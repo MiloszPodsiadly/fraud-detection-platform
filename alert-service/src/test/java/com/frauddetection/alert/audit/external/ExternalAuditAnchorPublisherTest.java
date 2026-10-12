@@ -203,6 +203,53 @@ class ExternalAuditAnchorPublisherTest {
     }
 
     @Test
+    void shouldPreserveDurablePublicationWhileRecordingManifestDegradation() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        ExternalAuditAnchor degraded = ExternalAuditAnchor.from(anchor, "object-store")
+                .published(
+                        ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
+                        ExternalAuditAnchor.MANIFEST_STATUS_FAILED
+                );
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.latest("source_service:alert-service")).thenReturn(java.util.Optional.empty());
+        when(sink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(anchorRepository.findByPartitionKeyAndChainPositionGreaterThan("source_service:alert-service", 0L, 100))
+                .thenReturn(List.of(anchor));
+        when(sink.publish(any(ExternalAuditAnchor.class))).thenReturn(degraded);
+        when(sink.externalReference(degraded)).thenReturn(java.util.Optional.of(new ExternalAnchorReference(
+                "local-anchor-1",
+                "audit-anchors/partition/00000000000000000001.json",
+                "hash-1",
+                "hash-1",
+                Instant.parse("2026-04-27T10:01:00Z")
+        )));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.publishHeadWindow(100);
+
+        assertThat(result.published()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        verify(publicationStatusRepository).recordSuccess(
+                org.mockito.ArgumentMatchers.eq(anchor),
+                org.mockito.ArgumentMatchers.eq(Instant.parse("2026-04-27T10:01:00Z")),
+                org.mockito.ArgumentMatchers.eq("object-store"),
+                org.mockito.ArgumentMatchers.any(ExternalAnchorReference.class),
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.ENFORCED),
+                org.mockito.ArgumentMatchers.eq(ExternalAuditAnchor.MANIFEST_STATUS_FAILED),
+                org.mockito.ArgumentMatchers.eq("RECORDED"),
+                org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
+        );
+    }
+
+    @Test
     void shouldRecordPartialWhenSigningIsRequiredAndTrustAuthorityIsUnavailable() {
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
@@ -406,6 +453,7 @@ class ExternalAuditAnchorPublisherTest {
         when(anchorRepository.findHeadWindow("source_service:alert-service", 100)).thenReturn(List.of(anchor));
         when(publicationStatusRepository.findByLocalAnchorId("local-anchor-1")).thenReturn(java.util.Optional.empty());
         when(sink.findByChainPosition("source_service:alert-service", 1L)).thenReturn(java.util.Optional.of(external));
+        when(sink.publish(any(ExternalAuditAnchor.class))).thenReturn(external);
         when(sink.externalReference(external)).thenReturn(java.util.Optional.of(new ExternalAnchorReference(
                 "local-anchor-1",
                 "audit-anchors/partition/00000000000000000001.json",
@@ -473,6 +521,7 @@ class ExternalAuditAnchorPublisherTest {
                 .thenReturn(List.of(anchor));
         when(publicationStatusRepository.findByLocalAnchorId("local-anchor-1")).thenReturn(java.util.Optional.empty());
         when(sink.findByChainPosition("source_service:alert-service", 1L)).thenReturn(java.util.Optional.of(external));
+        when(sink.publish(any(ExternalAuditAnchor.class))).thenReturn(external);
         when(sink.externalReference(external)).thenReturn(java.util.Optional.of(new ExternalAnchorReference(
                 "local-anchor-1",
                 "audit-anchors/partition/00000000000000000001.json",
@@ -549,6 +598,87 @@ class ExternalAuditAnchorPublisherTest {
         assertThat(result.missing()).isEqualTo(1);
         assertThat(result.recovered()).isZero();
         verify(publicationStatusRepository).recordRecoveryMissing(anchor, Instant.parse("2026-04-27T10:01:00Z"));
+    }
+
+    @Test
+    void shouldClearManifestDegradationOnlyAfterVerifiedRepair() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        ExternalAuditAnchor external = ExternalAuditAnchor.from(anchor, "object-store");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(sink.immutabilityLevel()).thenReturn(ExternalImmutabilityLevel.ENFORCED);
+        when(anchorRepository.findHeadWindow("source_service:alert-service", 100)).thenReturn(List.of(anchor));
+        when(publicationStatusRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(java.util.Optional.of(manifestDegradedStatus(anchor)));
+        when(sink.findByChainPosition("source_service:alert-service", 1L)).thenReturn(java.util.Optional.of(external));
+        when(sink.publish(any(ExternalAuditAnchor.class))).thenReturn(external.published(null, null));
+        when(sink.externalReference(any(ExternalAuditAnchor.class))).thenReturn(java.util.Optional.of(new ExternalAnchorReference(
+                "local-anchor-1",
+                "audit-anchors/partition/00000000000000000001.json",
+                "hash-1",
+                "hash-1",
+                Instant.parse("2026-04-27T10:01:00Z")
+        )));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.reconcileAnchors(100);
+
+        assertThat(result.recovered()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        verify(publicationStatusRepository).recordRecovered(
+                org.mockito.ArgumentMatchers.eq(anchor),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("object-store"),
+                org.mockito.ArgumentMatchers.any(ExternalAnchorReference.class),
+                org.mockito.ArgumentMatchers.eq(ExternalImmutabilityLevel.ENFORCED),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any(SignedAuditAnchorPayload.class)
+        );
+    }
+
+    @Test
+    void shouldKeepManifestDegradationWhenRepairStillFails() {
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L, "hash-1");
+        ExternalAuditAnchor external = ExternalAuditAnchor.from(anchor, "object-store");
+        when(sink.sinkType()).thenReturn("object-store");
+        when(anchorRepository.findHeadWindow("source_service:alert-service", 100)).thenReturn(List.of(anchor));
+        when(publicationStatusRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(java.util.Optional.of(manifestDegradedStatus(anchor)));
+        when(sink.findByChainPosition("source_service:alert-service", 1L)).thenReturn(java.util.Optional.of(external));
+        when(sink.publish(any(ExternalAuditAnchor.class))).thenReturn(external.published(
+                ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
+                ExternalAuditAnchor.MANIFEST_STATUS_FAILED
+        ));
+        ExternalAuditAnchorPublisher publisher = new ExternalAuditAnchorPublisher(
+                anchorRepository,
+                publicationStatusRepository,
+                sink,
+                metrics,
+                Clock.fixed(Instant.parse("2026-04-27T10:01:00Z"), ZoneOffset.UTC),
+                100
+        );
+
+        ExternalAuditAnchorPublishResult result = publisher.reconcileAnchors(100);
+
+        assertThat(result.recovered()).isZero();
+        assertThat(result.failed()).isEqualTo(1);
+        verify(publicationStatusRepository, never()).recordRecovered(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
     }
 
     @Test
@@ -668,6 +798,39 @@ class ExternalAuditAnchorPublisherTest {
                 null,
                 1,
                 ExternalAuditAnchor.REASON_EXTERNAL_ANCHOR_REQUIRED_FAILED,
+                Instant.parse("2026-04-27T10:01:00Z")
+        );
+    }
+
+    private ExternalAuditAnchorPublicationStatusDocument manifestDegradedStatus(AuditAnchorDocument anchor) {
+        return new ExternalAuditAnchorPublicationStatusDocument(
+                anchor.anchorId(),
+                anchor.partitionKey(),
+                anchor.chainPosition(),
+                true,
+                ExternalAuditAnchor.STATUS_PUBLISHED,
+                ExternalAuditAnchor.STATUS_PUBLISHED,
+                ExternalAuditAnchor.MANIFEST_STATUS_FAILED,
+                "RECORDED",
+                "CREATED",
+                false,
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "object-store",
+                "audit-anchors/partition/00000000000000000001.json",
+                anchor.lastEventHash(),
+                anchor.lastEventHash(),
+                Instant.parse("2026-04-27T10:01:00Z"),
+                ExternalImmutabilityLevel.ENFORCED.name(),
+                ExternalAuditAnchor.MANIFEST_STATUS_FAILED,
+                "UNSIGNED",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                1,
+                ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
                 Instant.parse("2026-04-27T10:01:00Z")
         );
     }

@@ -10,6 +10,7 @@ import java.time.Instant;
 public class AuditDegradationEventDocument {
 
     public static final String TYPE_POST_COMMIT_DEGRADED = "POST_COMMIT_DEGRADED";
+    public static final String TYPE_EXTERNAL_HEAD_INTEGRITY = "EXTERNAL_HEAD_INTEGRITY";
 
     @Id
     private String auditId;
@@ -47,6 +48,11 @@ public class AuditDegradationEventDocument {
     private String approvedBy;
     private String approvalReason;
     private String reason;
+    private String observedVersion;
+    private String observedDigest;
+    private String recoveryAction;
+    private String recoveryOutcome;
+    private Instant recoveryAttemptedAt;
 
     public String getAuditId() {
         return auditId;
@@ -230,5 +236,45 @@ public class AuditDegradationEventDocument {
 
     public void setReason(String reason) {
         this.reason = reason;
+    }
+
+    public String getObservedVersion() {
+        return observedVersion;
+    }
+
+    public void setObservedVersion(String observedVersion) {
+        this.observedVersion = observedVersion;
+    }
+
+    public String getObservedDigest() {
+        return observedDigest;
+    }
+
+    public void setObservedDigest(String observedDigest) {
+        this.observedDigest = observedDigest;
+    }
+
+    public String getRecoveryAction() {
+        return recoveryAction;
+    }
+
+    public void setRecoveryAction(String recoveryAction) {
+        this.recoveryAction = recoveryAction;
+    }
+
+    public String getRecoveryOutcome() {
+        return recoveryOutcome;
+    }
+
+    public void setRecoveryOutcome(String recoveryOutcome) {
+        this.recoveryOutcome = recoveryOutcome;
+    }
+
+    public Instant getRecoveryAttemptedAt() {
+        return recoveryAttemptedAt;
+    }
+
+    public void setRecoveryAttemptedAt(Instant recoveryAttemptedAt) {
+        this.recoveryAttemptedAt = recoveryAttemptedAt;
     }
 }

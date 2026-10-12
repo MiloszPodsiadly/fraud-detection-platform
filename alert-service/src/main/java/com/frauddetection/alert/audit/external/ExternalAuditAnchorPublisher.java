@@ -393,7 +393,9 @@ public class ExternalAuditAnchorPublisher {
             return true;
         }
         return ExternalAuditAnchor.STATUS_LOCAL_STATUS_UNVERIFIED.equals(status.externalPublicationStatus())
-                || ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED.equals(status.externalPublicationStatus());
+                || ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED.equals(status.externalPublicationStatus())
+                || ExternalAuditAnchor.MANIFEST_STATUS_FAILED.equals(status.headManifestStatus())
+                || ExternalAuditAnchor.MANIFEST_STATUS_FAILED.equals(status.manifestStatus());
     }
 
     private ReconciliationOutcome reconcileLocalAnchor(AuditAnchorDocument localAnchor) {
@@ -426,6 +428,26 @@ public class ExternalAuditAnchorPublisher {
             return ReconciliationOutcome.invalidOutcome();
         }
         try {
+            external = sink.publish(ExternalAuditAnchor.from(localAnchor, sink.sinkType()));
+            if (external == null) {
+                throw new ExternalAuditAnchorSinkException(
+                        ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
+                        "External anchor metadata repair returned no result."
+                );
+            }
+            mismatch = mismatchReason(localAnchor, external);
+            if (mismatch != null) {
+                publicationStatusRepository.recordRecoveryInvalid(localAnchor, clock.instant(), mismatch);
+                metrics.recordExternalAnchorStatusRecoveryFailed(sink.sinkType(), "INVALID");
+                return ReconciliationOutcome.invalidOutcome();
+            }
+            if (ExternalAuditAnchor.MANIFEST_STATUS_FAILED.equals(external.manifestStatus())) {
+                metrics.recordExternalAnchorStatusRecoveryFailed(
+                        sink.sinkType(),
+                        ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED
+                );
+                return ReconciliationOutcome.failedOutcome();
+            }
             ExternalAnchorReference reference = sink.externalReference(external).orElse(null);
             ExternalImmutabilityLevel immutabilityLevel = sink.immutabilityLevel() == null
                     ? ExternalImmutabilityLevel.NONE

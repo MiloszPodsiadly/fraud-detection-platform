@@ -34,8 +34,8 @@ public class ExternalAuditIntegrityService {
     private final AlertServiceMetrics metrics;
     private final AuditService auditService;
     private final ExternalAuditAnchorPublicationStatusRepository publicationStatusRepository;
-    private final AuditTrustAuthorityClient trustAuthorityClient;
     private final AuditTrustAuthorityProperties trustAuthorityProperties;
+    private final ExternalAuditSignatureEnricher signatureEnricher;
 
     ExternalAuditIntegrityService(
             AuditAnchorRepository anchorRepository,
@@ -64,8 +64,13 @@ public class ExternalAuditIntegrityService {
         this.metrics = metrics;
         this.auditService = auditService;
         this.publicationStatusRepository = publicationStatusRepository;
-        this.trustAuthorityClient = trustAuthorityClient == null ? new DisabledAuditTrustAuthorityClient() : trustAuthorityClient;
         this.trustAuthorityProperties = trustAuthorityProperties == null ? new AuditTrustAuthorityProperties() : trustAuthorityProperties;
+        this.signatureEnricher = new ExternalAuditSignatureEnricher(
+                sink,
+                publicationStatusRepository,
+                trustAuthorityClient,
+                metrics
+        );
     }
 
     ExternalAuditIntegrityService(
@@ -170,11 +175,20 @@ public class ExternalAuditIntegrityService {
             violations.add(new AuditIntegrityViolation("EXTERNAL_SCHEMA_VERSION_UNSUPPORTED", 1, "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED"));
         }
 
-        SignatureEnrichment signature = signatureEnrichment(external);
+        boolean integrityViolationsPresent = !violations.isEmpty();
+        ExternalAuditSignatureEnricher.Enrichment signature = signatureEnricher.enrich(external);
+        boolean manifestDegraded = isManifestDegraded(external) || signature.manifestDegraded();
+        if (manifestDegraded) {
+            violations.add(new AuditIntegrityViolation(
+                    ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
+                    1,
+                    ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED
+            ));
+        }
+
         SignaturePolicyResult signaturePolicy = signaturePolicy(signature.verification());
         metrics.recordAuditSignatureVerification(signature.verification().status());
         metrics.recordAuditSignaturePolicyResult(signaturePolicy.status());
-        boolean integrityViolationsPresent = !violations.isEmpty();
         if (!"VALID".equals(signaturePolicy.status())) {
             violations.add(new AuditIntegrityViolation(
                     signaturePolicy.reasonCode(),
@@ -182,12 +196,22 @@ public class ExternalAuditIntegrityService {
                     signaturePolicy.reasonCode()
             ));
         }
-        String status = violations.isEmpty() ? "VALID" : (integrityViolationsPresent ? "INVALID" : signaturePolicy.status());
+        String status;
+        if (integrityViolationsPresent || "INVALID".equals(signaturePolicy.status())) {
+            status = "INVALID";
+        } else if (manifestDegraded) {
+            status = "PARTIAL";
+        } else {
+            status = violations.isEmpty() ? "VALID" : signaturePolicy.status();
+        }
         String reasonCode = signaturePolicy.reasonCode();
         String message = signaturePolicy.message();
         if (integrityViolationsPresent) {
             reasonCode = violations.getFirst().violationType();
             message = "External audit anchor integrity mismatch.";
+        } else if (!"INVALID".equals(signaturePolicy.status()) && manifestDegraded) {
+            reasonCode = ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED;
+            message = "External anchor is durable, but its navigation manifest requires repair.";
         }
         return response(status, query, local, external, signature, violations, reasonCode, message);
     }
@@ -203,6 +227,7 @@ public class ExternalAuditIntegrityService {
             long latestLocalPosition = latestLocal == null ? 0L : latestLocal.chainPosition();
             ExternalAuditAnchor latestExternal = sink.latest(query.partitionKey()).orElse(null);
             long latestExternalPosition = latestExternal == null ? 0L : latestExternal.chainPosition();
+            boolean observedManifestDegradation = isManifestDegraded(latestExternal);
             long from = query.fromPosition() == null
                     ? (latestLocalPosition == 0L ? 1L : Math.max(1L, latestLocalPosition - query.limit() + 1L))
                     : query.fromPosition();
@@ -213,6 +238,9 @@ public class ExternalAuditIntegrityService {
                     ? Math.max(0L, java.time.Duration.between(latestExternal.createdAt(), latestLocal.createdAt()).toSeconds())
                     : null;
             PublicationCoverage publicationCoverage = publicationCoverage(query.partitionKey(), query.limit());
+            boolean manifestDegraded = observedManifestDegradation || publicationCoverage.manifestDegradedCount() > 0;
+            int unrecoveredCount = publicationCoverage.unrecoveredCount()
+                    + (observedManifestDegradation && publicationCoverage.manifestDegradedCount() == 0 ? 1 : 0);
             return new ExternalAuditAnchorCoverageResponse(
                     "AVAILABLE",
                     latestLocalPosition,
@@ -222,13 +250,15 @@ public class ExternalAuditIntegrityService {
                     missingRanges,
                     truncated,
                     query.limit(),
-                    null,
-                    null
+                    manifestDegraded ? ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED : null,
+                    manifestDegraded
+                            ? "External anchor coverage is available, but the navigation manifest requires repair."
+                            : null
             ).withPublicationStatus(
                     publicationCoverage.requiredPublicationFailures(),
                     publicationCoverage.localStatusUnverified(),
                     publicationCoverage.recoveredCount(),
-                    publicationCoverage.unrecoveredCount()
+                    unrecoveredCount
             );
         } catch (DataAccessException exception) {
             return unavailableCoverage(query, "AUDIT_STORE_UNAVAILABLE", "Local audit anchor store is currently unavailable.");
@@ -274,12 +304,13 @@ public class ExternalAuditIntegrityService {
 
     private PublicationCoverage publicationCoverage(String partitionKey, int limit) {
         if (publicationStatusRepository == null) {
-            return new PublicationCoverage(0, 0, 0, 0);
+            return new PublicationCoverage(0, 0, 0, 0, 0);
         }
         int requiredFailures = 0;
         int localStatusUnverified = 0;
         int recovered = 0;
         int unrecovered = 0;
+        int manifestDegraded = 0;
         List<AuditAnchorDocument> anchors = anchorRepository.findHeadWindow(partitionKey, limit);
         if (anchors == null) {
             anchors = List.of();
@@ -291,7 +322,10 @@ public class ExternalAuditIntegrityService {
                 unrecovered++;
                 continue;
             }
-            if (ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED.equals(status.externalPublicationStatus())
+            if (isManifestDegraded(status)) {
+                manifestDegraded++;
+                unrecovered++;
+            } else if (ExternalAuditAnchor.STATUS_LOCAL_ANCHOR_CREATED_EXTERNAL_REQUIRED_FAILED.equals(status.externalPublicationStatus())
                     || Boolean.TRUE.equals(status.externalRequired())) {
                 requiredFailures++;
                 unrecovered++;
@@ -306,7 +340,18 @@ public class ExternalAuditIntegrityService {
                 unrecovered++;
             }
         }
-        return new PublicationCoverage(requiredFailures, localStatusUnverified, recovered, unrecovered);
+        return new PublicationCoverage(requiredFailures, localStatusUnverified, recovered, unrecovered, manifestDegraded);
+    }
+
+    private boolean isManifestDegraded(ExternalAuditAnchor anchor) {
+        return anchor != null
+                && ExternalAuditAnchor.MANIFEST_STATUS_FAILED.equals(anchor.manifestStatus());
+    }
+
+    private boolean isManifestDegraded(ExternalAuditAnchorPublicationStatusDocument status) {
+        return status != null
+                && (ExternalAuditAnchor.MANIFEST_STATUS_FAILED.equals(status.headManifestStatus())
+                || ExternalAuditAnchor.MANIFEST_STATUS_FAILED.equals(status.manifestStatus()));
     }
 
     private ExternalAuditAnchorCoverageResponse unavailableCoverage(
@@ -355,7 +400,9 @@ public class ExternalAuditIntegrityService {
             String reasonCode,
             String message
     ) {
-        SignatureEnrichment signature = external == null ? SignatureEnrichment.unsigned(null) : signatureEnrichment(external);
+        ExternalAuditSignatureEnricher.Enrichment signature = external == null
+                ? ExternalAuditSignatureEnricher.Enrichment.unsigned(null)
+                : signatureEnricher.enrich(external);
         return new ExternalAuditIntegrityResponse(
                 status,
                 1,
@@ -385,7 +432,8 @@ public class ExternalAuditIntegrityService {
     }
 
     private ExternalAuditIntegrityResponse noLocalAnchorResponse(ExternalAuditIntegrityQuery query) {
-        SignatureEnrichment signature = SignatureEnrichment.unsigned(null);
+        ExternalAuditSignatureEnricher.Enrichment signature =
+                ExternalAuditSignatureEnricher.Enrichment.unsigned(null);
         SignaturePolicyResult signaturePolicy = signaturePolicy(signature.verification());
         metrics.recordAuditSignatureVerification(signature.verification().status());
         metrics.recordAuditSignaturePolicyResult(signaturePolicy.status());
@@ -421,7 +469,7 @@ public class ExternalAuditIntegrityService {
             ExternalAuditIntegrityQuery query,
             AuditAnchorDocument local,
             ExternalAuditAnchor external,
-            SignatureEnrichment signature,
+            ExternalAuditSignatureEnricher.Enrichment signature,
             List<AuditIntegrityViolation> violations,
             String reasonCode,
             String message
@@ -482,18 +530,6 @@ public class ExternalAuditIntegrityService {
         );
     }
 
-    private SignatureEnrichment signatureEnrichment(ExternalAuditAnchor external) {
-        try {
-            ExternalAnchorReference reference = sink.externalReference(external).orElse(null);
-            return enrichSignature(external, reference);
-        } catch (ExternalAuditAnchorSinkException exception) {
-            if (isExternalIntegrityMismatch(exception.reason())) {
-                metrics.recordExternalTamperingDetected(exception.reason());
-            }
-            throw exception;
-        }
-    }
-
     private String timestampTrustLevel() {
         ExternalWitnessCapabilities capabilities = sink.capabilities();
         return capabilities == null ? "APP_OBSERVED" : capabilities.timestampTrustLevel();
@@ -502,58 +538,6 @@ public class ExternalAuditIntegrityService {
     private ExternalDurabilityGuarantee durabilityGuarantee() {
         ExternalWitnessCapabilities capabilities = sink.capabilities();
         return capabilities == null ? ExternalDurabilityGuarantee.NONE : capabilities.durabilityGuarantee();
-    }
-
-    private SignatureEnrichment enrichSignature(ExternalAuditAnchor external, ExternalAnchorReference reference) {
-        if (reference == null || publicationStatusRepository == null || reference.anchorId() == null) {
-            return SignatureEnrichment.unsigned(reference);
-        }
-        try {
-            return publicationStatusRepository.findByLocalAnchorId(reference.anchorId())
-                    .map(status -> verifiedSignatureReference(external, reference, status))
-                    .orElseGet(() -> SignatureEnrichment.unsigned(reference));
-        } catch (DataAccessException exception) {
-            return new SignatureEnrichment(reference, AuditTrustSignatureVerificationResult.unavailable(), null, null, null);
-        }
-    }
-
-    private SignatureEnrichment verifiedSignatureReference(
-            ExternalAuditAnchor external,
-            ExternalAnchorReference reference,
-            ExternalAuditAnchorPublicationStatusDocument status
-    ) {
-        SignedAuditAnchorPayload signature = new SignedAuditAnchorPayload(
-                status.signatureStatus(),
-                status.signingAlgorithm(),
-                status.signature(),
-                status.signingKeyId(),
-                status.signedAt(),
-                status.signingAuthority(),
-                status.signedPayloadHash()
-        );
-        ExternalAnchorReference signedReference = reference.withSignature(signature);
-        if (!"SIGNED".equals(signature.signatureStatus())
-                || signature.signature() == null
-                || signature.keyId() == null) {
-            return SignatureEnrichment.unsigned(signedReference);
-        }
-        AuditAnchorSigningPayload payload = new AuditAnchorSigningPayload(
-                external.partitionKey(),
-                external.localAnchorId(),
-                external.chainPosition(),
-                external.lastEventHash(),
-                reference.externalKey(),
-                reference.externalHash(),
-                sink.immutabilityLevel()
-        );
-        AuditTrustSignatureVerificationResult verification = trustAuthorityClient.verify(payload, signature);
-        return new SignatureEnrichment(
-                signedReference,
-                verification,
-                signature.keyId(),
-                signature.signatureAlgorithm(),
-                signature.signingAuthority()
-        );
     }
 
     private SignaturePolicyResult signaturePolicy(AuditTrustSignatureVerificationResult verification) {
@@ -588,18 +572,6 @@ public class ExternalAuditIntegrityService {
         };
     }
 
-    private record SignatureEnrichment(
-            ExternalAnchorReference reference,
-            AuditTrustSignatureVerificationResult verification,
-            String signingKeyId,
-            String signingAlgorithm,
-            String signingAuthority
-    ) {
-        static SignatureEnrichment unsigned(ExternalAnchorReference reference) {
-            return new SignatureEnrichment(reference, AuditTrustSignatureVerificationResult.unsigned(), null, null, null);
-        }
-    }
-
     private record SignaturePolicyResult(String status, String reasonCode, String message) {
         static SignaturePolicyResult valid() {
             return new SignaturePolicyResult("VALID", null, null);
@@ -618,7 +590,8 @@ public class ExternalAuditIntegrityService {
             int requiredPublicationFailures,
             int localStatusUnverified,
             int recoveredCount,
-            int unrecoveredCount
+            int unrecoveredCount,
+            int manifestDegradedCount
     ) {
     }
 

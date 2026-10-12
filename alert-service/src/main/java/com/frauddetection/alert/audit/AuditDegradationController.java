@@ -123,7 +123,18 @@ public class AuditDegradationController {
             @JsonProperty("approved_by")
             String approvedBy,
             @JsonProperty("approval_reason")
-            String approvalReason
+            String approvalReason,
+            String reason,
+            @JsonProperty("observed_version")
+            String observedVersion,
+            @JsonProperty("observed_digest")
+            String observedDigest,
+            @JsonProperty("recovery_action")
+            String recoveryAction,
+            @JsonProperty("recovery_outcome")
+            String recoveryOutcome,
+            @JsonProperty("recovery_attempted_at")
+            Instant recoveryAttemptedAt
     ) {
         static AuditDegradationResponse from(AuditDegradationEventDocument document) {
             return new AuditDegradationResponse(
@@ -146,7 +157,13 @@ public class AuditDegradationController {
                     document.getResolutionEvidenceVerifiedBy(),
                     document.getApprovedAt(),
                     document.getApprovedBy(),
-                    document.getApprovalReason()
+                    document.getApprovalReason(),
+                    document.getReason(),
+                    document.getObservedVersion(),
+                    document.getObservedDigest(),
+                    document.getRecoveryAction(),
+                    document.getRecoveryOutcome(),
+                    document.getRecoveryAttemptedAt()
             );
         }
     }

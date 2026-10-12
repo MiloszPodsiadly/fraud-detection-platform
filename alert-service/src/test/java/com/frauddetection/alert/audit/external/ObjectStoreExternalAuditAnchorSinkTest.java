@@ -6,6 +6,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
+import com.frauddetection.alert.audit.ExternalAuditHeadForensicService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,12 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ObjectStoreExternalAuditAnchorSinkTest {
 
@@ -305,6 +312,9 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(latest).get()
                 .extracting(ExternalAuditAnchor::chainPosition)
                 .isEqualTo(2L);
+        assertThat(latest).get()
+                .extracting(ExternalAuditAnchor::manifestStatus)
+                .isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
         assertThat(meterRegistry.get("external_manifest_read_total").tag("status", "INVALID").counter().count()).isEqualTo(1.0d);
         assertThat(meterRegistry.get("external_manifest_fallback_scan_total").counter().count()).isEqualTo(1.0d);
     }
@@ -324,6 +334,28 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 .extracting(ExternalAuditAnchor::chainPosition)
                 .isEqualTo(1L);
         assertThat(meterRegistry.get("external_manifest_invalid_total").counter().count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldExposeMissingManifestAsDegradedUntilIdempotentRepairSucceeds() {
+        ExternalAuditAnchor candidate = ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                sink.sinkType()
+        );
+        sink.publish(candidate);
+        client.removeRaw("audit-bucket", headManifestKey());
+
+        ExternalAuditAnchor degraded = sink.latest("source_service:alert-service").orElseThrow();
+
+        assertThat(degraded.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_PUBLISHED);
+        assertThat(degraded.manifestStatus()).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
+
+        ExternalAuditAnchor repaired = sink.publish(candidate);
+
+        assertThat(repaired.manifestStatus()).isNull();
+        assertThat(sink.latest("source_service:alert-service")).get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(1L);
     }
 
     @Test
@@ -522,6 +554,76 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
+    void manifestRepairCasConflictShouldRemainRecordedAsUnresolvedEvidence() {
+        ExternalAuditHeadForensicService forensicService = mock(ExternalAuditHeadForensicService.class);
+        when(forensicService.recordIncident(
+                anyString(), anyString(), anyString(), anyString(), any(Instant.class)
+        )).thenReturn("external-head-incident-3");
+        ObjectStoreExternalAuditAnchorSink forensicSink = sinkWithForensicEvidence(forensicService);
+        forensicSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                forensicSink.sinkType()
+        ));
+        byte[] manifest = client.getObject("audit-bucket", headManifestKey()).orElseThrow();
+        client.putRaw(
+                "audit-bucket",
+                headManifestKey(),
+                new String(manifest, StandardCharsets.UTF_8)
+                        .replace("\"manifest_hash\":\"", "\"manifest_hash\":\"tampered-")
+                        .getBytes(StandardCharsets.UTF_8)
+        );
+        client.alwaysConflictHeadCompareAndSwap = true;
+
+        ExternalAuditAnchor result = forensicSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-2", 2L, "hash-2"),
+                forensicSink.sinkType()
+        ));
+
+        assertThat(result.manifestStatus()).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
+        verify(forensicService).recordRepairOutcome(
+                eq("external-head-incident-3"),
+                eq("CAS_CONFLICT"),
+                org.mockito.ArgumentMatchers.any(Instant.class)
+        );
+    }
+
+    @Test
+    void validStaleHeadShouldBeRecordedOnlyWhenRepairingAnExistingAnchor() {
+        ExternalAuditHeadForensicService forensicService = mock(ExternalAuditHeadForensicService.class);
+        when(forensicService.recordIncident(
+                anyString(), anyString(), anyString(), anyString(), any(Instant.class)
+        )).thenReturn("external-head-incident-4");
+        ObjectStoreExternalAuditAnchorSink forensicSink = sinkWithForensicEvidence(forensicService);
+        forensicSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                forensicSink.sinkType()
+        ));
+        putPaddedAnchor("local-anchor-2", 2L, "hash-2");
+
+        forensicSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-2", 2L, "hash-2"),
+                forensicSink.sinkType()
+        ));
+
+        verify(forensicService).recordIncident(
+                eq("source_service:alert-service"),
+                anyString(),
+                anyString(),
+                eq("HEAD_MANIFEST_STALE"),
+                any(Instant.class)
+        );
+        verify(forensicService).recordRepairOutcome(
+                eq("external-head-incident-4"),
+                eq("VERIFIED_REPAIRED"),
+                any(Instant.class)
+        );
+        assertThat(forensicSink.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(2L);
+    }
+
+    @Test
     void timedOutCompareAndSwapShouldNotReportHealthyManifestUpdate() {
         sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
         client.headCompareAndSwapDelay = Duration.ofMillis(200);
@@ -567,7 +669,15 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
     @Test
     void tamperedManifestShouldBeRepairedOnlyByVersionMatchedWrite() {
-        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+        ExternalAuditHeadForensicService forensicService = mock(ExternalAuditHeadForensicService.class);
+        when(forensicService.recordIncident(
+                anyString(), anyString(), anyString(), anyString(), any(Instant.class)
+        )).thenReturn("external-head-incident-1");
+        ObjectStoreExternalAuditAnchorSink forensicSink = sinkWithForensicEvidence(forensicService);
+        forensicSink.publish(ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                forensicSink.sinkType()
+        ));
         byte[] manifest = client.getObject("audit-bucket", headManifestKey()).orElseThrow();
         client.putRaw(
                 "audit-bucket",
@@ -578,17 +688,65 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         );
         client.resetCounters();
 
-        ExternalAuditAnchor stored = sink.publish(
-                ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), sink.sinkType())
+        ExternalAuditAnchor stored = forensicSink.publish(
+                ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), forensicSink.sinkType())
         );
 
         assertThat(stored.manifestStatus()).isNull();
         assertThat(client.compareAndSwapCalls).isEqualTo(1);
         assertThat(client.putObjectCalls).isZero();
-        assertThat(sink.latest("source_service:alert-service"))
+        assertThat(forensicSink.latest("source_service:alert-service"))
                 .get()
                 .extracting(ExternalAuditAnchor::chainPosition)
                 .isEqualTo(2L);
+        org.mockito.InOrder evidenceOrder = org.mockito.Mockito.inOrder(forensicService);
+        evidenceOrder.verify(forensicService).recordIncident(
+                eq("source_service:alert-service"),
+                anyString(),
+                anyString(),
+                eq("HEAD_MANIFEST_HASH_MISMATCH"),
+                any(Instant.class)
+        );
+        evidenceOrder.verify(forensicService).recordRepairOutcome(
+                eq("external-head-incident-1"),
+                eq("VERIFIED_REPAIRED"),
+                org.mockito.ArgumentMatchers.any(Instant.class)
+        );
+    }
+
+    @Test
+    void missingHeadDetectionShouldRemainDurableAcrossRestartBeforeRepair() {
+        ExternalAuditHeadForensicService forensicService = mock(ExternalAuditHeadForensicService.class);
+        when(forensicService.recordIncident(
+                anyString(), org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull(),
+                anyString(), any(Instant.class)
+        )).thenReturn("external-head-incident-2");
+        ObjectStoreExternalAuditAnchorSink initial = sinkWithForensicEvidence(forensicService);
+        ExternalAuditAnchor candidate = ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                initial.sinkType()
+        );
+        initial.publish(candidate);
+        client.removeRaw("audit-bucket", headManifestKey());
+
+        assertThat(initial.latest("source_service:alert-service")).isPresent();
+        verify(forensicService).recordIncident(
+                eq("source_service:alert-service"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                eq("HEAD_MANIFEST_MISSING"),
+                any(Instant.class)
+        );
+
+        ObjectStoreExternalAuditAnchorSink restarted = sinkWithForensicEvidence(forensicService);
+        restarted.publish(candidate);
+
+        verify(forensicService).recordRepairOutcome(
+                eq("external-head-incident-2"),
+                eq("VERIFIED_REPAIRED"),
+                org.mockito.ArgumentMatchers.any(Instant.class)
+        );
+        assertThat(restarted.latest("source_service:alert-service")).isPresent();
     }
 
     @Test
@@ -867,6 +1025,22 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 Duration.ZERO,
                 1,
                 ExternalImmutabilityLevel.CONFIGURED
+        );
+    }
+
+    private ObjectStoreExternalAuditAnchorSink sinkWithForensicEvidence(ExternalAuditHeadForensicService forensicService) {
+        return new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                client,
+                objectMapper,
+                null,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                1,
+                ExternalImmutabilityLevel.CONFIGURED,
+                ExternalWitnessCapabilities.objectStore(ExternalImmutabilityLevel.CONFIGURED),
+                forensicService
         );
     }
 

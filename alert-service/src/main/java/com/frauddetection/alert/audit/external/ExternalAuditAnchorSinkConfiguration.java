@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.external;
 
 import tools.jackson.databind.ObjectMapper;
+import com.frauddetection.alert.audit.ExternalAuditHeadForensicService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,7 +56,8 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.policy.require-overwrite-protection:true}") boolean requireOverwriteProtection,
             @Value("${app.audit.external-anchoring.policy.require-stable-reference:true}") boolean requireStableReference,
             @Value("${app.audit.external-anchoring.policy.allow-separate-account-in-prod:false}") boolean allowSeparateAccountInProd,
-            @Value("${HOSTNAME:alert-service}") String instanceId
+            @Value("${HOSTNAME:alert-service}") String instanceId,
+            ObjectProvider<ExternalAuditHeadForensicService> externalAuditHeadForensicService
     ) {
         validatePublicationPolicy(publicationRequired, publicationFailClosed);
         boolean strictPublication = publicationRequired || publicationFailClosed;
@@ -121,7 +123,8 @@ class ExternalAuditAnchorSinkConfiguration {
                     objectStoreRetryBackoff,
                     objectStoreMaxAttempts,
                     immutabilityLevel,
-                    capabilities
+                    capabilities,
+                    externalAuditHeadForensicService == null ? null : externalAuditHeadForensicService.getIfAvailable()
             );
         }
         if ("external-object-store".equals(sink)) {
@@ -134,6 +137,71 @@ class ExternalAuditAnchorSinkConfiguration {
         }
         log.info("External audit anchor sink configured: sink_type=disabled");
         return new DisabledExternalAuditAnchorSink();
+    }
+
+    ExternalAuditAnchorSink externalAuditAnchorSink(
+            ObjectMapper objectMapper,
+            ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
+            AlertServiceMetrics metrics,
+            Environment environment,
+            boolean publicationEnabled,
+            boolean publicationRequired,
+            boolean publicationFailClosed,
+            String sink,
+            String localFilePath,
+            boolean allowLocalFileInProd,
+            String objectStoreBucket,
+            String objectStorePrefix,
+            String objectStoreRegion,
+            String objectStoreEndpoint,
+            String objectStoreAccessKeyId,
+            String objectStoreSecretAccessKey,
+            boolean objectStoreStartupCheckEnabled,
+            boolean objectStoreStartupTestWriteEnabled,
+            Duration objectStoreOperationTimeout,
+            Duration objectStoreRetryBackoff,
+            int objectStoreMaxAttempts,
+            String minimumIndependenceLevel,
+            String minimumImmutabilityLevel,
+            String minimumTimestampTrustLevel,
+            boolean requireDeleteProtection,
+            boolean requireOverwriteProtection,
+            boolean requireStableReference,
+            boolean allowSeparateAccountInProd,
+            String instanceId
+    ) {
+        return externalAuditAnchorSink(
+                objectMapper,
+                objectStoreClient,
+                metrics,
+                environment,
+                publicationEnabled,
+                publicationRequired,
+                publicationFailClosed,
+                sink,
+                localFilePath,
+                allowLocalFileInProd,
+                objectStoreBucket,
+                objectStorePrefix,
+                objectStoreRegion,
+                objectStoreEndpoint,
+                objectStoreAccessKeyId,
+                objectStoreSecretAccessKey,
+                objectStoreStartupCheckEnabled,
+                objectStoreStartupTestWriteEnabled,
+                objectStoreOperationTimeout,
+                objectStoreRetryBackoff,
+                objectStoreMaxAttempts,
+                minimumIndependenceLevel,
+                minimumImmutabilityLevel,
+                minimumTimestampTrustLevel,
+                requireDeleteProtection,
+                requireOverwriteProtection,
+                requireStableReference,
+                allowSeparateAccountInProd,
+                instanceId,
+                null
+        );
     }
 
     ExternalAuditAnchorSink externalAuditAnchorSink(

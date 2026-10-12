@@ -7,6 +7,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.cfg.MapperBuilder;
 import tools.jackson.databind.json.JsonMapper;
+import com.frauddetection.alert.audit.ExternalAuditHeadForensicService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +51,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     private final int maxAttempts;
     private final ExternalImmutabilityLevel immutabilityLevel;
     private final ExternalWitnessCapabilities capabilities;
+    private final ExternalAuditHeadForensicService forensicService;
 
     ObjectStoreExternalAuditAnchorSink(
             String bucket,
@@ -72,7 +74,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             ExternalImmutabilityLevel immutabilityLevel
     ) {
         this(bucket, prefix, client, objectMapper, metrics, operationTimeout, retryBackoff, maxAttempts,
-                immutabilityLevel, ExternalWitnessCapabilities.objectStore(immutabilityLevel));
+                immutabilityLevel, ExternalWitnessCapabilities.objectStore(immutabilityLevel), null);
     }
 
     ObjectStoreExternalAuditAnchorSink(
@@ -86,6 +88,34 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             int maxAttempts,
             ExternalImmutabilityLevel immutabilityLevel,
             ExternalWitnessCapabilities capabilities
+    ) {
+        this(
+                bucket,
+                prefix,
+                client,
+                objectMapper,
+                metrics,
+                operationTimeout,
+                retryBackoff,
+                maxAttempts,
+                immutabilityLevel,
+                capabilities,
+                null
+        );
+    }
+
+    ObjectStoreExternalAuditAnchorSink(
+            String bucket,
+            String prefix,
+            ObjectStoreAuditAnchorClient client,
+            ObjectMapper objectMapper,
+            AlertServiceMetrics metrics,
+            Duration operationTimeout,
+            Duration retryBackoff,
+            int maxAttempts,
+            ExternalImmutabilityLevel immutabilityLevel,
+            ExternalWitnessCapabilities capabilities,
+            ExternalAuditHeadForensicService forensicService
     ) {
         this.bucket = requireText(bucket, "bucket");
         this.prefix = trimSlashes(requireText(prefix, "prefix"));
@@ -107,6 +137,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         this.maxAttempts = Math.max(1, Math.min(maxAttempts, 3));
         this.immutabilityLevel = immutabilityLevel == null ? ExternalImmutabilityLevel.NONE : immutabilityLevel;
         this.capabilities = capabilities == null ? ExternalWitnessCapabilities.objectStore(this.immutabilityLevel) : capabilities;
+        this.forensicService = forensicService;
     }
 
     @Override
@@ -133,24 +164,24 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             Optional<byte[]> existing = getObject(key);
             if (existing.isPresent()) {
                 ExternalAuditAnchor stored = idempotentExisting(key, existing.get(), payload, candidate);
-                return updateHeadManifest(stored, key);
+                return updateHeadManifest(stored, key, true, true);
             }
             Optional<byte[]> legacyExisting = getObject(legacyObjectKey(anchor.partitionKey(), anchor.chainPosition()));
             if (legacyExisting.isPresent()) {
                 String legacyKey = legacyObjectKey(anchor.partitionKey(), anchor.chainPosition());
                 ExternalAuditAnchor stored = idempotentExisting(legacyKey, legacyExisting.get(), payload, candidate);
-                return updateHeadManifest(stored, legacyKey);
+                return updateHeadManifest(stored, legacyKey, true, true);
             }
             rejectNonMonotonicNewAnchor(anchor);
             try {
                 putObjectIfAbsent(key, payload);
                 verifyStoredObject(key, candidate);
-                return updateHeadManifest(anchor.published(null, null), key);
+                return updateHeadManifest(anchor.published(null, null), key, anchor.chainPosition() > 1L, false);
             } catch (ExternalAuditAnchorSinkException exception) {
                 if ("CONFLICT".equals(exception.reason())) {
                     ExternalAuditAnchor stored = idempotentExisting(key, getObject(key)
                             .orElseThrow(() -> new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink is unavailable.")), payload, candidate);
-                    return updateHeadManifest(stored, key);
+                    return updateHeadManifest(stored, key, anchor.chainPosition() > 1L, false);
                 }
                 if (isUnverifiedWrite(exception.reason())) {
                     recordFailure("get");
@@ -199,17 +230,25 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     public Optional<ExternalAuditAnchor> latest(String partitionKey) {
         String keyPrefix = objectKeyPrefix(partitionKey);
         try {
-            Optional<ExternalAuditAnchor> manifestHead = latestFromManifest(partitionKey, keyPrefix);
-            if (manifestHead.isPresent()) {
-                return manifestHead;
+            HeadLookup manifestHead = latestFromManifest(partitionKey, keyPrefix);
+            if (manifestHead.anchor().isPresent()) {
+                return manifestHead.anchor();
             }
             recordManifestFallbackScan();
             List<String> keys = scanAnchorKeys(keyPrefix);
             recordHeadScanDepth(keys.size());
-            return keys.stream()
+            Optional<ExternalAuditAnchor> fallback = keys.stream()
                     .max(Comparator.comparingLong(this::parseChainPosition)
                             .thenComparing(key -> key))
                     .flatMap(this::read);
+            if (fallback.isEmpty()) {
+                return Optional.empty();
+            }
+            recordHeadIncident(partitionKey, manifestHead);
+            return fallback.map(anchor -> anchor.published(
+                            ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
+                            ExternalAuditAnchor.MANIFEST_STATUS_FAILED
+                    ));
         } catch (ExternalAuditAnchorSinkException exception) {
             throw exception;
         } catch (RuntimeException exception) {
@@ -318,25 +357,62 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         return payload.toExternalAnchor();
     }
 
-    private ExternalAuditAnchor updateHeadManifest(ExternalAuditAnchor anchor, String anchorKey) {
+    private ExternalAuditAnchor updateHeadManifest(
+            ExternalAuditAnchor anchor,
+            String anchorKey,
+            boolean missingHeadIsIncident,
+            boolean repairingExistingAnchor
+    ) {
         String manifestKey = headManifestKey(anchor.partitionKey());
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            String incidentId = null;
             try {
-                Optional<ObjectStoreAuditAnchorVersionedObject> observed = getObjectWithVersion(manifestKey);
+                Optional<ObjectStoreAuditAnchorVersionedObject> observed;
+                try {
+                    observed = getObjectWithVersion(manifestKey);
+                } catch (ExternalAuditAnchorSinkException exception) {
+                    incidentId = recordHeadIncident(
+                            anchor.partitionKey(),
+                            HeadLookup.failed("HEAD_STORAGE_READ_FAILED", null, null)
+                    );
+                    throw exception;
+                }
                 HeadCandidate desired;
                 if (observed.isEmpty()) {
+                    if (missingHeadIsIncident) {
+                        incidentId = recordHeadIncident(
+                                anchor.partitionKey(),
+                                HeadLookup.failed("HEAD_MANIFEST_MISSING", null, null)
+                        );
+                    }
                     desired = highestPublishedAnchor(anchor, anchorKey);
                     putObjectIfAbsent(manifestKey, serialize(signedManifest(desired.anchor(), desired.key())));
                 } else {
-                    Optional<ObjectStoreExternalAuditHeadManifest> current = parseObservedManifest(
+                    ParsedHeadManifest parsed = parseObservedManifest(
                             observed.get(),
                             anchor.partitionKey()
                     );
+                    Optional<ObjectStoreExternalAuditHeadManifest> current = parsed.manifest();
+                    if (repairingExistingAnchor
+                            && current.isPresent()
+                            && current.get().latestChainPosition() < anchor.chainPosition()) {
+                        incidentId = recordHeadIncident(
+                                anchor.partitionKey(),
+                                HeadLookup.failed(
+                                        "HEAD_MANIFEST_STALE",
+                                        parsed.observation().observedVersion(),
+                                        parsed.observation().observedDigest()
+                                )
+                        );
+                    } else {
+                        incidentId = recordHeadIncident(anchor.partitionKey(), parsed.observation());
+                    }
                     desired = current
                             .map(manifest -> selectHeadUpdate(manifest, anchor, anchorKey))
                             .orElseGet(() -> highestPublishedAnchor(anchor, anchorKey));
                     if (desired == null) {
                         recordManifestUpdate("SUCCESS");
+                        recordHeadRepairOutcome(incidentId, "VERIFIED_REPAIRED");
                         return anchor;
                     }
                     putObjectIfVersionMatches(
@@ -346,16 +422,23 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                     );
                 }
                 verifyCurrentHead(anchor.partitionKey());
+                recordHeadRepairOutcome(incidentId, "VERIFIED_REPAIRED");
                 recordManifestUpdate("SUCCESS");
                 return anchor;
             } catch (ExternalAuditAnchorConflictException exception) {
+                recordHeadRepairOutcome(incidentId, "CAS_CONFLICT");
                 throw exception;
             } catch (ExternalAuditAnchorSinkException exception) {
                 if ("CONFLICT".equals(exception.reason()) && attempt < maxAttempts) {
+                    recordHeadRepairOutcome(incidentId, "CAS_CONFLICT_RETRYING");
                     recordRetry("head-cas");
                     backoff();
                     continue;
                 }
+                recordHeadRepairOutcome(
+                        incidentId,
+                        "CONFLICT".equals(exception.reason()) ? "CAS_CONFLICT" : "REPAIR_FAILED"
+                );
                 return manifestUpdateFailed(anchor, exception);
             }
         }
@@ -368,22 +451,31 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         );
     }
 
-    private Optional<ObjectStoreExternalAuditHeadManifest> parseObservedManifest(
+    private ParsedHeadManifest parseObservedManifest(
             ObjectStoreAuditAnchorVersionedObject observed,
             String partitionKey
     ) {
+        String digest = sha256Hex(observed.content());
         ObjectStoreExternalAuditHeadManifest manifest;
         try {
             manifest = deserializeHeadManifest(observed.content());
         } catch (ExternalAuditAnchorSinkException exception) {
             recordManifestInvalid();
-            return Optional.empty();
+            return ParsedHeadManifest.failed(
+                    HeadLookup.failed("HEAD_MANIFEST_MALFORMED", observed.version(), digest)
+            );
         }
-        if (verifyHeadManifest(manifest, partitionKey).isEmpty()) {
+        HeadVerification verification = verifyHeadManifestDetailed(manifest, partitionKey);
+        if (verification.anchor().isEmpty()) {
             recordManifestInvalid();
-            return Optional.empty();
+            return ParsedHeadManifest.failed(
+                    HeadLookup.failed(verification.reason(), observed.version(), digest)
+            );
         }
-        return Optional.of(manifest);
+        return new ParsedHeadManifest(
+                Optional.of(manifest),
+                new HeadLookup(verification.anchor(), null, observed.version(), digest)
+        );
     }
 
     private HeadCandidate selectHeadUpdate(
@@ -463,27 +555,38 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         return current;
     }
 
-    private Optional<ExternalAuditAnchor> latestFromManifest(String partitionKey, String keyPrefix) {
-        Optional<ObjectStoreExternalAuditHeadManifest> manifest;
+    private HeadLookup latestFromManifest(String partitionKey, String keyPrefix) {
+        Optional<ObjectStoreAuditAnchorVersionedObject> observed;
         try {
-            manifest = readHeadManifest(keyPrefix);
+            observed = getObjectWithVersion(keyPrefix + "/head.json");
+        } catch (ExternalAuditAnchorSinkException exception) {
+            recordManifestRead("INVALID");
+            HeadLookup failure = HeadLookup.failed("HEAD_STORAGE_READ_FAILED", null, null);
+            recordHeadIncident(partitionKey, failure);
+            return failure;
+        }
+        if (observed.isEmpty()) {
+            recordManifestRead("MISS");
+            return HeadLookup.failed("HEAD_MANIFEST_MISSING", null, null);
+        }
+        ObjectStoreAuditAnchorVersionedObject head = observed.get();
+        String digest = sha256Hex(head.content());
+        ObjectStoreExternalAuditHeadManifest manifest;
+        try {
+            manifest = deserializeHeadManifest(head.content());
         } catch (ExternalAuditAnchorSinkException exception) {
             recordManifestRead("INVALID");
             recordManifestInvalid();
-            return Optional.empty();
+            return HeadLookup.failed("HEAD_MANIFEST_MALFORMED", head.version(), digest);
         }
-        if (manifest.isEmpty()) {
-            recordManifestRead("MISS");
-            return Optional.empty();
-        }
-        Optional<ExternalAuditAnchor> verified = verifyHeadManifest(manifest.get(), partitionKey);
-        if (verified.isPresent()) {
+        HeadVerification verified = verifyHeadManifestDetailed(manifest, partitionKey);
+        if (verified.anchor().isPresent()) {
             recordManifestRead("HIT");
-            return verified;
+            return new HeadLookup(verified.anchor(), null, head.version(), digest);
         }
         recordManifestRead("INVALID");
         recordManifestInvalid();
-        return Optional.empty();
+        return HeadLookup.failed(verified.reason(), head.version(), digest);
     }
 
     private Optional<ObjectStoreExternalAuditHeadManifest> readHeadManifest(String keyPrefix) {
@@ -506,17 +609,26 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             ObjectStoreExternalAuditHeadManifest manifest,
             String partitionKey
     ) {
+        return verifyHeadManifestDetailed(manifest, partitionKey).anchor();
+    }
+
+    private HeadVerification verifyHeadManifestDetailed(
+            ObjectStoreExternalAuditHeadManifest manifest,
+            String partitionKey
+    ) {
         if (manifest.manifestHash() == null
-                || !manifest.manifestHash().equals(sha256Hex(serialize(manifest.withoutManifestHash())))
-                || !partitionKey.equals(manifest.partitionKey())
+                || !manifest.manifestHash().equals(sha256Hex(serialize(manifest.withoutManifestHash())))) {
+            return HeadVerification.failed("HEAD_MANIFEST_HASH_MISMATCH");
+        }
+        if (!partitionKey.equals(manifest.partitionKey())
                 || manifest.latestChainPosition() < 0
                 || !StringUtils.hasText(manifest.latestExternalKey())) {
-            return Optional.empty();
+            return HeadVerification.failed("HEAD_MANIFEST_REFERENCE_INCOMPATIBLE");
         }
         Optional<ExternalAuditAnchor> referenced = read(manifest.latestExternalKey());
         if (referenced.isEmpty()) {
             recordManifestMismatch();
-            return Optional.empty();
+            return HeadVerification.failed("HEAD_MANIFEST_REFERENCE_INCOMPATIBLE");
         }
         ExternalAuditAnchor anchor = referenced.get();
         if (anchor.chainPosition() != manifest.latestChainPosition()
@@ -524,9 +636,9 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                 || !anchor.lastEventHash().equals(manifest.latestEventHash())
                 || !anchor.partitionKey().equals(manifest.partitionKey())) {
             recordManifestMismatch();
-            return Optional.empty();
+            return HeadVerification.failed("HEAD_MANIFEST_REFERENCE_INCOMPATIBLE");
         }
-        return Optional.of(anchor);
+        return new HeadVerification(Optional.of(anchor), null);
     }
 
     private ObjectStoreExternalAuditHeadManifest signedManifest(ExternalAuditAnchor anchor, String anchorKey) {
@@ -868,6 +980,25 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         }
     }
 
+    private String recordHeadIncident(String partitionKey, HeadLookup observation) {
+        if (forensicService == null || observation == null || observation.reason() == null) {
+            return null;
+        }
+        return forensicService.recordIncident(
+                partitionKey,
+                observation.observedVersion(),
+                observation.observedDigest(),
+                observation.reason(),
+                Instant.now()
+        );
+    }
+
+    private void recordHeadRepairOutcome(String incidentId, String outcome) {
+        if (forensicService != null && incidentId != null) {
+            forensicService.recordRepairOutcome(incidentId, outcome, Instant.now());
+        }
+    }
+
     private void backoff() {
         if (retryBackoff.isZero()) {
             return;
@@ -960,6 +1091,32 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
             ExternalAuditAnchor anchor,
             String key
     ) {
+    }
+
+    private record HeadLookup(
+            Optional<ExternalAuditAnchor> anchor,
+            String reason,
+            String observedVersion,
+            String observedDigest
+    ) {
+        static HeadLookup failed(String reason, String observedVersion, String observedDigest) {
+            return new HeadLookup(Optional.empty(), reason, observedVersion, observedDigest);
+        }
+    }
+
+    private record HeadVerification(Optional<ExternalAuditAnchor> anchor, String reason) {
+        static HeadVerification failed(String reason) {
+            return new HeadVerification(Optional.empty(), reason);
+        }
+    }
+
+    private record ParsedHeadManifest(
+            Optional<ObjectStoreExternalAuditHeadManifest> manifest,
+            HeadLookup observation
+    ) {
+        static ParsedHeadManifest failed(HeadLookup observation) {
+            return new ParsedHeadManifest(Optional.empty(), observation);
+        }
     }
 
     private String requireText(String value, String name) {
