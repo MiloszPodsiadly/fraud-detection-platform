@@ -5,6 +5,7 @@ import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -21,12 +22,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -56,6 +60,9 @@ class TransactionScoredRedriveKafkaMongoIntegrationTest extends AbstractIntegrat
     @Autowired
     private MongoTemplate mongoTemplate;
 
+    @Autowired
+    private KafkaListenerEndpointRegistry listenerRegistry;
+
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
         FraudPlatformContainers.startAll();
@@ -80,25 +87,43 @@ class TransactionScoredRedriveKafkaMongoIntegrationTest extends AbstractIntegrat
         String transactionId = "transaction-redrive-" + SUFFIX;
         TransactionScoredEvent event = TransactionFixtures.scoredTransaction()
                 .withTransactionId(transactionId)
+                .withFeatureSnapshot(rapidTransferSnapshot(transactionId))
                 .build();
 
         try (KafkaConsumer<String, byte[]> quarantineConsumer = quarantineConsumer()) {
+            awaitRedriveListenerReady();
             quarantineConsumer.subscribe(List.of(QUARANTINE_TOPIC));
-            quarantineConsumer.poll(Duration.ofMillis(100));
+            awaitConsumerAssignment(quarantineConsumer);
 
             kafkaTemplate.send(validRedriveRecord(event)).get(10, TimeUnit.SECONDS);
             kafkaTemplate.send(validRedriveRecord(event)).get(10, TimeUnit.SECONDS);
             kafkaTemplate.flush();
 
-            awaitCondition(() -> countByTransactionId(ScoredTransactionDocument.class, transactionId) == 1L);
-            awaitCondition(() -> countByTransactionId(AlertDocument.class, transactionId) == 1L);
-            awaitCondition(() -> countByTransactionId(FraudAlertOutboxRecord.class, transactionId) == 1L);
-            awaitCondition(() -> mongoTemplate.count(new Query(), FraudCaseDocument.class) == 1L);
+            awaitCondition(
+                    () -> countByTransactionId(ScoredTransactionDocument.class, transactionId) == 1L,
+                    "one scored transaction",
+                    event
+            );
+            awaitCondition(
+                    () -> countByTransactionId(AlertDocument.class, transactionId) == 1L,
+                    "one alert",
+                    event
+            );
+            awaitCondition(
+                    () -> countByTransactionId(FraudAlertOutboxRecord.class, transactionId) == 1L,
+                    "one fraud alert outbox record",
+                    event
+            );
+            awaitCondition(
+                    () -> countFraudCasesByCustomerId(event.customerId()) == 1L,
+                    "one eligible fraud case",
+                    event
+            );
 
             assertThat(countByTransactionId(ScoredTransactionDocument.class, transactionId)).isOne();
             assertThat(countByTransactionId(AlertDocument.class, transactionId)).isOne();
             assertThat(countByTransactionId(FraudAlertOutboxRecord.class, transactionId)).isOne();
-            assertThat(mongoTemplate.count(new Query(), FraudCaseDocument.class)).isOne();
+            assertThat(countFraudCasesByCustomerId(event.customerId())).isOne();
 
             ProducerRecord<String, TransactionScoredEvent> invalid = new ProducerRecord<>(
                     REDRIVE_TOPIC,
@@ -158,6 +183,44 @@ class TransactionScoredRedriveKafkaMongoIntegrationTest extends AbstractIntegrat
         ), new StringDeserializer(), new ByteArrayDeserializer());
     }
 
+    private Map<String, Object> rapidTransferSnapshot(String transactionId) {
+        return Map.of(
+                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                List.of("prior-" + transactionId, transactionId),
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")
+        );
+    }
+
+    private void awaitRedriveListenerReady() {
+        MessageListenerContainer container = listenerRegistry.getListenerContainer("transactionScoredRedriveListener");
+        assertThat(container).as("redrive listener container").isNotNull();
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (container.isRunning() && !container.getAssignedPartitions().isEmpty()) {
+                return;
+            }
+            LockSupport.parkNanos(Duration.ofMillis(25).toNanos());
+        }
+        throw new AssertionError("Redrive listener was not ready: running=" + container.isRunning()
+                + ", assignedPartitions=" + container.getAssignedPartitions());
+    }
+
+    private void awaitConsumerAssignment(KafkaConsumer<String, byte[]> consumer) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (System.nanoTime() < deadline) {
+            consumer.poll(Duration.ofMillis(100));
+            if (!consumer.assignment().isEmpty()) {
+                return;
+            }
+        }
+        throw new AssertionError("Quarantine observer was not assigned: topic=" + QUARANTINE_TOPIC
+                + ", assignment=" + consumer.assignment());
+    }
+
     private ConsumerRecord<String, byte[]> pollForRecord(KafkaConsumer<String, byte[]> consumer) {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
         while (System.nanoTime() < deadline) {
@@ -180,7 +243,18 @@ class TransactionScoredRedriveKafkaMongoIntegrationTest extends AbstractIntegrat
         );
     }
 
-    private void awaitCondition(BooleanSupplier condition) {
+    private long countFraudCasesByCustomerId(String customerId) {
+        return mongoTemplate.count(
+                Query.query(Criteria.where("customerId").is(customerId)),
+                FraudCaseDocument.class
+        );
+    }
+
+    private void awaitCondition(
+            BooleanSupplier condition,
+            String expectedState,
+            TransactionScoredEvent event
+    ) {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
         while (System.nanoTime() < deadline) {
             if (condition.getAsBoolean()) {
@@ -188,6 +262,15 @@ class TransactionScoredRedriveKafkaMongoIntegrationTest extends AbstractIntegrat
             }
             LockSupport.parkNanos(Duration.ofMillis(25).toNanos());
         }
-        throw new AssertionError("Timed out waiting for redrive side effect.");
+        MessageListenerContainer container = listenerRegistry.getListenerContainer("transactionScoredRedriveListener");
+        throw new AssertionError("Timed out waiting for " + expectedState
+                + ": topic=" + REDRIVE_TOPIC
+                + ", group=" + REDRIVE_GROUP
+                + ", listenerRunning=" + (container != null && container.isRunning())
+                + ", assignedPartitions=" + (container == null ? List.of() : container.getAssignedPartitions())
+                + ", scoredTransactions=" + countByTransactionId(ScoredTransactionDocument.class, event.transactionId())
+                + ", alerts=" + countByTransactionId(AlertDocument.class, event.transactionId())
+                + ", outboxRecords=" + countByTransactionId(FraudAlertOutboxRecord.class, event.transactionId())
+                + ", fraudCases=" + countFraudCasesByCustomerId(event.customerId()));
     }
 }
