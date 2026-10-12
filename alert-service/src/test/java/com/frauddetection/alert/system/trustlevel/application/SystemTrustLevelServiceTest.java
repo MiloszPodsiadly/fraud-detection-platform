@@ -244,6 +244,36 @@ class SystemTrustLevelServiceTest {
     }
 
     @Test
+    void shouldNotReportHealthyWhenFallbackCoverageCoexistsWithUnresolvedHeadIntegrity() {
+        ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
+        when(sink.capabilities()).thenReturn(verifiedCapabilities());
+        when(degradationService.unresolvedExternalHeadIntegrityCount()).thenReturn(1L);
+        SystemTrustLevelService service = service(
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                Duration.ofMinutes(10),
+                integrityService,
+                sink,
+                degradationService,
+                healthyOutboxRepository(),
+                null
+        );
+
+        SystemTrustLevel response = service.trustLevel();
+
+        assertThat(response.coverageStatus()).isEqualTo("HEALTHY");
+        assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
+        assertThat(response.reasonCode()).isEqualTo("EXTERNAL_HEAD_INTEGRITY_UNRESOLVED");
+    }
+
+    @Test
     void shouldDowngradeFailClosedWhenOutboxHasTerminalFailure() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);

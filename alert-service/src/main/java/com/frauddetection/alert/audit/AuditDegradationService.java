@@ -73,6 +73,15 @@ public class AuditDegradationService {
         }
     }
 
+    public long unresolvedExternalHeadIntegrityCount() {
+        try {
+            return repository.countByTypeAndResolved(AuditDegradationEventDocument.TYPE_EXTERNAL_HEAD_INTEGRITY, false);
+        } catch (DataAccessException exception) {
+            log.warn("External HEAD integrity incident lookup failed: reason=EXTERNAL_HEAD_INTEGRITY_LOOKUP_FAILED");
+            return 1L;
+        }
+    }
+
     public long resolvedCount() {
         try {
             return repository.countByResolved(true);
@@ -106,6 +115,11 @@ public class AuditDegradationService {
         String normalizedReason = normalize(reason, 500, "not specified");
         AuditDegradationEventDocument event = repository.findByAuditId(auditId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown audit degradation event."));
+
+        if (AuditDegradationResolutionOwner.forIncidentType(event.getType())
+                == AuditDegradationResolutionOwner.VERIFIED_EXTERNAL_HEAD_RECOVERY) {
+            rejectManualResolution(durableAudit, auditId, normalizedActor);
+        }
 
         if (bankModeFailClosed) {
             ResolutionEvidenceReference evidence = ResolutionEvidenceReference.require(
@@ -143,6 +157,31 @@ public class AuditDegradationService {
             }
             return repository.save(event);
         });
+    }
+
+    private void rejectManualResolution(AuditService durableAudit, String auditId, String actor) {
+        durableAudit.audit(
+                AuditAction.RESOLVE_AUDIT_DEGRADATION,
+                AuditResourceType.AUDIT_DEGRADATION,
+                auditId,
+                null,
+                actor,
+                AuditOutcome.ATTEMPTED,
+                null
+        );
+        durableAudit.audit(
+                AuditAction.RESOLVE_AUDIT_DEGRADATION,
+                AuditResourceType.AUDIT_DEGRADATION,
+                auditId,
+                null,
+                actor,
+                AuditOutcome.FAILED,
+                "VERIFIED_TECHNICAL_RECOVERY_REQUIRED"
+        );
+        throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "External HEAD integrity incidents require verified technical recovery."
+        );
     }
 
     private AuditDegradationEventDocument auditedResolutionChange(

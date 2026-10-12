@@ -412,7 +412,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                             .orElseGet(() -> highestPublishedAnchor(anchor, anchorKey));
                     if (desired == null) {
                         recordManifestUpdate("SUCCESS");
-                        recordHeadRepairOutcome(incidentId, "VERIFIED_REPAIRED");
+                        recordVerifiedHeadRepair(incidentId);
                         return anchor;
                     }
                     putObjectIfVersionMatches(
@@ -422,20 +422,20 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
                     );
                 }
                 verifyCurrentHead(anchor.partitionKey());
-                recordHeadRepairOutcome(incidentId, "VERIFIED_REPAIRED");
+                recordVerifiedHeadRepair(incidentId);
                 recordManifestUpdate("SUCCESS");
                 return anchor;
             } catch (ExternalAuditAnchorConflictException exception) {
-                recordHeadRepairOutcome(incidentId, "CAS_CONFLICT");
+                recordFailedHeadRepair(incidentId, "CAS_CONFLICT");
                 throw exception;
             } catch (ExternalAuditAnchorSinkException exception) {
                 if ("CONFLICT".equals(exception.reason()) && attempt < maxAttempts) {
-                    recordHeadRepairOutcome(incidentId, "CAS_CONFLICT_RETRYING");
+                    recordFailedHeadRepair(incidentId, "CAS_CONFLICT_RETRYING");
                     recordRetry("head-cas");
                     backoff();
                     continue;
                 }
-                recordHeadRepairOutcome(
+                recordFailedHeadRepair(
                         incidentId,
                         "CONFLICT".equals(exception.reason()) ? "CAS_CONFLICT" : "REPAIR_FAILED"
                 );
@@ -993,9 +993,15 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
         );
     }
 
-    private void recordHeadRepairOutcome(String incidentId, String outcome) {
+    private void recordVerifiedHeadRepair(String incidentId) {
         if (forensicService != null && incidentId != null) {
-            forensicService.recordRepairOutcome(incidentId, outcome, Instant.now());
+            forensicService.recordVerifiedRepair(incidentId, Instant.now());
+        }
+    }
+
+    private void recordFailedHeadRepair(String incidentId, String outcome) {
+        if (forensicService != null && incidentId != null) {
+            forensicService.recordFailedRepair(incidentId, outcome, Instant.now());
         }
     }
 

@@ -14,9 +14,14 @@ import java.util.HexFormat;
 public class ExternalAuditHeadForensicService {
 
     private final AuditDegradationEventRepository repository;
+    private final ExternalAuditHeadRecoveryTransitions recoveryTransitions;
 
-    public ExternalAuditHeadForensicService(AuditDegradationEventRepository repository) {
+    public ExternalAuditHeadForensicService(
+            AuditDegradationEventRepository repository,
+            ExternalAuditHeadRecoveryTransitions recoveryTransitions
+    ) {
         this.repository = repository;
+        this.recoveryTransitions = recoveryTransitions;
     }
 
     public String recordIncident(
@@ -64,23 +69,23 @@ public class ExternalAuditHeadForensicService {
         return incidentId;
     }
 
-    public void recordRepairOutcome(String incidentId, String outcome, Instant attemptedAt) {
-        try {
-            AuditDegradationEventDocument event = repository.findByAuditId(incidentId)
-                    .orElseThrow(() -> new AuditPersistenceUnavailableException(
-                            "External HEAD integrity evidence is unavailable.",
-                            null
-                    ));
-            event.setRecoveryOutcome(normalize(outcome, 120, "REPAIR_FAILED"));
-            event.setRecoveryAttemptedAt(attemptedAt == null ? Instant.now() : attemptedAt);
-            event.setResolved("VERIFIED_REPAIRED".equals(event.getRecoveryOutcome()));
-            repository.save(event);
-        } catch (DataAccessException exception) {
-            throw new AuditPersistenceUnavailableException(
-                    "External HEAD repair evidence could not be persisted.",
-                    exception
-            );
+    public void recordVerifiedRepair(String incidentId, Instant attemptedAt) {
+        recoveryTransitions.recordVerifiedRepair(
+                incidentId,
+                attemptedAt == null ? Instant.now() : attemptedAt
+        );
+    }
+
+    public void recordFailedRepair(String incidentId, String outcome, Instant attemptedAt) {
+        String normalizedOutcome = normalize(outcome, 120, "REPAIR_FAILED");
+        if (ExternalAuditHeadRecoveryStore.VERIFIED_REPAIRED.equals(normalizedOutcome)) {
+            throw new IllegalArgumentException("Verified repair requires the verified recovery path.");
         }
+        recoveryTransitions.recordFailedRepair(
+                incidentId,
+                normalizedOutcome,
+                attemptedAt == null ? Instant.now() : attemptedAt
+        );
     }
 
     private String normalize(String value, int maxLength, String fallback) {

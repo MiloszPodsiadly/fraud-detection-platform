@@ -580,7 +580,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         ));
 
         assertThat(result.manifestStatus()).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
-        verify(forensicService).recordRepairOutcome(
+        verify(forensicService).recordFailedRepair(
                 eq("external-head-incident-3"),
                 eq("CAS_CONFLICT"),
                 org.mockito.ArgumentMatchers.any(Instant.class)
@@ -612,9 +612,8 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 eq("HEAD_MANIFEST_STALE"),
                 any(Instant.class)
         );
-        verify(forensicService).recordRepairOutcome(
+        verify(forensicService).recordVerifiedRepair(
                 eq("external-head-incident-4"),
-                eq("VERIFIED_REPAIRED"),
                 any(Instant.class)
         );
         assertThat(forensicSink.latest("source_service:alert-service"))
@@ -707,9 +706,8 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 eq("HEAD_MANIFEST_HASH_MISMATCH"),
                 any(Instant.class)
         );
-        evidenceOrder.verify(forensicService).recordRepairOutcome(
+        evidenceOrder.verify(forensicService).recordVerifiedRepair(
                 eq("external-head-incident-1"),
-                eq("VERIFIED_REPAIRED"),
                 org.mockito.ArgumentMatchers.any(Instant.class)
         );
     }
@@ -741,9 +739,8 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         ObjectStoreExternalAuditAnchorSink restarted = sinkWithForensicEvidence(forensicService);
         restarted.publish(candidate);
 
-        verify(forensicService).recordRepairOutcome(
+        verify(forensicService).recordVerifiedRepair(
                 eq("external-head-incident-2"),
-                eq("VERIFIED_REPAIRED"),
                 org.mockito.ArgumentMatchers.any(Instant.class)
         );
         assertThat(restarted.latest("source_service:alert-service")).isPresent();

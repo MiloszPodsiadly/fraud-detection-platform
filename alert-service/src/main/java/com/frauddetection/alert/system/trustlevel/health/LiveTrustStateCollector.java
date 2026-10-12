@@ -62,6 +62,9 @@ public class LiveTrustStateCollector {
 
     public LiveTrustSnapshot collect() {
         long postCommitDegraded = auditDegradationService == null ? 0L : auditDegradationService.unresolvedPostCommitDegradedCount();
+        long unresolvedExternalHeadIntegrity = auditDegradationService == null
+                ? 0L
+                : auditDegradationService.unresolvedExternalHeadIntegrityCount();
         long pendingDegradationResolution = auditDegradationService == null ? 0L : auditDegradationService.pendingResolutionCount();
         long postCommitDegradedResolved = auditDegradationService == null ? 0L : auditDegradationService.resolvedCount();
         OutboxRecoveryHealthSnapshot outboxRecovery = outboxRecoveryHealthCollector.collect();
@@ -94,6 +97,7 @@ public class LiveTrustStateCollector {
                 localStatusUnverified,
                 missingRanges,
                 postCommitDegraded,
+                unresolvedExternalHeadIntegrity,
                 pendingDegradationResolution,
                 postCommitDegradedResolved,
                 outboxRecovery,

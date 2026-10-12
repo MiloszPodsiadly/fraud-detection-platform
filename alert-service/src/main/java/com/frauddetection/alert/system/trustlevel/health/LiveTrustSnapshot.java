@@ -10,6 +10,7 @@ public record LiveTrustSnapshot(
         int localStatusUnverified,
         int missingRanges,
         long postCommitAuditDegraded,
+        long unresolvedExternalHeadIntegrityCount,
         long pendingDegradationResolutionCount,
         long postCommitAuditDegradedResolved,
         OutboxRecoveryHealthSnapshot outboxRecovery,

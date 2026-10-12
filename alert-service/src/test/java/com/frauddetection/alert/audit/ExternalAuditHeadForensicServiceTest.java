@@ -5,7 +5,6 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.time.Instant;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -19,7 +18,7 @@ class ExternalAuditHeadForensicServiceTest {
     @Test
     void shouldPersistForensicEvidenceWithDeterministicIdentity() {
         AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
-        ExternalAuditHeadForensicService service = new ExternalAuditHeadForensicService(repository);
+        ExternalAuditHeadForensicService service = service(repository);
         Instant detectedAt = Instant.parse("2026-10-11T12:00:00Z");
 
         String first = service.recordIncident(
@@ -55,7 +54,7 @@ class ExternalAuditHeadForensicServiceTest {
     @Test
     void shouldTreatDuplicateEvidenceAsIdempotent() {
         AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
-        ExternalAuditHeadForensicService service = new ExternalAuditHeadForensicService(repository);
+        ExternalAuditHeadForensicService service = service(repository);
         when(repository.insert(any(AuditDegradationEventDocument.class)))
                 .thenThrow(new DuplicateKeyException("already recorded"));
 
@@ -71,7 +70,7 @@ class ExternalAuditHeadForensicServiceTest {
     @Test
     void shouldFailClosedWhenEvidenceCannotBePersisted() {
         AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
-        ExternalAuditHeadForensicService service = new ExternalAuditHeadForensicService(repository);
+        ExternalAuditHeadForensicService service = service(repository);
         when(repository.insert(any(AuditDegradationEventDocument.class)))
                 .thenThrow(new DataAccessResourceFailureException("mongo down"));
 
@@ -85,29 +84,32 @@ class ExternalAuditHeadForensicServiceTest {
     }
 
     @Test
-    void shouldRetainDetectionEvidenceWhenVerifiedRepairCompletes() {
+    void shouldDelegateVerifiedRepairWithoutMutatingStaleDetectionObject() {
         AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
-        ExternalAuditHeadForensicService service = new ExternalAuditHeadForensicService(repository);
+        ExternalAuditHeadRecoveryTransitions recoveryTransitions = mock(ExternalAuditHeadRecoveryTransitions.class);
+        ExternalAuditHeadForensicService service = new ExternalAuditHeadForensicService(
+                repository,
+                recoveryTransitions
+        );
         AuditDegradationEventDocument event = new AuditDegradationEventDocument();
         event.setAuditId("external-head-1");
         event.setReason("HEAD_MANIFEST_HASH_MISMATCH");
         event.setObservedVersion("version-7");
         event.setObservedDigest("digest-7");
-        when(repository.findByAuditId("external-head-1")).thenReturn(Optional.of(event));
-        when(repository.save(event)).thenReturn(event);
-
-        service.recordRepairOutcome(
+        service.recordVerifiedRepair(
                 "external-head-1",
-                "VERIFIED_REPAIRED",
                 Instant.parse("2026-10-11T12:01:00Z")
         );
 
-        assertThat(event.isResolved()).isTrue();
+        verify(recoveryTransitions).recordVerifiedRepair(
+                "external-head-1",
+                Instant.parse("2026-10-11T12:01:00Z")
+        );
+        assertThat(event.isResolved()).isFalse();
         assertThat(event.getReason()).isEqualTo("HEAD_MANIFEST_HASH_MISMATCH");
         assertThat(event.getObservedVersion()).isEqualTo("version-7");
         assertThat(event.getObservedDigest()).isEqualTo("digest-7");
-        assertThat(event.getRecoveryOutcome()).isEqualTo("VERIFIED_REPAIRED");
-        verify(repository).save(event);
+        verify(repository, org.mockito.Mockito.never()).save(event);
     }
 
     @Test
@@ -130,5 +132,12 @@ class ExternalAuditHeadForensicServiceTest {
         assertThat(response.recoveryAction()).isEqualTo("RECONSTRUCT_AND_CAS_HEAD");
         assertThat(response.recoveryOutcome()).isEqualTo("CAS_CONFLICT");
         assertThat(response.recoveryAttemptedAt()).isEqualTo(Instant.parse("2026-10-11T12:01:00Z"));
+    }
+
+    private ExternalAuditHeadForensicService service(AuditDegradationEventRepository repository) {
+        return new ExternalAuditHeadForensicService(
+                repository,
+                mock(ExternalAuditHeadRecoveryTransitions.class)
+        );
     }
 }

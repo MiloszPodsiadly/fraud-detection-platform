@@ -112,6 +112,7 @@ public class TrustPostureEvaluator {
                 && live.localStatusUnverified() == 0
                 && live.missingRanges() == 0
                 && live.postCommitAuditDegraded() == 0
+                && live.unresolvedExternalHeadIntegrityCount() == 0
                 && live.pendingDegradationResolutionCount() == 0
                 && (!bankModeFailClosed || (publicationEnabled && publicationRequired && failClosed))
                 && (!bankModeFailClosed || (trustAuthorityEnabled && signingRequired))
@@ -140,7 +141,9 @@ public class TrustPostureEvaluator {
             OutboxRecoveryHealthSnapshot health,
             TrustIncidentSummary incidents
     ) {
-        String reasonCode = live.coverageReasonCode();
+        String reasonCode = live.unresolvedExternalHeadIntegrityCount() > 0
+                ? "EXTERNAL_HEAD_INTEGRITY_UNRESOLVED"
+                : live.coverageReasonCode();
         if (reasonCode == null) {
             reasonCode = health.outboxReasonCode();
         }

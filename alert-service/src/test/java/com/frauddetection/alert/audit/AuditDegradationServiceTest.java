@@ -16,6 +16,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -53,12 +54,34 @@ class AuditDegradationServiceTest {
     }
 
     @Test
+    void shouldReadUnresolvedExternalHeadIntegrityCountIndependently() {
+        AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
+        AuditDegradationService service = new AuditDegradationService(repository);
+        when(repository.countByTypeAndResolved(AuditDegradationEventDocument.TYPE_EXTERNAL_HEAD_INTEGRITY, false))
+                .thenReturn(3L);
+
+        assertThat(service.unresolvedExternalHeadIntegrityCount()).isEqualTo(3L);
+        verify(repository).countByTypeAndResolved(AuditDegradationEventDocument.TYPE_EXTERNAL_HEAD_INTEGRITY, false);
+    }
+
+    @Test
+    void shouldFailClosedWhenExternalHeadIntegrityCountIsUnavailable() {
+        AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
+        AuditDegradationService service = new AuditDegradationService(repository);
+        when(repository.countByTypeAndResolved(AuditDegradationEventDocument.TYPE_EXTERNAL_HEAD_INTEGRITY, false))
+                .thenThrow(new DataAccessResourceFailureException("mongo down"));
+
+        assertThat(service.unresolvedExternalHeadIntegrityCount()).isOne();
+    }
+
+    @Test
     void shouldResolveDegradationWithOperatorEvidenceAndAuditResolution() {
         AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
         AuditService auditService = mock(AuditService.class);
         AuditDegradationService service = new AuditDegradationService(repository, auditService);
         AuditDegradationEventDocument event = new AuditDegradationEventDocument();
         event.setAuditId("audit-1");
+        event.setType(AuditDegradationEventDocument.TYPE_POST_COMMIT_DEGRADED);
         event.setResolved(false);
         when(repository.findByAuditId("audit-1")).thenReturn(Optional.of(event));
         when(repository.save(event)).thenReturn(event);
@@ -201,11 +224,129 @@ class AuditDegradationServiceTest {
         assertThat(approved.getApprovedBy()).isEqualTo("ops-approver");
     }
 
+    @Test
+    void shouldRejectManualExternalHeadResolutionWithoutChangingForensicEvidence() {
+        AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        AuditDegradationEventDocument event = unresolvedExternalHeadIncident();
+        when(repository.findByAuditId("external-head-1")).thenReturn(Optional.of(event));
+
+        assertThatThrownBy(() -> new AuditDegradationService(repository, auditService)
+                .resolveDegradation("external-head-1", "ops-admin", "looks healthy", ticketEvidence("ticket-123")))
+                .isInstanceOfSatisfying(ResponseStatusException.class, exception -> {
+                    assertThat(exception.getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT);
+                    assertThat(exception.getReason())
+                            .isEqualTo("External HEAD integrity incidents require verified technical recovery.");
+                });
+
+        assertExternalHeadIncidentUnchanged(event);
+        verify(repository, never()).save(any());
+        InOrder auditOrder = inOrder(auditService);
+        auditOrder.verify(auditService).audit(
+                AuditAction.RESOLVE_AUDIT_DEGRADATION,
+                AuditResourceType.AUDIT_DEGRADATION,
+                "external-head-1",
+                null,
+                "ops-admin",
+                AuditOutcome.ATTEMPTED,
+                null
+        );
+        auditOrder.verify(auditService).audit(
+                AuditAction.RESOLVE_AUDIT_DEGRADATION,
+                AuditResourceType.AUDIT_DEGRADATION,
+                "external-head-1",
+                null,
+                "ops-admin",
+                AuditOutcome.FAILED,
+                "VERIFIED_TECHNICAL_RECOVERY_REQUIRED"
+        );
+    }
+
+    @Test
+    void shouldRejectFirstBankApprovalForExternalHeadIncident() {
+        AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        AuditDegradationEventDocument event = unresolvedExternalHeadIncident();
+        when(repository.findByAuditId("external-head-1")).thenReturn(Optional.of(event));
+
+        assertThatThrownBy(() -> new AuditDegradationService(repository, auditService, true)
+                .resolveDegradation("external-head-1", "ops-requester", "request", ticketEvidence("ticket-123")))
+                .isInstanceOf(ResponseStatusException.class);
+
+        assertExternalHeadIncidentUnchanged(event);
+        verify(repository, never()).save(any());
+        verify(auditService).audit(
+                AuditAction.RESOLVE_AUDIT_DEGRADATION,
+                AuditResourceType.AUDIT_DEGRADATION,
+                "external-head-1",
+                null,
+                "ops-requester",
+                AuditOutcome.FAILED,
+                "VERIFIED_TECHNICAL_RECOVERY_REQUIRED"
+        );
+    }
+
+    @Test
+    void shouldNotBypassExternalHeadResolutionOwnershipAfterServiceRestart() {
+        AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
+        AuditService auditService = mock(AuditService.class);
+        AuditDegradationEventDocument event = unresolvedExternalHeadIncident();
+        when(repository.findByAuditId("external-head-1")).thenReturn(Optional.of(event));
+
+        assertThatThrownBy(() -> new AuditDegradationService(repository, auditService)
+                .resolveDegradation("external-head-1", "ops-admin", "first", null))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> new AuditDegradationService(repository, auditService)
+                .resolveDegradation("external-head-1", "ops-admin", "after restart", null))
+                .isInstanceOf(ResponseStatusException.class);
+
+        assertExternalHeadIncidentUnchanged(event);
+        verify(repository, never()).save(any());
+        verify(auditService, times(2)).audit(
+                AuditAction.RESOLVE_AUDIT_DEGRADATION,
+                AuditResourceType.AUDIT_DEGRADATION,
+                "external-head-1",
+                null,
+                "ops-admin",
+                AuditOutcome.FAILED,
+                "VERIFIED_TECHNICAL_RECOVERY_REQUIRED"
+        );
+    }
+
     private AuditDegradationEventDocument unresolvedEvent() {
         AuditDegradationEventDocument event = new AuditDegradationEventDocument();
         event.setAuditId("audit-1");
+        event.setType(AuditDegradationEventDocument.TYPE_POST_COMMIT_DEGRADED);
         event.setResolved(false);
         return event;
+    }
+
+    private AuditDegradationEventDocument unresolvedExternalHeadIncident() {
+        AuditDegradationEventDocument event = new AuditDegradationEventDocument();
+        event.setAuditId("external-head-1");
+        event.setType(AuditDegradationEventDocument.TYPE_EXTERNAL_HEAD_INTEGRITY);
+        event.setResolved(false);
+        event.setResolutionPending(false);
+        event.setReason("HEAD_MANIFEST_HASH_MISMATCH");
+        event.setObservedVersion("version-7");
+        event.setObservedDigest("digest-7");
+        event.setRecoveryAction("RECONSTRUCT_AND_CAS_HEAD");
+        event.setRecoveryOutcome("DETECTED_PENDING_REPAIR");
+        return event;
+    }
+
+    private void assertExternalHeadIncidentUnchanged(AuditDegradationEventDocument event) {
+        assertThat(event.isResolved()).isFalse();
+        assertThat(event.isResolutionPending()).isFalse();
+        assertThat(event.getResolvedAt()).isNull();
+        assertThat(event.getResolvedBy()).isNull();
+        assertThat(event.getResolutionReason()).isNull();
+        assertThat(event.getResolutionRequestedAt()).isNull();
+        assertThat(event.getResolutionRequestedBy()).isNull();
+        assertThat(event.getReason()).isEqualTo("HEAD_MANIFEST_HASH_MISMATCH");
+        assertThat(event.getObservedVersion()).isEqualTo("version-7");
+        assertThat(event.getObservedDigest()).isEqualTo("digest-7");
+        assertThat(event.getRecoveryOutcome()).isEqualTo("DETECTED_PENDING_REPAIR");
     }
 
     private ResolutionEvidenceReference ticketEvidence(String reference) {
