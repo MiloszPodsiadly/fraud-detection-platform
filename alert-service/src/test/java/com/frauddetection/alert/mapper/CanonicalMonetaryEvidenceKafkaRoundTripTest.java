@@ -50,7 +50,7 @@ class CanonicalMonetaryEvidenceKafkaRoundTripTest {
         ScoredTransactionRepository repository = mock(ScoredTransactionRepository.class);
         when(repository.findAllById(List.of(roundTripped.transactionId()))).thenReturn(List.of(persisted));
         FraudCaseTransactionAssembler.Assembly assembly = new FraudCaseTransactionAssembler(repository)
-                .assemble(List.of(roundTripped.transactionId()), roundTripped);
+                .assemble(List.of(roundTripped.transactionId()), roundTripped.customerId(), roundTripped);
 
         assertThat(assembly.transactions()).singleElement()
                 .satisfies(transaction -> assertThat(transaction.getAmountPln()).isEqualTo(exactAmount));

@@ -1,11 +1,12 @@
 package com.frauddetection.alert.config;
 
-import com.frauddetection.common.events.contract.TransactionScoredEvent;
-import com.frauddetection.common.events.observability.TraceContext;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionReason;
+import com.frauddetection.alert.fraudcase.FraudCaseEvidenceValidationException;
 import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
 import com.frauddetection.alert.messaging.MlPredictionEvidenceTransientProcessingException;
 import com.frauddetection.alert.messaging.TransactionScoredRecoveryValidationException;
+import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.observability.TraceContext;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -232,6 +233,35 @@ class AlertKafkaFailureHandlingTest {
         );
 
         assertThat(errorHandler.isAckAfterHandle()).isTrue();
+    }
+
+    @Test
+    void fraudCaseOwnershipViolationsAreRecoveredWithoutRetry() {
+        DeadLetterPublishingRecoverer sourceRecoverer = mock(DeadLetterPublishingRecoverer.class);
+        DeadLetterPublishingRecoverer redriveRecoverer = mock(DeadLetterPublishingRecoverer.class);
+        DefaultErrorHandler sourceHandler = recoveryConfiguration.kafkaErrorHandler(
+                sourceRecoverer,
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+        DefaultErrorHandler redriveHandler = recoveryConfiguration.transactionScoredRedriveErrorHandler(
+                redriveRecoverer,
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                "transactions.scored",
+                0,
+                1L,
+                "transaction-1",
+                mock(TransactionScoredEvent.class)
+        );
+        FraudCaseEvidenceValidationException violation = new FraudCaseEvidenceValidationException(
+                FraudCaseEvidenceValidationException.Reason.CROSS_CUSTOMER_TRANSACTION
+        );
+
+        assertThat(sourceHandler.handleOne(violation, source, null, null)).isTrue();
+        assertThat(redriveHandler.handleOne(violation, source, null, null)).isTrue();
+        verify(sourceRecoverer).accept(source, null, violation);
+        verify(redriveRecoverer).accept(source, null, violation);
     }
 
     @Test

@@ -46,6 +46,7 @@ public class FraudCaseIngestionService {
         String caseKey = event.customerId() + ":" + SUSPICION_TYPE + ":" + firstTransactionId;
         FraudCaseDocument document = fraudCaseRepository.findByCaseKey(caseKey)
                 .orElseGet(() -> newCase(caseKey, event));
+        validateCaseOwnership(document, caseKey, event.customerId());
 
         LinkedHashSet<String> mergedIds = new LinkedHashSet<>(
                 document.getTransactionIds() == null ? List.of() : document.getTransactionIds()
@@ -58,6 +59,7 @@ public class FraudCaseIngestionService {
         boolean newerAggregationSnapshot = shouldApplyAggregationSnapshot(document, event);
         FraudCaseTransactionAssembler.Assembly assembly = transactionAssembler.assemble(
                 mergedTransactionIds,
+                event.customerId(),
                 event
         );
         boolean materializationChanged = !sameTransactions(document.getTransactions(), assembly.transactions())
@@ -186,6 +188,19 @@ public class FraudCaseIngestionService {
         document.setTransactions(List.of());
         document.setTransactionIds(List.of());
         return document;
+    }
+
+    private void validateCaseOwnership(FraudCaseDocument document, String expectedCaseKey, String expectedCustomerId) {
+        if (!Objects.equals(expectedCaseKey, document.getCaseKey())) {
+            throw new FraudCaseEvidenceValidationException(
+                    FraudCaseEvidenceValidationException.Reason.CASE_KEY_MISMATCH
+            );
+        }
+        if (!Objects.equals(expectedCustomerId, document.getCustomerId())) {
+            throw new FraudCaseEvidenceValidationException(
+                    FraudCaseEvidenceValidationException.Reason.CASE_CUSTOMER_MISMATCH
+            );
+        }
     }
 
     private List<String> transactionIds(Map<String, Object> featureSnapshot, String currentTransactionId) {

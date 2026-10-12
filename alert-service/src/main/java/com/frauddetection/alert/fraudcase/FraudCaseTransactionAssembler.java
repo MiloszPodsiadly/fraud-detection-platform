@@ -23,10 +23,27 @@ public class FraudCaseTransactionAssembler {
         this.scoredTransactionRepository = scoredTransactionRepository;
     }
 
-    public Assembly assemble(List<String> transactionIds, TransactionScoredEvent currentEvent) {
+    public Assembly assemble(
+            List<String> transactionIds,
+            String expectedCustomerId,
+            TransactionScoredEvent currentEvent
+    ) {
+        if (currentEvent != null && !Objects.equals(expectedCustomerId, currentEvent.customerId())) {
+            throw new FraudCaseEvidenceValidationException(
+                    FraudCaseEvidenceValidationException.Reason.CURRENT_EVENT_CUSTOMER_MISMATCH
+            );
+        }
         Map<String, ScoredTransactionDocument> storedTransactions = scoredTransactionRepository.findAllById(transactionIds)
                 .stream()
                 .collect(Collectors.toMap(ScoredTransactionDocument::getTransactionId, transaction -> transaction));
+
+        storedTransactions.values().forEach(transaction -> {
+            if (!Objects.equals(expectedCustomerId, transaction.getCustomerId())) {
+                throw new FraudCaseEvidenceValidationException(
+                        FraudCaseEvidenceValidationException.Reason.CROSS_CUSTOMER_TRANSACTION
+                );
+            }
+        });
 
         List<FraudCaseTransactionDocument> transactions = new ArrayList<>();
         for (String transactionId : transactionIds) {

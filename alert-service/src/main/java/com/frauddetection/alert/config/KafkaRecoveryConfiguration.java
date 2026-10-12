@@ -2,6 +2,7 @@ package com.frauddetection.alert.config;
 
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionValidationException;
+import com.frauddetection.alert.fraudcase.FraudCaseEvidenceValidationException;
 import com.frauddetection.alert.messaging.EngineIntelligenceRecoveryValidationException;
 import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
 import com.frauddetection.alert.messaging.ScoringOccurrenceConflictException;
@@ -122,7 +123,8 @@ public class KafkaRecoveryConfiguration {
         handler.addNotRetryableExceptions(
                 DeserializationException.class,
                 MlPredictionEvidencePermanentProcessingException.class,
-                ScoringOccurrenceConflictException.class
+                ScoringOccurrenceConflictException.class,
+                FraudCaseEvidenceValidationException.class
         );
         handler.setRetryListeners((ConsumerRecord<?, ?> record, Exception exception, int attempt) ->
                 retryLog(record, exception, attempt, "Retrying Kafka record processing before dead-letter handoff."));
@@ -182,7 +184,8 @@ public class KafkaRecoveryConfiguration {
         handler.addNotRetryableExceptions(
                 DeserializationException.class,
                 TransactionScoredRecoveryValidationException.class,
-                ScoringOccurrenceConflictException.class
+                ScoringOccurrenceConflictException.class,
+                FraudCaseEvidenceValidationException.class
         );
         return handler;
     }
