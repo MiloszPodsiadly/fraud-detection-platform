@@ -212,14 +212,10 @@ class FraudCaseReadModelMetricsContractTest {
         String metricsInterface = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/observability/FraudCaseReadModelMetrics.java"
         ));
-        String metricsImplementation = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/observability/AlertServiceMetrics.java"
+        String metricsRecorder = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/observability/fraudcase/FraudCaseMetricsRecorder.java"
         ));
-        String recorderSlice = metricsImplementation.substring(
-                metricsImplementation.indexOf("private void recordFraudCaseReadModel"),
-                metricsImplementation.indexOf("private String endpoint", metricsImplementation.indexOf("private void recordFraudCaseReadModel"))
-        );
-        String source = metricsInterface + "\n" + recorderSlice;
+        String source = metricsInterface + "\n" + metricsRecorder;
 
         assertThat(metricsInterface)
                 .doesNotContain("String")

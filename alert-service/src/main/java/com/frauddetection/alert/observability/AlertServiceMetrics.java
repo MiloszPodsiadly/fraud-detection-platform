@@ -16,6 +16,7 @@ import com.frauddetection.alert.outbox.FraudAlertOutboxBacklogResponse;
 import com.frauddetection.alert.observability.evidence.EvidenceSnapshotMetricsRecorder;
 import com.frauddetection.alert.observability.audit.AuditIntegrityMetricsRecorder;
 import com.frauddetection.alert.observability.engineintelligence.EngineIntelligenceMetricsRecorder;
+import com.frauddetection.alert.observability.fraudcase.FraudCaseMetricsRecorder;
 import com.frauddetection.alert.observability.outbox.OutboxMetricsRecorder;
 import com.frauddetection.alert.observability.regulated.RegulatedMutationRecoveryMetricsRecorder;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
@@ -46,6 +47,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final OutboxMetricsRecorder outboxMetricsRecorder;
     private final RegulatedMutationRecoveryMetricsRecorder regulatedMutationRecoveryMetricsRecorder;
     private final EngineIntelligenceMetricsRecorder engineIntelligenceMetricsRecorder;
+    private final FraudCaseMetricsRecorder fraudCaseMetricsRecorder;
     private final AtomicInteger governanceAnalyticsWindowDays = new AtomicInteger(0);
     private final AtomicLong postCommitAuditDegraded = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
@@ -58,7 +60,8 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 new AuditIntegrityMetricsRecorder(meterRegistry),
                 new OutboxMetricsRecorder(meterRegistry),
                 new RegulatedMutationRecoveryMetricsRecorder(meterRegistry),
-                new EngineIntelligenceMetricsRecorder(meterRegistry)
+                new EngineIntelligenceMetricsRecorder(meterRegistry),
+                new FraudCaseMetricsRecorder(meterRegistry)
         );
     }
 
@@ -72,7 +75,8 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 new AuditIntegrityMetricsRecorder(meterRegistry),
                 new OutboxMetricsRecorder(meterRegistry),
                 new RegulatedMutationRecoveryMetricsRecorder(meterRegistry),
-                new EngineIntelligenceMetricsRecorder(meterRegistry)
+                new EngineIntelligenceMetricsRecorder(meterRegistry),
+                new FraudCaseMetricsRecorder(meterRegistry)
         );
     }
 
@@ -89,7 +93,8 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 auditIntegrityMetricsRecorder,
                 outboxMetricsRecorder,
                 regulatedMutationRecoveryMetricsRecorder,
-                new EngineIntelligenceMetricsRecorder(meterRegistry)
+                new EngineIntelligenceMetricsRecorder(meterRegistry),
+                new FraudCaseMetricsRecorder(meterRegistry)
         );
     }
 
@@ -100,7 +105,8 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             AuditIntegrityMetricsRecorder auditIntegrityMetricsRecorder,
             OutboxMetricsRecorder outboxMetricsRecorder,
             RegulatedMutationRecoveryMetricsRecorder regulatedMutationRecoveryMetricsRecorder,
-            EngineIntelligenceMetricsRecorder engineIntelligenceMetricsRecorder
+            EngineIntelligenceMetricsRecorder engineIntelligenceMetricsRecorder,
+            FraudCaseMetricsRecorder fraudCaseMetricsRecorder
     ) {
         this.meterRegistry = meterRegistry;
         this.evidenceSnapshotMetricsRecorder = evidenceSnapshotMetricsRecorder;
@@ -108,6 +114,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         this.outboxMetricsRecorder = outboxMetricsRecorder;
         this.regulatedMutationRecoveryMetricsRecorder = regulatedMutationRecoveryMetricsRecorder;
         this.engineIntelligenceMetricsRecorder = engineIntelligenceMetricsRecorder;
+        this.fraudCaseMetricsRecorder = fraudCaseMetricsRecorder;
         Gauge.builder("fraud_ml_governance_analytics_window_days", governanceAnalyticsWindowDays, AtomicInteger::get)
                 .register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
@@ -222,63 +229,37 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordFraudCaseWorkQueueRequest(String outcome) {
-        counter(
-                "fraud_case_work_queue_requests_total",
-                "endpoint_family", "fraud_case_work_queue",
-                "outcome", normalizeFraudCaseWorkQueueOutcome(outcome)
-        ).increment();
+        fraudCaseMetricsRecorder.recordWorkQueueRequest(outcome);
     }
 
     public void recordFraudCaseWorkQueueQuery(String outcome, String sortField) {
-        counter(
-                "fraud_case_work_queue_query_total",
-                "outcome", normalizeFraudCaseWorkQueueOutcome(outcome),
-                "sort_field", normalizeFraudCaseWorkQueueSortField(sortField)
-        ).increment();
+        fraudCaseMetricsRecorder.recordWorkQueueQuery(outcome, sortField);
     }
 
     public void recordFraudCaseWorkQueuePageSize(int pageSize) {
-        DistributionSummary.builder("fraud_case_work_queue_page_size_bucket")
-                .tag("endpoint_family", "fraud_case_work_queue")
-                .register(meterRegistry)
-                .record(Math.max(0, pageSize));
+        fraudCaseMetricsRecorder.recordWorkQueuePageSize(pageSize);
     }
 
     public void recordFraudCaseWorkQueueSummaryOutcome(String outcome, Duration latency) {
-        String normalizedOutcome = normalizeFraudCaseWorkQueueSummaryOutcome(outcome);
-        counter(
-                "fraud_case_work_queue_summary_requests_total",
-                "outcome", normalizedOutcome
-        ).increment();
-        Timer.builder("fraud_case_work_queue_summary_latency_seconds")
-                .register(meterRegistry)
-                .record(latency == null || latency.isNegative() ? Duration.ZERO : latency);
+        fraudCaseMetricsRecorder.recordWorkQueueSummary(outcome, latency);
     }
 
     @Override
     public void recordEvidenceSummary(FraudCaseReadModelOutcome outcome) {
-        recordFraudCaseReadModel("evidence_summary", outcome);
+        fraudCaseMetricsRecorder.recordReadModel("evidence_summary", outcome);
     }
 
     @Override
     public void recordEvidenceTimeline(FraudCaseReadModelOutcome outcome) {
-        recordFraudCaseReadModel("evidence_timeline", outcome);
+        fraudCaseMetricsRecorder.recordReadModel("evidence_timeline", outcome);
     }
 
     public void recordScoredTransactionSearchRequest(String outcome, String filterBucket) {
-        counter(
-                "scored_transaction_search_requests_total",
-                "endpoint_family", "scored_transactions",
-                "outcome", normalizeScoredTransactionSearchOutcome(outcome),
-                "filter_bucket", normalizeScoredTransactionFilterBucket(filterBucket)
-        ).increment();
+        fraudCaseMetricsRecorder.recordScoredTransactionSearch(outcome, filterBucket);
     }
 
     public void recordScoredTransactionSearchPageSize(int pageSize) {
-        DistributionSummary.builder("scored_transaction_search_page_size_bucket")
-                .tag("endpoint_family", "scored_transactions")
-                .register(meterRegistry)
-                .record(Math.max(0, pageSize));
+        fraudCaseMetricsRecorder.recordScoredTransactionPageSize(pageSize);
     }
 
     public void recordDecisionOutboxPublishConfirmationFailed() {
@@ -1107,15 +1088,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 .register(meterRegistry);
     }
 
-    private void recordFraudCaseReadModel(String endpoint, FraudCaseReadModelOutcome outcome) {
-        FraudCaseReadModelOutcome safeOutcome = outcome == null ? FraudCaseReadModelOutcome.ERROR : outcome;
-        counter(
-                "fraud.fraud_case.read_model.read",
-                "endpoint", endpoint,
-                "outcome", safeOutcome.label()
-        ).increment();
-    }
-
     private String endpoint(HttpServletRequest request) {
         String path = request.getRequestURI();
         String method = request.getMethod();
@@ -1288,56 +1260,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         return switch (reason) {
             case "PERSISTENCE_UNAVAILABLE", "AUDIT_UNAVAILABLE" -> reason;
             default -> "PERSISTENCE_UNAVAILABLE";
-        };
-    }
-
-    private String normalizeFraudCaseWorkQueueOutcome(String outcome) {
-        if (!StringUtils.hasText(outcome)) {
-            return "failure";
-        }
-        return switch (outcome) {
-            case "success", "invalid_filter", "invalid_sort", "invalid_cursor", "unauthorized", "failure" -> outcome;
-            default -> "failure";
-        };
-    }
-
-    private String normalizeFraudCaseWorkQueueSummaryOutcome(String outcome) {
-        if (!StringUtils.hasText(outcome)) {
-            return "failure";
-        }
-        return switch (outcome) {
-            case "success", "failure" -> outcome;
-            default -> "failure";
-        };
-    }
-
-    private String normalizeFraudCaseWorkQueueSortField(String sortField) {
-        if (!StringUtils.hasText(sortField)) {
-            return "default";
-        }
-        return switch (sortField) {
-            case "createdAt", "updatedAt", "priority", "riskLevel", "caseNumber", "default" -> sortField;
-            default -> "default";
-        };
-    }
-
-    private String normalizeScoredTransactionSearchOutcome(String outcome) {
-        if (!StringUtils.hasText(outcome)) {
-            return "failure";
-        }
-        return switch (outcome) {
-            case "success", "rejected", "failure" -> outcome;
-            default -> "failure";
-        };
-    }
-
-    private String normalizeScoredTransactionFilterBucket(String filterBucket) {
-        if (!StringUtils.hasText(filterBucket)) {
-            return "none";
-        }
-        return switch (filterBucket) {
-            case "none", "query", "risk", "classification", "combined" -> filterBucket;
-            default -> "combined";
         };
     }
 
