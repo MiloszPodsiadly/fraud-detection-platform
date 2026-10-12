@@ -7,6 +7,9 @@ import org.springframework.util.StringUtils;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -33,7 +36,7 @@ final class TrustAuthorityKeyRegistry {
     private final RegisteredKey activeKey;
 
     TrustAuthorityKeyRegistry(TrustAuthorityProperties properties, Environment environment) {
-        this(properties, localKeyGenerationAllowed(environment));
+        this(properties, TrustAuthorityProfilePolicy.localKeyGenerationAllowed(environment));
     }
 
     TrustAuthorityKeyRegistry(TrustAuthorityProperties properties, boolean localKeyGenerationAllowed) {
@@ -113,20 +116,25 @@ final class TrustAuthorityKeyRegistry {
             throw new IllegalStateException("Unsupported trust authority key algorithm.");
         }
         try {
-            if (requiresLocalGeneration(entry)) {
+            KeyMaterialSource materialSource = keyMaterialSource(entry);
+            if (materialSource.bootstrap()) {
                 if (!localKeyGenerationAllowed || !"ACTIVE".equals(normalizeStatus(entry.getStatus()))) {
                     throw new IllegalStateException("Trust authority key material is required outside local/dev/test profiles.");
                 }
                 KeyPair generated = KeyPairGenerator.getInstance(ALGORITHM).generateKeyPair();
-                writeKeysIfConfigured(entry, generated);
+                if (materialSource == KeyMaterialSource.FRESH_PERSISTED_BOOTSTRAP) {
+                    persistFreshKeyPair(entry, generated);
+                }
                 return registeredKey(entry, generated.getPublic(), generated.getPrivate());
             }
-            PublicKey publicKey = publicKey(readKeyMaterial(entry.getPublicKey(), entry.getPublicKeyPath()));
-            PrivateKey privateKey = StringUtils.hasText(entry.getPrivateKey()) || StringUtils.hasText(entry.getPrivateKeyPath())
-                    ? privateKey(readKeyMaterial(entry.getPrivateKey(), entry.getPrivateKeyPath()))
-                    : null;
+            PublicKey publicKey = materialSource == KeyMaterialSource.INLINE
+                    ? publicKey(entry.getPublicKey())
+                    : publicKey(readPersistedKey(entry.getPublicKeyPath(), "public"));
+            PrivateKey privateKey = materialSource == KeyMaterialSource.INLINE
+                    ? privateKey(entry.getPrivateKey())
+                    : privateKey(readPersistedKey(entry.getPrivateKeyPath(), "private"));
             return registeredKey(entry, publicKey, privateKey);
-        } catch (IOException | GeneralSecurityException exception) {
+        } catch (IOException | GeneralSecurityException | IllegalArgumentException exception) {
             throw new IllegalStateException("Trust authority configured key material could not be initialized.", exception);
         }
     }
@@ -146,40 +154,82 @@ final class TrustAuthorityKeyRegistry {
         );
     }
 
-    private boolean requiresLocalGeneration(TrustAuthorityProperties.KeyEntry entry) {
-        boolean inlineMaterial = StringUtils.hasText(entry.getPublicKey()) || StringUtils.hasText(entry.getPrivateKey());
-        boolean persistedMaterial = StringUtils.hasText(entry.getPublicKeyPath())
-                && StringUtils.hasText(entry.getPrivateKeyPath())
-                && Files.exists(Path.of(entry.getPublicKeyPath()))
-                && Files.exists(Path.of(entry.getPrivateKeyPath()));
-        return !inlineMaterial && !persistedMaterial;
+    private KeyMaterialSource keyMaterialSource(TrustAuthorityProperties.KeyEntry entry) {
+        boolean publicInline = StringUtils.hasText(entry.getPublicKey());
+        boolean privateInline = StringUtils.hasText(entry.getPrivateKey());
+        boolean publicPathConfigured = StringUtils.hasText(entry.getPublicKeyPath());
+        boolean privatePathConfigured = StringUtils.hasText(entry.getPrivateKeyPath());
+
+        if (publicInline || privateInline) {
+            if (publicPathConfigured || privatePathConfigured) {
+                throw new IllegalStateException("Trust authority key material cannot mix inline and persisted configuration.");
+            }
+            if (!publicInline || !privateInline) {
+                throw new IllegalStateException("Trust authority inline key material requires a complete key pair.");
+            }
+            return KeyMaterialSource.INLINE;
+        }
+        if (publicPathConfigured || privatePathConfigured) {
+            if (!publicPathConfigured || !privatePathConfigured) {
+                throw new IllegalStateException("Trust authority persisted key material requires both key paths.");
+            }
+            Path publicPath = Path.of(entry.getPublicKeyPath()).toAbsolutePath().normalize();
+            Path privatePath = Path.of(entry.getPrivateKeyPath()).toAbsolutePath().normalize();
+            if (publicPath.equals(privatePath)) {
+                throw new IllegalStateException("Trust authority public and private key paths must be distinct.");
+            }
+            boolean publicExists = Files.exists(publicPath);
+            boolean privateExists = Files.exists(privatePath);
+            if (publicExists != privateExists) {
+                throw new IllegalStateException("Trust authority persisted key material is partial; bootstrap will not overwrite it.");
+            }
+            return publicExists ? KeyMaterialSource.PERSISTED : KeyMaterialSource.FRESH_PERSISTED_BOOTSTRAP;
+        }
+        return KeyMaterialSource.EPHEMERAL_BOOTSTRAP;
     }
 
-    private void writeKeysIfConfigured(TrustAuthorityProperties.KeyEntry entry, KeyPair generated) throws IOException {
-        if (StringUtils.hasText(entry.getPrivateKeyPath())) {
-            Path path = Path.of(entry.getPrivateKeyPath());
-            if (path.getParent() != null) {
-                Files.createDirectories(path.getParent());
-            }
-            Files.writeString(path, Base64.getEncoder().encodeToString(generated.getPrivate().getEncoded()));
-        }
-        if (StringUtils.hasText(entry.getPublicKeyPath())) {
-            Path path = Path.of(entry.getPublicKeyPath());
-            if (path.getParent() != null) {
-                Files.createDirectories(path.getParent());
-            }
-            Files.writeString(path, Base64.getEncoder().encodeToString(generated.getPublic().getEncoded()));
+    private void persistFreshKeyPair(TrustAuthorityProperties.KeyEntry entry, KeyPair generated) throws IOException {
+        Path privatePath = Path.of(entry.getPrivateKeyPath());
+        Path publicPath = Path.of(entry.getPublicKeyPath());
+        createParentDirectories(privatePath);
+        createParentDirectories(publicPath);
+        createPrivateKeyFile(privatePath);
+        Files.writeString(
+                privatePath,
+                Base64.getEncoder().encodeToString(generated.getPrivate().getEncoded()),
+                StandardOpenOption.WRITE
+        );
+        Files.writeString(
+                publicPath,
+                Base64.getEncoder().encodeToString(generated.getPublic().getEncoded()),
+                StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE
+        );
+    }
+
+    private void createPrivateKeyFile(Path path) throws IOException {
+        try {
+            Files.createFile(path, PosixFilePermissions.asFileAttribute(Set.of(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE
+            )));
+        } catch (UnsupportedOperationException exception) {
+            Files.createFile(path);
         }
     }
 
-    private String readKeyMaterial(String inline, String path) throws IOException {
-        if (StringUtils.hasText(inline)) {
-            return inline;
+    private void createParentDirectories(Path path) throws IOException {
+        if (path.getParent() != null) {
+            Files.createDirectories(path.getParent());
         }
-        if (StringUtils.hasText(path)) {
-            return Files.readString(Path.of(path));
+    }
+
+    private String readPersistedKey(String path, String material) throws IOException {
+        Path keyPath = Path.of(path);
+        if (!Files.isRegularFile(keyPath) || !Files.isReadable(keyPath)) {
+            throw new IllegalStateException("Trust authority persisted " + material + " key must be a readable file.");
         }
-        throw new IllegalStateException("Configured trust authority key material is missing.");
+        return Files.readString(keyPath);
     }
 
     private PrivateKey privateKey(String encoded) throws GeneralSecurityException {
@@ -228,15 +278,6 @@ final class TrustAuthorityKeyRegistry {
         }
     }
 
-    private static boolean localKeyGenerationAllowed(Environment environment) {
-        Set<String> profiles = Set.of(environment.getActiveProfiles());
-        return profiles.isEmpty()
-                || profiles.contains("local")
-                || profiles.contains("dev")
-                || profiles.contains("test")
-                || profiles.contains("docker-local");
-    }
-
     record RegisteredKey(
             String keyId,
             PublicKey publicKey,
@@ -245,5 +286,22 @@ final class TrustAuthorityKeyRegistry {
             Instant validFrom,
             Instant validUntil
     ) {
+    }
+
+    private enum KeyMaterialSource {
+        INLINE(false),
+        PERSISTED(false),
+        EPHEMERAL_BOOTSTRAP(true),
+        FRESH_PERSISTED_BOOTSTRAP(true);
+
+        private final boolean bootstrap;
+
+        KeyMaterialSource(boolean bootstrap) {
+            this.bootstrap = bootstrap;
+        }
+
+        boolean bootstrap() {
+            return bootstrap;
+        }
     }
 }

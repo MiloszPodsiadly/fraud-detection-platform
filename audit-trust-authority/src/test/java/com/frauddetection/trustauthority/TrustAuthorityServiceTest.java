@@ -37,7 +37,11 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -221,6 +225,178 @@ class TrustAuthorityServiceTest {
     }
 
     @Test
+    void shouldAllowEphemeralKeyGenerationOnlyForNonProductionLocalProfiles() {
+        TrustAuthorityProperties properties = propertiesWithKeys(keyWithoutMaterial("ephemeral-key", "ACTIVE"));
+
+        assertThat(new TrustAuthorityKeyRegistry(properties, environment(" local ")).activeKey().keyId())
+                .isEqualTo("ephemeral-key");
+        assertThat(new TrustAuthorityKeyRegistry(properties, environment("DEV")).activeKey().keyId())
+                .isEqualTo("ephemeral-key");
+        assertThat(new TrustAuthorityKeyRegistry(properties, environment("test")).activeKey().keyId())
+                .isEqualTo("ephemeral-key");
+        assertThat(new TrustAuthorityKeyRegistry(properties, environment("docker-local")).activeKey().keyId())
+                .isEqualTo("ephemeral-key");
+    }
+
+    @Test
+    void shouldRejectEphemeralKeyGenerationWhenAnyProductionProfileIsActive() {
+        TrustAuthorityProperties properties = propertiesWithKeys(keyWithoutMaterial("ephemeral-key", "ACTIVE"));
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(properties, environment("prod", "local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("key material is required");
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(properties, environment(" staging ", " TEST ")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("key material is required");
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(properties, environment("PRODUCTION", "docker-local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("key material is required");
+    }
+
+    @Test
+    void shouldBootstrapPersistedKeyPairOnceAndPreserveIdentityAcrossRestart() throws Exception {
+        Path privateKey = tempDir.resolve("bootstrap/private.key");
+        Path publicKey = tempDir.resolve("bootstrap/public.key");
+        TrustAuthorityProperties properties = propertiesWithKeys(
+                persistedKey("stable-key", "ACTIVE", privateKey, publicKey)
+        );
+
+        TrustAuthorityKeyRegistry first = new TrustAuthorityKeyRegistry(properties, environment("local"));
+        String privateMaterial = Files.readString(privateKey);
+        String publicMaterial = Files.readString(publicKey);
+        TrustAuthorityKeyRegistry restarted = new TrustAuthorityKeyRegistry(properties, environment("local"));
+
+        assertThat(restarted.activeResponse().keyId()).isEqualTo("stable-key");
+        assertThat(restarted.activeResponse().keyFingerprintSha256())
+                .isEqualTo(first.activeResponse().keyFingerprintSha256());
+        assertThat(Files.readString(privateKey)).isEqualTo(privateMaterial);
+        assertThat(Files.readString(publicKey)).isEqualTo(publicMaterial);
+    }
+
+    @Test
+    void shouldPreserveWinningIdentityDuringConcurrentPersistedBootstrap() throws Exception {
+        Path privateKey = tempDir.resolve("concurrent-bootstrap/private.key");
+        Path publicKey = tempDir.resolve("concurrent-bootstrap/public.key");
+        TrustAuthorityProperties properties = propertiesWithKeys(
+                persistedKey("concurrent-key", "ACTIVE", privateKey, publicKey)
+        );
+        CountDownLatch start = new CountDownLatch(1);
+        Callable<Optional<String>> bootstrap = () -> {
+            start.await();
+            try {
+                return Optional.of(new TrustAuthorityKeyRegistry(properties, environment("local"))
+                        .activeResponse()
+                        .keyFingerprintSha256());
+            } catch (IllegalStateException exception) {
+                return Optional.empty();
+            }
+        };
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(bootstrap);
+            var second = executor.submit(bootstrap);
+            start.countDown();
+            List<String> successfulFingerprints = List.of(first.get(), second.get()).stream()
+                    .flatMap(Optional::stream)
+                    .toList();
+            String persistedFingerprint = new TrustAuthorityKeyRegistry(properties, environment("local"))
+                    .activeResponse()
+                    .keyFingerprintSha256();
+
+            assertThat(successfulFingerprints).isNotEmpty().containsOnly(persistedFingerprint);
+            assertThat(privateKey).isRegularFile();
+            assertThat(publicKey).isRegularFile();
+        }
+    }
+
+    @Test
+    void shouldRejectPartialPersistedKeyPairWithoutChangingExistingMaterial() throws Exception {
+        Path privateKey = tempDir.resolve("partial/private.key");
+        Path publicKey = tempDir.resolve("partial/public.key");
+        Files.createDirectories(privateKey.getParent());
+        Files.writeString(privateKey, "existing-private-material");
+        TrustAuthorityProperties properties = propertiesWithKeys(
+                persistedKey("partial-key", "ACTIVE", privateKey, publicKey)
+        );
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(properties, environment("local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("partial");
+        assertThat(Files.readString(privateKey)).isEqualTo("existing-private-material");
+        assertThat(publicKey).doesNotExist();
+    }
+
+    @Test
+    void shouldRejectPublicOnlyPersistedKeyPairWithoutChangingExistingMaterial() throws Exception {
+        Path privateKey = tempDir.resolve("public-only/private.key");
+        Path publicKey = tempDir.resolve("public-only/public.key");
+        Files.createDirectories(publicKey.getParent());
+        Files.writeString(publicKey, "existing-public-material");
+        TrustAuthorityProperties properties = propertiesWithKeys(
+                persistedKey("public-only-key", "ACTIVE", privateKey, publicKey)
+        );
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(properties, environment("local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("partial");
+        assertThat(Files.readString(publicKey)).isEqualTo("existing-public-material");
+        assertThat(privateKey).doesNotExist();
+    }
+
+    @Test
+    void shouldRejectSharedPersistedKeyPathBeforeCreatingMaterial() {
+        Path sharedPath = tempDir.resolve("shared/key.material");
+        TrustAuthorityProperties properties = propertiesWithKeys(
+                persistedKey("shared-path-key", "ACTIVE", sharedPath, sharedPath)
+        );
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(properties, environment("local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("paths must be distinct");
+        assertThat(sharedPath).doesNotExist();
+    }
+
+    @Test
+    void shouldRejectConflictingInlineAndPersistedKeyConfiguration() throws Exception {
+        TrustAuthorityProperties.KeyEntry entry = key("conflicting-key", "ACTIVE", keyPair());
+        entry.setPrivateKeyPath(tempDir.resolve("conflict/private.key").toString());
+        entry.setPublicKeyPath(tempDir.resolve("conflict/public.key").toString());
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(propertiesWithKeys(entry), environment("local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("cannot mix inline and persisted");
+    }
+
+    @Test
+    void shouldRejectMalformedOrMismatchedPersistedKeyMaterial() throws Exception {
+        Path malformedPrivate = tempDir.resolve("malformed/private.key");
+        Path malformedPublic = tempDir.resolve("malformed/public.key");
+        Files.createDirectories(malformedPrivate.getParent());
+        Files.writeString(malformedPrivate, "not-a-private-key");
+        Files.writeString(malformedPublic, "not-a-public-key");
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(propertiesWithKeys(
+                persistedKey("malformed-key", "ACTIVE", malformedPrivate, malformedPublic)
+        ), environment("local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("could not be initialized");
+
+        KeyPair first = keyPair();
+        KeyPair second = keyPair();
+        Path mismatchPrivate = tempDir.resolve("mismatch/private.key");
+        Path mismatchPublic = tempDir.resolve("mismatch/public.key");
+        Files.createDirectories(mismatchPrivate.getParent());
+        Files.writeString(mismatchPrivate, Base64.getEncoder().encodeToString(first.getPrivate().getEncoded()));
+        Files.writeString(mismatchPublic, Base64.getEncoder().encodeToString(second.getPublic().getEncoded()));
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(propertiesWithKeys(
+                persistedKey("mismatched-key", "ACTIVE", mismatchPrivate, mismatchPublic)
+        ), environment("local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("do not match");
+    }
+
+    @Test
     void shouldRejectRevokedKeyAndUnknownKey() throws Exception {
         KeyPair keyV1 = keyPair();
         TrustAuthorityService oldService = service(propertiesWithKeys(key("key-v1", "ACTIVE", keyV1)));
@@ -277,6 +453,16 @@ class TrustAuthorityServiceTest {
     @Test
     void shouldAllowDefaultDemoTokenInDockerLocalProfile() {
         new TrustAuthorityRuntimeGuard(new TrustAuthorityProperties(), environment("docker-local")).run(null);
+    }
+
+    @Test
+    void shouldNotTreatMixedProductionAndLocalProfilesAsLocalFixtureContext() {
+        TrustAuthorityProperties properties = new TrustAuthorityProperties();
+        properties.getAudit().setSink("durable-hash-chain");
+
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(properties, environment(" PROD ", "local")).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.");
     }
 
     @Test
@@ -1034,6 +1220,25 @@ class TrustAuthorityServiceTest {
         return entry;
     }
 
+    private TrustAuthorityProperties.KeyEntry keyWithoutMaterial(String keyId, String status) {
+        TrustAuthorityProperties.KeyEntry entry = new TrustAuthorityProperties.KeyEntry();
+        entry.setKeyId(keyId);
+        entry.setStatus(status);
+        return entry;
+    }
+
+    private TrustAuthorityProperties.KeyEntry persistedKey(
+            String keyId,
+            String status,
+            Path privateKey,
+            Path publicKey
+    ) {
+        TrustAuthorityProperties.KeyEntry entry = keyWithoutMaterial(keyId, status);
+        entry.setPrivateKeyPath(privateKey.toString());
+        entry.setPublicKeyPath(publicKey.toString());
+        return entry;
+    }
+
     private TrustAuthorityProperties.CallerEntry caller(String serviceName, String token, List<String> purposes) {
         TrustAuthorityProperties.CallerEntry caller = new TrustAuthorityProperties.CallerEntry();
         caller.setServiceName(serviceName);
@@ -1058,9 +1263,9 @@ class TrustAuthorityServiceTest {
         return generator.generateKeyPair();
     }
 
-    private MockEnvironment environment(String profile) {
+    private MockEnvironment environment(String... profiles) {
         MockEnvironment environment = new MockEnvironment();
-        environment.setActiveProfiles(profile);
+        environment.setActiveProfiles(profiles);
         return environment;
     }
 
