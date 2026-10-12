@@ -89,7 +89,8 @@ class AlertKafkaFailureHandlingTest {
                 "transactionScoredKafkaListenerContainerFactory",
                 "mlPredictionEvidenceKafkaListenerContainerFactory",
                 "engineIntelligenceKafkaListenerContainerFactory",
-                "engineIntelligenceRedriveKafkaListenerContainerFactory"
+                "engineIntelligenceRedriveKafkaListenerContainerFactory",
+                "transactionScoredRedriveKafkaListenerContainerFactory"
         );
 
         assertThat(containerFactoryMethods).allSatisfy(methodName -> {
@@ -395,6 +396,32 @@ class AlertKafkaFailureHandlingTest {
                 factory.createContainer("transactions.redrive");
         assertThat(container.getConcurrency()).isEqualTo(1);
         assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void failedTransactionRedriveQuarantinePublicationIsPropagatedBeforeAcknowledgement() {
+        KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
+        when(kafkaOperations.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
+        TransactionScoredRecoveryProperties properties = transactionScoredRecoveryProperties();
+        DeadLetterPublishingRecoverer recoverer = config.transactionScoredRedriveQuarantineRecoverer(
+                kafkaOperations,
+                properties
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                properties.redriveTopic(),
+                0,
+                42L,
+                "transaction-1",
+                new byte[]{1, 2, 3}
+        );
+
+        assertThatThrownBy(() -> recoverer.accept(
+                source,
+                null,
+                new TransactionScoredRecoveryValidationException()
+        )).isInstanceOf(RuntimeException.class);
     }
 
     private MlPredictionEvidenceRecoveryProperties evidenceRecoveryProperties() {
