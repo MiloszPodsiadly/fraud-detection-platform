@@ -7,6 +7,7 @@ import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.domain.RecentTransaction;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
 import com.frauddetection.enricher.service.CurrencyAmountConverter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,7 @@ public class RedisFeatureStore implements FeatureStore {
     private final CurrencyAmountConverter currencyAmountConverter;
     private final int maxFinalRecentTransactionCount;
 
+    @Autowired
     public RedisFeatureStore(
             StringRedisTemplate stringRedisTemplate,
             FeatureStoreProperties featureStoreProperties,
