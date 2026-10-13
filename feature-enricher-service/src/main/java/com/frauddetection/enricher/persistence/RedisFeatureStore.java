@@ -1,6 +1,7 @@
 package com.frauddetection.enricher.persistence;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.features.FraudFeatureValueBoundsContract;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.domain.RecentTransaction;
@@ -23,15 +24,34 @@ public class RedisFeatureStore implements FeatureStore {
     private final StringRedisTemplate stringRedisTemplate;
     private final FeatureStoreProperties featureStoreProperties;
     private final CurrencyAmountConverter currencyAmountConverter;
+    private final int maxFinalRecentTransactionCount;
 
     public RedisFeatureStore(
             StringRedisTemplate stringRedisTemplate,
             FeatureStoreProperties featureStoreProperties,
             CurrencyAmountConverter currencyAmountConverter
     ) {
+        this(
+                stringRedisTemplate,
+                featureStoreProperties,
+                currencyAmountConverter,
+                FraudFeatureValueBoundsContract.MAX_RECENT_TRANSACTION_COUNT
+        );
+    }
+
+    RedisFeatureStore(
+            StringRedisTemplate stringRedisTemplate,
+            FeatureStoreProperties featureStoreProperties,
+            CurrencyAmountConverter currencyAmountConverter,
+            int maxFinalRecentTransactionCount
+    ) {
+        if (maxFinalRecentTransactionCount < 1) {
+            throw new IllegalArgumentException("maxFinalRecentTransactionCount must be positive");
+        }
         this.stringRedisTemplate = stringRedisTemplate;
         this.featureStoreProperties = featureStoreProperties;
         this.currencyAmountConverter = currencyAmountConverter;
+        this.maxFinalRecentTransactionCount = maxFinalRecentTransactionCount;
     }
 
     @Override
@@ -63,7 +83,17 @@ public class RedisFeatureStore implements FeatureStore {
             stringRedisTemplate.opsForZSet().removeRangeByScore(merchantTransactionsKey, Double.NEGATIVE_INFINITY, merchantWindowStart);
 
             Set<ZSetOperations.TypedTuple<String>> recentTransactionEntries =
-                    stringRedisTemplate.opsForZSet().rangeByScoreWithScores(customerTransactionsKey, recentWindowStart, eventTimestamp);
+                    stringRedisTemplate.opsForZSet().rangeByScoreWithScores(
+                            customerTransactionsKey,
+                            recentWindowStart,
+                            eventTimestamp,
+                            0,
+                            maxFinalRecentTransactionCount
+                    );
+            if (recentTransactionEntries != null
+                    && recentTransactionEntries.size() >= maxFinalRecentTransactionCount) {
+                throw new IllegalStateException("RECENT_TRANSACTION_WINDOW_CAPACITY_EXCEEDED");
+            }
             List<RecentTransaction> recentTransactions = parseTransactions(recentTransactionEntries);
             Long merchantFrequency = stringRedisTemplate.opsForZSet().count(merchantTransactionsKey, merchantWindowStart, eventTimestamp);
             Boolean knownDevice = stringRedisTemplate.opsForSet().isMember(deviceSetKey, event.deviceInfo().deviceId());
