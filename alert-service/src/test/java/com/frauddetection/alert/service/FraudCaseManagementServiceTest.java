@@ -449,6 +449,42 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
+    void shouldRejectRecognizableMalformedBurstWithoutReasonCodeBeforeCaseAccess() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument existing = new FraudCaseDocument();
+        existing.setAssignedInvestigatorId("investigator-7");
+        existing.setAnalystId("analyst-9");
+        existing.setDecisionReason("Existing analyst decision");
+        existing.setDecisionTags(List.of("manual-review"));
+        var event = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withReasonCodes(List.of())
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT,
+                        "2"
+                ))
+                .build();
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                .hasMessage("RAPID_TRANSFER_SNAPSHOT_INCONSISTENT");
+
+        verifyNoInteractions(fraudCaseRepository, scoredTransactionRepository);
+        assertThat(existing.getAssignedInvestigatorId()).isEqualTo("investigator-7");
+        assertThat(existing.getAnalystId()).isEqualTo("analyst-9");
+        assertThat(existing.getDecisionReason()).isEqualTo("Existing analyst decision");
+        assertThat(existing.getDecisionTags()).containsExactly("manual-review");
+    }
+
+    @Test
     void shouldIgnoreValidSubthresholdRapidTransferFacts() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);

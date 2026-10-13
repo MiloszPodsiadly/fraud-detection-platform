@@ -182,11 +182,11 @@ class TransactionScoredRedriveKafkaMongoIntegrationTest extends AbstractIntegrat
         TransactionScoredEvent invalid = TransactionFixtures.scoredTransaction()
                 .withTransactionId(invalidTransactionId)
                 .withCustomerId(invalidCustomerId)
-                .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
+                .withReasonCodes(List.of())
                 .withFeatureSnapshot(Map.of(
                         FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
-                        List.of(invalidTransactionId, invalidTransactionId),
-                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        List.of("prior-" + invalidTransactionId, invalidTransactionId),
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, "2",
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
                         FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
                         FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",

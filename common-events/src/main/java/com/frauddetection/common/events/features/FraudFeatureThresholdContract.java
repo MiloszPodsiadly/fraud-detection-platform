@@ -44,7 +44,7 @@ public final class FraudFeatureThresholdContract {
                 && FraudFeatureValueBoundsContract.isWithinCountBounds(count)
                 && FraudFeatureValueBoundsContract.isWithinAmountBounds(amountPln);
         if (!canonicalFacts) {
-            if (!rapidTransferClaimed) {
+            if (!rapidTransferClaimed && !hasRecognizableQualifyingEvidence(featureSnapshot, amountPln)) {
                 return RapidTransferAssessment.notApplicable();
             }
             return membershipIssue(featureSnapshot, count, currentTransactionId)
@@ -79,6 +79,16 @@ public final class FraudFeatureThresholdContract {
                 FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS
         );
         return RapidTransferAssessment.validBurst(transactionIds);
+    }
+
+    private static boolean hasRecognizableQualifyingEvidence(
+            Map<String, Object> featureSnapshot,
+            BigDecimal amountPln
+    ) {
+        return amountPln != null
+                && FraudFeatureValueBoundsContract.isWithinAmountBounds(amountPln)
+                && amountPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0
+                && membershipIssue(featureSnapshot, null, null).isEmpty();
     }
 
     private static java.util.Optional<RapidTransferEvidenceIssue> membershipIssue(
