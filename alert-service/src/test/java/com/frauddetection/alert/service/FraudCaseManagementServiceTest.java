@@ -449,7 +449,7 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
-    void shouldRejectRecognizableMalformedBurstWithoutReasonCodeBeforeCaseAccess() {
+    void shouldRejectRecognizableContradictoryBurstEvidenceWithoutReasonCodeBeforeCaseAccess() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
         FraudCaseManagementService service = service(
@@ -464,18 +464,32 @@ class FraudCaseManagementServiceTest {
         existing.setAnalystId("analyst-9");
         existing.setDecisionReason("Existing analyst decision");
         existing.setDecisionTags(List.of("manual-review"));
-        var event = TransactionFixtures.scoredTransaction()
+        var contradictoryCount = TransactionFixtures.scoredTransaction()
                 .withTransactionId("rapid-txn-2")
                 .withReasonCodes(List.of())
                 .withFeatureSnapshot(rapidTransferSnapshotWith(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT,
-                        "2"
+                        1
+                ))
+                .build();
+        var malformedCountAndMembership = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withReasonCodes(List.of())
+                .withFeatureSnapshot(Map.of(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                        List.of("rapid-txn-1", "rapid-txn-1"),
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, "2",
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"
                 ))
                 .build();
 
-        assertThatThrownBy(() -> service.handleScoredTransaction(event))
-                .isInstanceOf(FraudCaseEvidenceValidationException.class)
-                .hasMessage("RAPID_TRANSFER_SNAPSHOT_INCONSISTENT");
+        List.of(contradictoryCount, malformedCountAndMembership).forEach(event ->
+                assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                        .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                        .hasMessage("RAPID_TRANSFER_MEMBERSHIP_INVALID")
+        );
 
         verifyNoInteractions(fraudCaseRepository, scoredTransactionRepository);
         assertThat(existing.getAssignedInvestigatorId()).isEqualTo("investigator-7");

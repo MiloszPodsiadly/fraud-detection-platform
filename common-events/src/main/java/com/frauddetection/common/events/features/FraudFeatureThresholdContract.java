@@ -44,7 +44,7 @@ public final class FraudFeatureThresholdContract {
                 && FraudFeatureValueBoundsContract.isWithinCountBounds(count)
                 && FraudFeatureValueBoundsContract.isWithinAmountBounds(amountPln);
         if (!canonicalFacts) {
-            if (!rapidTransferClaimed && !hasRecognizableQualifyingEvidence(featureSnapshot, amountPln)) {
+            if (!rapidTransferClaimed && !hasRecognizableQualifyingEvidence(featureSnapshot, count, amountPln)) {
                 return RapidTransferAssessment.notApplicable();
             }
             return membershipIssue(featureSnapshot, count, currentTransactionId)
@@ -55,7 +55,9 @@ public final class FraudFeatureThresholdContract {
         }
 
         boolean qualifyingFacts = isRapidTransferPlnBurst(count, amountPln);
-        if (!qualifyingFacts && !rapidTransferClaimed) {
+        if (!qualifyingFacts
+                && !rapidTransferClaimed
+                && !hasRecognizableQualifyingEvidence(featureSnapshot, count, amountPln)) {
             return RapidTransferAssessment.notBurst();
         }
 
@@ -83,12 +85,21 @@ public final class FraudFeatureThresholdContract {
 
     private static boolean hasRecognizableQualifyingEvidence(
             Map<String, Object> featureSnapshot,
+            Integer count,
             BigDecimal amountPln
     ) {
-        return amountPln != null
-                && FraudFeatureValueBoundsContract.isWithinAmountBounds(amountPln)
-                && amountPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0
-                && membershipIssue(featureSnapshot, null, null).isEmpty();
+        if (amountPln == null
+                || !FraudFeatureValueBoundsContract.isWithinAmountBounds(amountPln)
+                || amountPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) < 0) {
+            return false;
+        }
+        if (count != null
+                && FraudFeatureValueBoundsContract.isWithinCountBounds(count)
+                && count >= RAPID_TRANSFER_MIN_COUNT) {
+            return true;
+        }
+        Object membership = featureSnapshot.get(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS);
+        return membership instanceof List<?> ids && ids.size() >= RAPID_TRANSFER_MIN_COUNT;
     }
 
     private static java.util.Optional<RapidTransferEvidenceIssue> membershipIssue(

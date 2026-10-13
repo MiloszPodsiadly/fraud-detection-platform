@@ -139,6 +139,16 @@ class FraudFeatureThresholdContractTest {
                         "txn-2",
                         false
                 );
+        FraudFeatureThresholdContract.RapidTransferAssessment malformedCountAndMembership =
+                FraudFeatureThresholdContract.assessRapidTransferPlnBurst(
+                        with(
+                                recognizableBurst,
+                                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                                List.of("txn-1", "txn-1")
+                        ),
+                        "txn-2",
+                        false
+                );
 
         assertThat(stringCount.status())
                 .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.INVALID_BURST_EVIDENCE);
@@ -148,6 +158,10 @@ class FraudFeatureThresholdContractTest {
                 .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.INVALID_BURST_EVIDENCE);
         assertThat(fractionalCount.issue())
                 .isEqualTo(FraudFeatureThresholdContract.RapidTransferEvidenceIssue.SNAPSHOT_INCONSISTENT);
+        assertThat(malformedCountAndMembership.status())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.INVALID_BURST_EVIDENCE);
+        assertThat(malformedCountAndMembership.issue())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferEvidenceIssue.MEMBERSHIP_INVALID);
 
         FraudFeatureThresholdContract.RapidTransferAssessment contradictoryCount =
                 FraudFeatureThresholdContract.assessRapidTransferPlnBurst(
@@ -158,6 +172,29 @@ class FraudFeatureThresholdContractTest {
         assertThat(contradictoryCount.status())
                 .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.INVALID_BURST_EVIDENCE);
         assertThat(contradictoryCount.issue())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferEvidenceIssue.MEMBERSHIP_INVALID);
+    }
+
+    @Test
+    void countAndMembershipContradictionFailsClosedBeforeNonBurstClassification() {
+        Map<String, Object> contradictoryEvidence = Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1", "txn-2")
+        );
+
+        FraudFeatureThresholdContract.RapidTransferAssessment assessment =
+                FraudFeatureThresholdContract.assessRapidTransferPlnBurst(
+                        contradictoryEvidence,
+                        "txn-2",
+                        false
+                );
+
+        assertThat(assessment.status())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.INVALID_BURST_EVIDENCE);
+        assertThat(assessment.issue())
                 .isEqualTo(FraudFeatureThresholdContract.RapidTransferEvidenceIssue.MEMBERSHIP_INVALID);
     }
 
