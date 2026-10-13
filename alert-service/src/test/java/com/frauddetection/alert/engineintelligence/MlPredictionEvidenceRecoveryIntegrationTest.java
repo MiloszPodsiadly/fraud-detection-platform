@@ -88,8 +88,7 @@ class MlPredictionEvidenceRecoveryIntegrationTest {
     @Autowired
     private KafkaListenerEndpointRegistry listenerRegistry;
 
-    @Autowired
-    private KafkaRecoveryConfiguration kafkaConfig;
+    private final KafkaRecoveryConfiguration kafkaConfig = new KafkaRecoveryConfiguration();
 
     @MockitoBean
     private MlPredictionEvidenceProjectionRepository evidenceRepository;
