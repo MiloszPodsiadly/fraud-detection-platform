@@ -23,15 +23,29 @@ elif [[ "$variant" == "full-security-hardened" ]]; then
   )
 fi
 
-services=(mongodb redis kafka ml-inference-service audit-trust-authority transaction-ingest-service alert-service analyst-console-ui)
-health_services=(ml-inference-service audit-trust-authority transaction-ingest-service alert-service analyst-console-ui)
+services=(mongodb redis kafka ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service alert-service analyst-console-ui)
+health_services=(ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service alert-service analyst-console-ui)
 if [[ "$variant" == "app-hardening" ]]; then
   services+=(transaction-simulator-service)
   health_services+=(transaction-simulator-service)
 elif [[ "$variant" == "full-security-hardened" ]]; then
-  services=(mongodb redis kafka keycloak ml-inference-service audit-trust-authority transaction-ingest-service fraud-scoring-service alert-service analyst-console-ui)
-  health_services=(ml-inference-service audit-trust-authority transaction-ingest-service fraud-scoring-service alert-service analyst-console-ui)
+  services=(mongodb redis kafka keycloak ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service fraud-scoring-service alert-service analyst-console-ui)
+  health_services=(ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service fraud-scoring-service alert-service analyst-console-ui)
 fi
+
+require_runtime_health_coverage() {
+  local required_service="$1"
+  if [[ ! " ${services[*]} " =~ " ${required_service} " ]]; then
+    echo "Runtime smoke variant $variant must start $required_service." >&2
+    exit 1
+  fi
+  if [[ ! " ${health_services[*]} " =~ " ${required_service} " ]]; then
+    echo "Runtime smoke variant $variant must verify $required_service health." >&2
+    exit 1
+  fi
+}
+
+require_runtime_health_coverage feature-enricher-service
 
 failed_service=""
 

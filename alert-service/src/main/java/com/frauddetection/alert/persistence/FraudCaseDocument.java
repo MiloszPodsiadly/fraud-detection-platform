@@ -60,6 +60,11 @@ public class FraudCaseDocument {
     private BigDecimal thresholdPln;
     private BigDecimal totalAmountPln;
     private String aggregationWindow;
+    private String aggregationSourceEventId;
+    private String aggregationSourceEventCreatedAt;
+    private Long aggregationSourceEventCreatedAtEpochSecond;
+    private Integer aggregationSourceEventCreatedAtNano;
+    private String aggregationSourceEventFingerprint;
     private Instant firstTransactionAt;
     private Instant lastTransactionAt;
     @Indexed
@@ -107,6 +112,16 @@ public class FraudCaseDocument {
     public void setTotalAmountPln(BigDecimal totalAmountPln) { this.totalAmountPln = totalAmountPln; }
     public String getAggregationWindow() { return aggregationWindow; }
     public void setAggregationWindow(String aggregationWindow) { this.aggregationWindow = aggregationWindow; }
+    public String getAggregationSourceEventId() { return aggregationSourceEventId; }
+    public void setAggregationSourceEventId(String aggregationSourceEventId) { this.aggregationSourceEventId = aggregationSourceEventId; }
+    public String getAggregationSourceEventCreatedAt() { return aggregationSourceEventCreatedAt; }
+    public void setAggregationSourceEventCreatedAt(String aggregationSourceEventCreatedAt) { this.aggregationSourceEventCreatedAt = aggregationSourceEventCreatedAt; }
+    public Long getAggregationSourceEventCreatedAtEpochSecond() { return aggregationSourceEventCreatedAtEpochSecond; }
+    public void setAggregationSourceEventCreatedAtEpochSecond(Long aggregationSourceEventCreatedAtEpochSecond) { this.aggregationSourceEventCreatedAtEpochSecond = aggregationSourceEventCreatedAtEpochSecond; }
+    public Integer getAggregationSourceEventCreatedAtNano() { return aggregationSourceEventCreatedAtNano; }
+    public void setAggregationSourceEventCreatedAtNano(Integer aggregationSourceEventCreatedAtNano) { this.aggregationSourceEventCreatedAtNano = aggregationSourceEventCreatedAtNano; }
+    public String getAggregationSourceEventFingerprint() { return aggregationSourceEventFingerprint; }
+    public void setAggregationSourceEventFingerprint(String aggregationSourceEventFingerprint) { this.aggregationSourceEventFingerprint = aggregationSourceEventFingerprint; }
     public Instant getFirstTransactionAt() { return firstTransactionAt; }
     public void setFirstTransactionAt(Instant firstTransactionAt) { this.firstTransactionAt = firstTransactionAt; }
     public Instant getLastTransactionAt() { return lastTransactionAt; }

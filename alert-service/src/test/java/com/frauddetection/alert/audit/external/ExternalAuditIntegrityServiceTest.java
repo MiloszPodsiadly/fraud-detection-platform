@@ -1,5 +1,7 @@
 package com.frauddetection.alert.audit.external;
 
+import com.frauddetection.alert.audit.external.integrity.ExternalAuditIntegrityQueryParser;
+
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
@@ -722,6 +724,63 @@ class ExternalAuditIntegrityServiceTest {
     }
 
     @Test
+    void shouldDegradeCoverageWhilePublishedAnchorManifestNeedsRepair() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink objectStoreSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
+        ExternalAuditAnchorPublicationStatusDocument degradedStatus = manifestDegradedStatus(local);
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(repository.findByPartitionKeyAndChainPositionBetween("source_service:alert-service", 1L, 1L, 1))
+                .thenReturn(List.of(local));
+        when(repository.findHeadWindow("source_service:alert-service", 1)).thenReturn(List.of(local));
+        when(objectStoreSink.latest("source_service:alert-service")).thenReturn(Optional.of(external(local)));
+        when(publicationRepository.findByLocalAnchorIds(List.of("local-anchor-1")))
+                .thenReturn(List.of(degradedStatus));
+        when(publicationRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(Optional.of(degradedStatus));
+
+        ExternalAuditAnchorCoverageResponse response = objectStoreIntegrityService(
+                repository,
+                objectStoreSink,
+                publicationRepository
+        ).coverage("alert-service", 1);
+
+        assertThat(response.status()).isEqualTo("AVAILABLE");
+        assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
+        assertThat(response.reasonCode()).isEqualTo(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
+        assertThat(response.unrecoveredCount()).isEqualTo(1);
+        assertThat(response.missingRanges()).isEmpty();
+    }
+
+    @Test
+    void shouldNotReportValidIntegrityWhileManifestRepairIsPending() {
+        AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
+        ExternalAuditAnchorSink objectStoreSink = mock(ExternalAuditAnchorSink.class);
+        ExternalAuditAnchorPublicationStatusRepository publicationRepository =
+                mock(ExternalAuditAnchorPublicationStatusRepository.class);
+        AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
+        ExternalAuditAnchor external = external(local);
+        when(repository.findLatestByPartitionKey("source_service:alert-service")).thenReturn(Optional.of(local));
+        when(objectStoreSink.findByChainPosition("source_service:alert-service", 1L)).thenReturn(Optional.of(external));
+        when(publicationRepository.findByLocalAnchorId("local-anchor-1"))
+                .thenReturn(Optional.of(manifestDegradedStatus(local)));
+
+        ExternalAuditIntegrityResponse response = objectStoreIntegrityService(
+                repository,
+                objectStoreSink,
+                publicationRepository
+        ).verify("alert-service", 100);
+
+        assertThat(response.status()).isEqualTo("PARTIAL");
+        assertThat(response.reasonCode()).isEqualTo(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
+        assertThat(response.violations())
+                .extracting(com.frauddetection.alert.audit.AuditIntegrityViolation::violationType)
+                .contains(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
+    }
+
+    @Test
     void shouldReturnUnavailableCoverageWhenExternalHeadCannotBeProven() {
         AuditAnchorRepository repository = mock(AuditAnchorRepository.class);
         ExternalAuditAnchorSink unavailableSink = mock(ExternalAuditAnchorSink.class);
@@ -904,6 +963,39 @@ class ExternalAuditIntegrityServiceTest {
                 null,
                 1,
                 null,
+                Instant.parse("2026-04-27T10:01:00Z")
+        );
+    }
+
+    private ExternalAuditAnchorPublicationStatusDocument manifestDegradedStatus(AuditAnchorDocument anchor) {
+        return new ExternalAuditAnchorPublicationStatusDocument(
+                anchor.anchorId(),
+                anchor.partitionKey(),
+                anchor.chainPosition(),
+                true,
+                ExternalAuditAnchor.STATUS_PUBLISHED,
+                ExternalAuditAnchor.STATUS_PUBLISHED,
+                ExternalAuditAnchor.MANIFEST_STATUS_FAILED,
+                "RECORDED",
+                "CREATED",
+                false,
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "object-store",
+                "audit-anchors/source_service-alert-service/00000000000000000001.json",
+                anchor.lastEventHash(),
+                anchor.lastEventHash(),
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "ENFORCED",
+                ExternalAuditAnchor.MANIFEST_STATUS_FAILED,
+                "UNSIGNED",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                1,
+                ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED,
                 Instant.parse("2026-04-27T10:01:00Z")
         );
     }

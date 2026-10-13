@@ -4,7 +4,7 @@ import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
-import com.frauddetection.alert.service.FraudDecisionOutboxPublisher;
+import com.frauddetection.alert.outbox.FraudDecisionOutboxPublisher;
 import org.bson.Document;
 import org.bson.types.Decimal128;
 import org.junit.jupiter.api.Test;

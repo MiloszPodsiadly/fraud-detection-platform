@@ -1,5 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineRiskSeverity;
+
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 

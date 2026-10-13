@@ -15,7 +15,7 @@ class FraudCaseRemovedListExactCountGuardTest {
         String docs = Files.readString(projectRoot().resolve("docs/architecture/fraud_case_work_queue.md"))
                 .toLowerCase()
                 .replaceAll("\\s+", " ");
-        String queryService = Files.readString(sourceRoot().resolve("service/FraudCaseQueryService.java"));
+        String queryService = Files.readString(sourceRoot().resolve("fraudcase/FraudCaseQueryService.java"));
         String repository = Files.readString(sourceRoot().resolve("fraudcase/MongoFraudCaseSearchRepository.java"));
 
         assertThat(docs)

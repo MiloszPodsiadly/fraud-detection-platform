@@ -13,10 +13,7 @@ public class TrustAuthorityProperties {
     static final String DEFAULT_LOCAL_HMAC_SECRET = "local-dev-trust-hmac-secret";
 
     private String authorityName = "local-trust-authority";
-    private String keyId = "local-ed25519-key-1";
     private String hmacSecret = DEFAULT_LOCAL_HMAC_SECRET;
-    private String privateKeyPath;
-    private String publicKeyPath;
     private List<KeyEntry> keys = new ArrayList<>();
     private boolean enabled = true;
     private boolean signingRequired = true;
@@ -36,36 +33,12 @@ public class TrustAuthorityProperties {
         this.authorityName = authorityName;
     }
 
-    public String getKeyId() {
-        return keyId;
-    }
-
-    public void setKeyId(String keyId) {
-        this.keyId = keyId;
-    }
-
     public String getHmacSecret() {
         return hmacSecret;
     }
 
     public void setHmacSecret(String hmacSecret) {
         this.hmacSecret = hmacSecret;
-    }
-
-    public String getPrivateKeyPath() {
-        return privateKeyPath;
-    }
-
-    public void setPrivateKeyPath(String privateKeyPath) {
-        this.privateKeyPath = privateKeyPath;
-    }
-
-    public String getPublicKeyPath() {
-        return publicKeyPath;
-    }
-
-    public void setPublicKeyPath(String publicKeyPath) {
-        this.publicKeyPath = publicKeyPath;
     }
 
     public List<KeyEntry> getKeys() {

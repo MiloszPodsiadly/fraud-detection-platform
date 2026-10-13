@@ -6,7 +6,7 @@ import com.frauddetection.alert.fraudcase.FraudCaseReadQueryPolicy;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
-import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.LinkedMultiValueMap;
 

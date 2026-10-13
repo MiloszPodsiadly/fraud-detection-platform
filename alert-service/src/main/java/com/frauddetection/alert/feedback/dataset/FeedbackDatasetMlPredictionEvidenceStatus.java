@@ -9,7 +9,7 @@ public enum FeedbackDatasetMlPredictionEvidenceStatus {
     MALFORMED,
     IDENTITY_MISMATCH;
 
-    static FeedbackDatasetMlPredictionEvidenceStatus fromAuthoritativeOmission(
+    public static FeedbackDatasetMlPredictionEvidenceStatus fromAuthoritativeOmission(
             MlPredictionEvidenceOmissionReason reason
     ) {
         return switch (reason) {

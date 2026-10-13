@@ -14,7 +14,7 @@ class FraudCaseReadModelSingleSourceOfTruthTest {
     void workQueueUsesExistingQueryServiceAndSearchRepositoryOnly() throws IOException {
         String controller = read("controller/FraudCaseController.java");
         String summaryController = read("controller/FraudCaseWorkQueueSummaryController.java");
-        String queryService = read("service/FraudCaseQueryService.java");
+        String queryService = read("fraudcase/FraudCaseQueryService.java");
         String searchRepository = read("fraudcase/MongoFraudCaseSearchRepository.java");
         String queryPolicy = read("fraudcase/FraudCaseReadQueryPolicy.java");
 

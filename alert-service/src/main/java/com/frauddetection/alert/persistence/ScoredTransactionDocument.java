@@ -9,6 +9,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -44,6 +45,7 @@ public class ScoredTransactionDocument {
     private Instant scoredAt;
 
     private Money transactionAmount;
+    private BigDecimal currentTransactionAmountPln;
     private MerchantInfo merchantInfo;
     private Double fraudScore;
 
@@ -87,6 +89,8 @@ public class ScoredTransactionDocument {
     public void setScoredAt(Instant scoredAt) { this.scoredAt = scoredAt; }
     public Money getTransactionAmount() { return transactionAmount; }
     public void setTransactionAmount(Money transactionAmount) { this.transactionAmount = transactionAmount; }
+    public BigDecimal getCurrentTransactionAmountPln() { return currentTransactionAmountPln; }
+    public void setCurrentTransactionAmountPln(BigDecimal currentTransactionAmountPln) { this.currentTransactionAmountPln = currentTransactionAmountPln; }
     public MerchantInfo getMerchantInfo() { return merchantInfo; }
     public void setMerchantInfo(MerchantInfo merchantInfo) { this.merchantInfo = merchantInfo; }
     public Double getFraudScore() { return fraudScore; }

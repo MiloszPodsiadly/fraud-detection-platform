@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.regulated.status.RegulatedMutationPublicStatusMapper;
+
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

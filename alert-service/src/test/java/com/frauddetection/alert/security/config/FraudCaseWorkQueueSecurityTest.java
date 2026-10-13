@@ -11,7 +11,7 @@ import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
-import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;

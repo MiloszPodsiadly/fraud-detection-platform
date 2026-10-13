@@ -14,8 +14,8 @@ class FraudCaseRemovedApiSurfaceTest {
     void retiredLifecycleSurfaceAndImplementationStayRemoved() throws IOException {
         Path source = sourceRoot();
         String controller = Files.readString(source.resolve("controller/FraudCaseController.java"));
-        String management = Files.readString(source.resolve("service/FraudCaseManagementService.java"));
-        String query = Files.readString(source.resolve("service/FraudCaseQueryService.java"));
+        String management = Files.readString(source.resolve("fraudcase/FraudCaseManagementService.java"));
+        String query = Files.readString(source.resolve("fraudcase/FraudCaseQueryService.java"));
 
         assertThat(controller)
                 .doesNotContain("/assign", "/notes", "/decisions", "/transition", "/close", "/reopen", "/audit")
@@ -24,7 +24,7 @@ class FraudCaseRemovedApiSurfaceTest {
                 .doesNotContain("FraudCaseLifecycleService", "createCase(", "assignCase(", "addNote(", "addDecision(",
                         "transitionCase(", "closeCase(", "reopenCase(", "auditTrail(", "searchCases(", "listCases(");
         assertThat(query).doesNotContain("auditTrail(", "searchCases(", "listCases(", "FraudCaseAuditRepository");
-        assertThat(source.resolve("service/FraudCaseLifecycleService.java")).doesNotExist();
+        assertThat(source.resolve("fraudcase/FraudCaseLifecycleService.java")).doesNotExist();
         assertThat(source.resolve("fraudcase/FraudCaseLifecycleIdempotencyService.java")).doesNotExist();
         assertThat(source.resolve("persistence/FraudCaseLifecycleIdempotencyRepository.java")).doesNotExist();
     }

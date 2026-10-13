@@ -15,6 +15,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -22,6 +23,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,6 +37,36 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PersistentAuditEventPublisherTest {
+
+    private static final List<String> FORBIDDEN_AUDIT_MUTATION_FRAGMENTS = List.of(
+            "mongoTemplate.save",
+            "mongoTemplate.remove",
+            "updateFirst(",
+            "updateMulti(",
+            "updateOne(",
+            "findAndModify("
+    );
+    private static final Pattern UPDATED_FIELD = Pattern.compile("\\.(?:set|unset|setOnInsert)\\(\"([^\"]+)\"");
+    private static final Map<String, MutableAuditComponentPolicy> MUTABLE_AUDIT_COMPONENTS = Map.of(
+            "AuditChainLockRepository.java",
+            new MutableAuditComponentPolicy(
+                    "AuditChainLockDocument",
+                    Set.of("findAndModify(", "updateFirst("),
+                    Set.of("_id", "owner_token", "locked_until")
+            ),
+            "WriteActionAuditOutboxClaimStore.java",
+            new MutableAuditComponentPolicy(
+                    "WriteActionAuditOutboxRecord",
+                    Set.of("findAndModify("),
+                    Set.of("status", "last_attempt_at", "claimed_at", "claim_owner", "claim_expires_at")
+            ),
+            "ExternalAuditHeadRecoveryStore.java",
+            new MutableAuditComponentPolicy(
+                    "AuditDegradationEventDocument",
+                    Set.of("findAndModify("),
+                    Set.of("recoveryOutcome", "recoveryAttemptedAt", "resolved", "activeIncidentKey")
+            )
+    );
 
     @Test
     void shouldPersistAppendOnlyAuditDocumentWithoutPayloadData() {
@@ -644,31 +677,78 @@ class PersistentAuditEventPublisherTest {
     @Test
     void shouldNotContainDurableAuditUpdateOrDeleteOperations() throws Exception {
         Path auditSource = Path.of("src/main/java/com/frauddetection/alert/audit");
-        List<String> forbiddenFragments = List.of(
-                "mongoTemplate.save",
-                "mongoTemplate.remove",
-                "updateFirst(",
-                "updateMulti(",
-                "updateOne(",
-                "findAndModify("
-        );
 
         try (var paths = Files.walk(auditSource)) {
             List<Path> offenders = paths
                     .filter(path -> path.toString().endsWith(".java"))
                     .filter(path -> !path.toString().contains("\\read\\"))
-                    .filter(path -> !path.endsWith("AuditChainLockRepository.java"))
-                    .filter(path -> !path.endsWith("WriteActionAuditOutboxClaimStore.java"))
                     .filter(path -> {
                         try {
-                            String content = Files.readString(path);
-                            return forbiddenFragments.stream().anyMatch(content::contains);
+                            return violatesAuditMutationPolicy(path, Files.readString(path));
                         } catch (Exception exception) {
                             return true;
                         }
                     })
                     .toList();
             assertThat(offenders).isEmpty();
+        }
+    }
+
+    @Test
+    void shouldRejectImmutableAuditMutationHiddenBehindReviewedRecoveryComponentName() {
+        String forbiddenFixture = """
+                class ExternalAuditHeadRecoveryStore {
+                    void mutate() {
+                        Update update = new Update().set("event_hash", "tampered");
+                        mongoTemplate.findAndModify(query, update, options, AuditEventDocument.class);
+                    }
+                }
+                """;
+
+        assertThat(violatesAuditMutationPolicy(
+                Path.of("ExternalAuditHeadRecoveryStore.java"),
+                forbiddenFixture
+        )).isTrue();
+    }
+
+    private boolean violatesAuditMutationPolicy(Path path, String source) {
+        if (FORBIDDEN_AUDIT_MUTATION_FRAGMENTS.stream().noneMatch(source::contains)) {
+            return false;
+        }
+        MutableAuditComponentPolicy policy = MUTABLE_AUDIT_COMPONENTS.get(path.getFileName().toString());
+        return policy == null || !policy.permits(source);
+    }
+
+    private record MutableAuditComponentPolicy(
+            String documentType,
+            Set<String> operations,
+            Set<String> mutableFields
+    ) {
+        private boolean permits(String source) {
+            for (String fragment : FORBIDDEN_AUDIT_MUTATION_FRAGMENTS) {
+                int operationStart = source.indexOf(fragment);
+                while (operationStart >= 0) {
+                    if (!operations.contains(fragment)) {
+                        return false;
+                    }
+                    int operationEnd = source.indexOf(");", operationStart);
+                    if (operationEnd < 0
+                            || !source.substring(operationStart, operationEnd).contains(documentType + ".class")) {
+                        return false;
+                    }
+                    operationStart = source.indexOf(fragment, operationEnd + 2);
+                }
+            }
+
+            Matcher matcher = UPDATED_FIELD.matcher(source);
+            boolean foundMutableField = false;
+            while (matcher.find()) {
+                foundMutableField = true;
+                if (!mutableFields.contains(matcher.group(1))) {
+                    return false;
+                }
+            }
+            return foundMutableField;
         }
     }
 

@@ -9,7 +9,7 @@ import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.frauddetection.alert.outbox.DecisionOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;

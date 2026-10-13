@@ -16,6 +16,21 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 class RegulatedMutationArchitectureTest {
 
     @Test
+    void statusMappingPackageMustRemainIndependentFromMutationOrchestration() {
+        JavaClasses classes = new ClassFileImporter().importPackages("com.frauddetection.alert");
+
+        noClasses()
+                .that().resideInAPackage("..regulated.status..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "..regulated.mutation..",
+                        "..alert.service..",
+                        "..alert.outbox..",
+                        "..alert.audit.."
+                )
+                .check(classes);
+    }
+
+    @Test
     void mainReadmeMustContainExactMaintainerContactBlock() throws Exception {
         String readme = Files.readString(Path.of("../README.md")).replace("\r\n", "\n");
 
@@ -153,7 +168,7 @@ class RegulatedMutationArchitectureTest {
     @Test
     void transactionalOutboxPublisherIsTheOnlyBrokerPublishingBoundary() throws Exception {
         String scheduledWrapper = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/service/FraudDecisionOutboxPublisher.java"
+                "src/main/java/com/frauddetection/alert/outbox/FraudDecisionOutboxPublisher.java"
         ));
         String coordinator = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/outbox/OutboxPublisherCoordinator.java"
@@ -175,7 +190,9 @@ class RegulatedMutationArchitectureTest {
                         String normalized = path.toString().replace('\\', '/');
                         return !normalized.endsWith("messaging/FraudDecisionEventPublisher.java")
                                 && !normalized.endsWith("config/KafkaConfig.java")
-                                && !normalized.endsWith("config/AlertKafkaConfig.java")
+                                && !normalized.endsWith("config/KafkaRecoveryConfiguration.java")
+                                && !normalized.endsWith("config/TransactionScoredKafkaConfiguration.java")
+                                && !normalized.endsWith("config/FraudEventKafkaConfiguration.java")
                                 && !normalized.contains("/messaging/");
                     })
                     .toList();
@@ -1373,19 +1390,24 @@ class RegulatedMutationArchitectureTest {
 
     @Test
     void systemTrustLevelMustNotMaterializeTrustIncidents() throws Exception {
-        String source = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/system/SystemTrustLevelController.java"
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/system/trustlevel/application/SystemTrustLevelService.java"
+        ));
+        String collector = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/system/trustlevel/health/LiveTrustStateCollector.java"
         ));
 
-        assertThat(source).doesNotContain("materializer.materialize");
-        assertThat(source).doesNotContain("trustSignalCollector.collect()");
-        assertThat(source).contains("trustIncidentService.summary()");
+        assertThat(service).doesNotContain("materializer.materialize");
+        assertThat(service).doesNotContain("trustSignalCollector.collect()");
+        assertThat(collector).doesNotContain("materializer.materialize");
+        assertThat(collector).doesNotContain("trustSignalCollector.collect()");
+        assertThat(collector).contains("trustIncidentService.summary()");
     }
 
     @Test
     void decisionOutboxWriterMustPersistTransactionalOutboxRecord() throws Exception {
         String writer = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/service/DecisionOutboxWriter.java"
+                "src/main/java/com/frauddetection/alert/outbox/DecisionOutboxWriter.java"
         ));
 
         assertThat(writer).contains("TransactionalOutboxRecordRepository");

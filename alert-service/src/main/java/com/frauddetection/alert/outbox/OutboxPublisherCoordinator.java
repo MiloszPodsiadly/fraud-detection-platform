@@ -3,7 +3,6 @@ package com.frauddetection.alert.outbox;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

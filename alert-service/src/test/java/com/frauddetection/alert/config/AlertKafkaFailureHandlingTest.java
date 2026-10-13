@@ -1,10 +1,12 @@
 package com.frauddetection.alert.config;
 
-import com.frauddetection.common.events.contract.TransactionScoredEvent;
-import com.frauddetection.common.events.observability.TraceContext;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionReason;
+import com.frauddetection.alert.fraudcase.FraudCaseEvidenceValidationException;
 import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
 import com.frauddetection.alert.messaging.MlPredictionEvidenceTransientProcessingException;
+import com.frauddetection.alert.messaging.TransactionScoredRecoveryValidationException;
+import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.observability.TraceContext;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -41,12 +43,14 @@ import static org.mockito.Mockito.when;
 
 class AlertKafkaFailureHandlingTest {
 
-    private final AlertKafkaConfig config = new AlertKafkaConfig();
+    private final TransactionScoredKafkaConfiguration transactionConfiguration =
+            new TransactionScoredKafkaConfiguration();
+    private final KafkaRecoveryConfiguration recoveryConfiguration = new KafkaRecoveryConfiguration();
 
     @Test
     void capturesMalformedPayloadForContainerErrorHandling() {
         DefaultKafkaConsumerFactory<String, TransactionScoredEvent> consumerFactory =
-                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) config
+                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) transactionConfiguration
                         .transactionScoredEventConsumerFactory(new KafkaProperties());
 
         assertThat(consumerFactory.getValueDeserializer()).isInstanceOf(ErrorHandlingDeserializer.class);
@@ -71,7 +75,7 @@ class AlertKafkaFailureHandlingTest {
                 + "\"mlPredictionEvidence\":{\"contractVersion\":2}"
                 + "}").getBytes(StandardCharsets.UTF_8);
         DefaultKafkaConsumerFactory<String, TransactionScoredEvent> canonicalFactory =
-                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) config
+                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) transactionConfiguration
                         .transactionScoredEventConsumerFactory(new KafkaProperties());
         RecordHeaders headers = new RecordHeaders();
 
@@ -88,11 +92,12 @@ class AlertKafkaFailureHandlingTest {
                 "transactionScoredKafkaListenerContainerFactory",
                 "mlPredictionEvidenceKafkaListenerContainerFactory",
                 "engineIntelligenceKafkaListenerContainerFactory",
-                "engineIntelligenceRedriveKafkaListenerContainerFactory"
+                "engineIntelligenceRedriveKafkaListenerContainerFactory",
+                "transactionScoredRedriveKafkaListenerContainerFactory"
         );
 
         assertThat(containerFactoryMethods).allSatisfy(methodName -> {
-            var method = Arrays.stream(AlertKafkaConfig.class.getDeclaredMethods())
+            var method = Arrays.stream(KafkaRecoveryConfiguration.class.getDeclaredMethods())
                     .filter(candidate -> candidate.getName().equals(methodName))
                     .findFirst()
                     .orElseThrow();
@@ -102,7 +107,7 @@ class AlertKafkaFailureHandlingTest {
             assertThat(qualifier.value()).isEqualTo("transactionScoredEventConsumerFactory");
         });
 
-        assertThat(Arrays.stream(AlertKafkaConfig.class.getDeclaredMethods())
+        assertThat(Arrays.stream(KafkaRecoveryConfiguration.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName))
                 .doesNotContain("mlPredictionEvidenceConsumerFactory");
     }
@@ -110,7 +115,7 @@ class AlertKafkaFailureHandlingTest {
     @Test
     void preservesOriginalMalformedBytesForDeadLetterPublication() {
         DefaultKafkaProducerFactory<Object, Object> producerFactory =
-                (DefaultKafkaProducerFactory<Object, Object>) config.deadLetterProducerFactory(new KafkaProperties());
+                (DefaultKafkaProducerFactory<Object, Object>) recoveryConfiguration.deadLetterProducerFactory(new KafkaProperties());
         Serializer<Object> serializer = producerFactory.getValueSerializer();
         byte[] malformedPayload = "{not-json".getBytes(StandardCharsets.UTF_8);
 
@@ -124,7 +129,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
-        DeadLetterPublishingRecoverer recoverer = config.deadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.deadLetterPublishingRecoverer(
                 kafkaOperations,
                 new KafkaTopicProperties(
                         "transactions.scored",
@@ -180,7 +185,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
-        DeadLetterPublishingRecoverer recoverer = config.deadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.deadLetterPublishingRecoverer(
                 kafkaOperations,
                 new KafkaTopicProperties(
                         "transactions.scored",
@@ -213,7 +218,7 @@ class AlertKafkaFailureHandlingTest {
 
     @Test
     void acknowledgesOnlyAfterConfiguredRecoveryCompletes() {
-        DeadLetterPublishingRecoverer recoverer = config.deadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.deadLetterPublishingRecoverer(
                 mock(KafkaOperations.class),
                 new KafkaTopicProperties(
                         "transactions.scored",
@@ -222,7 +227,7 @@ class AlertKafkaFailureHandlingTest {
                         "transactions.dead-letter"
                 )
         );
-        DefaultErrorHandler errorHandler = config.kafkaErrorHandler(
+        DefaultErrorHandler errorHandler = recoveryConfiguration.kafkaErrorHandler(
                 recoverer,
                 new KafkaConsumerProperties(1, 3, 1000L)
         );
@@ -231,12 +236,41 @@ class AlertKafkaFailureHandlingTest {
     }
 
     @Test
+    void fraudCaseEvidenceViolationsAreRecoveredWithoutRetry() {
+        DeadLetterPublishingRecoverer sourceRecoverer = mock(DeadLetterPublishingRecoverer.class);
+        DeadLetterPublishingRecoverer redriveRecoverer = mock(DeadLetterPublishingRecoverer.class);
+        DefaultErrorHandler sourceHandler = recoveryConfiguration.kafkaErrorHandler(
+                sourceRecoverer,
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+        DefaultErrorHandler redriveHandler = recoveryConfiguration.transactionScoredRedriveErrorHandler(
+                redriveRecoverer,
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                "transactions.scored",
+                0,
+                1L,
+                "transaction-1",
+                mock(TransactionScoredEvent.class)
+        );
+        FraudCaseEvidenceValidationException violation = new FraudCaseEvidenceValidationException(
+                FraudCaseEvidenceValidationException.Reason.CURRENT_EVENT_NOT_IN_EVIDENCE_IDS
+        );
+
+        assertThat(sourceHandler.handleOne(violation, source, null, null)).isTrue();
+        assertThat(redriveHandler.handleOne(violation, source, null, null)).isTrue();
+        verify(sourceRecoverer).accept(source, null, violation);
+        verify(redriveRecoverer).accept(source, null, violation);
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void transientEvidenceFailureUsesDedicatedRecoverableDeadLetterTopic() {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
-        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.mlPredictionEvidenceDeadLetterPublishingRecoverer(
                 kafkaOperations,
                 evidenceRecoveryProperties()
         );
@@ -270,7 +304,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
-        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.mlPredictionEvidenceDeadLetterPublishingRecoverer(
                 kafkaOperations,
                 evidenceRecoveryProperties()
         );
@@ -301,7 +335,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
-        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.mlPredictionEvidenceDeadLetterPublishingRecoverer(
                 kafkaOperations,
                 evidenceRecoveryProperties()
         );
@@ -324,7 +358,7 @@ class AlertKafkaFailureHandlingTest {
 
     @Test
     void evidenceConsumerUsesBoundedConcurrencyAndRecordAcknowledgement() {
-        var factory = config.mlPredictionEvidenceKafkaListenerContainerFactory(
+        var factory = recoveryConfiguration.mlPredictionEvidenceKafkaListenerContainerFactory(
                 mock(ConsumerFactory.class),
                 mock(DefaultErrorHandler.class),
                 new KafkaConsumerProperties(1, 3, 1000L)
@@ -338,7 +372,7 @@ class AlertKafkaFailureHandlingTest {
 
     @Test
     void engineIntelligenceConsumerHasIndependentRecordAcknowledgementFactory() {
-        var factory = config.engineIntelligenceKafkaListenerContainerFactory(
+        var factory = recoveryConfiguration.engineIntelligenceKafkaListenerContainerFactory(
                 mock(ConsumerFactory.class),
                 mock(DefaultErrorHandler.class),
                 new KafkaConsumerProperties(1, 3, 1000L)
@@ -350,12 +384,94 @@ class AlertKafkaFailureHandlingTest {
         assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void exhaustedOrInvalidTransactionRedriveIsDurablyQuarantinedBeforeAcknowledgement() {
+        KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
+        when(kafkaOperations.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
+        TransactionScoredRecoveryProperties properties = transactionScoredRecoveryProperties();
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.transactionScoredRedriveQuarantineRecoverer(
+                kafkaOperations,
+                properties
+        );
+        DefaultErrorHandler errorHandler = recoveryConfiguration.transactionScoredRedriveErrorHandler(
+                recoverer,
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                properties.redriveTopic(),
+                2,
+                17L,
+                "transaction-1",
+                new byte[]{1, 2, 3}
+        );
+
+        recoverer.accept(source, null, new TransactionScoredRecoveryValidationException());
+
+        ArgumentCaptor<ProducerRecord<Object, Object>> publishedRecord = ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaOperations).send(publishedRecord.capture());
+        assertThat(publishedRecord.getValue().topic()).isEqualTo(properties.quarantineTopic());
+        assertThat(publishedRecord.getValue().partition()).isEqualTo(2);
+        assertThat(errorHandler.isAckAfterHandle()).isTrue();
+    }
+
+    @Test
+    void transactionRedriveUsesIndependentRecordAcknowledgementFactory() {
+        var factory = recoveryConfiguration.transactionScoredRedriveKafkaListenerContainerFactory(
+                mock(ConsumerFactory.class),
+                mock(DefaultErrorHandler.class),
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+
+        var container = (ConcurrentMessageListenerContainer<String, TransactionScoredEvent>)
+                factory.createContainer("transactions.redrive");
+        assertThat(container.getConcurrency()).isEqualTo(1);
+        assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void failedTransactionRedriveQuarantinePublicationIsPropagatedBeforeAcknowledgement() {
+        KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
+        when(kafkaOperations.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
+        TransactionScoredRecoveryProperties properties = transactionScoredRecoveryProperties();
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.transactionScoredRedriveQuarantineRecoverer(
+                kafkaOperations,
+                properties
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                properties.redriveTopic(),
+                0,
+                42L,
+                "transaction-1",
+                new byte[]{1, 2, 3}
+        );
+
+        assertThatThrownBy(() -> recoverer.accept(
+                source,
+                null,
+                new TransactionScoredRecoveryValidationException()
+        )).isInstanceOf(RuntimeException.class);
+    }
+
     private MlPredictionEvidenceRecoveryProperties evidenceRecoveryProperties() {
         return new MlPredictionEvidenceRecoveryProperties(
                 "ml.prediction-evidence.dead-letter",
                 "ml.prediction-evidence.redrive",
                 "ml.prediction-evidence.quarantine",
                 "alert-service-ml-prediction-evidence-redrive",
+                false
+        );
+    }
+
+    private TransactionScoredRecoveryProperties transactionScoredRecoveryProperties() {
+        return new TransactionScoredRecoveryProperties(
+                "transactions.redrive",
+                "transactions.quarantine",
+                "alert-service-transaction-scored-redrive",
+                "alert-service",
                 false
         );
     }

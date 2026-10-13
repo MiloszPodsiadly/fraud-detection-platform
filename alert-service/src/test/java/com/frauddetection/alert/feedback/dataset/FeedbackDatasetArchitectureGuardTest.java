@@ -77,6 +77,22 @@ class FeedbackDatasetArchitectureGuardTest {
     }
 
     @Test
+    void builderDelegatesExactEvidenceResolutionToOneBatchComponent() throws IOException {
+        Path productionRoot = datasetProductionRoot();
+        String builder = read(productionRoot.resolve("FeedbackDatasetBuilder.java"));
+        String resolver = read(productionRoot.resolve(
+                "evidence/FeedbackDatasetMlPredictionEvidenceResolver.java"
+        ));
+
+        assertThat(builder)
+                .contains("evidenceResolver.resolve(")
+                .doesNotContain("findAllById(", "classifyEvidence(", "presentLineageParts(");
+        assertThat(resolver)
+                .contains("repository.findAllById(sourceEventIds)")
+                .doesNotContain("repository.findById(");
+    }
+
+    @Test
     void fraudFeedbackRecordHasDatasetQueryIndex() {
         CompoundIndexes indexes = FraudFeedbackRecord.class.getAnnotation(CompoundIndexes.class);
 
@@ -124,9 +140,7 @@ class FeedbackDatasetArchitectureGuardTest {
     }
 
     private String datasetProductionText() throws IOException {
-        Path root = Path.of("").toAbsolutePath().endsWith("alert-service")
-                ? DATASET_MAIN
-                : ROOT.resolve("alert-service").resolve(DATASET_MAIN);
+        Path root = datasetProductionRoot();
         StringBuilder source = new StringBuilder();
         try (var paths = Files.walk(root)) {
             paths.filter(Files::isRegularFile)
@@ -135,6 +149,12 @@ class FeedbackDatasetArchitectureGuardTest {
                     .forEach(path -> source.append(read(path)).append('\n'));
         }
         return source.toString();
+    }
+
+    private Path datasetProductionRoot() {
+        return Path.of("").toAbsolutePath().endsWith("alert-service")
+                ? DATASET_MAIN
+                : ROOT.resolve("alert-service").resolve(DATASET_MAIN);
     }
 
     private String read(Path path) {

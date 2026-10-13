@@ -17,13 +17,13 @@ import com.frauddetection.alert.outbox.OutboxRecoveryController;
 import com.frauddetection.alert.outbox.OutboxRecoveryService;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
-import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandInspectionResponse;
 import com.frauddetection.alert.regulated.RegulatedMutationInspectionRateLimiter;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryBacklogResponse;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryController;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
-import com.frauddetection.alert.system.SystemTrustLevelController;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelController;
+import com.frauddetection.alert.system.trustlevel.application.SystemTrustLevelService;
 import com.frauddetection.alert.trust.TrustIncidentController;
 import com.frauddetection.alert.trust.TrustIncidentPreviewRateLimiter;
 import com.frauddetection.alert.trust.TrustIncidentService;
@@ -32,7 +32,6 @@ import com.frauddetection.alert.trust.TrustIncidentSummary;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.web.server.ResponseStatusException;
@@ -182,7 +181,6 @@ class SensitiveReadEndpointFailClosedControllerTest {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        AlertRepository alertRepository = mock(AlertRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         RegulatedMutationRecoveryService recoveryService = mock(RegulatedMutationRecoveryService.class);
         TrustIncidentService trustIncidentService = mock(TrustIncidentService.class);
@@ -221,7 +219,7 @@ class SensitiveReadEndpointFailClosedControllerTest {
         when(outboxRepository.countByProjectionMismatchTrue()).thenReturn(0L);
         when(outboxRepository.findTopByStatusInOrderByCreatedAtAsc(any())).thenReturn(Optional.empty());
         when(trustIncidentService.summary()).thenReturn(TrustIncidentSummary.empty());
-        return new SystemTrustLevelController(
+        SystemTrustLevelService service = new SystemTrustLevelService(
                 true,
                 true,
                 true,
@@ -235,20 +233,11 @@ class SensitiveReadEndpointFailClosedControllerTest {
                 integrityService,
                 sink,
                 degradationService,
-                alertRepository,
-                provider(outboxRepository),
+                outboxRepository,
                 recoveryService,
-                provider(trustIncidentService),
-                provider(null),
-                provider(sensitiveReadAuditService)
+                trustIncidentService
         );
-    }
-
-    @SuppressWarnings("unchecked")
-    private <T> ObjectProvider<T> provider(T value) {
-        ObjectProvider<T> provider = mock(ObjectProvider.class);
-        when(provider.getIfAvailable()).thenReturn(value);
-        return provider;
+        return new SystemTrustLevelController(service, sensitiveReadAuditService);
     }
 
     private interface ThrowingCall {

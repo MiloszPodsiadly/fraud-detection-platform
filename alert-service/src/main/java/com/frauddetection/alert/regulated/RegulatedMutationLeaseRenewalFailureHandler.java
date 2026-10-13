@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.regulated.status.RegulatedMutationPublicStatusMapper;
+
 import com.mongodb.client.result.UpdateResult;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;

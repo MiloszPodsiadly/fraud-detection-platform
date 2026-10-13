@@ -194,6 +194,12 @@ app:
       fraud-alerts: fraud.alerts
       fraud-decisions: fraud.decisions
       transactions-dead-letter: transactions.dead-letter
+    transaction-scored-recovery:
+      redrive-topic: ${TRANSACTION_SCORED_REDRIVE_TOPIC:transactions.redrive}
+      quarantine-topic: ${TRANSACTION_SCORED_QUARANTINE_TOPIC:transactions.quarantine}
+      redrive-group-id: ${TRANSACTION_SCORED_REDRIVE_GROUP_ID:${spring.application.name}-transaction-scored-redrive}
+      source-consumer-group: ${TRANSACTION_SCORED_CONSUMER_GROUP_ID:${spring.kafka.consumer.group-id}}
+      redrive-enabled: ${TRANSACTION_SCORED_REDRIVE_ENABLED:false}
     evidence-recovery:
       dead-letter-topic: ${ML_PREDICTION_EVIDENCE_DLT_TOPIC:ml.prediction-evidence.dead-letter}
       redrive-topic: ${ML_PREDICTION_EVIDENCE_REDRIVE_TOPIC:ml.prediction-evidence.redrive}

@@ -15,7 +15,8 @@ class FraudCaseCurrentApiSurfaceTest {
         Path source = sourceRoot();
         String controller = Files.readString(source.resolve("controller/FraudCaseController.java"));
         String summaryController = Files.readString(source.resolve("controller/FraudCaseWorkQueueSummaryController.java"));
-        String management = Files.readString(source.resolve("service/FraudCaseManagementService.java"));
+        String management = Files.readString(source.resolve("fraudcase/FraudCaseManagementService.java"));
+        String updateCoordinator = Files.readString(source.resolve("fraudcase/FraudCaseUpdateCoordinator.java"));
 
         assertThat(controller)
                 .contains("@GetMapping(VERSIONED_BASE_PATH + \"/work-queue\")")
@@ -25,7 +26,8 @@ class FraudCaseCurrentApiSurfaceTest {
                 .contains("@RequestMapping(\"/api/v1/fraud-cases/work-queue\")")
                 .contains("@GetMapping(\"/summary\")");
         assertThat(management)
-                .contains("public UpdateFraudCaseResponse updateCase(")
+                .contains("public UpdateFraudCaseResponse updateCase(");
+        assertThat(updateCoordinator)
                 .contains("regulatedMutationCoordinator.commit(command)");
     }
 

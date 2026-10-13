@@ -1,5 +1,7 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.alert.fraudcase.FraudCaseQueryService;
+
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;

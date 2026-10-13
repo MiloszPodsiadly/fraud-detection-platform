@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.regulated.status.RegulatedMutationPublicStatusMapper;
+
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;

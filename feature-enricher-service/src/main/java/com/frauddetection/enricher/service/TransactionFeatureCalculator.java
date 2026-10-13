@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -28,6 +29,8 @@ public class TransactionFeatureCalculator {
         BigDecimal currentAmountPln = currencyAmountConverter.toPln(event.transactionAmount().amount(), event.transactionAmount().currency());
         BigDecimal recentAmountSumPln = snapshot.recentAmountSumPln().add(currentAmountPln);
         int merchantFrequency7d = snapshot.merchantFrequency7d() + 1;
+        java.util.List<String> rapidTransferTransactionIds = rapidTransferTransactionIds(snapshot, event);
+        validateRapidTransferEvidence(recentTransactionCount, rapidTransferTransactionIds);
 
         boolean knownFromContext = event.customerContext().knownDeviceIds() != null
                 && event.customerContext().knownDeviceIds().contains(event.deviceInfo().deviceId());
@@ -45,7 +48,7 @@ public class TransactionFeatureCalculator {
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, canonicalObservationWindow);
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln);
         featureSnapshot.put(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, currentAmountPln);
-        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, rapidTransferTransactionIds(snapshot, event));
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, rapidTransferTransactionIds);
         featureSnapshot.put(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, velocityPerMinute);
         featureSnapshot.put(FraudFeatureContract.MERCHANT_FREQUENCY_7D, merchantFrequency7d);
         featureSnapshot.put(FraudFeatureContract.DEVICE_NOVELTY, deviceNovelty);
@@ -63,5 +66,14 @@ public class TransactionFeatureCalculator {
         snapshot.recentTransactions().forEach(transaction -> transactionIds.add(transaction.transactionId()));
         transactionIds.add(event.transactionId());
         return java.util.List.copyOf(transactionIds);
+    }
+
+    private void validateRapidTransferEvidence(int recentTransactionCount, java.util.List<String> transactionIds) {
+        HashSet<String> distinctIds = new HashSet<>();
+        boolean canonicalIds = transactionIds.stream()
+                .allMatch(id -> id != null && !id.isBlank() && id.equals(id.trim()) && distinctIds.add(id));
+        if (!canonicalIds || transactionIds.size() != recentTransactionCount) {
+            throw new IllegalStateException("RAPID_TRANSFER_EVIDENCE_IDENTITY_INVALID");
+        }
     }
 }

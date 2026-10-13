@@ -51,7 +51,7 @@ class FeatureEnricherRulesCompositionTest {
 
     @Test
     void officialCountFiveProducerOutputPreservesRulesV2MediumScoreWithoutFeatureFlags() {
-        TransactionEnrichedEvent enriched = officialEvent(4, BigDecimal.ZERO, new BigDecimal("100.00"));
+        TransactionEnrichedEvent enriched = officialEvent(4, new BigDecimal("400.00"), new BigDecimal("100.00"));
 
         FraudScoreResult result = score(enriched);
 
@@ -105,7 +105,7 @@ class FeatureEnricherRulesCompositionTest {
 
     @Test
     void officialFeatureEnricherKafkaReplayFeedsRulesAndVelocityWithTheSameNormalizedSnapshot() {
-        TransactionEnrichedEvent produced = officialEvent(4, BigDecimal.ZERO, new BigDecimal("100.00"));
+        TransactionEnrichedEvent produced = officialEvent(4, new BigDecimal("400.00"), new BigDecimal("100.00"));
         TransactionEnrichedEvent replayed = kafkaReplay(produced);
         Map<String, Object> replayedSnapshot = replayed.featureSnapshot();
 
@@ -125,12 +125,12 @@ class FeatureEnricherRulesCompositionTest {
                 .isEqualTo(5.0d)
                 .isExactlyInstanceOf(Double.class);
         assertThat(replayedSnapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
-                .isEqualTo(new BigDecimal("100.00"))
+                .isEqualTo(new BigDecimal("500.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
         assertThat(rulesResult.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
                 .containsEntry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d)
-                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"))
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("500.00"))
                 .containsEntry(FraudFeatureContract.CURRENCY, "PLN");
         assertThat(rulesResult.fraudScore()).isCloseTo(0.47d, within(0.000001d));
         assertThat(rulesResult.riskLevel()).isEqualTo(RiskLevel.MEDIUM);
@@ -165,15 +165,30 @@ class FeatureEnricherRulesCompositionTest {
         var raw = TransactionFixtures.rawTransaction()
                 .withAmount(currentAmountPln, "PLN")
                 .build();
+        List<RecentTransaction> history = officialHistory(previousCount, previousAmountPln);
         var snapshot = new FeatureStoreSnapshot(
                 previousCount,
                 previousAmountPln,
-                List.of(),
+                history,
                 0,
-                Instant.parse("2026-04-20T10:12:00Z"),
+                history.getLast().transactionTimestamp(),
                 true
         );
         return mapper.toEvent(raw, calculator.calculate(raw, snapshot));
+    }
+
+    private List<RecentTransaction> officialHistory(int count, BigDecimal totalAmountPln) {
+        BigDecimal amountPln = totalAmountPln.divide(BigDecimal.valueOf(count));
+        Instant firstTimestamp = Instant.parse("2026-04-20T10:14:50Z");
+        return java.util.stream.IntStream.range(0, count)
+                .mapToObj(index -> new RecentTransaction(
+                        "official-history-" + (index + 1),
+                        firstTimestamp.plusSeconds(index * 5L),
+                        amountPln,
+                        "PLN",
+                        amountPln
+                ))
+                .toList();
     }
 
     private TransactionEnrichedEvent officialRapidTransferEventWithHistory() {

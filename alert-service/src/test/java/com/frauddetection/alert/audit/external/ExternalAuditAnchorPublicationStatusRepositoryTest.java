@@ -99,6 +99,41 @@ class ExternalAuditAnchorPublicationStatusRepositoryTest {
     }
 
     @Test
+    void shouldKeepPhysicalPublicationAndManifestFailureAsSeparateFacts() {
+        AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L);
+
+        repository.recordSuccess(
+                anchor,
+                Instant.parse("2026-04-27T10:01:00Z"),
+                "object-store",
+                new ExternalAnchorReference(
+                        "local-anchor-1",
+                        "audit-anchors/partition/1.json",
+                        "hash-1",
+                        "hash-1",
+                        Instant.parse("2026-04-27T10:01:00Z")
+                ),
+                ExternalImmutabilityLevel.ENFORCED,
+                ExternalAuditAnchor.MANIFEST_STATUS_FAILED,
+                "RECORDED",
+                SignedAuditAnchorPayload.unsigned()
+        );
+
+        ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).upsert(
+                org.mockito.ArgumentMatchers.any(Query.class),
+                update.capture(),
+                eq(ExternalAuditAnchorPublicationStatusDocument.class)
+        );
+        Document set = update.getValue().getUpdateObject().get("$set", Document.class);
+        assertThat(set.get("external_published")).isEqualTo(true);
+        assertThat(set.get("external_object_status")).isEqualTo(ExternalAuditAnchor.STATUS_PUBLISHED);
+        assertThat(set.get("head_manifest_status")).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
+        assertThat(set.get("last_external_publish_failure_reason"))
+                .isEqualTo(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
+    }
+
+    @Test
     void shouldPersistConsistentFailureStatus() {
         AuditAnchorDocument anchor = localAnchor("local-anchor-1", 1L);
 

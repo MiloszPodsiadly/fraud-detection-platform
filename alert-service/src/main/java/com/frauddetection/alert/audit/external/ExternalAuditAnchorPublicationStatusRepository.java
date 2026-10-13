@@ -79,8 +79,15 @@ class ExternalAuditAnchorPublicationStatusRepository {
                 .set("signed_at", signature == null ? null : signature.signedAt())
                 .set("signing_authority", signature == null ? null : safe(signature.signingAuthority()))
                 .set("signed_payload_hash", signature == null ? null : safe(signature.signedPayloadHash(), 128))
-                .inc("external_publish_attempts", 1)
-                .unset("last_external_publish_failure_reason");
+                .inc("external_publish_attempts", 1);
+        if (ExternalAuditAnchor.MANIFEST_STATUS_FAILED.equals(manifestStatus)) {
+            status.set(
+                    "last_external_publish_failure_reason",
+                    ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED
+            );
+        } else {
+            status.unset("last_external_publish_failure_reason");
+        }
         mongoTemplate.upsert(query, status, ExternalAuditAnchorPublicationStatusDocument.class);
     }
 

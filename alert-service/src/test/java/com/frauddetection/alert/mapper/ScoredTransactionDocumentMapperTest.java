@@ -4,6 +4,7 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
@@ -33,6 +34,42 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ScoredTransactionDocumentMapperTest {
 
     private final ScoredTransactionDocumentMapper mapper = new ScoredTransactionDocumentMapper();
+
+    @Test
+    void shouldPersistCanonicalTransactionAmountFromTheSameScoringOccurrence() {
+        var event = new TransactionScoredEvent(
+                "event-money",
+                "txn-money",
+                "correlation-1",
+                "customer-1",
+                "account-1",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                Instant.parse("2026-01-01T00:00:00Z"),
+                new Money(new BigDecimal("25.00"), "EUR"),
+                null,
+                null,
+                null,
+                null,
+                0.91,
+                RiskLevel.CRITICAL,
+                "strategy",
+                "model",
+                "v1",
+                Instant.parse("2026-01-01T00:00:01Z"),
+                List.of(),
+                Map.of(),
+                Map.of(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("107.50")),
+                true,
+                List.of(),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
+        );
+
+        assertThat(mapper.toDocument(event).getCurrentTransactionAmountPln())
+                .isEqualByComparingTo("107.50");
+    }
 
     @Test
     void shouldPopulateNormalizedIndexedSearchFields() {

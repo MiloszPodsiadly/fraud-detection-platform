@@ -12,9 +12,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
-import java.util.Arrays;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Component
 public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
@@ -72,19 +70,11 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
         if (!"durable-hash-chain".equals(properties.getAudit().getSink())) {
             throw new IllegalStateException("Prod-like trust authority requires durable-hash-chain audit sink.");
         }
-        if (properties.getKeys().isEmpty()) {
-            requirePersistentPath(properties.getPrivateKeyPath(), "private key");
-            requirePersistentPath(properties.getPublicKeyPath(), "public key");
-            enforcePrivateKeyFile(properties.getPrivateKeyPath());
-            return;
-        }
         properties.getKeys().forEach(key -> {
             if (StringUtils.hasText(key.getPrivateKey())) {
                 throw new IllegalStateException("Prod-like trust authority forbids inline private key material.");
             }
-            if (!"REVOKED".equalsIgnoreCase(key.getStatus())) {
-                requirePersistentPath(key.getPublicKeyPath(), "public key");
-            }
+            requirePersistentPath(key.getPublicKeyPath(), "public key");
             if ("ACTIVE".equalsIgnoreCase(key.getStatus())) {
                 requirePersistentPath(key.getPrivateKeyPath(), "private key");
                 enforcePrivateKeyFile(key.getPrivateKeyPath());
@@ -93,18 +83,14 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
     }
 
     private boolean prodLikeProfile() {
-        return Arrays.stream(environment.getActiveProfiles())
-                .map(String::toLowerCase)
-                .anyMatch(profile -> profile.equals("prod")
-                        || profile.equals("production")
-                        || profile.equals("staging"));
+        return TrustAuthorityProfilePolicy.productionLike(environment);
     }
 
     private boolean localFixtureProfile() {
-        Set<String> profiles = Arrays.stream(environment.getActiveProfiles())
-                .map(String::trim)
-                .map(String::toLowerCase)
-                .collect(Collectors.toSet());
+        if (TrustAuthorityProfilePolicy.productionLike(environment)) {
+            return false;
+        }
+        Set<String> profiles = TrustAuthorityProfilePolicy.normalizedProfiles(environment);
         return profiles.stream().anyMatch(LOCAL_FIXTURE_PROFILES::contains)
                 || (profiles.contains("test") && explicitFixtureTestContext());
     }

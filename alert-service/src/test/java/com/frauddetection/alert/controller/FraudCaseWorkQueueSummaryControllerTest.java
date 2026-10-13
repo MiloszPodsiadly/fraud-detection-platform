@@ -2,7 +2,7 @@ package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
-import com.frauddetection.alert.service.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseQueryService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 

@@ -1,5 +1,12 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.alert.fraudcase.FraudCaseIngestionService;
+import com.frauddetection.alert.fraudcase.FraudCaseEvidenceValidationException;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseTransactionAssembler;
+import com.frauddetection.alert.fraudcase.FraudCaseUpdateCoordinator;
+
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
@@ -29,6 +36,8 @@ import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -42,11 +51,154 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
 class FraudCaseManagementServiceTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PLN", "EUR", "USD", "GBP", "JPY"})
+    void shouldUseOccurrenceBoundCanonicalAmountRegardlessOfRawCurrency(String currency) {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        var event = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withCustomerId("currency-customer")
+                .withAmount(new BigDecimal("25.00"), currency)
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN,
+                        new BigDecimal("107.50")
+                ))
+                .build();
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of());
+
+        service.handleScoredTransaction(event);
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getTransactions())
+                .singleElement()
+                .extracting("amountPln")
+                .isEqualTo(new BigDecimal("107.50"));
+    }
+
+    @Test
+    void shouldExposeUnavailableAmountWhenCurrentCanonicalEvidenceIsMissingOrMalformed() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of());
+
+        java.util.LinkedHashMap<String, Object> missing = new java.util.LinkedHashMap<>(rapidTransferSnapshotWith(
+                FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN,
+                new BigDecimal("10000.00")
+        ));
+        missing.remove(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN);
+        service.handleScoredTransaction(TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withCustomerId("missing-customer")
+                .withFeatureSnapshot(Map.copyOf(missing))
+                .build());
+        service.handleScoredTransaction(TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withCustomerId("malformed-customer")
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN,
+                        "10000.00"
+                ))
+                .build());
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).allSatisfy(saved -> assertThat(saved.getTransactions())
+                .singleElement()
+                .extracting("amountPln")
+                .isNull());
+    }
+
+    @Test
+    void shouldNotInventAmountForHistoricalTransactionWithoutCanonicalEvidence() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        ScoredTransactionDocument historical = scoredTransaction(
+                "rapid-txn-1",
+                "rapid-customer-rapid-txn-2",
+                new BigDecimal("2500.00")
+        );
+        historical.setTransactionAmount(new Money(new BigDecimal("2500.00"), "EUR"));
+        historical.setCurrentTransactionAmountPln(null);
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of(historical));
+
+        service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        ));
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getTotalAmountPln()).isEqualByComparingTo("20000.00");
+        assertThat(captor.getValue().getTransactions())
+                .extracting("amountPln")
+                .containsExactly(null, new BigDecimal("10000.00"));
+    }
+
+    @Test
+    void shouldUsePersistedWinningOccurrenceWhenAnOlderAdmittedWorkerResumes() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        ScoredTransactionDocument winner = scoredTransaction(
+                "rapid-txn-2",
+                "rapid-customer-rapid-txn-2",
+                new BigDecimal("215.00")
+        );
+        winner.setTransactionAmount(new Money(new BigDecimal("50.00"), "EUR"));
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of(winner));
+
+        service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        ));
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getTransactions())
+                .singleElement()
+                .extracting("amountPln")
+                .isEqualTo(new BigDecimal("215.00"));
+    }
 
     @Test
     void shouldCreateRapidTransferCaseWithGroupedTransactionDetails() {
@@ -99,6 +251,105 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
+    void shouldRejectCrossCustomerTransactionProjectionWithoutPersistingForeignEvidence() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        ScoredTransactionDocument foreignTransaction = scoredTransaction(
+                "rapid-txn-1",
+                "different-customer",
+                new BigDecimal("15000.00")
+        );
+        var currentEvent = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withCustomerId("case-customer")
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                        List.of("rapid-txn-1", "rapid-txn-2")
+                ))
+                .build();
+        when(fraudCaseRepository.findByCaseKey("case-customer:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1"))
+                .thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(List.of("rapid-txn-1", "rapid-txn-2")))
+                .thenReturn(List.of(foreignTransaction));
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(currentEvent))
+                .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                .hasMessage("CROSS_CUSTOMER_TRANSACTION");
+        verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldRejectRapidTransferEvidenceThatDoesNotContainTheCurrentTransactionBeforeCaseAccess() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument existing = new FraudCaseDocument();
+        existing.setCaseKey("case-customer:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1");
+        existing.setCustomerId("case-customer");
+        existing.setTransactionIds(List.of("rapid-txn-1", "rapid-txn-2"));
+        existing.setAssignedInvestigatorId("investigator-7");
+        existing.setAnalystId("analyst-9");
+        existing.setDecisionReason("Existing analyst decision");
+        existing.setDecisionTags(List.of("manual-review"));
+        when(fraudCaseRepository.findByCaseKey(existing.getCaseKey())).thenReturn(Optional.of(existing));
+        var event = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-3")
+                .withCustomerId("case-customer")
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                        List.of("rapid-txn-1", "rapid-txn-2")
+                ))
+                .build();
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                .hasMessage("CURRENT_EVENT_NOT_IN_EVIDENCE_IDS");
+
+        verifyNoInteractions(fraudCaseRepository, scoredTransactionRepository);
+        assertThat(existing.getAssignedInvestigatorId()).isEqualTo("investigator-7");
+        assertThat(existing.getAnalystId()).isEqualTo("analyst-9");
+        assertThat(existing.getDecisionReason()).isEqualTo("Existing analyst decision");
+        assertThat(existing.getDecisionTags()).containsExactly("manual-review");
+    }
+
+    @Test
+    void shouldRejectExistingCaseOwnedByDifferentCustomer() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument existing = new FraudCaseDocument();
+        existing.setCaseKey("rapid-customer-rapid-txn-2:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1");
+        existing.setCustomerId("different-customer");
+        when(fraudCaseRepository.findByCaseKey(existing.getCaseKey())).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        )))
+                .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                .hasMessage("CASE_CUSTOMER_MISMATCH");
+        verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
     void shouldCreateRapidTransferCaseFromCanonicalFactsRegardlessOfPrimaryEngineReasonCodes() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
@@ -128,7 +379,7 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
-    void shouldNotCreateRapidTransferCaseFromReasonCodeWithoutCompleteCanonicalEvidence() {
+    void shouldRejectRapidTransferClaimWithoutCompleteCanonicalEvidence() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         FraudCaseManagementService service = service(
                 fraudCaseRepository,
@@ -147,14 +398,16 @@ class FraudCaseManagementServiceTest {
                 ))
                 .build();
 
-        service.handleScoredTransaction(event);
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                .hasMessage("RAPID_TRANSFER_MEMBERSHIP_MISSING");
 
         verify(fraudCaseRepository, never()).findByCaseKey(any());
         verify(fraudCaseRepository, never()).save(any());
     }
 
     @Test
-    void shouldNotCreateRapidTransferCaseFromMalformedCurrentCanonicalFacts() {
+    void shouldRejectMalformedQualifyingCanonicalFacts() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         FraudCaseManagementService service = service(
                 fraudCaseRepository,
@@ -183,14 +436,148 @@ class FraudCaseManagementServiceTest {
                 rapidTransferSnapshotWith(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1")),
                 rapidTransferSnapshotWith(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1", " "))
         );
-        malformedSnapshots.forEach(snapshot -> service.handleScoredTransaction(
+        malformedSnapshots.forEach(snapshot -> assertThatThrownBy(() -> service.handleScoredTransaction(
                 TransactionFixtures.scoredTransaction()
+                        .withTransactionId("rapid-txn-2")
                         .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
                         .withFeatureSnapshot(snapshot)
                         .build()
-        ));
+        )).isInstanceOf(FraudCaseEvidenceValidationException.class));
 
         verify(fraudCaseRepository, never()).findByCaseKey(any());
+        verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldRejectRecognizableContradictoryBurstEvidenceWithoutReasonCodeBeforeCaseAccess() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument existing = new FraudCaseDocument();
+        existing.setAssignedInvestigatorId("investigator-7");
+        existing.setAnalystId("analyst-9");
+        existing.setDecisionReason("Existing analyst decision");
+        existing.setDecisionTags(List.of("manual-review"));
+        var contradictoryCount = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withReasonCodes(List.of())
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT,
+                        1
+                ))
+                .build();
+        var malformedCountAndMembership = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withReasonCodes(List.of())
+                .withFeatureSnapshot(Map.of(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                        List.of("rapid-txn-1", "rapid-txn-1"),
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, "2",
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"
+                ))
+                .build();
+
+        List.of(contradictoryCount, malformedCountAndMembership).forEach(event ->
+                assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                        .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                        .hasMessage("RAPID_TRANSFER_MEMBERSHIP_INVALID")
+        );
+
+        verifyNoInteractions(fraudCaseRepository, scoredTransactionRepository);
+        assertThat(existing.getAssignedInvestigatorId()).isEqualTo("investigator-7");
+        assertThat(existing.getAnalystId()).isEqualTo("analyst-9");
+        assertThat(existing.getDecisionReason()).isEqualTo("Existing analyst decision");
+        assertThat(existing.getDecisionTags()).containsExactly("manual-review");
+    }
+
+    @Test
+    void shouldIgnoreValidSubthresholdRapidTransferFacts() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        var event = TransactionFixtures.scoredTransaction()
+                .withTransactionId("subthreshold-txn")
+                .withFeatureSnapshot(Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("subthreshold-txn")
+                ))
+                .build();
+
+        service.handleScoredTransaction(event);
+
+        verifyNoInteractions(fraudCaseRepository, scoredTransactionRepository);
+    }
+
+    @Test
+    void shouldRejectPersistedAggregationWithoutCompleteOccurrenceOwnership() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument incompatible = new FraudCaseDocument();
+        incompatible.setCaseId("case-unowned-aggregation");
+        incompatible.setCaseKey("rapid-customer-rapid-txn-2:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1");
+        incompatible.setCustomerId("rapid-customer-rapid-txn-2");
+        incompatible.setTransactionIds(List.of("rapid-txn-1", "rapid-txn-2"));
+        incompatible.setTransactions(List.of());
+        incompatible.setTotalAmountPln(new BigDecimal("20000.00"));
+        incompatible.setAggregationWindow("PT1M");
+        when(fraudCaseRepository.findByCaseKey(incompatible.getCaseKey())).thenReturn(Optional.of(incompatible));
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        )))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("FRAUD_CASE_AGGREGATION_OCCURRENCE_IDENTITY_REQUIRED");
+        verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldRejectPartialPersistedAggregationOwnership() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument incompatible = new FraudCaseDocument();
+        incompatible.setCaseKey("rapid-customer-rapid-txn-2:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1");
+        incompatible.setCustomerId("rapid-customer-rapid-txn-2");
+        incompatible.setTransactionIds(List.of("rapid-txn-1", "rapid-txn-2"));
+        incompatible.setTransactions(List.of());
+        incompatible.setAggregationSourceEventId("event-only");
+        when(fraudCaseRepository.findByCaseKey(incompatible.getCaseKey())).thenReturn(Optional.of(incompatible));
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        )))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("FRAUD_CASE_AGGREGATION_OCCURRENCE_IDENTITY_INVALID");
         verify(fraudCaseRepository, never()).save(any());
     }
 
@@ -435,12 +822,17 @@ class FraudCaseManagementServiceTest {
     ) {
         FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         return new FraudCaseManagementService(
-                fraudCaseRepository,
-                scoredTransactionRepository,
-                analystActorResolver,
-                new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
-                coordinator,
-                responseMapper,
+                new FraudCaseIngestionService(
+                        fraudCaseRepository,
+                        new FraudCaseTransactionAssembler(scoredTransactionRepository)
+                ),
+                new FraudCaseUpdateCoordinator(
+                        fraudCaseRepository,
+                        analystActorResolver,
+                        new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
+                        coordinator,
+                        responseMapper
+                ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,
                         mock(FraudCaseSearchRepository.class),
@@ -463,6 +855,7 @@ class FraudCaseManagementServiceTest {
         document.setCorrelationId("corr-" + transactionId);
         document.setTransactionTimestamp(transactionTimestamp);
         document.setTransactionAmount(new Money(amount, "PLN"));
+        document.setCurrentTransactionAmountPln(amount);
         document.setFraudScore(0.42d);
         document.setRiskLevel(RiskLevel.LOW);
         return document;

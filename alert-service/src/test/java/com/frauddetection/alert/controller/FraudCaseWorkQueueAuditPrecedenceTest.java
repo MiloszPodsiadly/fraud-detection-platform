@@ -15,7 +15,7 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
-import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

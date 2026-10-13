@@ -1,5 +1,10 @@
 package com.frauddetection.trustauthority;
 
+import com.frauddetection.trustauthority.api.TrustSignRequest;
+import com.frauddetection.trustauthority.api.TrustSignResponse;
+import com.frauddetection.trustauthority.api.TrustVerifyRequest;
+import com.frauddetection.trustauthority.api.TrustVerifyResponse;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;

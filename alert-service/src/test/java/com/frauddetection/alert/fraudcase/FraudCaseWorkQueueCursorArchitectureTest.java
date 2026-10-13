@@ -24,7 +24,7 @@ class FraudCaseWorkQueueCursorArchitectureTest {
 
     @Test
     void productionQueryServiceConstructorShouldUseConfiguredCursorSecret() throws IOException {
-        String service = Files.readString(sourceRoot().resolve("service/FraudCaseQueryService.java"))
+        String service = Files.readString(sourceRoot().resolve("fraudcase/FraudCaseQueryService.java"))
                 .replace("\r\n", "\n");
         String productionConstructor = method(
                 service,

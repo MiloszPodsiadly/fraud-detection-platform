@@ -5,6 +5,7 @@ import com.frauddetection.alert.exception.AlertNotFoundException;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
+import com.frauddetection.alert.regulated.RegulatedMutationExecutionContext;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -21,7 +22,12 @@ public class FraudCaseUpdateMutationHandler {
         this.metrics = metrics;
     }
 
-    public FraudCaseDocument update(String caseId, UpdateFraudCaseRequest request, String actorId) {
+    public FraudCaseDocument update(
+            String caseId,
+            UpdateFraudCaseRequest request,
+            String actorId,
+            RegulatedMutationExecutionContext context
+    ) {
         FraudCaseDocument document = fraudCaseRepository.findById(caseId)
                 .orElseThrow(() -> new AlertNotFoundException(caseId));
         Instant now = Instant.now();
@@ -32,7 +38,7 @@ public class FraudCaseUpdateMutationHandler {
         document.setDecidedAt(now);
         document.setUpdatedAt(now);
         FraudCaseDocument saved = fraudCaseRepository.save(document);
-        metrics.recordFraudCaseUpdated();
+        context.afterDurableCommit(metrics::recordFraudCaseUpdated);
         return saved;
     }
 }

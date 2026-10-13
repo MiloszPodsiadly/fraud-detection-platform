@@ -1,7 +1,5 @@
 package com.frauddetection.alert.feedback;
 
-import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
-import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditOutcome;
@@ -9,22 +7,15 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
-import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
-import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
-import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
-import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
-import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
-import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
+import com.frauddetection.alert.feedback.assembly.FraudFeedbackRecordAssembler;
+import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnapshotter;
+import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
+import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
+import com.frauddetection.alert.feedback.validation.ValidatedFraudFeedback;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
-import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
-import com.frauddetection.common.events.engine.FraudEngineType;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
-import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -32,51 +23,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Clock;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
-import java.util.regex.Pattern;
 
 @Service
 public class FraudFeedbackService {
 
-    private static final Logger log = LoggerFactory.getLogger(FraudFeedbackService.class);
-    private static final int MAX_REASON_CODES = 10;
-    private static final int MAX_REASON_CODE_LENGTH = 128;
-    private static final int MAX_NOTES_LENGTH = 500;
-    private static final Pattern REASON_CODE_PATTERN = Pattern.compile("[A-Z0-9_]+");
-    private static final List<String> UNSAFE_TERMS = List.of(
-            "token",
-            "secret",
-            "password",
-            "raw" + "payload",
-            "raw" + "mlrequest",
-            "raw" + "mlresponse",
-            "raw" + "featurevector",
-            "raw" + "evidence",
-            "stack" + "trace",
-            "exception" + "message",
-            "final" + "decision",
-            "payment" + "decision",
-            "payment" + "authorization",
-            "approve" + "payment",
-            "decline" + "payment",
-            "block" + "transaction",
-            "authorize" + "payment"
-    );
-
     private final FraudFeedbackRepository repository;
     private final FraudFeedbackMapper mapper;
     private final TransactionMonitoringUseCase transactionMonitoringUseCase;
-    private final EngineIntelligenceReadService engineIntelligenceReadService;
-    private final EngineIntelligenceResponseMapper engineIntelligenceResponseMapper;
-    private final MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository;
     private final CurrentAnalystUser currentAnalystUser;
     private final WriteActionAuditOutboxService auditOutboxService;
     private final RegulatedMutationTransactionRunner transactionRunner;
+    private final FraudFeedbackRequestValidator requestValidator;
+    private final FraudFeedbackRecordAssembler recordAssembler;
+    private final EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter;
+    private final MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter;
     private final Clock clock;
 
     @Autowired
@@ -84,23 +44,25 @@ public class FraudFeedbackService {
             FraudFeedbackRepository repository,
             FraudFeedbackMapper mapper,
             TransactionMonitoringUseCase transactionMonitoringUseCase,
-            EngineIntelligenceReadService engineIntelligenceReadService,
-            EngineIntelligenceResponseMapper engineIntelligenceResponseMapper,
-            MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository,
             CurrentAnalystUser currentAnalystUser,
             WriteActionAuditOutboxService auditOutboxService,
-            RegulatedMutationTransactionRunner transactionRunner
+            RegulatedMutationTransactionRunner transactionRunner,
+            FraudFeedbackRequestValidator requestValidator,
+            FraudFeedbackRecordAssembler recordAssembler,
+            EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter,
+            MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter
     ) {
         this(
                 repository,
                 mapper,
                 transactionMonitoringUseCase,
-                engineIntelligenceReadService,
-                engineIntelligenceResponseMapper,
-                mlPredictionEvidenceProjectionRepository,
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,
+                requestValidator,
+                recordAssembler,
+                engineIntelligenceSnapshotter,
+                mlPredictionEvidenceSnapshotter,
                 Clock.systemUTC()
         );
     }
@@ -109,31 +71,30 @@ public class FraudFeedbackService {
             FraudFeedbackRepository repository,
             FraudFeedbackMapper mapper,
             TransactionMonitoringUseCase transactionMonitoringUseCase,
-            EngineIntelligenceReadService engineIntelligenceReadService,
-            EngineIntelligenceResponseMapper engineIntelligenceResponseMapper,
-            MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository,
             CurrentAnalystUser currentAnalystUser,
             WriteActionAuditOutboxService auditOutboxService,
             RegulatedMutationTransactionRunner transactionRunner,
+            FraudFeedbackRequestValidator requestValidator,
+            FraudFeedbackRecordAssembler recordAssembler,
+            EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter,
+            MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter,
             Clock clock
     ) {
         this.repository = repository;
         this.mapper = mapper;
         this.transactionMonitoringUseCase = transactionMonitoringUseCase;
-        this.engineIntelligenceReadService = engineIntelligenceReadService;
-        this.engineIntelligenceResponseMapper = engineIntelligenceResponseMapper;
-        this.mlPredictionEvidenceProjectionRepository = Objects.requireNonNull(
-                mlPredictionEvidenceProjectionRepository,
-                "mlPredictionEvidenceProjectionRepository is required"
-        );
         this.currentAnalystUser = currentAnalystUser;
         this.auditOutboxService = auditOutboxService;
         this.transactionRunner = transactionRunner;
+        this.requestValidator = requestValidator;
+        this.recordAssembler = recordAssembler;
+        this.engineIntelligenceSnapshotter = engineIntelligenceSnapshotter;
+        this.mlPredictionEvidenceSnapshotter = mlPredictionEvidenceSnapshotter;
         this.clock = clock;
     }
 
     public FraudFeedbackResponse create(String transactionId, CreateFraudFeedbackRequest request) {
-        ValidatedFeedback validated = validate(request);
+        ValidatedFraudFeedback validated = requestValidator.validate(request);
         String actor = currentAnalystUser.get()
                 .map(principal -> principal.userId())
                 .filter(userId -> !userId.isBlank())
@@ -150,7 +111,7 @@ public class FraudFeedbackService {
 
     private FraudFeedbackRecord createWithAuthoritativeSnapshot(
             String transactionId,
-            ValidatedFeedback validated,
+            ValidatedFraudFeedback validated,
             String actor
     ) {
         ScoredTransaction transaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
@@ -161,28 +122,16 @@ public class FraudFeedbackService {
         }
 
         FraudFeedbackRecord record = new FraudFeedbackRecord();
-        record.setFeedbackId("ffb-" + UUID.randomUUID());
-        record.setTransactionId(transaction.transactionId());
         record.captureScoringOccurrence(ownership);
-        record.setCustomerId(transaction.customerId());
-        record.setCorrelationId(transaction.correlationId());
-        record.setAnalystDecision(validated.analystDecision());
-        record.setFeedbackLabel(validated.feedbackLabel());
-        record.setLabelSource(FeedbackLabelSource.ANALYST_REVIEW);
-        record.setFeedbackStatus(FraudFeedbackStatus.RECORDED);
-        record.setCreatedAt(clock.instant());
-        record.setCreatedBy(actor);
-        record.setDecisionReasonCodes(validated.decisionReasonCodes());
-        record.setNotes(validated.notes());
-        record.setFraudScore(transaction.fraudScore());
-        record.setRiskLevel(transaction.riskLevel());
-        record.setAlertRecommended(transaction.alertRecommended());
-        record.setScoredAt(transaction.scoredAt());
-        record.setTransactionTimestamp(transaction.transactionTimestamp());
-        record.setMlPredictionEvidenceOmissionReason(transaction.mlPredictionEvidenceOmissionReason());
-        snapshotEngineIntelligence(record, transaction);
-        snapshotMlPredictionEvidence(record, transaction, ownership);
-        snapshotAnalystRecommendation(record, transaction.analystRecommendation());
+        recordAssembler.assemble(
+                record,
+                transaction,
+                validated,
+                actor,
+                clock.instant()
+        );
+        engineIntelligenceSnapshotter.snapshot(record, transaction);
+        mlPredictionEvidenceSnapshotter.snapshot(record, transaction, ownership);
         return persistFeedbackWithAuditIntent(record);
     }
 
@@ -205,120 +154,6 @@ public class FraudFeedbackService {
         return repository.findByTransactionId(boundedTransactionId)
                 .map(mapper::toResponse)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "FRAUD_FEEDBACK_NOT_FOUND"));
-    }
-
-    private void snapshotEngineIntelligence(FraudFeedbackRecord record, ScoredTransaction transaction) {
-        try {
-            EngineIntelligenceReadModel readModel = engineIntelligenceReadService.readForOccurrence(
-                    transaction.transactionId(),
-                    transaction.scoringOccurrenceOwnership()
-            );
-            EngineIntelligenceResponse response = engineIntelligenceResponseMapper.toResponse(readModel);
-            record.setEngineIntelligenceStatus(response.status());
-            if (response.comparison() != null) {
-                record.setComparisonType(response.comparison().comparisonType());
-                record.setComparedEngineIds(response.comparison().comparedEngineIds());
-                record.setAgreementStatus(response.comparison().agreementStatus());
-                record.setRiskMismatchStatus(response.comparison().riskMismatchStatus());
-                record.setScoreDeltaBucket(response.comparison().scoreDeltaBucket());
-            }
-            snapshotRulesEvidence(record, readModel);
-        } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
-            record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
-        } catch (RuntimeException exception) {
-            log.warn("Fraud feedback engine intelligence snapshot unavailable.");
-            record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
-        }
-    }
-
-    private void snapshotRulesEvidence(FraudFeedbackRecord record, EngineIntelligenceReadModel readModel) {
-        if (readModel == null || !readModel.available() || readModel.engines() == null) {
-            return;
-        }
-        readModel.engines().stream()
-                .filter(engine -> FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID.equals(engine.engineId()))
-                .filter(engine -> engine.engineType() == FraudEngineType.RULES)
-                .findFirst()
-                .ifPresent(engine -> {
-                    record.setRulesEngineStatus(engine.status());
-                    record.setRulesRiskLevel(engine.riskLevel());
-                });
-    }
-
-    private void snapshotMlPredictionEvidence(
-            FraudFeedbackRecord record,
-            ScoredTransaction transaction,
-            ScoringOccurrenceOwnership ownership
-    ) {
-        if (transaction.mlPredictionEvidenceOmissionReason() != null) {
-            return;
-        }
-        try {
-            MlPredictionEvidenceProjection projection = mlPredictionEvidenceProjectionRepository
-                    .findById(ownership.sourceEventId())
-                    .orElseThrow(() -> evidenceSnapshotUnavailable(null));
-            if (!matchesOccurrence(projection, transaction, ownership)) {
-                throw evidenceSnapshotUnavailable(null);
-            }
-            validateExactEvidence(projection);
-            applyMlPredictionEvidence(record, projection);
-        } catch (ResponseStatusException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
-            throw evidenceSnapshotUnavailable(exception);
-        }
-    }
-
-    private boolean matchesOccurrence(
-            MlPredictionEvidenceProjection projection,
-            ScoredTransaction transaction,
-            ScoringOccurrenceOwnership ownership
-    ) {
-        return Objects.equals(projection.getSourceEventId(), ownership.sourceEventId())
-                && Objects.equals(projection.getTransactionId(), transaction.transactionId())
-                && Objects.equals(projection.getCorrelationId(), transaction.correlationId())
-                && Objects.equals(projection.getSourceEventCreatedAt(), ownership.sourceEventCreatedAt());
-    }
-
-    private void validateExactEvidence(MlPredictionEvidenceProjection projection) {
-        new MlPredictionEvidence(
-                projection.getMlScore(),
-                projection.getMlRiskLevel(),
-                projection.getModelName(),
-                projection.getModelVersion(),
-                projection.getFeatureContractVersion(),
-                projection.getModelArtifactSha256(),
-                projection.getSourceExecutionTimestamp()
-        );
-    }
-
-    private ResponseStatusException evidenceSnapshotUnavailable(RuntimeException cause) {
-        return new ResponseStatusException(
-                HttpStatus.SERVICE_UNAVAILABLE,
-                "FRAUD_FEEDBACK_ML_PREDICTION_EVIDENCE_UNAVAILABLE",
-                cause
-        );
-    }
-
-    private void applyMlPredictionEvidence(
-            FraudFeedbackRecord record,
-            MlPredictionEvidenceProjection projection
-    ) {
-        record.setMlModelName(projection.getModelName());
-        record.setMlModelVersion(projection.getModelVersion());
-        record.setMlFeatureContractVersion(projection.getFeatureContractVersion());
-        record.setMlModelArtifactSha256(projection.getModelArtifactSha256());
-    }
-
-    private void snapshotAnalystRecommendation(FraudFeedbackRecord record, AnalystRecommendationResult recommendation) {
-        if (recommendation == null) {
-            recommendation = AnalystRecommendationResult.absent();
-        }
-        record.setAnalystRecommendationStatus(recommendation.status());
-        record.setAnalystRecommendation(recommendation.recommendation());
-        record.setAnalystRecommendationVersion(recommendation.recommendationVersion());
-        record.setAnalystRecommendationGeneratedAt(recommendation.generatedAt());
-        record.setAnalystRecommendationReasonCodes(recommendation.reasonCodes());
     }
 
     private void persistAuditIntent(FraudFeedbackRecord saved) {
@@ -372,131 +207,4 @@ public class FraudFeedbackService {
         }
     }
 
-    private ValidatedFeedback validate(CreateFraudFeedbackRequest request) {
-        if (request == null) {
-            throw badRequest("FRAUD_FEEDBACK_REQUEST_REQUIRED");
-        }
-        if (request.analystDecision() == null) {
-            throw badRequest("FRAUD_FEEDBACK_ANALYST_DECISION_REQUIRED");
-        }
-        if (request.feedbackLabel() == null) {
-            throw badRequest("FRAUD_FEEDBACK_LABEL_REQUIRED");
-        }
-        validateDecisionMatchesLabel(request.analystDecision(), request.feedbackLabel());
-        List<String> reasonCodes = validateReasonCodes(request.decisionReasonCodes());
-        validateReasonCodesMatchLabel(request.feedbackLabel(), reasonCodes);
-        String notes = validateNotes(request.notes());
-        return new ValidatedFeedback(request.analystDecision(), request.feedbackLabel(), reasonCodes, notes);
-    }
-
-    private void validateDecisionMatchesLabel(AnalystDecision decision, FraudFeedbackLabel label) {
-        boolean matches = switch (decision) {
-            case MARKED_FRAUD -> label == FraudFeedbackLabel.CONFIRMED_FRAUD;
-            case MARKED_LEGITIMATE -> label == FraudFeedbackLabel.CONFIRMED_LEGITIMATE;
-            case MARKED_INCONCLUSIVE -> label == FraudFeedbackLabel.INCONCLUSIVE;
-            case REQUESTED_MORE_INFO -> label == FraudFeedbackLabel.NEEDS_MORE_INFO;
-        };
-        if (!matches) {
-            throw badRequest("FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH");
-        }
-    }
-
-    private void validateReasonCodesMatchLabel(FraudFeedbackLabel feedbackLabel, List<String> reasonCodes) {
-        Set<FraudFeedbackReasonCode> allowedCodes = allowedReasonCodes(feedbackLabel);
-        for (String reasonCode : reasonCodes) {
-            if (!allowedCodes.contains(FraudFeedbackReasonCode.valueOf(reasonCode))) {
-                throw badRequest("FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH");
-            }
-        }
-    }
-
-    private Set<FraudFeedbackReasonCode> allowedReasonCodes(FraudFeedbackLabel feedbackLabel) {
-        return switch (feedbackLabel) {
-            case CONFIRMED_FRAUD -> EnumSet.of(
-                    FraudFeedbackReasonCode.CUSTOMER_CONFIRMED_FRAUD,
-                    FraudFeedbackReasonCode.DOCUMENTATION_CONFIRMED_FRAUD,
-                    FraudFeedbackReasonCode.CHARGEBACK_SIGNAL,
-                    FraudFeedbackReasonCode.ACCOUNT_TAKEOVER_INDICATOR,
-                    FraudFeedbackReasonCode.ANALYST_CONFIRMED_FRAUD
-            );
-            case CONFIRMED_LEGITIMATE -> EnumSet.of(
-                    FraudFeedbackReasonCode.CUSTOMER_CONFIRMED_LEGITIMATE,
-                    FraudFeedbackReasonCode.DOCUMENTATION_CONFIRMED_LEGITIMATE,
-                    FraudFeedbackReasonCode.MERCHANT_CONFIRMED,
-                    FraudFeedbackReasonCode.FALSE_POSITIVE_PATTERN,
-                    FraudFeedbackReasonCode.ANALYST_CONFIRMED_LEGITIMATE
-            );
-            case INCONCLUSIVE -> EnumSet.of(
-                    FraudFeedbackReasonCode.INSUFFICIENT_EVIDENCE,
-                    FraudFeedbackReasonCode.ANALYST_INCONCLUSIVE
-            );
-            case NEEDS_MORE_INFO -> EnumSet.of(
-                    FraudFeedbackReasonCode.NEEDS_CUSTOMER_CONTACT,
-                    FraudFeedbackReasonCode.INSUFFICIENT_EVIDENCE,
-                    FraudFeedbackReasonCode.ANALYST_NEEDS_MORE_INFO
-            );
-        };
-    }
-
-    private List<String> validateReasonCodes(List<String> reasonCodes) {
-        if (reasonCodes == null || reasonCodes.isEmpty()) {
-            throw badRequest("FRAUD_FEEDBACK_REASON_CODES_REQUIRED");
-        }
-        if (reasonCodes.size() > MAX_REASON_CODES) {
-            throw badRequest("FRAUD_FEEDBACK_REASON_CODES_TOO_MANY");
-        }
-        return reasonCodes.stream()
-                .map(this::validateReasonCode)
-                .toList();
-    }
-
-    private String validateReasonCode(String reasonCode) {
-        if (reasonCode == null || reasonCode.isBlank()) {
-            throw badRequest("FRAUD_FEEDBACK_REASON_CODE_REQUIRED");
-        }
-        String normalized = reasonCode.trim();
-        if (normalized.length() > MAX_REASON_CODE_LENGTH || !REASON_CODE_PATTERN.matcher(normalized).matches()) {
-            throw badRequest("FRAUD_FEEDBACK_REASON_CODE_INVALID");
-        }
-        rejectUnsafeTerms(normalized, "FRAUD_FEEDBACK_REASON_CODE_UNSAFE");
-        try {
-            FraudFeedbackReasonCode.valueOf(normalized);
-        } catch (IllegalArgumentException exception) {
-            throw badRequest("FRAUD_FEEDBACK_REASON_CODE_UNKNOWN");
-        }
-        return normalized;
-    }
-
-    private String validateNotes(String notes) {
-        if (notes == null || notes.isBlank()) {
-            return null;
-        }
-        String normalized = notes.trim();
-        if (normalized.length() > MAX_NOTES_LENGTH) {
-            throw badRequest("FRAUD_FEEDBACK_NOTES_TOO_LONG");
-        }
-        rejectUnsafeTerms(normalized, "FRAUD_FEEDBACK_NOTES_UNSAFE");
-        return normalized;
-    }
-
-    private void rejectUnsafeTerms(String value, String reason) {
-        String normalized = value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
-        for (String term : UNSAFE_TERMS) {
-            if (normalized.contains(term)) {
-                throw badRequest(reason);
-            }
-        }
-    }
-
-    private ResponseStatusException badRequest(String reason) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, reason);
-    }
-
-    private record ValidatedFeedback(
-            AnalystDecision analystDecision,
-            FraudFeedbackLabel feedbackLabel,
-            List<String> decisionReasonCodes,
-            String notes
-    ) {
-    }
 }

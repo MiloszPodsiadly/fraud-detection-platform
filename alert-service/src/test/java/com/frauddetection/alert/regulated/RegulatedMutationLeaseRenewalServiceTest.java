@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.regulated.status.RegulatedMutationPublicStatusMapper;
+
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.mongodb.client.result.UpdateResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;

@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.regulated.status.RegulatedMutationPublicStatusMapper;
+
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditEventDocument;
@@ -14,7 +16,7 @@ import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.frauddetection.alert.outbox.DecisionOutboxStatus;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;

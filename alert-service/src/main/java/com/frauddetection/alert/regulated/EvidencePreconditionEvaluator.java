@@ -1,8 +1,9 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.fraudcase.decision.AnalystDecisionEvidencePolicy;
+
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.persistence.AlertDocument;
-import com.frauddetection.alert.service.AnalystDecisionEvidencePolicy;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;

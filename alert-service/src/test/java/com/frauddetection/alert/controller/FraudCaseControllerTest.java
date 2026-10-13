@@ -17,7 +17,8 @@ import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
-import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.persistence.FraudCaseTransactionDocument;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,7 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -115,7 +117,8 @@ class FraudCaseControllerTest {
         mockMvc.perform(get("/api/v1/fraud-cases/case-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.caseId").value("case-1"))
-                .andExpect(jsonPath("$.status").value("OPEN"));
+                .andExpect(jsonPath("$.status").value("OPEN"))
+                .andExpect(jsonPath("$.transactions[0].amountPln").value(nullValue()));
 
         verify(sensitiveReadAuditService).audit(
                 eq(ReadAccessEndpointCategory.FRAUD_CASE_DETAIL),
@@ -210,6 +213,9 @@ class FraudCaseControllerTest {
         document.setPriority(FraudCasePriority.HIGH);
         document.setRiskLevel(RiskLevel.CRITICAL);
         document.setLinkedAlertIds(List.of("alert-1"));
+        FraudCaseTransactionDocument transaction = new FraudCaseTransactionDocument();
+        transaction.setTransactionId("transaction-without-canonical-pln");
+        document.setTransactions(List.of(transaction));
         document.setCreatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         document.setUpdatedAt(Instant.parse("2026-05-10T10:00:00Z"));
         return document;

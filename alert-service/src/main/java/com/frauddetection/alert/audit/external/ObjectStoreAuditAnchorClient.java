@@ -20,6 +20,29 @@ interface ObjectStoreAuditAnchorClient {
 
     void putObjectIfAbsent(String bucket, String key, byte[] content);
 
+    default Optional<ObjectStoreAuditAnchorVersionedObject> getObjectWithVersion(String bucket, String key) {
+        throw new ExternalAuditAnchorSinkException(
+                "HEAD_CONDITIONAL_WRITE_UNSUPPORTED",
+                "Object-store versioned reads are not configured."
+        );
+    }
+
+    default void putObjectIfVersionMatches(
+            String bucket,
+            String key,
+            String expectedVersion,
+            byte[] content
+    ) {
+        throw new ExternalAuditAnchorSinkException(
+                "HEAD_CONDITIONAL_WRITE_UNSUPPORTED",
+                "Object-store compare-and-swap is not configured."
+        );
+    }
+
+    default ObjectStoreAuditAnchorHeadWriteCapability headWriteCapability() {
+        return ObjectStoreAuditAnchorHeadWriteCapability.UNSUPPORTED;
+    }
+
     default void putObject(String bucket, String key, byte[] content) {
         throw new ExternalAuditAnchorSinkException(
                 "UNAVAILABLE",
@@ -76,4 +99,30 @@ record ObjectStoreAuditAnchorObject(
         String timestampSource,
         boolean timestampVerified
 ) {
+}
+
+record ObjectStoreAuditAnchorVersionedObject(
+        byte[] content,
+        String version
+) {
+    ObjectStoreAuditAnchorVersionedObject {
+        content = content == null ? new byte[0] : java.util.Arrays.copyOf(content, content.length);
+        if (version == null || version.isBlank()) {
+            throw new IllegalArgumentException("Object-store version is required.");
+        }
+    }
+
+    @Override
+    public byte[] content() {
+        return java.util.Arrays.copyOf(content, content.length);
+    }
+}
+
+enum ObjectStoreAuditAnchorHeadWriteCapability {
+    UNSUPPORTED,
+    LINEARIZABLE_CREATE_AND_COMPARE_AND_SWAP;
+
+    boolean supportsLinearizableHeadUpdates() {
+        return this == LINEARIZABLE_CREATE_AND_COMPARE_AND_SWAP;
+    }
 }
