@@ -710,6 +710,72 @@ class TrustAuthorityServiceTest {
     }
 
     @Test
+    void shouldAllowPersistedActiveAndPublicOnlyRetiredAndRevokedKeysInProdLikeProfile() throws Exception {
+        KeyPair activePair = keyPair();
+        KeyPair retiredPair = keyPair();
+        KeyPair revokedPair = keyPair();
+        Path activePrivate = tempDir.resolve("lifecycle/active-private.key");
+        Path activePublic = tempDir.resolve("lifecycle/active-public.key");
+        Path retiredPublic = tempDir.resolve("lifecycle/retired-public.key");
+        Path revokedPublic = tempDir.resolve("lifecycle/revoked-public.key");
+        Files.createDirectories(activePrivate.getParent());
+        Files.writeString(activePrivate, Base64.getEncoder().encodeToString(activePair.getPrivate().getEncoded()));
+        restrictPrivateKeyPermissions(activePrivate);
+        Files.writeString(activePublic, Base64.getEncoder().encodeToString(activePair.getPublic().getEncoded()));
+        Files.writeString(retiredPublic, Base64.getEncoder().encodeToString(retiredPair.getPublic().getEncoded()));
+        Files.writeString(revokedPublic, Base64.getEncoder().encodeToString(revokedPair.getPublic().getEncoded()));
+
+        TrustAuthorityProperties.KeyEntry retired = keyWithoutMaterial("retired-public", "RETIRED");
+        retired.setPublicKeyPath(retiredPublic.toString());
+        TrustAuthorityProperties.KeyEntry revoked = keyWithoutMaterial("revoked-public", "REVOKED");
+        revoked.setPublicKeyPath(revokedPublic.toString());
+        TrustAuthorityProperties properties = jwtProperties(rsaKeyPair());
+        properties.getAudit().setSink("durable-hash-chain");
+        properties.setKeys(List.of(
+                persistedKey("active-pair", "ACTIVE", activePrivate, activePublic),
+                retired,
+                revoked
+        ));
+
+        new TrustAuthorityRuntimeGuard(properties, environment("prod")).run(null);
+        TrustAuthorityKeyRegistry registry = new TrustAuthorityKeyRegistry(properties, environment("prod"));
+
+        assertThat(registry.responses()).extracting(TrustKeyResponse::status)
+                .containsExactly("ACTIVE", "RETIRED", "REVOKED");
+        assertThat(registry.responses()).extracting(TrustKeyResponse::keyFingerprintSha256)
+                .allSatisfy(fingerprint -> assertThat(fingerprint).isNotBlank());
+    }
+
+    @Test
+    void shouldRequireRevokedPublicKeyPathInMixedProdLikeProfile() throws Exception {
+        TrustAuthorityProperties properties = jwtProperties(rsaKeyPair());
+        properties.getAudit().setSink("durable-hash-chain");
+        configurePersistentSigningKeys(properties);
+        TrustAuthorityProperties.KeyEntry revoked = keyWithoutMaterial("revoked-without-path", "REVOKED");
+        properties.setKeys(List.of(properties.getKeys().getFirst(), revoked));
+
+        assertThatThrownBy(() -> new TrustAuthorityRuntimeGuard(
+                properties,
+                environment("prod", "local")
+        ).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("persistent public key path");
+    }
+
+    @Test
+    void shouldRejectMalformedRevokedPublicMaterialInLocalProfile() throws Exception {
+        TrustAuthorityProperties.KeyEntry malformedRevoked = keyWithoutMaterial("malformed-revoked", "REVOKED");
+        malformedRevoked.setPublicKey("not-an-ed25519-public-key");
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(
+                propertiesWithKeys(malformedRevoked, key("active-with-revoked", "ACTIVE", keyPair())),
+                environment("local")
+        ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("could not be initialized");
+    }
+
+    @Test
     void shouldFailStartupWhenCapabilityOverclaimsExternalTrust() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setCapabilityLevel("external-anchored-trust");

@@ -74,9 +74,7 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
             if (StringUtils.hasText(key.getPrivateKey())) {
                 throw new IllegalStateException("Prod-like trust authority forbids inline private key material.");
             }
-            if (!"REVOKED".equalsIgnoreCase(key.getStatus())) {
-                requirePersistentPath(key.getPublicKeyPath(), "public key");
-            }
+            requirePersistentPath(key.getPublicKeyPath(), "public key");
             if ("ACTIVE".equalsIgnoreCase(key.getStatus())) {
                 requirePersistentPath(key.getPrivateKeyPath(), "private key");
                 enforcePrivateKeyFile(key.getPrivateKeyPath());
