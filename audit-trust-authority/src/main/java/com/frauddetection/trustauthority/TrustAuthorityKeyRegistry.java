@@ -116,24 +116,27 @@ final class TrustAuthorityKeyRegistry {
             throw new IllegalStateException("Unsupported trust authority key algorithm.");
         }
         try {
-            KeyMaterialSource materialSource = keyMaterialSource(entry);
+            String status = normalizeStatus(entry.getStatus());
+            KeyMaterialSource materialSource = keyMaterialSource(entry, status);
             if (materialSource.bootstrap()) {
-                if (!localKeyGenerationAllowed || !"ACTIVE".equals(normalizeStatus(entry.getStatus()))) {
+                if (!localKeyGenerationAllowed || !"ACTIVE".equals(status)) {
                     throw new IllegalStateException("Trust authority key material is required outside local/dev/test profiles.");
                 }
                 KeyPair generated = KeyPairGenerator.getInstance(ALGORITHM).generateKeyPair();
                 if (materialSource == KeyMaterialSource.FRESH_PERSISTED_BOOTSTRAP) {
                     persistFreshKeyPair(entry, generated);
                 }
-                return registeredKey(entry, generated.getPublic(), generated.getPrivate());
+                return registeredKey(entry, generated.getPublic(), generated.getPrivate(), status);
             }
-            PublicKey publicKey = materialSource == KeyMaterialSource.INLINE
+            PublicKey publicKey = materialSource.inline()
                     ? publicKey(entry.getPublicKey())
                     : publicKey(readPersistedKey(entry.getPublicKeyPath(), "public"));
-            PrivateKey privateKey = materialSource == KeyMaterialSource.INLINE
-                    ? privateKey(entry.getPrivateKey())
-                    : privateKey(readPersistedKey(entry.getPrivateKeyPath(), "private"));
-            return registeredKey(entry, publicKey, privateKey);
+            PrivateKey privateKey = materialSource.privateMaterial()
+                    ? materialSource.inline()
+                            ? privateKey(entry.getPrivateKey())
+                            : privateKey(readPersistedKey(entry.getPrivateKeyPath(), "private"))
+                    : null;
+            return registeredKey(entry, publicKey, privateKey, status);
         } catch (IOException | GeneralSecurityException | IllegalArgumentException exception) {
             throw new IllegalStateException("Trust authority configured key material could not be initialized.", exception);
         }
@@ -142,19 +145,20 @@ final class TrustAuthorityKeyRegistry {
     private RegisteredKey registeredKey(
             TrustAuthorityProperties.KeyEntry entry,
             PublicKey publicKey,
-            PrivateKey privateKey
+            PrivateKey privateKey,
+            String status
     ) {
         return new RegisteredKey(
                 entry.getKeyId(),
                 publicKey,
                 privateKey,
-                normalizeStatus(entry.getStatus()),
+                status,
                 entry.getValidFrom() == null ? Instant.EPOCH : entry.getValidFrom(),
                 entry.getValidUntil()
         );
     }
 
-    private KeyMaterialSource keyMaterialSource(TrustAuthorityProperties.KeyEntry entry) {
+    private KeyMaterialSource keyMaterialSource(TrustAuthorityProperties.KeyEntry entry, String status) {
         boolean publicInline = StringUtils.hasText(entry.getPublicKey());
         boolean privateInline = StringUtils.hasText(entry.getPrivateKey());
         boolean publicPathConfigured = StringUtils.hasText(entry.getPublicKeyPath());
@@ -164,26 +168,40 @@ final class TrustAuthorityKeyRegistry {
             if (publicPathConfigured || privatePathConfigured) {
                 throw new IllegalStateException("Trust authority key material cannot mix inline and persisted configuration.");
             }
-            if (!publicInline || !privateInline) {
+            if (!publicInline || ("ACTIVE".equals(status) && !privateInline)) {
                 throw new IllegalStateException("Trust authority inline key material requires a complete key pair.");
             }
-            return KeyMaterialSource.INLINE;
+            return privateInline ? KeyMaterialSource.INLINE_PAIR : KeyMaterialSource.INLINE_PUBLIC;
         }
         if (publicPathConfigured || privatePathConfigured) {
-            if (!publicPathConfigured || !privatePathConfigured) {
+            if (!publicPathConfigured || ("ACTIVE".equals(status) && !privatePathConfigured)) {
                 throw new IllegalStateException("Trust authority persisted key material requires both key paths.");
             }
             Path publicPath = Path.of(entry.getPublicKeyPath()).toAbsolutePath().normalize();
-            Path privatePath = Path.of(entry.getPrivateKeyPath()).toAbsolutePath().normalize();
-            if (publicPath.equals(privatePath)) {
+            Path privatePath = privatePathConfigured
+                    ? Path.of(entry.getPrivateKeyPath()).toAbsolutePath().normalize()
+                    : null;
+            if (privatePath != null && publicPath.equals(privatePath)) {
                 throw new IllegalStateException("Trust authority public and private key paths must be distinct.");
             }
             boolean publicExists = Files.exists(publicPath);
-            boolean privateExists = Files.exists(privatePath);
-            if (publicExists != privateExists) {
+            boolean privateExists = privatePath != null && Files.exists(privatePath);
+            if (!publicExists && privateExists) {
                 throw new IllegalStateException("Trust authority persisted key material is partial; bootstrap will not overwrite it.");
             }
-            return publicExists ? KeyMaterialSource.PERSISTED : KeyMaterialSource.FRESH_PERSISTED_BOOTSTRAP;
+            if ("ACTIVE".equals(status)) {
+                if (publicExists != privateExists) {
+                    throw new IllegalStateException("Trust authority persisted key material is partial; bootstrap will not overwrite it.");
+                }
+                return publicExists ? KeyMaterialSource.PERSISTED_PAIR : KeyMaterialSource.FRESH_PERSISTED_BOOTSTRAP;
+            }
+            if (!publicExists) {
+                throw new IllegalStateException("Trust authority verification key requires persisted public key material.");
+            }
+            return privateExists ? KeyMaterialSource.PERSISTED_PAIR : KeyMaterialSource.PERSISTED_PUBLIC;
+        }
+        if (!"ACTIVE".equals(status)) {
+            throw new IllegalStateException("Trust authority verification key requires public key material.");
         }
         return KeyMaterialSource.EPHEMERAL_BOOTSTRAP;
     }
@@ -289,19 +307,33 @@ final class TrustAuthorityKeyRegistry {
     }
 
     private enum KeyMaterialSource {
-        INLINE(false),
-        PERSISTED(false),
-        EPHEMERAL_BOOTSTRAP(true),
-        FRESH_PERSISTED_BOOTSTRAP(true);
+        INLINE_PAIR(false, true, true),
+        INLINE_PUBLIC(false, true, false),
+        PERSISTED_PAIR(false, false, true),
+        PERSISTED_PUBLIC(false, false, false),
+        EPHEMERAL_BOOTSTRAP(true, false, false),
+        FRESH_PERSISTED_BOOTSTRAP(true, false, false);
 
         private final boolean bootstrap;
+        private final boolean inline;
+        private final boolean privateMaterial;
 
-        KeyMaterialSource(boolean bootstrap) {
+        KeyMaterialSource(boolean bootstrap, boolean inline, boolean privateMaterial) {
             this.bootstrap = bootstrap;
+            this.inline = inline;
+            this.privateMaterial = privateMaterial;
         }
 
         boolean bootstrap() {
             return bootstrap;
+        }
+
+        boolean inline() {
+            return inline;
+        }
+
+        boolean privateMaterial() {
+            return privateMaterial;
         }
     }
 }

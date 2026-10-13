@@ -15,6 +15,7 @@ import java.security.GeneralSecurityException;
 import java.security.Signature;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -43,7 +44,7 @@ final class TrustAuthoritySigningOperations {
     }
 
     TrustSignResponse sign(TrustSignRequest request) {
-        Instant signedAt = clock.instant();
+        Instant signedAt = clock.instant().truncatedTo(ChronoUnit.MILLIS);
         if (signedAt.isBefore(activeKey.validFrom())) {
             throw OperationFailure.request(
                     "KEY_NOT_YET_VALID",
@@ -62,7 +63,7 @@ final class TrustAuthoritySigningOperations {
             Signature signer = Signature.getInstance(TrustAuthorityKeyRegistry.ALGORITHM);
             signer.initSign(activeKey.privateKey());
             signer.update(canonicalBytes(request.purpose(), request.payloadHash(), request.partitionKey(),
-                    request.chainPosition(), request.anchorId()));
+                    request.chainPosition(), request.anchorId(), signedAt));
             return new TrustSignResponse(
                     Base64.getEncoder().encodeToString(signer.sign()),
                     activeKey.keyId(),
@@ -100,7 +101,7 @@ final class TrustAuthoritySigningOperations {
             Signature verifier = Signature.getInstance(TrustAuthorityKeyRegistry.ALGORITHM);
             verifier.initVerify(key.publicKey());
             verifier.update(canonicalBytes(request.purpose(), request.payloadHash(), request.partitionKey(),
-                    request.chainPosition(), request.anchorId()));
+                    request.chainPosition(), request.anchorId(), request.signedAt()));
             return verifier.verify(Base64.getDecoder().decode(request.signature()))
                     ? Verification.success()
                     : Verification.invalid("SIGNATURE_INVALID");
@@ -118,7 +119,8 @@ final class TrustAuthoritySigningOperations {
             String payloadHash,
             String partitionKey,
             long chainPosition,
-            String anchorId
+            String anchorId,
+            Instant signedAt
     ) {
         Map<String, Object> canonical = new LinkedHashMap<>();
         canonical.put("anchor_id", anchorId);
@@ -126,6 +128,7 @@ final class TrustAuthoritySigningOperations {
         canonical.put("partition_key", partitionKey);
         canonical.put("payload_hash", payloadHash);
         canonical.put("purpose", purpose);
+        canonical.put("signed_at", signedAt.toString());
         try {
             return CANONICAL_JSON.writeValueAsBytes(canonical);
         } catch (JacksonException exception) {

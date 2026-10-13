@@ -7,12 +7,14 @@ import org.springframework.web.client.RestClient;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.time.Instant;
 import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -97,6 +99,49 @@ class HttpAuditTrustAuthorityClientTest {
         ));
 
         assertThat(result.signatureStatus()).isEqualTo("SIGNED");
+        server.verify();
+    }
+
+    @Test
+    void shouldPreserveTheExactSignedTimestampAcrossTheVerificationBoundary() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://trust-authority");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AuditTrustAuthorityProperties properties = new AuditTrustAuthorityProperties();
+        properties.setHmacSecret("alert-hmac-secret");
+        properties.setCallerServiceName("alert-service");
+        properties.setCallerEnvironment("test");
+        HttpAuditTrustAuthorityClient client = new HttpAuditTrustAuthorityClient(builder.build(), properties);
+        Instant signedAt = Instant.parse("2026-04-29T10:00:00.123Z");
+        AuditAnchorSigningPayload payload = new AuditAnchorSigningPayload(
+                "source_service:alert-service",
+                "anchor-1",
+                1L,
+                "last-hash",
+                "external-key",
+                "external-hash",
+                ExternalImmutabilityLevel.CONFIGURED
+        );
+        SignedAuditAnchorPayload signature = new SignedAuditAnchorPayload(
+                "SIGNED",
+                "Ed25519",
+                "signature",
+                "key-1",
+                signedAt,
+                "local-trust-authority",
+                "payload-hash"
+        );
+        server.expect(once(), requestTo("http://trust-authority/api/v1/trust/verify"))
+                .andExpect(jsonPath("$.signed_at").value(signedAt.toString()))
+                .andRespond(withSuccess("""
+                        {
+                          "status": "VALID",
+                          "reason_code": null
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        AuditTrustSignatureVerificationResult result = client.verify(payload, signature);
+
+        assertThat(result.status()).isEqualTo("VALID");
         server.verify();
     }
 

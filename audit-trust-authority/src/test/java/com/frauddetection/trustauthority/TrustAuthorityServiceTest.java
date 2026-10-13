@@ -74,6 +74,53 @@ class TrustAuthorityServiceTest {
     }
 
     @Test
+    void shouldRejectAnySignedTimestampModificationInsideTheSameKeyValidityWindow() throws Exception {
+        KeyPair keyPair = keyPair();
+        Instant signingTime = Instant.now();
+        TrustAuthorityProperties.KeyEntry key = key("key-timestamp", "ACTIVE", keyPair);
+        key.setValidFrom(signingTime.minusSeconds(86_400));
+        key.setValidUntil(signingTime.plusSeconds(86_400));
+        TrustAuthorityService service = service(
+                propertiesWithKeys(key),
+                new RecordingAuditSink(),
+                new TrustAuthorityMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(signingTime, java.time.ZoneOffset.UTC)
+        );
+        TrustSignRequest request = request("hash-timestamp", "anchor-timestamp");
+        TrustSignResponse signature = sign(service, request);
+
+        assertThat(signature.signedAt())
+                .isEqualTo(signingTime.truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
+        assertThat(verifyWithTimestamp(service, request, signature, signature.signedAt().plusSeconds(1)).status())
+                .isEqualTo("INVALID");
+        assertThat(verifyWithTimestamp(service, request, signature, signature.signedAt().plusNanos(1)).status())
+                .isEqualTo("INVALID");
+    }
+
+    @Test
+    void shouldRejectMissingSignedTimestamp() {
+        TrustAuthorityService service = service("key-1");
+        TrustSignRequest request = request("hash-1", "anchor-1");
+        TrustSignResponse signature = sign(service, request);
+
+        TrustVerifyResponse verified = verifyWithTimestamp(service, request, signature, null);
+
+        assertThat(verified.status()).isEqualTo("INVALID");
+        assertThat(verified.reasonCode()).isEqualTo("SIGNED_AT_MISSING");
+    }
+
+    @Test
+    void shouldVerifyAfterCanonicalTimestampTextRoundTrip() {
+        TrustAuthorityService service = service("key-1");
+        TrustSignRequest request = request("hash-round-trip", "anchor-round-trip");
+        TrustSignResponse signature = sign(service, request);
+        Instant deserializedSignedAt = Instant.parse(signature.signedAt().toString());
+
+        assertThat(verifyWithTimestamp(service, request, signature, deserializedSignedAt).status())
+                .isEqualTo("VALID");
+    }
+
+    @Test
     void shouldRejectModifiedPayloadHash() {
         TrustAuthorityService service = service("key-1");
         TrustSignResponse signature = sign(service, request("hash-1", "anchor-1"));
@@ -162,6 +209,77 @@ class TrustAuthorityServiceTest {
         assertThat(newSignature.keyId()).isEqualTo("key-v2");
         assertThat(rotatedService.keys()).extracting(TrustKeyResponse::keyId)
                 .containsExactly("key-v1", "key-v2");
+    }
+
+    @Test
+    void shouldVerifyRetiredInlinePublicOnlyKeyAfterRotation() throws Exception {
+        KeyPair retiredPair = keyPair();
+        TrustSignRequest request = request("hash-retired-inline", "anchor-retired-inline");
+        TrustSignResponse historicalSignature = sign(
+                service(propertiesWithKeys(key("retired-inline", "ACTIVE", retiredPair))),
+                request
+        );
+        TrustAuthorityService rotatedService = service(propertiesWithKeys(
+                publicOnlyKey("retired-inline", "RETIRED", retiredPair),
+                key("active-inline", "ACTIVE", keyPair())
+        ));
+
+        TrustVerifyResponse verified = verify(rotatedService, new TrustVerifyRequest(
+                request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
+                request.anchorId(), historicalSignature.signature(), historicalSignature.keyId(),
+                historicalSignature.signedAt()
+        ));
+        TrustSignResponse newSignature = sign(rotatedService, request);
+
+        assertThat(verified.status()).isEqualTo("VALID");
+        assertThat(newSignature.keyId()).isEqualTo("active-inline");
+    }
+
+    @Test
+    void shouldVerifyRetiredPersistedPublicKeyWhenConfiguredPrivateFileIsAbsent() throws Exception {
+        KeyPair retiredPair = keyPair();
+        TrustSignRequest request = request("hash-retired-file", "anchor-retired-file");
+        TrustSignResponse historicalSignature = sign(
+                service(propertiesWithKeys(key("retired-file", "ACTIVE", retiredPair))),
+                request
+        );
+        Path publicKey = tempDir.resolve("retired/public.key");
+        Path absentPrivateKey = tempDir.resolve("retired/private.key");
+        Files.createDirectories(publicKey.getParent());
+        Files.writeString(publicKey, Base64.getEncoder().encodeToString(retiredPair.getPublic().getEncoded()));
+        TrustAuthorityService rotatedService = service(propertiesWithKeys(
+                persistedKey("retired-file", "RETIRED", absentPrivateKey, publicKey),
+                key("active-file-rotation", "ACTIVE", keyPair())
+        ));
+
+        TrustVerifyResponse verified = verify(rotatedService, new TrustVerifyRequest(
+                request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
+                request.anchorId(), historicalSignature.signature(), historicalSignature.keyId(),
+                historicalSignature.signedAt()
+        ));
+
+        assertThat(verified.status()).isEqualTo("VALID");
+        assertThat(absentPrivateKey).doesNotExist();
+    }
+
+    @Test
+    void shouldFailClosedForActivePublicOnlyAndMalformedRetiredPublicMaterial() throws Exception {
+        KeyPair pair = keyPair();
+        TrustAuthorityProperties.KeyEntry malformedRetired = keyWithoutMaterial("malformed-retired", "RETIRED");
+        malformedRetired.setPublicKey("not-an-ed25519-public-key");
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(
+                propertiesWithKeys(publicOnlyKey("active-public-only", "ACTIVE", pair)),
+                true
+        ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("complete key pair");
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(
+                propertiesWithKeys(malformedRetired, key("active-with-malformed-retired", "ACTIVE", keyPair())),
+                true
+        ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("could not be initialized");
     }
 
     @Test
@@ -977,20 +1095,26 @@ class TrustAuthorityServiceTest {
     @Test
     void shouldEnforceKeyValidityWindowDuringVerification() throws Exception {
         KeyPair keyPair = keyPair();
+        Instant signingTime = Instant.now();
         TrustSignRequest request = request("hash-1", "anchor-1");
-        TrustSignResponse signature = sign(service(propertiesWithKeys(key("key-v1", "ACTIVE", keyPair))), request);
         TrustAuthorityProperties.KeyEntry verificationKey = key("key-v1", "ACTIVE", keyPair);
-        verificationKey.setValidFrom(Instant.parse("2026-04-01T00:00:00Z"));
-        verificationKey.setValidUntil(Instant.parse("2026-04-30T00:00:00Z"));
-        TrustAuthorityService service = service(propertiesWithKeys(verificationKey));
+        verificationKey.setValidFrom(signingTime.minusSeconds(86_400));
+        verificationKey.setValidUntil(signingTime.plusSeconds(86_400));
+        TrustAuthorityService service = service(
+                propertiesWithKeys(verificationKey),
+                new RecordingAuditSink(),
+                new TrustAuthorityMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(signingTime, java.time.ZoneOffset.UTC)
+        );
+        TrustSignResponse signature = sign(service, request);
 
         TrustVerifyResponse expired = verify(service, new TrustVerifyRequest(
                 request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
-                request.anchorId(), signature.signature(), signature.keyId(), Instant.parse("2026-05-01T00:00:00Z")
+                request.anchorId(), signature.signature(), signature.keyId(), signingTime.plusSeconds(172_800)
         ));
         TrustVerifyResponse valid = verify(service, new TrustVerifyRequest(
                 request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
-                request.anchorId(), signature.signature(), signature.keyId(), Instant.parse("2026-04-15T00:00:00Z")
+                request.anchorId(), signature.signature(), signature.keyId(), signature.signedAt()
         ));
 
         assertThat(expired.status()).isEqualTo("INVALID");
@@ -1220,6 +1344,12 @@ class TrustAuthorityServiceTest {
         return entry;
     }
 
+    private TrustAuthorityProperties.KeyEntry publicOnlyKey(String keyId, String status, KeyPair keyPair) {
+        TrustAuthorityProperties.KeyEntry entry = keyWithoutMaterial(keyId, status);
+        entry.setPublicKey(Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded()));
+        return entry;
+    }
+
     private TrustAuthorityProperties.KeyEntry keyWithoutMaterial(String keyId, String status) {
         TrustAuthorityProperties.KeyEntry entry = new TrustAuthorityProperties.KeyEntry();
         entry.setKeyId(keyId);
@@ -1279,6 +1409,24 @@ class TrustAuthorityServiceTest {
 
     private TrustVerifyResponse verify(TrustAuthorityService service, TrustVerifyRequest request) {
         return service.verify(credentials("alert-service", "local", "local-dev-trust-hmac-secret", "VERIFY", verifyCredentialPayload(request)), request);
+    }
+
+    private TrustVerifyResponse verifyWithTimestamp(
+            TrustAuthorityService service,
+            TrustSignRequest request,
+            TrustSignResponse signature,
+            Instant signedAt
+    ) {
+        return verify(service, new TrustVerifyRequest(
+                request.purpose(),
+                request.payloadHash(),
+                request.partitionKey(),
+                request.chainPosition(),
+                request.anchorId(),
+                signature.signature(),
+                signature.keyId(),
+                signedAt
+        ));
     }
 
     private TrustAuthorityRequestCredentials credentials(String serviceName, String environment, String secret, String action, String payload) {
