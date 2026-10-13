@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -61,17 +62,17 @@ public class RedisFeatureStore implements FeatureStore {
             stringRedisTemplate.opsForZSet().removeRangeByScore(customerTransactionsKey, Double.NEGATIVE_INFINITY, recentWindowStart);
             stringRedisTemplate.opsForZSet().removeRangeByScore(merchantTransactionsKey, Double.NEGATIVE_INFINITY, merchantWindowStart);
 
-            Long recentCount = stringRedisTemplate.opsForZSet().count(customerTransactionsKey, recentWindowStart, eventTimestamp);
-            Set<ZSetOperations.TypedTuple<String>> recentTransactions =
+            Set<ZSetOperations.TypedTuple<String>> recentTransactionEntries =
                     stringRedisTemplate.opsForZSet().rangeByScoreWithScores(customerTransactionsKey, recentWindowStart, eventTimestamp);
+            List<RecentTransaction> recentTransactions = parseTransactions(recentTransactionEntries);
             Long merchantFrequency = stringRedisTemplate.opsForZSet().count(merchantTransactionsKey, merchantWindowStart, eventTimestamp);
             Boolean knownDevice = stringRedisTemplate.opsForSet().isMember(deviceSetKey, event.deviceInfo().deviceId());
             String lastTransactionTimestamp = stringRedisTemplate.opsForValue().get(lastTransactionKey);
 
             return new FeatureStoreSnapshot(
-                    recentCount == null ? 0 : recentCount.intValue(),
+                    recentTransactions.size(),
                     sumAmountsPln(recentTransactions),
-                    parseTransactions(recentTransactions),
+                    recentTransactions,
                     merchantFrequency == null ? 0 : merchantFrequency.intValue(),
                     lastTransactionTimestamp == null ? null : Instant.parse(lastTransactionTimestamp),
                     Boolean.TRUE.equals(knownDevice)
@@ -112,33 +113,47 @@ public class RedisFeatureStore implements FeatureStore {
         }
     }
 
-    private BigDecimal sumAmountsPln(Set<ZSetOperations.TypedTuple<String>> entries) {
+    private BigDecimal sumAmountsPln(List<RecentTransaction> transactions) {
         BigDecimal total = BigDecimal.ZERO;
-        for (RecentTransaction transaction : parseTransactions(entries)) {
+        for (RecentTransaction transaction : transactions) {
             total = total.add(transaction.amountPln());
         }
         return total;
     }
 
     private List<RecentTransaction> parseTransactions(Set<ZSetOperations.TypedTuple<String>> entries) {
-        if (entries == null || entries.isEmpty()) {
+        if (entries == null) {
+            throw malformedRecentTransactionMembership();
+        }
+        if (entries.isEmpty()) {
             return List.of();
         }
 
         List<RecentTransaction> transactions = new ArrayList<>();
+        Set<String> transactionIds = new HashSet<>();
         for (ZSetOperations.TypedTuple<String> entry : entries) {
             if (entry == null || entry.getValue() == null || entry.getScore() == null) {
-                continue;
+                throw malformedRecentTransactionMembership();
             }
-            String[] parts = entry.getValue().split("\\|");
-            if (parts.length < 2) {
-                continue;
+            String[] parts = entry.getValue().split("\\|", -1);
+            if (parts.length != 4
+                    || parts[0].isBlank()
+                    || !parts[0].equals(parts[0].trim())
+                    || !transactionIds.add(parts[0])
+                    || !Double.isFinite(entry.getScore())
+                    || entry.getScore() != Math.rint(entry.getScore())) {
+                throw malformedRecentTransactionMembership();
             }
             BigDecimal amount = new BigDecimal(parts[1]);
-            String currency = parts.length >= 3 ? parts[2] : "PLN";
-            BigDecimal amountPln = parts.length >= 4
-                    ? new BigDecimal(parts[3])
-                    : currencyAmountConverter.toPln(amount, currency);
+            String currency = parts[2];
+            BigDecimal amountPln = new BigDecimal(parts[3]);
+            BigDecimal expectedAmountPln = currencyAmountConverter.toPln(amount, currency);
+            if (amount.signum() <= 0
+                    || amountPln.signum() <= 0
+                    || !currency.equals(currency.toUpperCase(java.util.Locale.ROOT))
+                    || amountPln.compareTo(expectedAmountPln) != 0) {
+                throw malformedRecentTransactionMembership();
+            }
             transactions.add(new RecentTransaction(
                     parts[0],
                     Instant.ofEpochMilli(entry.getScore().longValue()),
@@ -148,6 +163,10 @@ public class RedisFeatureStore implements FeatureStore {
             ));
         }
         return List.copyOf(transactions);
+    }
+
+    private IllegalStateException malformedRecentTransactionMembership() {
+        return new IllegalStateException("MALFORMED_RECENT_TRANSACTION_MEMBERSHIP");
     }
 
     private double scoreFor(Instant instant) {
