@@ -1111,7 +1111,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     ) {
         return Map.of(
                 FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, transactionIds,
-                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, transactionIds.size(),
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
                 FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln,
                 FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
