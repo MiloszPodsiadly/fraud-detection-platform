@@ -51,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -282,6 +283,46 @@ class FraudCaseManagementServiceTest {
                 .isInstanceOf(FraudCaseEvidenceValidationException.class)
                 .hasMessage("CROSS_CUSTOMER_TRANSACTION");
         verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldRejectRapidTransferEvidenceThatDoesNotContainTheCurrentTransactionBeforeCaseAccess() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument existing = new FraudCaseDocument();
+        existing.setCaseKey("case-customer:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1");
+        existing.setCustomerId("case-customer");
+        existing.setTransactionIds(List.of("rapid-txn-1", "rapid-txn-2"));
+        existing.setAssignedInvestigatorId("investigator-7");
+        existing.setAnalystId("analyst-9");
+        existing.setDecisionReason("Existing analyst decision");
+        existing.setDecisionTags(List.of("manual-review"));
+        when(fraudCaseRepository.findByCaseKey(existing.getCaseKey())).thenReturn(Optional.of(existing));
+        var event = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-3")
+                .withCustomerId("case-customer")
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                        List.of("rapid-txn-1", "rapid-txn-2")
+                ))
+                .build();
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                .hasMessage("CURRENT_EVENT_NOT_IN_EVIDENCE_IDS");
+
+        verifyNoInteractions(fraudCaseRepository, scoredTransactionRepository);
+        assertThat(existing.getAssignedInvestigatorId()).isEqualTo("investigator-7");
+        assertThat(existing.getAnalystId()).isEqualTo("analyst-9");
+        assertThat(existing.getDecisionReason()).isEqualTo("Existing analyst decision");
+        assertThat(existing.getDecisionTags()).containsExactly("manual-review");
     }
 
     @Test

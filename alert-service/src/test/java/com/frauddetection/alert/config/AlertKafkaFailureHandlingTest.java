@@ -236,7 +236,7 @@ class AlertKafkaFailureHandlingTest {
     }
 
     @Test
-    void fraudCaseOwnershipViolationsAreRecoveredWithoutRetry() {
+    void fraudCaseEvidenceViolationsAreRecoveredWithoutRetry() {
         DeadLetterPublishingRecoverer sourceRecoverer = mock(DeadLetterPublishingRecoverer.class);
         DeadLetterPublishingRecoverer redriveRecoverer = mock(DeadLetterPublishingRecoverer.class);
         DefaultErrorHandler sourceHandler = recoveryConfiguration.kafkaErrorHandler(
@@ -255,7 +255,7 @@ class AlertKafkaFailureHandlingTest {
                 mock(TransactionScoredEvent.class)
         );
         FraudCaseEvidenceValidationException violation = new FraudCaseEvidenceValidationException(
-                FraudCaseEvidenceValidationException.Reason.CROSS_CUSTOMER_TRANSACTION
+                FraudCaseEvidenceValidationException.Reason.CURRENT_EVENT_NOT_IN_EVIDENCE_IDS
         );
 
         assertThat(sourceHandler.handleOne(violation, source, null, null)).isTrue();

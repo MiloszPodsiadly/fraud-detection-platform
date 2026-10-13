@@ -42,6 +42,11 @@ public class FraudCaseIngestionService {
         }
 
         List<String> transactionIds = transactionIds(snapshot, event.transactionId());
+        if (!transactionIds.contains(event.transactionId())) {
+            throw new FraudCaseEvidenceValidationException(
+                    FraudCaseEvidenceValidationException.Reason.CURRENT_EVENT_NOT_IN_EVIDENCE_IDS
+            );
+        }
         String firstTransactionId = transactionIds.isEmpty() ? event.transactionId() : transactionIds.get(0);
         String caseKey = event.customerId() + ":" + SUSPICION_TYPE + ":" + firstTransactionId;
         FraudCaseDocument document = fraudCaseRepository.findByCaseKey(caseKey)

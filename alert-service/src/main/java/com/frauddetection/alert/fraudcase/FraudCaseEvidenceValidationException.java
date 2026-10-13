@@ -14,6 +14,7 @@ public final class FraudCaseEvidenceValidationException extends RuntimeException
     }
 
     public enum Reason {
+        CURRENT_EVENT_NOT_IN_EVIDENCE_IDS,
         CURRENT_EVENT_CUSTOMER_MISMATCH,
         CROSS_CUSTOMER_TRANSACTION,
         CASE_CUSTOMER_MISMATCH,
