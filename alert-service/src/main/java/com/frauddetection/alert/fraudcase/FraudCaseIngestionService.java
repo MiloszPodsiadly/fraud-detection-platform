@@ -9,6 +9,7 @@ import com.frauddetection.alert.persistence.ScoringOccurrenceFingerprint;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
+import com.frauddetection.common.events.reason.ReasonCode;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -37,16 +38,24 @@ public class FraudCaseIngestionService {
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
         Map<String, Object> snapshot = event.featureSnapshot() == null ? Map.of() : event.featureSnapshot();
-        if (!FraudFeatureThresholdContract.isRapidTransferPlnBurst(snapshot)) {
-            return;
+        boolean rapidTransferClaimed = event.reasonCodes() != null
+                && event.reasonCodes().contains(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+        FraudFeatureThresholdContract.RapidTransferAssessment assessment =
+                FraudFeatureThresholdContract.assessRapidTransferPlnBurst(
+                        snapshot,
+                        event.transactionId(),
+                        rapidTransferClaimed
+                );
+        switch (assessment.status()) {
+            case NOT_APPLICABLE, NOT_A_BURST -> {
+                return;
+            }
+            case INVALID_BURST_EVIDENCE -> throw invalidEvidence(assessment.issue());
+            case VALID_BURST -> {
+                // Continue with the canonical membership returned by the shared contract.
+            }
         }
-
-        List<String> transactionIds = transactionIds(snapshot, event.transactionId());
-        if (!transactionIds.contains(event.transactionId())) {
-            throw new FraudCaseEvidenceValidationException(
-                    FraudCaseEvidenceValidationException.Reason.CURRENT_EVENT_NOT_IN_EVIDENCE_IDS
-            );
-        }
+        List<String> transactionIds = assessment.transactionIds();
         String firstTransactionId = transactionIds.isEmpty() ? event.transactionId() : transactionIds.get(0);
         String caseKey = event.customerId() + ":" + SUSPICION_TYPE + ":" + firstTransactionId;
         FraudCaseDocument document = fraudCaseRepository.findByCaseKey(caseKey)
@@ -208,12 +217,17 @@ public class FraudCaseIngestionService {
         }
     }
 
-    private List<String> transactionIds(Map<String, Object> featureSnapshot, String currentTransactionId) {
-        Object value = featureSnapshot.get(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS);
-        if (value instanceof List<?> list) {
-            return list.stream().map(String::valueOf).toList();
-        }
-        return List.of(currentTransactionId);
+    private FraudCaseEvidenceValidationException invalidEvidence(
+            FraudFeatureThresholdContract.RapidTransferEvidenceIssue issue
+    ) {
+        FraudCaseEvidenceValidationException.Reason reason = switch (issue) {
+            case MEMBERSHIP_MISSING -> FraudCaseEvidenceValidationException.Reason.RAPID_TRANSFER_MEMBERSHIP_MISSING;
+            case MEMBERSHIP_INVALID -> FraudCaseEvidenceValidationException.Reason.RAPID_TRANSFER_MEMBERSHIP_INVALID;
+            case CURRENT_TRANSACTION_MISSING -> FraudCaseEvidenceValidationException.Reason.CURRENT_EVENT_NOT_IN_EVIDENCE_IDS;
+            case SNAPSHOT_INCONSISTENT -> FraudCaseEvidenceValidationException.Reason.RAPID_TRANSFER_SNAPSHOT_INCONSISTENT;
+            case NONE -> throw new IllegalStateException("INVALID_RAPID_TRANSFER_EVIDENCE_REASON_REQUIRED");
+        };
+        return new FraudCaseEvidenceValidationException(reason);
     }
 
 }

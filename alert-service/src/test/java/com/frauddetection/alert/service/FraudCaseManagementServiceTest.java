@@ -379,7 +379,7 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
-    void shouldNotCreateRapidTransferCaseFromReasonCodeWithoutCompleteCanonicalEvidence() {
+    void shouldRejectRapidTransferClaimWithoutCompleteCanonicalEvidence() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         FraudCaseManagementService service = service(
                 fraudCaseRepository,
@@ -398,14 +398,16 @@ class FraudCaseManagementServiceTest {
                 ))
                 .build();
 
-        service.handleScoredTransaction(event);
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(FraudCaseEvidenceValidationException.class)
+                .hasMessage("RAPID_TRANSFER_MEMBERSHIP_MISSING");
 
         verify(fraudCaseRepository, never()).findByCaseKey(any());
         verify(fraudCaseRepository, never()).save(any());
     }
 
     @Test
-    void shouldNotCreateRapidTransferCaseFromMalformedCurrentCanonicalFacts() {
+    void shouldRejectMalformedQualifyingCanonicalFacts() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         FraudCaseManagementService service = service(
                 fraudCaseRepository,
@@ -434,15 +436,43 @@ class FraudCaseManagementServiceTest {
                 rapidTransferSnapshotWith(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1")),
                 rapidTransferSnapshotWith(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1", " "))
         );
-        malformedSnapshots.forEach(snapshot -> service.handleScoredTransaction(
+        malformedSnapshots.forEach(snapshot -> assertThatThrownBy(() -> service.handleScoredTransaction(
                 TransactionFixtures.scoredTransaction()
+                        .withTransactionId("rapid-txn-2")
                         .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
                         .withFeatureSnapshot(snapshot)
                         .build()
-        ));
+        )).isInstanceOf(FraudCaseEvidenceValidationException.class));
 
         verify(fraudCaseRepository, never()).findByCaseKey(any());
         verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldIgnoreValidSubthresholdRapidTransferFacts() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        var event = TransactionFixtures.scoredTransaction()
+                .withTransactionId("subthreshold-txn")
+                .withFeatureSnapshot(Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("subthreshold-txn")
+                ))
+                .build();
+
+        service.handleScoredTransaction(event);
+
+        verifyNoInteractions(fraudCaseRepository, scoredTransactionRepository);
     }
 
     @Test

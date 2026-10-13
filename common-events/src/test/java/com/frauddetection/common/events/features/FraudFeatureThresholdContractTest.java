@@ -49,6 +49,71 @@ class FraudFeatureThresholdContractTest {
     }
 
     @Test
+    void rapidTransferAssessmentSeparatesApplicabilityThresholdAndEvidenceValidity() {
+        Map<String, Object> validBurst = Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1", "txn-2")
+        );
+        Map<String, Object> validSubthreshold = Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"),
+                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1")
+        );
+
+        assertThat(FraudFeatureThresholdContract.assessRapidTransferPlnBurst(Map.of(), "txn-1", false).status())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.NOT_APPLICABLE);
+        assertThat(FraudFeatureThresholdContract.assessRapidTransferPlnBurst(
+                validSubthreshold,
+                "txn-1",
+                false
+        ).status()).isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.NOT_A_BURST);
+        FraudFeatureThresholdContract.RapidTransferAssessment accepted =
+                FraudFeatureThresholdContract.assessRapidTransferPlnBurst(validBurst, "txn-2", false);
+        assertThat(accepted.status()).isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.VALID_BURST);
+        assertThat(accepted.transactionIds()).containsExactly("txn-1", "txn-2");
+
+        FraudFeatureThresholdContract.RapidTransferAssessment invalidMembership =
+                FraudFeatureThresholdContract.assessRapidTransferPlnBurst(
+                        with(validBurst, FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                                List.of("txn-1", "txn-1")),
+                        "txn-2",
+                        false
+                );
+        assertThat(invalidMembership.status())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.INVALID_BURST_EVIDENCE);
+        assertThat(invalidMembership.issue())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferEvidenceIssue.MEMBERSHIP_INVALID);
+    }
+
+    @Test
+    void explicitBurstClaimAndCurrentTransactionMembershipFailClosed() {
+        FraudFeatureThresholdContract.RapidTransferAssessment absentClaimedEvidence =
+                FraudFeatureThresholdContract.assessRapidTransferPlnBurst(Map.of(), "txn-2", true);
+        assertThat(absentClaimedEvidence.status())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.INVALID_BURST_EVIDENCE);
+        assertThat(absentClaimedEvidence.issue())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferEvidenceIssue.MEMBERSHIP_MISSING);
+
+        FraudFeatureThresholdContract.RapidTransferAssessment missingCurrentTransaction =
+                FraudFeatureThresholdContract.assessRapidTransferPlnBurst(Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1", "txn-3")
+                ), "txn-2", false);
+        assertThat(missingCurrentTransaction.status())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferStatus.INVALID_BURST_EVIDENCE);
+        assertThat(missingCurrentTransaction.issue())
+                .isEqualTo(FraudFeatureThresholdContract.RapidTransferEvidenceIssue.CURRENT_TRANSACTION_MISSING);
+    }
+
+    @Test
     void rapidTransferSnapshotPredicateDoesNotFabricateIncompleteCases() {
         Map<String, Object> complete = Map.of(
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
