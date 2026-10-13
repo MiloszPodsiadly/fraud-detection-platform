@@ -177,22 +177,38 @@ class TransactionScoredRedriveKafkaMongoIntegrationTest extends AbstractIntegrat
 
     @Test
     void invalidRapidTransferEvidenceRollsBackAndUsesDurableRecoveryBeforeCorrectedProcessing() throws Exception {
-        String invalidTransactionId = "invalid-evidence-" + SUFFIX;
-        String invalidCustomerId = "invalid-customer-" + SUFFIX;
-        TransactionScoredEvent invalid = TransactionFixtures.scoredTransaction()
-                .withTransactionId(invalidTransactionId)
-                .withCustomerId(invalidCustomerId)
-                .withReasonCodes(List.of())
-                .withFeatureSnapshot(Map.of(
-                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
-                        List.of("prior-" + invalidTransactionId, invalidTransactionId),
-                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, "2",
-                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
-                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
-                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
-                        FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")
-                ))
-                .build();
+        String contradictoryTransactionId = "contradictory-evidence-" + SUFFIX;
+        String malformedTransactionId = "malformed-evidence-" + SUFFIX;
+        List<TransactionScoredEvent> invalidEvents = List.of(
+                TransactionFixtures.scoredTransaction()
+                        .withTransactionId(contradictoryTransactionId)
+                        .withCustomerId("contradictory-customer-" + SUFFIX)
+                        .withReasonCodes(List.of())
+                        .withFeatureSnapshot(Map.of(
+                                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                                List.of("prior-" + contradictoryTransactionId, contradictoryTransactionId),
+                                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
+                                FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                                FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")
+                        ))
+                        .build(),
+                TransactionFixtures.scoredTransaction()
+                        .withTransactionId(malformedTransactionId)
+                        .withCustomerId("malformed-customer-" + SUFFIX)
+                        .withReasonCodes(List.of())
+                        .withFeatureSnapshot(Map.of(
+                                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                                List.of(malformedTransactionId, malformedTransactionId),
+                                FraudFeatureContract.RECENT_TRANSACTION_COUNT, "2",
+                                FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                                FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")
+                        ))
+                        .build()
+        );
 
         try (KafkaConsumer<String, byte[]> deadLetterConsumer = recoveryConsumer("dead-letter-observer-");
              KafkaConsumer<String, byte[]> quarantineConsumer = recoveryConsumer("invalid-quarantine-observer-")) {
@@ -203,75 +219,105 @@ class TransactionScoredRedriveKafkaMongoIntegrationTest extends AbstractIntegrat
             awaitConsumerAssignment(deadLetterConsumer);
             awaitConsumerAssignment(quarantineConsumer);
 
-            kafkaTemplate.send(SOURCE_TOPIC, invalid.transactionId(), invalid).get(10, TimeUnit.SECONDS);
-            kafkaTemplate.flush();
+            for (TransactionScoredEvent invalid : invalidEvents) {
+                kafkaTemplate.send(SOURCE_TOPIC, invalid.transactionId(), invalid).get(10, TimeUnit.SECONDS);
+                kafkaTemplate.flush();
 
-            ConsumerRecord<String, byte[]> deadLettered = pollForRecord(deadLetterConsumer);
-            assertThat(deadLettered).isNotNull();
-            assertThat(deadLettered.value()).isNotEmpty();
-            assertThat(headerText(deadLettered, KafkaHeaders.DLT_ORIGINAL_TOPIC)).isEqualTo(SOURCE_TOPIC);
-            assertThat(deadLettered.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_PARTITION)).isNotNull();
-            assertThat(deadLettered.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_OFFSET)).isNotNull();
-            assertNoBusinessEffects(invalidTransactionId, invalidCustomerId);
+                ConsumerRecord<String, byte[]> deadLettered = pollForRecord(deadLetterConsumer);
+                assertThat(deadLettered).isNotNull();
+                assertThat(deadLettered.value()).isNotEmpty();
+                assertThat(headerText(deadLettered, KafkaHeaders.DLT_ORIGINAL_TOPIC)).isEqualTo(SOURCE_TOPIC);
+                assertThat(headerText(deadLettered, KafkaHeaders.DLT_ORIGINAL_CONSUMER_GROUP))
+                        .isEqualTo(SOURCE_GROUP);
+                assertThat(deadLettered.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_PARTITION)).isNotNull();
+                assertThat(deadLettered.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_OFFSET)).isNotNull();
+                assertNoBusinessEffects(invalid.transactionId(), invalid.customerId());
 
-            kafkaTemplate.send(validRedriveRecord(invalid)).get(10, TimeUnit.SECONDS);
-            kafkaTemplate.flush();
+                kafkaTemplate.send(validRedriveRecord(invalid)).get(10, TimeUnit.SECONDS);
+                kafkaTemplate.flush();
 
-            ConsumerRecord<String, byte[]> quarantined = pollForRecord(quarantineConsumer);
-            assertThat(quarantined).isNotNull();
-            assertThat(headerText(quarantined, KafkaHeaders.DLT_ORIGINAL_TOPIC)).isEqualTo(REDRIVE_TOPIC);
-            assertThat(quarantined.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_PARTITION)).isNotNull();
-            assertThat(quarantined.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_OFFSET)).isNotNull();
-            assertNoBusinessEffects(invalidTransactionId, invalidCustomerId);
+                ConsumerRecord<String, byte[]> quarantined = pollForRecord(quarantineConsumer);
+                assertThat(quarantined).isNotNull();
+                assertThat(headerText(quarantined, KafkaHeaders.DLT_ORIGINAL_TOPIC)).isEqualTo(REDRIVE_TOPIC);
+                assertThat(quarantined.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_PARTITION)).isNotNull();
+                assertThat(quarantined.headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_OFFSET)).isNotNull();
+                assertNoBusinessEffects(invalid.transactionId(), invalid.customerId());
+            }
 
-            TransactionScoredEvent corrected = TransactionFixtures.scoredTransaction()
-                    .withTransactionId(invalidTransactionId)
-                    .withCustomerId(invalidCustomerId)
-                    .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
-                    .withFeatureSnapshot(rapidTransferSnapshot(invalidTransactionId))
-                    .build();
-            kafkaTemplate.send(SOURCE_TOPIC, corrected.transactionId(), corrected).get(10, TimeUnit.SECONDS);
-            kafkaTemplate.send(SOURCE_TOPIC, corrected.transactionId(), corrected).get(10, TimeUnit.SECONDS);
-            kafkaTemplate.flush();
+            for (TransactionScoredEvent invalid : invalidEvents) {
+                TransactionScoredEvent corrected = TransactionFixtures.scoredTransaction()
+                        .withTransactionId(invalid.transactionId())
+                        .withCustomerId(invalid.customerId())
+                        .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
+                        .withFeatureSnapshot(rapidTransferSnapshot(invalid.transactionId()))
+                        .build();
+                kafkaTemplate.send(SOURCE_TOPIC, corrected.transactionId(), corrected).get(10, TimeUnit.SECONDS);
+                kafkaTemplate.send(SOURCE_TOPIC, corrected.transactionId(), corrected).get(10, TimeUnit.SECONDS);
+                kafkaTemplate.flush();
 
-            awaitCondition(
-                    () -> countByTransactionId(ScoredTransactionDocument.class, invalidTransactionId) == 1L,
-                    "one corrected scored transaction",
-                    corrected
+                awaitCondition(
+                        () -> countByTransactionId(ScoredTransactionDocument.class, corrected.transactionId()) == 1L,
+                        "one corrected scored transaction",
+                        corrected
+                );
+                awaitCondition(
+                        () -> countFraudCasesByCustomerId(corrected.customerId()) == 1L,
+                        "one corrected fraud case",
+                        corrected
+                );
+                assertThat(countByTransactionId(ScoredTransactionDocument.class, corrected.transactionId())).isOne();
+                assertThat(countFraudCasesByCustomerId(corrected.customerId())).isOne();
+            }
+
+            String singleTransactionId = "single-high-amount-" + SUFFIX;
+            String belowAmountTransactionId = "below-amount-threshold-" + SUFFIX;
+            String unrelatedTransactionId = "unrelated-features-" + SUFFIX;
+            List<TransactionScoredEvent> controls = List.of(
+                    TransactionFixtures.scoredTransaction()
+                            .withTransactionId(singleTransactionId)
+                            .withCustomerId("single-high-amount-customer-" + SUFFIX)
+                            .withReasonCodes(List.of())
+                            .withFeatureSnapshot(Map.of(
+                                    FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of(singleTransactionId),
+                                    FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
+                                    FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                                    FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                                    FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                                    FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("20000.00")
+                            ))
+                            .build(),
+                    TransactionFixtures.scoredTransaction()
+                            .withTransactionId(belowAmountTransactionId)
+                            .withCustomerId("below-amount-threshold-customer-" + SUFFIX)
+                            .withReasonCodes(List.of())
+                            .withFeatureSnapshot(Map.of(
+                                    FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                                    List.of("prior-" + belowAmountTransactionId, belowAmountTransactionId),
+                                    FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                                    FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                                    FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("19999.99"),
+                                    FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                                    FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("9999.99")
+                            ))
+                            .build(),
+                    TransactionFixtures.scoredTransaction()
+                            .withTransactionId(unrelatedTransactionId)
+                            .withCustomerId("unrelated-features-customer-" + SUFFIX)
+                            .withReasonCodes(List.of())
+                            .withFeatureSnapshot(Map.of(FraudFeatureContract.COUNTRY_MISMATCH, true))
+                            .build()
             );
-            awaitCondition(
-                    () -> countFraudCasesByCustomerId(invalidCustomerId) == 1L,
-                    "one corrected fraud case",
-                    corrected
-            );
-            assertThat(countByTransactionId(ScoredTransactionDocument.class, invalidTransactionId)).isOne();
-            assertThat(countFraudCasesByCustomerId(invalidCustomerId)).isOne();
-
-            String subthresholdTransactionId = "subthreshold-" + SUFFIX;
-            String subthresholdCustomerId = "subthreshold-customer-" + SUFFIX;
-            TransactionScoredEvent subthreshold = TransactionFixtures.scoredTransaction()
-                    .withTransactionId(subthresholdTransactionId)
-                    .withCustomerId(subthresholdCustomerId)
-                    .withReasonCodes(List.of())
-                    .withFeatureSnapshot(Map.of(
-                            FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
-                            List.of(subthresholdTransactionId),
-                            FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
-                            FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
-                            FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"),
-                            FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
-                            FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("100.00")
-                    ))
-                    .build();
-            kafkaTemplate.send(SOURCE_TOPIC, subthreshold.transactionId(), subthreshold).get(10, TimeUnit.SECONDS);
-            kafkaTemplate.flush();
-
-            awaitCondition(
-                    () -> countByTransactionId(ScoredTransactionDocument.class, subthresholdTransactionId) == 1L,
-                    "one subthreshold scored transaction",
-                    subthreshold
-            );
-            assertThat(countFraudCasesByCustomerId(subthresholdCustomerId)).isZero();
+            for (TransactionScoredEvent control : controls) {
+                kafkaTemplate.send(SOURCE_TOPIC, control.transactionId(), control).get(10, TimeUnit.SECONDS);
+                kafkaTemplate.flush();
+                awaitCondition(
+                        () -> countByTransactionId(ScoredTransactionDocument.class, control.transactionId()) == 1L,
+                        "one control scored transaction",
+                        control
+                );
+                assertThat(countFraudCasesByCustomerId(control.customerId())).isZero();
+            }
+            assertThat(deadLetterConsumer.poll(Duration.ofSeconds(2))).isEmpty();
         }
     }
 
