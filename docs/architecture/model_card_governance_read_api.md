@@ -2,7 +2,7 @@
 
 `GET /api/v1/governance/model-card/current` exposes one explicitly configured Model Card artifact set to callers with `model-card:read`.
 
-The provider reads only `ml_model_card.json`, `ml_model_card.md`, and `manifest.json` from the configured location. It rejects traversal, symlinks, non-canonical filenames, oversized or concurrently changed files, duplicate JSON keys, unsupported fields, and manifest digest or size mismatches. Disabled or unconfigured sources return `404`; configured but missing, corrupt, or inconsistent sources return a detail-safe `503`.
+The provider reads only `ml_model_card.json`, `ml_model_card.md`, and `manifest.json` from the configured location. It rejects traversal, symlinks, non-canonical filenames, oversized or concurrently changed files, duplicate JSON keys, unsupported fields, and manifest digest or size mismatches. A disabled source returns `404`. Enabling the source without a non-blank path, or with a card limit outside `1..524288` bytes or a Markdown limit outside `1..262144` bytes, fails application startup. With valid configuration, missing, corrupt, or inconsistent artifacts return a detail-safe `503`.
 
 The Python generator is the single writer of this artifact set, and this endpoint is its single application read route. Model Card and Platform Recommendation Evaluation Card share only the neutral `governance_artifact_safety.py` technical policy; neither product imports the other's schema, generator, writer, reader, or business contract. Model Card evaluation evidence comes exclusively from the exact-model evaluation artifact set.
 

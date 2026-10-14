@@ -68,7 +68,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
 
     @Override
     public Optional<ModelCard> currentCard() {
-        if (!properties.enabled() || properties.path() == null || properties.path().isBlank()) {
+        if (!properties.enabled()) {
             return Optional.empty();
         }
         try {

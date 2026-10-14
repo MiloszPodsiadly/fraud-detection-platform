@@ -7,8 +7,8 @@ public record ModelCardCurrentProperties(
         boolean enabled,
         String baseDir,
         String path,
-        long maxCardSizeBytes,
-        long maxMarkdownSizeBytes
+        Long maxCardSizeBytes,
+        Long maxMarkdownSizeBytes
 ) {
 
     private static final String DEFAULT_BASE_DIR = "/run/model-card";
@@ -19,11 +19,23 @@ public record ModelCardCurrentProperties(
         if (baseDir == null || baseDir.isBlank()) {
             baseDir = DEFAULT_BASE_DIR;
         }
-        if (maxCardSizeBytes <= 0) {
+        if (maxCardSizeBytes == null) {
             maxCardSizeBytes = DEFAULT_CARD_SIZE_BYTES;
         }
-        if (maxMarkdownSizeBytes <= 0) {
+        if (maxMarkdownSizeBytes == null) {
             maxMarkdownSizeBytes = DEFAULT_MARKDOWN_SIZE_BYTES;
+        }
+        if (enabled && (path == null || path.isBlank())) {
+            throw new IllegalArgumentException("model-card.current.path must be configured when enabled");
+        }
+        validateEnabledLimit(enabled, maxCardSizeBytes, DEFAULT_CARD_SIZE_BYTES, "max-card-size-bytes");
+        validateEnabledLimit(enabled, maxMarkdownSizeBytes, DEFAULT_MARKDOWN_SIZE_BYTES, "max-markdown-size-bytes");
+    }
+
+    private static void validateEnabledLimit(boolean enabled, long value, long maximum, String property) {
+        if (enabled && (value < 1 || value > maximum)) {
+            throw new IllegalArgumentException(
+                    "model-card.current.%s must be between 1 and %d when enabled".formatted(property, maximum));
         }
     }
 }

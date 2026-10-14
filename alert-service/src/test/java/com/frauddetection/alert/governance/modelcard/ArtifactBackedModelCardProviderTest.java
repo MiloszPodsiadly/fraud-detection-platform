@@ -52,9 +52,8 @@ class ArtifactBackedModelCardProviderTest {
     }
 
     @Test
-    void disabledOrUnconfiguredProviderReturnsEmpty() {
+    void disabledProviderReturnsEmpty() {
         assertThat(provider(false, null).currentCard()).isEmpty();
-        assertThat(provider(true, " ").currentCard()).isEmpty();
     }
 
     @Test
