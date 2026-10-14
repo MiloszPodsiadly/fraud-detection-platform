@@ -31,6 +31,9 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
             "artifactSetVersion", "files", "generatedAt", "reportType"
     );
     private static final Set<String> FILE_FIELDS = Set.of("name", "sha256", "sizeBytes");
+    private static final Set<String> ARTIFACT_FILENAMES = Set.of(
+            CARD_FILENAME, MARKDOWN_FILENAME, MANIFEST_FILENAME
+    );
 
     private final ModelCardCurrentProperties properties;
     private final ObjectMapper objectMapper;
@@ -76,14 +79,22 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
             );
             Path markdownPath = artifactReader.resolveSibling(cardPath, MARKDOWN_FILENAME);
             Path manifestPath = artifactReader.resolveSibling(cardPath, MANIFEST_FILENAME);
+            artifactReader.requireExactDirectoryEntries(cardPath.getParent(), ARTIFACT_FILENAMES);
             byte[] firstManifest = artifactReader.read(manifestPath, MAX_MANIFEST_SIZE_BYTES);
             byte[] cardPayload = artifactReader.read(cardPath, properties.maxCardSizeBytes());
             byte[] markdownPayload = artifactReader.read(markdownPath, properties.maxMarkdownSizeBytes());
+            JsonNode cardTree = readTree(cardPayload);
             ModelCard card = readCard(cardPayload);
             validator.validate(card);
+            validateCanonicalArtifacts(firstManifest, cardPayload, markdownPayload, cardTree);
             validateManifest(firstManifest, cardPayload, markdownPayload, card);
             byte[] secondManifest = artifactReader.read(manifestPath, MAX_MANIFEST_SIZE_BYTES);
-            if (!Arrays.equals(firstManifest, secondManifest)) {
+            byte[] secondCard = artifactReader.read(cardPath, properties.maxCardSizeBytes());
+            byte[] secondMarkdown = artifactReader.read(markdownPath, properties.maxMarkdownSizeBytes());
+            artifactReader.requireExactDirectoryEntries(cardPath.getParent(), ARTIFACT_FILENAMES);
+            if (!Arrays.equals(firstManifest, secondManifest)
+                    || !Arrays.equals(cardPayload, secondCard)
+                    || !Arrays.equals(markdownPayload, secondMarkdown)) {
                 throw unavailable();
             }
             return Optional.of(card);
@@ -114,6 +125,9 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
         require(card.generatedAt().equals(text(manifest, "generatedAt")), "generatedAt mismatch");
         JsonNode files = manifest.get("files");
         require(files != null && files.isArray() && files.size() == 2, "manifest file set unsupported");
+        require(CARD_FILENAME.equals(text(files.get(0), "name"))
+                        && MARKDOWN_FILENAME.equals(text(files.get(1), "name")),
+                "manifest file order unsupported");
         Map<String, JsonNode> entries = new HashMap<>();
         for (JsonNode entry : files) {
             exactFields(entry, FILE_FIELDS, "manifest file");
@@ -124,6 +138,21 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
         require(entries.size() == 2, "manifest file set unsupported");
         validateEntry(entries.get(CARD_FILENAME), cardPayload);
         validateEntry(entries.get(MARKDOWN_FILENAME), markdownPayload);
+    }
+
+    private void validateCanonicalArtifacts(
+            byte[] manifestPayload,
+            byte[] cardPayload,
+            byte[] markdownPayload,
+            JsonNode cardTree
+    ) {
+        require(Arrays.equals(cardPayload, ModelCardCanonicalArtifact.json(objectMapper, cardTree)),
+                "model card JSON is not canonical");
+        require(Arrays.equals(markdownPayload, ModelCardCanonicalArtifact.markdown(cardTree)),
+                "model card markdown is not canonical");
+        JsonNode manifest = readTree(manifestPayload);
+        require(Arrays.equals(manifestPayload, ModelCardCanonicalArtifact.json(objectMapper, manifest)),
+                "model card manifest is not canonical");
     }
 
     private void validateEntry(JsonNode entry, byte[] payload) {

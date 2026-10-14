@@ -11,7 +11,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 public final class GovernanceArtifactReader {
 
@@ -76,6 +78,22 @@ public final class GovernanceArtifactReader {
                 throw unavailable();
             }
             return payload;
+        } catch (IOException | SecurityException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    public void requireExactDirectoryEntries(Path directory, Set<String> expectedEntries) {
+        Objects.requireNonNull(directory);
+        Objects.requireNonNull(expectedEntries);
+        assertNoSymlinkDirectory(directory);
+        try (var entries = Files.list(directory)) {
+            Set<String> actualEntries = entries
+                    .map(path -> path.getFileName().toString())
+                    .collect(Collectors.toUnmodifiableSet());
+            if (!actualEntries.equals(expectedEntries)) {
+                throw unavailable();
+            }
         } catch (IOException | SecurityException exception) {
             throw unavailable(exception);
         }

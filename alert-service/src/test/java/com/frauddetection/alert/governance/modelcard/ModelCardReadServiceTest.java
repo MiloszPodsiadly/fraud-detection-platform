@@ -56,6 +56,32 @@ class ModelCardReadServiceTest {
         assertThat(counter("unavailable")).isEqualTo(1.0);
     }
 
+    @Test
+    void malformedProviderResultMapsToDetailSafe503() {
+        ModelCard valid = ModelCardTestFixtures.validUnavailableCard(objectMapper);
+        ModelCard malformed = new ModelCard(
+                valid.schemaVersion(), valid.cardType(), valid.generatedAt(), valid.subject(), valid.promotionState(),
+                valid.modelArtifactVerification(), valid.evaluationEvidence(), valid.evaluationSummary(),
+                new ModelCard.VerifiedUsageBoundary(
+                        valid.verifiedUsageBoundary().allowedModes(),
+                        valid.verifiedUsageBoundary().intendedUse(),
+                        valid.verifiedUsageBoundary().notIntendedUse(),
+                        valid.verifiedUsageBoundary().useLimitations(),
+                        null, "NONE", "NONE", "NONE", "NONE"
+                )
+        );
+        when(provider.currentCard()).thenReturn(Optional.of(malformed));
+
+        assertThatThrownBy(service::currentCard)
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException response = (ResponseStatusException) exception;
+                    assertThat(response.getStatusCode().value()).isEqualTo(503);
+                    assertThat(response.getReason()).isEqualTo("Model Card is invalid.");
+                });
+        assertThat(counter("invalid")).isEqualTo(1.0);
+    }
+
     private double counter(String outcome) {
         return meterRegistry.get("governance_model_card_read_total").tag("outcome", outcome).counter().count();
     }

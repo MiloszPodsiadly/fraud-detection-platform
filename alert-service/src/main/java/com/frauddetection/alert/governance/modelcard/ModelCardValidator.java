@@ -3,12 +3,16 @@ package com.frauddetection.alert.governance.modelcard;
 import tools.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.DateTimeException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 @Component
@@ -60,14 +64,27 @@ public class ModelCardValidator {
             "MODEL_SPECIFIC_EVALUATION_DOES_NOT_AUTHORIZE_PAYMENTS",
             "ML_PREDICTION_METRICS_REQUIRE_DIRECT_ML_OUTPUT_SIGNALS"
     );
-    private static final Set<String> WARNINGS = Set.of(
-            "INSUFFICIENT_MODEL_LINEAGE_RECORDS", "SINGLE_CLASS_MODEL_LINEAGE_RECORDS",
-            "MODEL_PREDICTION_SIGNAL_UNAVAILABLE", "UNEXPECTED_ML_EVIDENCE_LOSS",
-            "INVALID_ML_EVIDENCE_PRESENT", "MODEL_EVALUATION_PARTIAL_COVERAGE",
-            "SOURCE_DATASET_TRUNCATED", "SOURCE_DATASET_REQUIRED_FIELDS_MISSING",
-            "SOURCE_DATASET_INVALID_ROWS_SKIPPED"
+    private static final List<String> INTENDED_USE = List.of(
+            "EXACT_MODEL_OFFLINE_EVALUATION",
+            "RULES_VS_ML_DIAGNOSTIC_COMPARISON",
+            "SHADOW_MODEL_MONITORING"
     );
-
+    private static final List<String> NOT_INTENDED_USE = List.of(
+            "AUTOMATIC_APPROVE_DECLINE_OR_BLOCK",
+            "MODEL_PROMOTION_APPROVAL",
+            "PAYMENT_AUTHORIZATION",
+            "PRIMARY_PRODUCTION_FRAUD_DECISIONING",
+            "SCORING_THRESHOLD_CHANGE",
+            "WORKFLOW_OR_ANALYST_RECOMMENDATION"
+    );
+    private static final List<String> USE_LIMITATIONS = List.of(
+            "ANALYST_FEEDBACK_IS_REVIEW_SIGNAL_NOT_GROUND_TRUTH",
+            "BOUNDED_RETURNED_POPULATION_ONLY",
+            "DOES_NOT_ESTABLISH_GLOBAL_DATASET_COMPLETENESS",
+            "DOES_NOT_ESTABLISH_MODEL_CALIBRATION",
+            "DOES_NOT_ESTABLISH_PRODUCTION_READINESS",
+            "SOURCE_VERIFICATION_LEVEL_MUST_BE_INTERPRETED_EXPLICITLY"
+    );
     public void validate(ModelCard card) {
         require(card != null, "model card is missing");
         require(CARD_SCHEMA.equals(card.schemaVersion()), "schemaVersion unsupported");
@@ -159,7 +176,7 @@ public class ModelCardValidator {
         validateLineage(summary.get("lineagePolicy"));
         validateSupportedMetrics(summary.get("supportedMetrics"), population, balance);
         exactMachineCodes(summary.get("limitations"), LIMITATIONS, true, "limitations");
-        exactMachineCodes(summary.get("warnings"), WARNINGS, false, "warnings");
+        validateExpectedWarnings(summary.get("warnings"), summary.get("sourceDataset"), population, balance);
     }
 
     private void validateSummarySubject(JsonNode subject, ModelCard.Subject expected) {
@@ -277,37 +294,85 @@ public class ModelCardValidator {
         int fn = integer(metrics, "falseNegative", MAX_RECORDS);
         require(tp + fn == balance.get("positiveClassCount"), "positive confusion counts do not reconcile");
         require(tn + fp == balance.get("negativeClassCount"), "negative confusion counts do not reconcile");
+        require(tp + fp + tn + fn == recordsEvaluated, "confusion counts do not reconcile");
         require("RISK_HIGH_OR_CRITICAL_POSITIVE_V1".equals(text(metrics, "classificationPolicy")),
                 "classificationPolicy unsupported");
         require("EXACT_ML_PREDICTION_SCORE_DESC_EVALUATION_RECORD_ID_ASC_V1"
                         .equals(text(metrics, "rankingPolicy")), "rankingPolicy unsupported");
         validateAvailabilityFields(metrics, recordsEvaluated > 0, "MODEL_PREDICTION_SIGNAL_UNAVAILABLE");
-        for (String field : List.of(
-                "precision", "recall", "truePositiveRate", "falsePositiveRate", "falseNegativeRate"
-        )) {
-            validateMetricValue(metrics.get(field), "mlPredictionMetrics." + field);
-        }
-        validateRanking(metrics.get("precisionAtK"), "precisionAtK", recordsEvaluated);
-        validateRanking(metrics.get("recallAtK"), "recallAtK", recordsEvaluated);
-        require(metrics.get("precisionAtK").size() == metrics.get("recallAtK").size(),
-                "ranking metric key sets differ");
-        for (Map.Entry<String, JsonNode> entry : metrics.get("precisionAtK").properties()) {
-            require(metrics.get("recallAtK").has(entry.getKey()), "ranking metric key sets differ");
-        }
+        validateExpectedMetric(metrics.get("precision"), tp, tp + fp,
+                "NO_PREDICTED_POSITIVES", "mlPredictionMetrics.precision");
+        validateExpectedMetric(metrics.get("recall"), tp, tp + fn,
+                "NO_ACTUAL_POSITIVES", "mlPredictionMetrics.recall");
+        validateExpectedMetric(metrics.get("truePositiveRate"), tp, tp + fn,
+                "NO_ACTUAL_POSITIVES", "mlPredictionMetrics.truePositiveRate");
+        validateExpectedMetric(metrics.get("falsePositiveRate"), fp, fp + tn,
+                "NO_ACTUAL_NEGATIVES", "mlPredictionMetrics.falsePositiveRate");
+        validateExpectedMetric(metrics.get("falseNegativeRate"), fn, fn + tp,
+                "NO_ACTUAL_POSITIVES", "mlPredictionMetrics.falseNegativeRate");
+        validateRankedMetrics(
+                metrics.get("precisionAtK"),
+                metrics.get("recallAtK"),
+                recordsEvaluated,
+                balance.get("positiveClassCount")
+        );
     }
 
-    private void validateRanking(JsonNode ranking, String label, int recordsEvaluated) {
-        require(ranking != null && ranking.isObject() && !ranking.isEmpty(), label + " must be an object");
-        require(ranking.size() <= 32, label + " contains too many K values");
-        for (Map.Entry<String, JsonNode> entry : ranking.properties()) {
-            JsonNode row = entry.getValue();
-            exactFields(row, Set.of("requestedK", "actualK", "value"), label + " row");
-            int requested = integer(row, "requestedK", MAX_RECORDS);
-            require(requested > 0 && entry.getKey().equals(Integer.toString(requested)), label + " key mismatch");
-            require(integer(row, "actualK", MAX_RECORDS) == Math.min(requested, recordsEvaluated),
-                    label + " actualK mismatch");
-            validateMetricValue(row.get("value"), label + ".value");
+    private void validateRankedMetrics(
+            JsonNode precisionAtK,
+            JsonNode recallAtK,
+            int recordsEvaluated,
+            int totalPositive
+    ) {
+        require(precisionAtK != null && precisionAtK.isObject() && !precisionAtK.isEmpty(),
+                "precisionAtK must be a non-empty object");
+        require(recallAtK != null && recallAtK.isObject(), "recallAtK must be an object");
+        require(precisionAtK.size() <= 32, "precisionAtK contains too many K values");
+        require(precisionAtK.size() == recallAtK.size(), "ranking metric key sets differ");
+        Map<Integer, RankedPrefix> prefixes = new TreeMap<>();
+        for (Map.Entry<String, JsonNode> entry : precisionAtK.properties()) {
+            require(recallAtK.has(entry.getKey()), "ranking metric key sets differ");
+            JsonNode precisionRow = entry.getValue();
+            JsonNode recallRow = recallAtK.get(entry.getKey());
+            exactFields(precisionRow, Set.of("requestedK", "actualK", "value"), "precisionAtK row");
+            exactFields(recallRow, Set.of("requestedK", "actualK", "value"), "recallAtK row");
+            int requested = integer(precisionRow, "requestedK", MAX_RECORDS);
+            require(requested > 0 && entry.getKey().equals(Integer.toString(requested)),
+                    "ranking requestedK is invalid");
+            require(integer(recallRow, "requestedK", MAX_RECORDS) == requested,
+                    "ranking requestedK is inconsistent");
+            int actual = integer(precisionRow, "actualK", MAX_RECORDS);
+            require(actual == Math.min(requested, recordsEvaluated)
+                            && integer(recallRow, "actualK", MAX_RECORDS) == actual,
+                    "ranking actualK is inconsistent");
+            int matchedPositiveCount = -1;
+            for (int positiveAtK = 0; positiveAtK <= Math.min(actual, totalPositive); positiveAtK++) {
+                if (matchesExpectedMetric(precisionRow.get("value"), positiveAtK, actual, "NO_SCORED_RECORDS")
+                        && matchesExpectedMetric(
+                        recallRow.get("value"),
+                        recordsEvaluated > 0 ? positiveAtK : 0,
+                        recordsEvaluated > 0 ? totalPositive : 0,
+                        recordsEvaluated > 0 ? "NO_POSITIVE_RECORDS" : "NO_SCORED_RECORDS"
+                )) {
+                    require(matchedPositiveCount < 0, "ranking metric values are ambiguous");
+                    matchedPositiveCount = positiveAtK;
+                }
+            }
+            require(matchedPositiveCount >= 0, "ranking metric values are inconsistent");
+            prefixes.put(requested, new RankedPrefix(actual, matchedPositiveCount));
         }
+        int previousActual = 0;
+        int previousPositive = 0;
+        for (RankedPrefix prefix : prefixes.values()) {
+            require(prefix.actualK() >= previousActual
+                            && prefix.positiveCount() >= previousPositive
+                            && prefix.positiveCount() - previousPositive <= prefix.actualK() - previousActual,
+                    "ranking prefixes are inconsistent");
+            previousActual = prefix.actualK();
+            previousPositive = prefix.positiveCount();
+        }
+        require(previousActual != recordsEvaluated || previousPositive == totalPositive,
+                "complete ranking must include all positive records");
     }
 
     private void validateDisagreement(JsonNode value, int recordsEvaluated) {
@@ -351,30 +416,123 @@ public class ModelCardValidator {
                 "metric availability reason mismatch");
     }
 
-    private void validateMetricValue(JsonNode metric, String label) {
-        exactFields(metric, Set.of("available", "reason", "value"), label);
-        require(metric.get("available").isBoolean(), label + ".available must be boolean");
-        if (metric.get("available").booleanValue()) {
-            require(metric.get("reason").isNull(), label + ".reason must be null");
-            JsonNode value = metric.get("value");
-            require(value.isNumber() && Double.isFinite(value.doubleValue())
-                    && value.doubleValue() >= 0.0 && value.doubleValue() <= 1.0, label + ".value out of range");
-        } else {
-            require(metric.get("reason").isTextual() && !metric.get("reason").textValue().isBlank(),
-                    label + ".reason missing");
-            require(metric.get("value").isNull(), label + ".value must be null");
+    private void validateExpectedMetric(
+            JsonNode metric,
+            int numerator,
+            int denominator,
+            String unavailableReason,
+            String label
+    ) {
+        require(matchesExpectedMetric(metric, numerator, denominator, unavailableReason),
+                label + " is inconsistent");
+    }
+
+    private boolean matchesExpectedMetric(
+            JsonNode metric,
+            int numerator,
+            int denominator,
+            String unavailableReason
+    ) {
+        try {
+            validateMetricShape(metric);
+        } catch (ModelCardValidationException exception) {
+            return false;
         }
+        if (denominator == 0) {
+            return !metric.get("available").booleanValue()
+                    && metric.get("value").isNull()
+                    && metric.get("reason").isTextual()
+                    && unavailableReason.equals(metric.get("reason").textValue());
+        }
+        if (!metric.get("available").booleanValue() || !metric.get("reason").isNull()) {
+            return false;
+        }
+        JsonNode value = metric.get("value");
+        if (!value.isNumber() || !Double.isFinite(value.doubleValue())) {
+            return false;
+        }
+        BigDecimal expected = roundedMetricValue(numerator, denominator);
+        return value.decimalValue().compareTo(expected) == 0;
+    }
+
+    static BigDecimal roundedMetricValue(int numerator, int denominator) {
+        return new BigDecimal((double) numerator / denominator)
+                .setScale(6, RoundingMode.HALF_EVEN)
+                .stripTrailingZeros();
+    }
+
+    private void validateMetricShape(JsonNode metric) {
+        exactFields(metric, Set.of("available", "reason", "value"), "metric value");
+        require(metric.get("available").isBoolean(), "metric available must be boolean");
+        require(metric.get("reason").isNull() || metric.get("reason").isTextual(),
+                "metric reason must be text or null");
+    }
+
+    private record RankedPrefix(int actualK, int positiveCount) {
     }
 
     private void validateUsageBoundary(ModelCard.VerifiedUsageBoundary boundary) {
         require(boundary != null, "verifiedUsageBoundary is missing");
-        require(List.of("COMPARE", "OFFLINE_EVALUATION", "SHADOW").equals(boundary.allowedModes()),
+        require(boundary.allowedModes() != null
+                        && List.of("COMPARE", "OFFLINE_EVALUATION", "SHADOW").equals(boundary.allowedModes()),
                 "verifiedUsageBoundary.allowedModes unsupported");
-        require(List.of(
-                boundary.runtimeDecisionAuthority(), boundary.promotionAuthority(),
-                boundary.thresholdChangeAuthority(), boundary.paymentAuthorizationAuthority(),
-                boundary.workflowAuthority()
-        ).stream().allMatch("NONE"::equals), "verified usage authority must be NONE");
+        require(INTENDED_USE.equals(boundary.intendedUse()), "verifiedUsageBoundary.intendedUse unsupported");
+        require(NOT_INTENDED_USE.equals(boundary.notIntendedUse()),
+                "verifiedUsageBoundary.notIntendedUse unsupported");
+        require(USE_LIMITATIONS.equals(boundary.useLimitations()),
+                "verifiedUsageBoundary.useLimitations unsupported");
+        require("NONE".equals(boundary.runtimeDecisionAuthority()),
+                "verifiedUsageBoundary.runtimeDecisionAuthority must be NONE");
+        require("NONE".equals(boundary.promotionAuthority()),
+                "verifiedUsageBoundary.promotionAuthority must be NONE");
+        require("NONE".equals(boundary.thresholdChangeAuthority()),
+                "verifiedUsageBoundary.thresholdChangeAuthority must be NONE");
+        require("NONE".equals(boundary.paymentAuthorizationAuthority()),
+                "verifiedUsageBoundary.paymentAuthorizationAuthority must be NONE");
+        require("NONE".equals(boundary.workflowAuthority()),
+                "verifiedUsageBoundary.workflowAuthority must be NONE");
+    }
+
+    void validateExpectedWarnings(
+            JsonNode warnings,
+            JsonNode sourceDataset,
+            Map<String, Integer> population,
+            Map<String, Integer> balance
+    ) {
+        List<String> expected = new ArrayList<>();
+        if (sourceDataset.get("truncated").booleanValue()) {
+            expected.add("SOURCE_DATASET_TRUNCATED");
+        }
+        if (integer(sourceDataset, "skippedMissingRequiredFieldCount", MAX_RECORDS) > 0) {
+            expected.add("SOURCE_DATASET_REQUIRED_FIELDS_MISSING");
+        }
+        if (integer(sourceDataset, "skippedInvalidSourceRecordCount", MAX_RECORDS) > 0) {
+            expected.add("SOURCE_DATASET_INVALID_ROWS_SKIPPED");
+        }
+        int evaluated = population.get("recordsEvaluated");
+        if (evaluated == 0) {
+            expected.add("INSUFFICIENT_MODEL_LINEAGE_RECORDS");
+            expected.add("MODEL_PREDICTION_SIGNAL_UNAVAILABLE");
+        } else if (balance.get("positiveClassCount") == 0 || balance.get("negativeClassCount") == 0) {
+            expected.add("SINGLE_CLASS_MODEL_LINEAGE_RECORDS");
+        }
+        if (population.get("recordsExcludedUnexpectedMissingPredictionEvidence") > 0) {
+            expected.add("UNEXPECTED_ML_EVIDENCE_LOSS");
+        }
+        if (population.get("recordsExcludedInvalidPredictionEvidence") > 0) {
+            expected.add("INVALID_ML_EVIDENCE_PRESENT");
+        }
+        if (evaluated < population.get("recordsConsidered")) {
+            expected.add("MODEL_EVALUATION_PARTIAL_COVERAGE");
+        }
+        expected.sort(String::compareTo);
+        require(warnings != null && warnings.isArray() && warnings.size() == expected.size(),
+                "warnings do not match evaluated evidence");
+        for (int index = 0; index < expected.size(); index++) {
+            JsonNode warning = warnings.get(index);
+            require(warning != null && warning.isTextual() && expected.get(index).equals(warning.textValue()),
+                    "warnings do not match evaluated evidence");
+        }
     }
 
     private void exactMachineCodes(JsonNode value, Set<String> allowed, boolean exact, String label) {

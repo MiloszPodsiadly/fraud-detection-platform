@@ -28,6 +28,9 @@ public record ModelCardResponse(
                 card.evaluationSummary() == null ? null : card.evaluationSummary().deepCopy(),
                 new ModelCard.VerifiedUsageBoundary(
                         List.copyOf(card.verifiedUsageBoundary().allowedModes()),
+                        List.copyOf(card.verifiedUsageBoundary().intendedUse()),
+                        List.copyOf(card.verifiedUsageBoundary().notIntendedUse()),
+                        List.copyOf(card.verifiedUsageBoundary().useLimitations()),
                         card.verifiedUsageBoundary().runtimeDecisionAuthority(),
                         card.verifiedUsageBoundary().promotionAuthority(),
                         card.verifiedUsageBoundary().thresholdChangeAuthority(),

@@ -31,6 +31,9 @@ public record ModelCard(
 
     public record VerifiedUsageBoundary(
             List<String> allowedModes,
+            List<String> intendedUse,
+            List<String> notIntendedUse,
+            List<String> useLimitations,
             String runtimeDecisionAuthority,
             String promotionAuthority,
             String thresholdChangeAuthority,

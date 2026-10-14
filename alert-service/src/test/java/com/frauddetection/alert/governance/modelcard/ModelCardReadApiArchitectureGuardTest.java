@@ -73,7 +73,23 @@ class ModelCardReadApiArchitectureGuardTest {
         String architecture = Files.readString(ROOT.resolve("docs/architecture/model_card_governance_read_api.md"));
         String securityMap = Files.readString(ROOT.resolve("docs/security/endpoint_authorization_map.md"));
 
+        int modelCardStart = openApi.indexOf("    ModelCardResponse:");
+        int modelCardEnd = openApi.indexOf("    GenericObject:", modelCardStart);
+        String modelCardSchemas = openApi.substring(modelCardStart, modelCardEnd);
         assertThat(openApi).contains("/api/v1/governance/model-card/current", "ModelCardResponse", "model-card:read");
+        assertThat(modelCardSchemas)
+                .contains(
+                        "ModelCardEvaluationAvailable:",
+                        "ModelCardEvaluationUnavailable:",
+                        "ModelCardEvaluationSummary:",
+                        "ModelCardPredictionMetrics:",
+                        "ModelCardDisagreementMetrics:",
+                        "ModelCardUsageBoundary:",
+                        "intendedUse:",
+                        "notIntendedUse:",
+                        "useLimitations:"
+                )
+                .doesNotContain("#/components/schemas/GenericObject", "additionalProperties: true");
         assertThat(architecture).contains("grants no production decision", "scans for a latest artifact");
         assertThat(securityMap).contains("GET /api/v1/governance/model-card/current", "MODEL_CARD_READ");
     }
