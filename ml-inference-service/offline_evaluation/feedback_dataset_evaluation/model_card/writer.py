@@ -24,6 +24,7 @@ MODEL_CARD_ARTIFACT_SET_VERSION = "ml-model-card-artifact-set-v1"
 MODEL_CARD_FILENAME = "ml_model_card.json"
 MODEL_CARD_MARKDOWN_FILENAME = "ml_model_card.md"
 MODEL_CARD_MANIFEST_FILENAME = "manifest.json"
+MAX_MODEL_CARD_MARKDOWN_BYTES = 262_144
 
 
 def model_card_json(card: dict[str, Any]) -> str:
@@ -42,53 +43,115 @@ def model_card_markdown(card: dict[str, Any]) -> str:
         "",
         "## Model identity",
         "",
-        f"- Model name: `{subject['modelName']}`",
-        f"- Model version: `{subject['modelVersion']}`",
-        f"- Feature contract: `{subject['featureContractVersion']}`",
-        f"- Artifact SHA-256: `{subject['modelArtifactSha256']}`",
-        f"- Artifact verification: `{validated['modelArtifactVerification']['status']}`",
+        f"- Model name: {_code(subject['modelName'])}",
+        f"- Model version: {_code(subject['modelVersion'])}",
+        f"- Feature contract: {_code(subject['featureContractVersion'])}",
+        f"- Artifact SHA-256: {_code(subject['modelArtifactSha256'])}",
+        f"- Artifact verification: {_code(validated['modelArtifactVerification']['status'])}",
         "",
         "## Evaluation evidence",
         "",
-        f"- Status: `{evidence['status']}`",
+        f"- Status: {_code(evidence['status'])}",
     ]
     if evidence["status"] == EVALUATION_AVAILABLE:
         summary = validated["evaluationSummary"]
         lines.extend([
-            f"- Report type: `{evidence['reportType']}`",
-            f"- Report generated at: `{evidence['reportGeneratedAt']}`",
-            f"- Report and manifest integrity: `{evidence['integrityVerification']}`",
-            f"- Source dataset verification: `{evidence['sourceDatasetVerificationLevel']}`",
-            f"- Source dataset SHA-256: `{summary['sourceDataset']['sha256']}`",
+            f"- Report type: {_code(evidence['reportType'])}",
+            f"- Report generated at: {_code(evidence['reportGeneratedAt'])}",
+            f"- Report and manifest integrity: {_code(evidence['integrityVerification'])}",
+            f"- Source dataset verification: {_code(evidence['sourceDatasetVerificationLevel'])}",
             "",
-            "### Population",
+            "### Source dataset",
+            "",
+        ])
+        source = summary["sourceDataset"]
+        for label, field in (
+            ("Dataset version", "datasetVersion"),
+            ("SHA-256", "sha256"),
+            ("Raw rows read", "rawRowsRead"),
+            ("Records returned", "recordsReturned"),
+            ("Unresolved rows excluded", "excludedUnresolvedCount"),
+            ("Governance-review rows excluded", "excludedGovernanceReviewCount"),
+            ("Missing-required-field rows skipped", "skippedMissingRequiredFieldCount"),
+            ("Invalid source rows skipped", "skippedInvalidSourceRecordCount"),
+            ("Truncated", "truncated"),
+        ):
+            lines.append(f"- {label}: {_code(source[field])}")
+        lines.extend([
+            "",
+            "### Evaluation population",
             "",
         ])
         for name, value in sorted(summary["population"].items()):
-            lines.append(f"- {name}: `{value}`")
+            lines.append(f"- {name}: {_code(value)}")
         lines.extend([
             "",
             "### Class balance",
             "",
-            f"- Positive class count: `{summary['classBalance']['positiveClassCount']}`",
-            f"- Negative class count: `{summary['classBalance']['negativeClassCount']}`",
+            f"- Positive class count: {_code(summary['classBalance']['positiveClassCount'])}",
+            f"- Negative class count: {_code(summary['classBalance']['negativeClassCount'])}",
             "",
             "### Metric availability",
             "",
         ])
         for name, metric in sorted(summary["supportedMetrics"].items()):
             reason = metric["reason"] if metric["reason"] is not None else "NONE"
-            lines.append(f"- {name}: available=`{str(metric['available']).lower()}`, reason=`{reason}`")
+            lines.append(
+                f"- {name}: available={_code(metric['available'])}, reason={_code(reason)}"
+            )
+        prediction = summary["supportedMetrics"]["mlPredictionMetrics"]
+        lines.extend([
+            "",
+            "### Confusion matrix",
+            "",
+            f"- True positive: {_code(prediction['truePositive'])}",
+            f"- False positive: {_code(prediction['falsePositive'])}",
+            f"- True negative: {_code(prediction['trueNegative'])}",
+            f"- False negative: {_code(prediction['falseNegative'])}",
+            "",
+            "### Prediction metrics",
+            "",
+        ])
+        for label, field in (
+            ("Precision", "precision"),
+            ("Recall", "recall"),
+            ("True-positive rate", "truePositiveRate"),
+            ("False-positive rate", "falsePositiveRate"),
+            ("False-negative rate", "falseNegativeRate"),
+        ):
+            lines.append(_metric_line(label, prediction[field]))
+        lines.extend(_ranking_section("Precision at K", prediction["precisionAtK"]))
+        lines.extend(_ranking_section("Recall at K", prediction["recallAtK"]))
+        disagreement = summary["supportedMetrics"]["rulesVsMlDisagreement"]
+        lines.extend([
+            "",
+            "### Rules-vs-ML disagreement",
+            "",
+            f"- Available: {_code(disagreement['available'])}",
+            f"- Reason: {_code(disagreement['reason'] if disagreement['reason'] is not None else 'NONE')}",
+            f"- Records with exact ML evidence: {_code(disagreement['recordsWithExactMlEvidence'])}",
+            f"- Records compared: {_code(disagreement['recordsCompared'])}",
+            f"- Records excluded because Rules evidence was unavailable: {_code(disagreement['recordsExcludedRulesEvidenceUnavailable'])}",
+        ])
+        for name, value in sorted(disagreement["categoryCounts"].items()):
+            lines.append(f"- {name}: {_code(value)}")
         lines.extend(_machine_code_section("Warnings", summary["warnings"]))
         lines.extend(_machine_code_section("Limitations", summary["limitations"]))
     else:
-        lines.append(f"- Reason: `{evidence['reason']}`")
+        lines.append(f"- Reason: {_code(evidence['reason'])}")
+    boundary = validated["verifiedUsageBoundary"]
     lines.extend([
         "",
         "## Verified usage boundary",
         "",
-        f"- Allowed modes: `{', '.join(validated['verifiedUsageBoundary']['allowedModes'])}`",
-        f"- Promotion state: `{validated['promotionState']}`",
+        f"- Allowed modes: {_code(', '.join(boundary['allowedModes']))}",
+        f"- Promotion state: {_code(validated['promotionState'])}",
+    ])
+    lines.extend(_machine_code_section("Intended use", boundary["intendedUse"]))
+    lines.extend(_machine_code_section("Not intended use", boundary["notIntendedUse"]))
+    lines.extend(_machine_code_section("Use limitations", boundary["useLimitations"]))
+    lines.extend([
+        "",
         "- Runtime decision authority: `NONE`",
         "- Promotion authority: `NONE`",
         "- Threshold change authority: `NONE`",
@@ -96,7 +159,10 @@ def model_card_markdown(card: dict[str, Any]) -> str:
         "- Workflow authority: `NONE`",
         "",
     ])
-    return "\n".join(lines)
+    markdown = "\n".join(lines)
+    if len(markdown.encode("utf-8")) > MAX_MODEL_CARD_MARKDOWN_BYTES:
+        raise ModelCardValidationError("model card markdown exceeds maximum payload size")
+    return markdown
 
 
 def build_model_card_manifest(payloads: dict[Path, str], generated_at: str) -> str:
@@ -125,8 +191,12 @@ def write_model_card_artifacts(
     validated = validate_model_card(card)
     destination = Path(output_dir)
     _validate_destination(destination, allow_output_root)
-    staging_dir = Path(tempfile.mkdtemp(prefix=f".{destination.name}.staging-", dir=destination.parent))
+    lock_path, lock_descriptor = _acquire_publication_lock(destination)
+    staging_dir: Path | None = None
     try:
+        if destination.exists() or destination.is_symlink():
+            raise ModelCardValidationError("model card artifact version already exists and is immutable")
+        staging_dir = Path(tempfile.mkdtemp(prefix=f".{destination.name}.staging-", dir=destination.parent))
         card_path = staging_dir / MODEL_CARD_FILENAME
         markdown_path = staging_dir / MODEL_CARD_MARKDOWN_FILENAME
         manifest_path = staging_dir / MODEL_CARD_MANIFEST_FILENAME
@@ -141,12 +211,15 @@ def write_model_card_artifacts(
             encoding="utf-8",
             newline="\n",
         )
-        if destination.exists():
-            destination.rmdir()
-        os.replace(staging_dir, destination)
+        _validate_staging_directory(staging_dir)
+        _publish_new_directory(staging_dir, destination)
+        staging_dir = None
     except Exception:
-        _cleanup_staging_directory(staging_dir)
+        if staging_dir is not None:
+            _cleanup_staging_directory(staging_dir)
         raise
+    finally:
+        _release_publication_lock(lock_path, lock_descriptor)
     return {
         "modelCardJson": destination / MODEL_CARD_FILENAME,
         "modelCardMarkdown": destination / MODEL_CARD_MARKDOWN_FILENAME,
@@ -155,15 +228,14 @@ def write_model_card_artifacts(
 
 
 def _validate_destination(output_dir: Path, allow_output_root: Path | None) -> None:
+    if any(part == ".." for part in output_dir.parts):
+        raise ModelCardValidationError("model card output directory must not contain parent traversal")
     try:
         reject_symlink_path(output_dir, "model card output directory")
     except BoundedArtifactReadError as exc:
         raise ModelCardValidationError(str(exc)) from exc
     if output_dir.exists():
-        if not output_dir.is_dir():
-            raise ModelCardValidationError("model card output path must be a directory")
-        if any(output_dir.iterdir()):
-            raise ModelCardValidationError("model card output directory must be empty")
+        raise ModelCardValidationError("model card artifact version already exists and is immutable")
     if allow_output_root is not None:
         resolved_output = output_dir.resolve()
         resolved_root = Path(allow_output_root).resolve()
@@ -176,6 +248,52 @@ def _validate_destination(output_dir: Path, allow_output_root: Path | None) -> N
         raise ModelCardValidationError(str(exc)) from exc
 
 
+def _acquire_publication_lock(destination: Path) -> tuple[Path, int]:
+    lock_path = destination.parent / f".{destination.name}.publish.lock"
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except FileExistsError as exc:
+        raise ModelCardValidationError("model card artifact version publication is already in progress") from exc
+    except OSError as exc:
+        raise ModelCardValidationError("model card publication lock cannot be created") from exc
+    try:
+        os.write(descriptor, b"model-card-publication-v1\n")
+    except OSError as exc:
+        os.close(descriptor)
+        lock_path.unlink(missing_ok=True)
+        raise ModelCardValidationError("model card publication lock cannot be written") from exc
+    return lock_path, descriptor
+
+
+def _release_publication_lock(lock_path: Path, descriptor: int) -> None:
+    os.close(descriptor)
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _validate_staging_directory(staging_dir: Path) -> None:
+    # Local import avoids making the canonical reader depend on a second writer implementation.
+    from offline_evaluation.feedback_dataset_evaluation.model_card.artifact_reader import (
+        read_validated_model_card_artifact_set,
+    )
+
+    read_validated_model_card_artifact_set(staging_dir)
+
+
+def _publish_new_directory(staging_dir: Path, destination: Path) -> None:
+    if destination.exists() or destination.is_symlink():
+        raise ModelCardValidationError("model card artifact version already exists and is immutable")
+    try:
+        os.rename(staging_dir, destination)
+    except FileExistsError as exc:
+        raise ModelCardValidationError("model card artifact version already exists and is immutable") from exc
+    except OSError as exc:
+        raise ModelCardValidationError("model card artifact publication failed") from exc
+
+
 def _cleanup_staging_directory(staging_dir: Path) -> None:
     if staging_dir.is_symlink():
         raise RuntimeError("model card staging cleanup refused a symlink")
@@ -185,7 +303,40 @@ def _cleanup_staging_directory(staging_dir: Path) -> None:
 
 def _machine_code_section(title: str, values: list[str]) -> list[str]:
     lines = ["", f"### {title}", ""]
-    lines.extend(f"- `{value}`" for value in values)
+    lines.extend(f"- {_code(value)}" for value in values)
     if not values:
         lines.append("- `NONE`")
     return lines
+
+
+def _metric_line(label: str, metric: dict[str, Any]) -> str:
+    reason = metric["reason"] if metric["reason"] is not None else "NONE"
+    value = metric["value"] if metric["available"] else "UNAVAILABLE"
+    return (
+        f"- {label}: available={_code(metric['available'])}, "
+        f"value={_code(value)}, reason={_code(reason)}"
+    )
+
+
+def _ranking_section(title: str, rows: dict[str, Any]) -> list[str]:
+    lines = ["", f"### {title}", ""]
+    for key in sorted(rows, key=int):
+        row = rows[key]
+        metric = row["value"]
+        reason = metric["reason"] if metric["reason"] is not None else "NONE"
+        value = metric["value"] if metric["available"] else "UNAVAILABLE"
+        lines.append(
+            f"- K {key}: requestedK={_code(row['requestedK'])}, actualK={_code(row['actualK'])}, "
+            f"available={_code(metric['available'])}, value={_code(value)}, reason={_code(reason)}"
+        )
+    return lines
+
+
+def _code(value: Any) -> str:
+    if isinstance(value, bool):
+        text = str(value).lower()
+    else:
+        text = str(value)
+    if any(character in text for character in ("`", "\r", "\n")):
+        raise ModelCardValidationError("model card markdown value contains unsupported control characters")
+    return f"`{text}`"

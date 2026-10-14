@@ -41,8 +41,32 @@ NO_AUTHORITY = "NONE"
 MAX_MODEL_CARD_BYTES = 524_288
 
 VERIFIED_USAGE_MODES = ["COMPARE", "OFFLINE_EVALUATION", "SHADOW"]
+INTENDED_USE = [
+    "EXACT_MODEL_OFFLINE_EVALUATION",
+    "RULES_VS_ML_DIAGNOSTIC_COMPARISON",
+    "SHADOW_MODEL_MONITORING",
+]
+NOT_INTENDED_USE = [
+    "AUTOMATIC_APPROVE_DECLINE_OR_BLOCK",
+    "MODEL_PROMOTION_APPROVAL",
+    "PAYMENT_AUTHORIZATION",
+    "PRIMARY_PRODUCTION_FRAUD_DECISIONING",
+    "SCORING_THRESHOLD_CHANGE",
+    "WORKFLOW_OR_ANALYST_RECOMMENDATION",
+]
+USE_LIMITATIONS = [
+    "ANALYST_FEEDBACK_IS_REVIEW_SIGNAL_NOT_GROUND_TRUTH",
+    "BOUNDED_RETURNED_POPULATION_ONLY",
+    "DOES_NOT_ESTABLISH_GLOBAL_DATASET_COMPLETENESS",
+    "DOES_NOT_ESTABLISH_MODEL_CALIBRATION",
+    "DOES_NOT_ESTABLISH_PRODUCTION_READINESS",
+    "SOURCE_VERIFICATION_LEVEL_MUST_BE_INTERPRETED_EXPLICITLY",
+]
 VERIFIED_USAGE_BOUNDARY = {
     "allowedModes": VERIFIED_USAGE_MODES,
+    "intendedUse": INTENDED_USE,
+    "notIntendedUse": NOT_INTENDED_USE,
+    "useLimitations": USE_LIMITATIONS,
     "runtimeDecisionAuthority": NO_AUTHORITY,
     "promotionAuthority": NO_AUTHORITY,
     "thresholdChangeAuthority": NO_AUTHORITY,
@@ -125,7 +149,10 @@ def _validate_card_envelope_safety(card: dict[str, Any]) -> None:
     # avoids treating the canonical ranking-policy name as row-level evidence.
     envelope = {key: value for key, value in card.items() if key != "evaluationSummary"}
     try:
-        reject_unsafe_structure(envelope)
+        reject_unsafe_structure(
+            envelope,
+            safe_values=frozenset(INTENDED_USE + NOT_INTENDED_USE + USE_LIMITATIONS),
+        )
     except GovernanceArtifactSafetyPolicyError as exc:
         raise ModelCardValidationError(str(exc)) from exc
 

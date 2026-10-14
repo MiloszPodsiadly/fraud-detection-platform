@@ -11,7 +11,10 @@ from offline_evaluation.feedback_dataset_evaluation.model_card.schema import (
     MODEL_CARD_TYPE,
     MODEL_ARTIFACT_BYTES_VERIFIED,
     NO_AUTHORITY,
+    INTENDED_USE,
+    NOT_INTENDED_USE,
     PROMOTION_STATE,
+    USE_LIMITATIONS,
     VERIFIED_USAGE_MODES,
     ModelCardValidationError,
     validate_model_card,
@@ -55,6 +58,9 @@ class ModelCardSchemaTest(unittest.TestCase):
         self.assertIsNot(card["evaluationSummary"], validated["evaluationSummary"])
         self.assertEqual(PROMOTION_STATE, validated["promotionState"])
         self.assertEqual(VERIFIED_USAGE_MODES, validated["verifiedUsageBoundary"]["allowedModes"])
+        self.assertEqual(INTENDED_USE, validated["verifiedUsageBoundary"]["intendedUse"])
+        self.assertEqual(NOT_INTENDED_USE, validated["verifiedUsageBoundary"]["notIntendedUse"])
+        self.assertEqual(USE_LIMITATIONS, validated["verifiedUsageBoundary"]["useLimitations"])
         for authority in (
             "runtimeDecisionAuthority",
             "promotionAuthority",
@@ -219,6 +225,18 @@ class ModelCardSchemaTest(unittest.TestCase):
         with self.assertRaisesRegex(ModelCardValidationError, "verifiedUsageBoundary unsupported"):
             validate_model_card(card)
 
+        for field in ("intendedUse", "notIntendedUse", "useLimitations"):
+            with self.subTest(field=field):
+                card = self._available_card()
+                del card["verifiedUsageBoundary"][field]
+                with self.assertRaisesRegex(ModelCardValidationError, "missing required fields"):
+                    validate_model_card(card)
+
+        card = self._available_card()
+        card["verifiedUsageBoundary"]["intendedUse"][0] = "[unsafe](https://example.invalid)"
+        with self.assertRaisesRegex(ModelCardValidationError, "verifiedUsageBoundary unsupported"):
+            validate_model_card(card)
+
     def _available_card(self, *, with_prediction_evidence: bool = True):
         summary = self._summary(with_prediction_evidence=with_prediction_evidence)
         return {
@@ -245,6 +263,9 @@ class ModelCardSchemaTest(unittest.TestCase):
             "evaluationSummary": summary,
             "verifiedUsageBoundary": {
                 "allowedModes": list(VERIFIED_USAGE_MODES),
+                "intendedUse": list(INTENDED_USE),
+                "notIntendedUse": list(NOT_INTENDED_USE),
+                "useLimitations": list(USE_LIMITATIONS),
                 "runtimeDecisionAuthority": NO_AUTHORITY,
                 "promotionAuthority": NO_AUTHORITY,
                 "thresholdChangeAuthority": NO_AUTHORITY,
