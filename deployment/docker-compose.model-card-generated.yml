@@ -1,0 +1,17 @@
+# Explicit runtime overlay for one pre-published, exact-version Model Card artifact set.
+# Publication occurs outside alert-service; this mount grants the reader no write access.
+services:
+  alert-service:
+    environment:
+      MODEL_CARD_CURRENT_ENABLED: "true"
+      MODEL_CARD_CURRENT_BASE_DIR: /run/model-card
+      MODEL_CARD_CURRENT_PATH: /run/model-card/${MODEL_CARD_CURRENT_VERSION:?Set MODEL_CARD_CURRENT_VERSION to the exact published version directory}/ml_model_card.json
+      MODEL_CARD_CURRENT_MAX_CARD_SIZE_BYTES: ${MODEL_CARD_CURRENT_MAX_CARD_SIZE_BYTES:-524288}
+      MODEL_CARD_CURRENT_MAX_MARKDOWN_SIZE_BYTES: ${MODEL_CARD_CURRENT_MAX_MARKDOWN_SIZE_BYTES:-262144}
+    volumes:
+      - type: bind
+        source: ${MODEL_CARD_ARTIFACT_ROOT:-./local-generated/model-card}
+        target: /run/model-card
+        read_only: true
+        bind:
+          create_host_path: false
