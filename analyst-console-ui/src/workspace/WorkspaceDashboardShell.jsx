@@ -31,7 +31,7 @@ export function WorkspaceDashboardShell({
     canReadTransactions,
     canReadSuspiciousTransactions,
     canReadGovernanceAdvisories,
-    canReadShadowPerformance,
+    canReadModelGovernance,
     canWriteGovernanceAudit,
     runtimeStatus
   } = useWorkspaceRuntime();
@@ -120,7 +120,7 @@ export function WorkspaceDashboardShell({
             refreshNotice={refreshNotice}
             workspaceRoutes={visibleWorkspaceRoutes(WORKSPACE_ROUTE_ENTRIES, {
               canReadSuspiciousTransactions,
-              canReadShadowPerformance
+              canReadModelGovernance
             })}
             showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}
             workspaceCounters={workspaceCounterState.counters}
@@ -130,7 +130,7 @@ export function WorkspaceDashboardShell({
             canReadTransactions={canReadTransactions}
             canReadSuspiciousTransactions={canReadSuspiciousTransactions}
             canReadGovernanceAdvisories={canReadGovernanceAdvisories}
-            canReadShadowPerformance={canReadShadowPerformance}
+            canReadModelGovernance={canReadModelGovernance}
             canWriteGovernanceAudit={canWriteGovernanceAudit}
             alertPage={navigationState.alertPage}
             fraudCaseSummary={navigationState.fraudCaseSummary}

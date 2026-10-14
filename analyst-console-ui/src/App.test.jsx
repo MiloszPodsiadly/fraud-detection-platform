@@ -23,6 +23,7 @@ const {
   getSuspiciousTransaction,
   getSuspiciousTransactionLinkedAlertContext,
   getCurrentShadowPerformanceSummary,
+  getCurrentModelCard,
   createAlertsApiClient
 } = vi.hoisted(() => {
   const listAlerts = vi.fn();
@@ -39,6 +40,7 @@ const {
   const getSuspiciousTransaction = vi.fn();
   const getSuspiciousTransactionLinkedAlertContext = vi.fn();
   const getCurrentShadowPerformanceSummary = vi.fn();
+  const getCurrentModelCard = vi.fn();
   return {
     callbackPath: { value: true },
     completeLoginCallback: vi.fn(),
@@ -77,6 +79,7 @@ const {
     getSuspiciousTransaction,
     getSuspiciousTransactionLinkedAlertContext,
     getCurrentShadowPerformanceSummary,
+    getCurrentModelCard,
     createAlertsApiClient: vi.fn(() => ({
       listAlerts,
       listFraudCaseWorkQueue,
@@ -89,6 +92,7 @@ const {
       getSuspiciousTransaction,
       getSuspiciousTransactionLinkedAlertContext,
       getCurrentShadowPerformanceSummary,
+      getCurrentModelCard,
       getGovernanceAdvisoryAudit: vi.fn(),
       getAlert,
       getAssistantSummary,
@@ -156,6 +160,7 @@ describe("App", () => {
     getSuspiciousTransaction.mockResolvedValue(suspiciousTransactionDetails("suspicious-stable"));
     getSuspiciousTransactionLinkedAlertContext.mockResolvedValue(linkedAlertContext());
     getCurrentShadowPerformanceSummary.mockResolvedValue(shadowPerformanceSummary());
+    getCurrentModelCard.mockResolvedValue({ state: "invalid-response" });
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
       status: "AVAILABLE",
@@ -485,8 +490,8 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("link", { name: "Shadow Performance" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Shadow diagnostics/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Model Governance" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Model evidence/i })).not.toBeInTheDocument();
     expect(getCurrentShadowPerformanceSummary).not.toHaveBeenCalled();
   });
 
@@ -504,10 +509,33 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("link", { name: "Shadow Performance" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("link", { name: "Shadow Performance" }));
+    expect(screen.getByRole("link", { name: "Model Governance" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Model Governance" }));
     expect(await screen.findByRole("heading", { name: "Shadow Performance Summary" })).toBeInTheDocument();
     await waitFor(() => expect(getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
+  });
+
+  it("modelGovernanceVisibleWithModelCardReadOnly", async () => {
+    callbackPath.value = false;
+    const session = authenticatedSession({
+      extraAuthorities: ["model-card:read"],
+      authorities: ["model-card:read"]
+    });
+    refreshSession.mockResolvedValue(session);
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => session,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("link", { name: "Model Governance" }));
+    expect(await screen.findByRole("heading", { name: "Model Card" })).toBeInTheDocument();
+    await waitFor(() => expect(getCurrentModelCard).toHaveBeenCalledTimes(1));
+    expect(getCurrentShadowPerformanceSummary).not.toHaveBeenCalled();
   });
 
   it("dashboardRouteRequiresShadowPerformanceRead", async () => {

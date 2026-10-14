@@ -268,6 +268,7 @@ function runtimeValue(overrides = {}) {
     canReadTransactions: true,
     canReadSuspiciousTransactions: true,
     canReadGovernanceAdvisories: true,
+    canReadModelGovernance: true,
     canReadShadowPerformance: true,
     canReadPromotionReadiness: true,
     canReadModelCard: true,

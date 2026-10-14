@@ -15,7 +15,7 @@ export function AlertsListPage({
   canReadTransactions,
   canReadSuspiciousTransactions,
   canReadGovernanceAdvisories,
-  canReadShadowPerformance,
+  canReadModelGovernance,
   alertPage,
   transactionPage,
   advisoryQueue,
@@ -45,7 +45,7 @@ export function AlertsListPage({
         canReadTransactions={canReadTransactions}
         canReadSuspiciousTransactions={canReadSuspiciousTransactions}
         canReadGovernanceAdvisories={canReadGovernanceAdvisories}
-        canReadShadowPerformance={canReadShadowPerformance}
+        canReadModelGovernance={canReadModelGovernance}
         alertPage={alertPage}
         transactionPage={transactionPage}
         advisoryQueue={advisoryQueue}

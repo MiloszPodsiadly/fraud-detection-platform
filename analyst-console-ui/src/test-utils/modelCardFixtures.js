@@ -26,6 +26,27 @@ export function modelCard(overrides = {}) {
     evaluationSummary: evaluationSummary(subject),
     verifiedUsageBoundary: {
       allowedModes: ["COMPARE", "OFFLINE_EVALUATION", "SHADOW"],
+      intendedUse: [
+        "EXACT_MODEL_OFFLINE_EVALUATION",
+        "RULES_VS_ML_DIAGNOSTIC_COMPARISON",
+        "SHADOW_MODEL_MONITORING"
+      ],
+      notIntendedUse: [
+        "AUTOMATIC_APPROVE_DECLINE_OR_BLOCK",
+        "MODEL_PROMOTION_APPROVAL",
+        "PAYMENT_AUTHORIZATION",
+        "PRIMARY_PRODUCTION_FRAUD_DECISIONING",
+        "SCORING_THRESHOLD_CHANGE",
+        "WORKFLOW_OR_ANALYST_RECOMMENDATION"
+      ],
+      useLimitations: [
+        "ANALYST_FEEDBACK_IS_REVIEW_SIGNAL_NOT_GROUND_TRUTH",
+        "BOUNDED_RETURNED_POPULATION_ONLY",
+        "DOES_NOT_ESTABLISH_GLOBAL_DATASET_COMPLETENESS",
+        "DOES_NOT_ESTABLISH_MODEL_CALIBRATION",
+        "DOES_NOT_ESTABLISH_PRODUCTION_READINESS",
+        "SOURCE_VERIFICATION_LEVEL_MUST_BE_INTERPRETED_EXPLICITLY"
+      ],
       runtimeDecisionAuthority: "NONE",
       promotionAuthority: "NONE",
       thresholdChangeAuthority: "NONE",
@@ -98,8 +119,8 @@ function evaluationSummary(subject) {
         truePositiveRate: metric(1),
         falsePositiveRate: metric(0),
         falseNegativeRate: metric(0),
-        precisionAtK: rankingMetrics(),
-        recallAtK: rankingMetrics()
+        precisionAtK: rankingMetrics(0.5),
+        recallAtK: rankingMetrics(1)
       },
       rulesVsMlDisagreement: {
         available: true,
@@ -126,9 +147,9 @@ function metric(value) {
   return { available: true, reason: null, value };
 }
 
-function rankingMetrics() {
+function rankingMetrics(valueAtTwo) {
   return {
     1: { requestedK: 1, actualK: 1, value: metric(1) },
-    2: { requestedK: 2, actualK: 2, value: metric(1) }
+    2: { requestedK: 2, actualK: 2, value: metric(valueAtTwo) }
   };
 }

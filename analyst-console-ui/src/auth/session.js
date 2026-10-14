@@ -2,6 +2,12 @@ import { AUTHORITIES } from "./generatedAuthorities.js";
 
 export { AUTHORITIES } from "./generatedAuthorities.js";
 
+export const MODEL_GOVERNANCE_READ_AUTHORITIES = Object.freeze([
+  AUTHORITIES.SHADOW_PERFORMANCE_READ,
+  AUTHORITIES.PROMOTION_READINESS_READ,
+  AUTHORITIES.MODEL_CARD_READ
+]);
+
 export const ROLE_AUTHORITIES = {
   READ_ONLY_ANALYST: [
     AUTHORITIES.ALERT_READ,
@@ -73,6 +79,10 @@ export function isAuthenticated(session) {
 
 export function hasAuthority(session, authority) {
   return Boolean(session?.authorities?.includes(authority));
+}
+
+export function hasAnyAuthority(session, authorities) {
+  return authorities.some((authority) => hasAuthority(session, authority));
 }
 
 export function authorityLabel(authority) {

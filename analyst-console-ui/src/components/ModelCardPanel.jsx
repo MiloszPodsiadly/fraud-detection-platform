@@ -74,16 +74,21 @@ function ModelCardSuccess({ card }) {
 
 function UsageBoundary({ boundary }) {
   return (
-    <ModelCardSection title="Verified usage boundary">
-      <DefinitionList rows={[
-        ["Allowed modes", boundary.allowedModes.join(", ")],
-        ["Runtime decision authority", boundary.runtimeDecisionAuthority],
-        ["Promotion authority", boundary.promotionAuthority],
-        ["Threshold authority", boundary.thresholdChangeAuthority],
-        ["Payment authority", boundary.paymentAuthorizationAuthority],
-        ["Workflow authority", boundary.workflowAuthority]
-      ]} />
-    </ModelCardSection>
+    <>
+      <ModelCardSection title="Verified usage boundary">
+        <DefinitionList rows={[
+          ["Allowed modes", boundary.allowedModes.join(", ")],
+          ["Runtime decision authority", boundary.runtimeDecisionAuthority],
+          ["Promotion authority", boundary.promotionAuthority],
+          ["Threshold authority", boundary.thresholdChangeAuthority],
+          ["Payment authority", boundary.paymentAuthorizationAuthority],
+          ["Workflow authority", boundary.workflowAuthority]
+        ]} />
+      </ModelCardSection>
+      <ModelCardList title="Intended use" items={boundary.intendedUse} emptyLabel="Intended use unavailable." />
+      <ModelCardList title="Not intended use" items={boundary.notIntendedUse} emptyLabel="Prohibited use unavailable." />
+      <ModelCardList title="Use limitations" items={boundary.useLimitations} emptyLabel="Use limitations unavailable." />
+    </>
   );
 }
 
@@ -100,8 +105,12 @@ function EvaluationUnavailable({ reason }) {
 function EvaluationAvailable({ evidence, summary }) {
   const population = summary.population;
   const excluded = excludedCount(population);
-  const partialCoverage = excluded > 0 || summary.warnings.includes("MODEL_EVALUATION_PARTIAL_COVERAGE");
+  const coverage = evaluationCoverage(summary);
+  const partialCoverage = coverage === "PARTIAL";
+  const noData = coverage === "NO_DATA";
+  const sourceTruncated = summary.sourceDataset.truncated;
   const metrics = summary.supportedMetrics.mlPredictionMetrics;
+  const disagreement = summary.supportedMetrics.rulesVsMlDisagreement;
   return (
     <>
       <div className="shadowPerformanceGrid">
@@ -122,7 +131,8 @@ function EvaluationAvailable({ evidence, summary }) {
             ["Records excluded", excluded],
             ["Positive class", summary.classBalance.positiveClassCount],
             ["Negative class", summary.classBalance.negativeClassCount],
-            ["Coverage", partialCoverage ? "PARTIAL" : "COMPLETE"]
+            ["Evaluated population coverage", coverage],
+            ["Source dataset scope", sourceTruncated ? "SOURCE_TRUNCATED" : "BOUNDED_SOURCE_NOT_TRUNCATED"]
           ]} />
         </ModelCardSection>
         <ModelCardSection title="Evaluation window">
@@ -132,14 +142,37 @@ function EvaluationAvailable({ evidence, summary }) {
             ["To", displayTimestamp(summary.evaluationWindow.toInclusive)],
             ["Dataset version", summary.sourceDataset.datasetVersion],
             ["Dataset SHA-256", summary.sourceDataset.sha256],
-            ["Dataset truncated", summary.sourceDataset.truncated ? "Yes" : "No"]
+            ["Source verification", evidence.sourceDatasetVerificationLevel],
+            ["Dataset truncated", sourceTruncated ? "Yes" : "No"]
+          ]} />
+        </ModelCardSection>
+        <ModelCardSection title="Source-data quality">
+          <DefinitionList rows={[
+            ["Raw rows read", summary.sourceDataset.rawRowsRead],
+            ["Records returned", summary.sourceDataset.recordsReturned],
+            ["Unresolved excluded", summary.sourceDataset.excludedUnresolvedCount],
+            ["Governance review excluded", summary.sourceDataset.excludedGovernanceReviewCount],
+            ["Missing required fields skipped", summary.sourceDataset.skippedMissingRequiredFieldCount],
+            ["Invalid source rows skipped", summary.sourceDataset.skippedInvalidSourceRecordCount]
           ]} />
         </ModelCardSection>
       </div>
+      {noData && (
+        <div className="statePanel warningPanel" role="status">
+          <h3>No evaluation data</h3>
+          <p>The returned evaluation population contains no records. It provides no evidence of model quality.</p>
+        </div>
+      )}
       {partialCoverage && (
         <div className="statePanel warningPanel" role="status">
           <h3>Partial evaluation coverage</h3>
           <p>{excluded} record(s) were excluded. Read the exclusion counts and warnings before interpreting metrics.</p>
+        </div>
+      )}
+      {sourceTruncated && (
+        <div className="statePanel warningPanel" role="status">
+          <h3>Source dataset truncated</h3>
+          <p>The displayed coverage applies only to the bounded returned population, not the complete source dataset.</p>
         </div>
       )}
       <div className="shadowPerformanceGrid">
@@ -154,6 +187,26 @@ function EvaluationAvailable({ evidence, summary }) {
             ["Rules vs ML disagreement", availability(summary.supportedMetrics.rulesVsMlDisagreement)]
           ]} />
         </ModelCardSection>
+        <ModelCardSection title="Confusion matrix">
+          <DefinitionList rows={[
+            ["True positive", metrics.truePositive],
+            ["False positive", metrics.falsePositive],
+            ["True negative", metrics.trueNegative],
+            ["False negative", metrics.falseNegative]
+          ]} />
+        </ModelCardSection>
+        <ModelCardSection title="Rules-vs-ML disagreement">
+          <DefinitionList rows={[
+            ["Availability", availability(disagreement)],
+            ["Records with exact ML evidence", disagreement.recordsWithExactMlEvidence],
+            ["Records compared", disagreement.recordsCompared],
+            ["Rules evidence unavailable", disagreement.recordsExcludedRulesEvidenceUnavailable],
+            ["ML high, Rules low", disagreement.categoryCounts.ML_HIGH_RULES_LOW],
+            ["Rules high, ML low", disagreement.categoryCounts.RULES_HIGH_ML_LOW],
+            ["Both high", disagreement.categoryCounts.BOTH_HIGH],
+            ["Both low", disagreement.categoryCounts.BOTH_LOW]
+          ]} />
+        </ModelCardSection>
         <ModelCardSection title="Exclusions">
           <DefinitionList rows={[
             ["Identity mismatch", population.recordsExcludedIdentityMismatch],
@@ -166,7 +219,33 @@ function EvaluationAvailable({ evidence, summary }) {
         <ModelCardList title="Warnings" items={summary.warnings} emptyLabel="No evaluation warnings reported." />
         <ModelCardList title="Limitations" items={summary.limitations} emptyLabel="No limitations reported." />
       </div>
+      <RankingMetrics precisionAtK={metrics.precisionAtK} recallAtK={metrics.recallAtK} />
     </>
+  );
+}
+
+function RankingMetrics({ precisionAtK, recallAtK }) {
+  const keys = Object.keys(precisionAtK).sort((left, right) => Number(left) - Number(right));
+  return (
+    <ModelCardSection title="Ranking metrics">
+      <div className="tableShell">
+        <table className="dataTable">
+          <thead>
+            <tr><th scope="col">K</th><th scope="col">Actual K</th><th scope="col">Precision at K</th><th scope="col">Recall at K</th></tr>
+          </thead>
+          <tbody>
+            {keys.map((key) => (
+              <tr key={key}>
+                <th scope="row">{precisionAtK[key].requestedK}</th>
+                <td>{precisionAtK[key].actualK}</td>
+                <td>{metricDisplay(precisionAtK[key].value)}</td>
+                <td>{metricDisplay(recallAtK[key].value)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </ModelCardSection>
   );
 }
 
@@ -217,6 +296,13 @@ function excludedCount(population) {
     + population.recordsExcludedMissingPredictionEvidence
     + population.recordsExcludedUnexpectedMissingPredictionEvidence
     + population.recordsExcludedInvalidPredictionEvidence;
+}
+
+function evaluationCoverage(summary) {
+  const { population, sourceDataset } = summary;
+  if (population.recordsConsidered === 0 && population.recordsEvaluated === 0) return "NO_DATA";
+  if (population.recordsEvaluated < sourceDataset.recordsReturned) return "PARTIAL";
+  return "COMPLETE_EVALUATED_POPULATION";
 }
 
 function availability(metric) {
