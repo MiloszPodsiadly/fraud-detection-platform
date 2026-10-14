@@ -4,8 +4,10 @@ export function ShadowPerformanceWorkspaceContainer({
   headingLabel = "Shadow Performance Summary",
   summaryState,
   promotionReadinessState = { report: null, isLoading: false, error: null },
+  modelCardState = { card: null, isLoading: false, error: null },
   canReadShadowPerformance,
-  canReadPromotionReadiness
+  canReadPromotionReadiness,
+  canReadModelCard
 }) {
   return (
     <ShadowPerformanceDashboardPage
@@ -16,8 +18,13 @@ export function ShadowPerformanceWorkspaceContainer({
       promotionReadinessIsLoading={promotionReadinessState.isLoading}
       promotionReadinessError={promotionReadinessState.error}
       onPromotionReadinessRetry={promotionReadinessState.refresh}
+      modelCard={modelCardState.card}
+      modelCardIsLoading={modelCardState.isLoading}
+      modelCardError={modelCardState.error}
+      onModelCardRetry={modelCardState.refresh}
       canReadShadowPerformance={canReadShadowPerformance}
       canReadPromotionReadiness={canReadPromotionReadiness}
+      canReadModelCard={canReadModelCard}
       onRetry={summaryState.refresh}
       workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />

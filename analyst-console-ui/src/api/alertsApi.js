@@ -3,6 +3,7 @@ import { isAbortError } from "./apiErrors.js";
 import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 import { isValidPromotionReviewReadinessReport } from "../governance/promotionReviewReadinessReportValidation.js";
+import { isValidModelCard } from "../governance/modelCardValidation.js";
 import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
 
 export { isAbortError } from "./apiErrors.js";
@@ -37,6 +38,7 @@ export function createAlertsApiClient({
     ),
     getCurrentShadowPerformanceSummary: (requestOptions) => shadowPerformanceSummaryRequest(request, requestOptions),
     getCurrentPromotionReviewReadinessReport: (requestOptions) => promotionReviewReadinessReportRequest(request, requestOptions),
+    getCurrentModelCard: (requestOptions) => modelCardRequest(request, requestOptions),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -283,6 +285,16 @@ async function promotionReviewReadinessReportRequest(request, { signal } = {}) {
     ...(signal ? { signal } : {})
   });
   if (!isValidPromotionReviewReadinessReport(response)) {
+    return Object.freeze({ state: "invalid-response" });
+  }
+  return response;
+}
+
+async function modelCardRequest(request, { signal } = {}) {
+  const response = await request("/api/v1/governance/model-card/current", {
+    ...(signal ? { signal } : {})
+  });
+  if (!isValidModelCard(response)) {
     return Object.freeze({ state: "invalid-response" });
   }
   return response;

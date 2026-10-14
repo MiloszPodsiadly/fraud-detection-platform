@@ -37,6 +37,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadGovernanceAdvisories).toBe(true);
     expect(result.current.canReadShadowPerformance).toBe(false);
     expect(result.current.canReadPromotionReadiness).toBe(false);
+    expect(result.current.canReadModelCard).toBe(false);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.runtimeStatus).toBe("ready");
   });
@@ -59,6 +60,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadSuspiciousTransactions).toBe(true);
     expect(result.current.canReadShadowPerformance).toBe(false);
     expect(result.current.canReadPromotionReadiness).toBe(false);
+    expect(result.current.canReadModelCard).toBe(false);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.apiClient).toEqual({ client: true });
   });
@@ -215,6 +217,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadGovernanceAdvisories).toBeUndefined();
     expect(result.current.canReadShadowPerformance).toBeUndefined();
     expect(result.current.canReadPromotionReadiness).toBeUndefined();
+    expect(result.current.canReadModelCard).toBeUndefined();
     expect(result.current.canWriteGovernanceAudit).toBeUndefined();
   });
 

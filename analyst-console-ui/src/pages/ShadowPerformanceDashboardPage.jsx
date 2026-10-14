@@ -1,5 +1,6 @@
 import { ShadowPerformanceDashboard } from "../components/ShadowPerformanceDashboard.jsx";
 import { PromotionReviewReadinessPanel } from "../components/PromotionReviewReadinessPanel.jsx";
+import { ModelCardPanel } from "../components/ModelCardPanel.jsx";
 
 export function ShadowPerformanceDashboardPage({
   summary,
@@ -9,8 +10,13 @@ export function ShadowPerformanceDashboardPage({
   promotionReadinessIsLoading,
   promotionReadinessError,
   onPromotionReadinessRetry,
+  modelCard,
+  modelCardIsLoading,
+  modelCardError,
+  onModelCardRetry,
   canReadShadowPerformance,
   canReadPromotionReadiness,
+  canReadModelCard,
   onRetry,
   workspaceHeadingProps = {}
 }) {
@@ -30,6 +36,13 @@ export function ShadowPerformanceDashboardPage({
         error={promotionReadinessError}
         canReadPromotionReadiness={canReadPromotionReadiness}
         onRetry={onPromotionReadinessRetry}
+      />
+      <ModelCardPanel
+        card={modelCard}
+        isLoading={modelCardIsLoading}
+        error={modelCardError}
+        canReadModelCard={canReadModelCard}
+        onRetry={onModelCardRetry}
       />
     </>
   );

@@ -48,6 +48,7 @@ export const AUTHORITY_LABELS = {
   [AUTHORITIES.SUSPICIOUS_TRANSACTION_READ]: "suspicious transaction read access",
   [AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE]: "record governance advisory review",
   [AUTHORITIES.SHADOW_PERFORMANCE_READ]: "read shadow performance summary",
+  [AUTHORITIES.MODEL_CARD_READ]: "read exact model card",
   [AUTHORITIES.AUDIT_READ]: "read platform audit events"
 };
 
