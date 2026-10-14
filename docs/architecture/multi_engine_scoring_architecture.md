@@ -14,9 +14,9 @@ transaction -> features -> multiple engines -> risk intelligence -> alert/case -
 Current Engine Intelligence runtime maps bounded engine outputs into `EngineIntelligenceSummary`, carries that
 optional summary on `TransactionScoredEvent`, projects it in alert-service, exposes bounded read DTOs/OpenAPI, and
 renders it in Analyst Console. Historical FDP-101 tightened the pre-exposure shared `FraudEngineResult` contract.
-Historical FDP-102 added an internal alert-service feedback dataset-export foundation for offline evaluation input
-only. FDP-104 added an offline Model Card v1 governance artifact that consumes FDP-103 aggregate evaluation reports
-only.
+The internal alert-service feedback dataset-export foundation supplies offline evaluation input only. The offline
+exact-artifact Model Card consumes the model-specific aggregate evaluation report only; it does not consume the
+separate Platform Recommendation Evaluation Card or Shadow Performance products.
 
 These contracts still do not alter baseline scoring selection, dashboards, model retraining, thresholds, automatic
 decisioning, recommendations, payment authorization, alert severity, or fraud-case status. Public/operator-triggered
