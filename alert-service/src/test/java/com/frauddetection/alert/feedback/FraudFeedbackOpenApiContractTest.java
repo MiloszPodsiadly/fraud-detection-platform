@@ -103,6 +103,12 @@ class FraudFeedbackOpenApiContractTest {
                 components:
                   schemas:
                     Unsafe:
+                      enum: [AUTHORIZEPAYMENT]
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
                       enum: [authorizePayment]
                 """,
                 """
@@ -110,6 +116,30 @@ class FraudFeedbackOpenApiContractTest {
                   schemas:
                     Unsafe:
                       default: APPROVE_PAYMENT
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      enum: [DECLINE_PAYMENT]
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      enum: [BLOCK_TRANSACTION]
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      enum: [MODEL_SPECIFIC_EVALUATION_AUTHORIZE_PAYMENTS]
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      enum: [MODEL_SPECIFIC_EVALUATION_DOES_NOT_AUTHORIZE_PAYMENT_NOW]
                 """,
                 """
                 components:
@@ -157,6 +187,7 @@ class FraudFeedbackOpenApiContractTest {
                     Safe:
                       enum:
                         - DOES_NOT_AUTHORIZE_PAYMENTS
+                        - MODEL_SPECIFIC_EVALUATION_DOES_NOT_AUTHORIZE_PAYMENTS
                       description: This endpoint does not authorize payments.
                 """)).doesNotThrowAnyException();
         assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
@@ -165,6 +196,17 @@ class FraudFeedbackOpenApiContractTest {
                     UnsafeNearMatch:
                       enum:
                         - DOES_NOT_AUTHORIZE_PAYMENT_NOW
+                """)).isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
+                paths:
+                  /unsafe:
+                    post:
+                      operationId: authorizePayment
+                components:
+                  schemas:
+                    UnrelatedSafeLimitation:
+                      enum:
+                        - MODEL_SPECIFIC_EVALUATION_DOES_NOT_AUTHORIZE_PAYMENTS
                 """)).isInstanceOf(AssertionError.class);
     }
 
