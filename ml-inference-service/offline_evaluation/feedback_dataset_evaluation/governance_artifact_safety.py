@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 
-class EvaluationCardSafetyPolicyError(ValueError):
-    """Raised when Evaluation Card content contains unsafe fields or policy terms."""
+class GovernanceArtifactSafetyPolicyError(ValueError):
+    """Raised when governance artifact content contains unsafe fields or policy terms."""
 
 
 FORBIDDEN_FIELD_NAMES = {
@@ -80,7 +80,7 @@ def reject_unsafe_structure(
         for key, nested in value.items():
             compact_key = compact_policy_token(str(key))
             if compact_key in forbidden_field_names:
-                raise EvaluationCardSafetyPolicyError(f"{field_message}: {key}")
+                raise GovernanceArtifactSafetyPolicyError(f"{field_message}: {key}")
             reject_unsafe_structure(
                 nested,
                 safe_values=safe_values,
@@ -100,7 +100,12 @@ def reject_unsafe_structure(
                 value_message=value_message,
             )
     elif isinstance(value, str):
-        reject_unsafe_policy_value(value, safe_values=safe_values, forbidden_terms=forbidden_value_terms, message=value_message)
+        reject_unsafe_policy_value(
+            value,
+            safe_values=safe_values,
+            forbidden_terms=forbidden_value_terms,
+            message=value_message,
+        )
 
 
 def reject_unsafe_policy_value(
@@ -114,11 +119,11 @@ def reject_unsafe_policy_value(
         return
     lowered = value.lower()
     if "eval_" in lowered or "txnref_" in lowered or "eval-" in lowered or "txnref-" in lowered:
-        raise EvaluationCardSafetyPolicyError("forbidden pseudonymous identifier prefix")
+        raise GovernanceArtifactSafetyPolicyError("forbidden pseudonymous identifier prefix")
     compact = compact_policy_token(value)
     for term in forbidden_terms:
         if term in compact:
-            raise EvaluationCardSafetyPolicyError(f"{message}: {value}")
+            raise GovernanceArtifactSafetyPolicyError(f"{message}: {value}")
 
 
 def reject_unsafe_serialized_payload(
@@ -130,7 +135,7 @@ def reject_unsafe_serialized_payload(
 ) -> None:
     lowered = payload.lower()
     if "eval_" in lowered or "txnref_" in lowered or "eval-" in lowered or "txnref-" in lowered:
-        raise EvaluationCardSafetyPolicyError("evaluation card contains forbidden pseudonymous identifier prefix")
+        raise GovernanceArtifactSafetyPolicyError("governance artifact contains forbidden pseudonymous identifier prefix")
     masked = payload
     for safe_value in sorted(safe_values, key=len, reverse=True):
         masked = masked.replace(safe_value, "")
@@ -139,4 +144,4 @@ def reject_unsafe_serialized_payload(
     compact_payload = compact_policy_token(masked)
     for forbidden in forbidden_terms:
         if forbidden in compact_payload:
-            raise EvaluationCardSafetyPolicyError(f"evaluation card contains forbidden term: {forbidden}")
+            raise GovernanceArtifactSafetyPolicyError(f"governance artifact contains forbidden term: {forbidden}")

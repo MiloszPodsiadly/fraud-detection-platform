@@ -31,8 +31,8 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema impor
     validate_class_count_integrity,
     validate_evaluation_card,
 )
-from offline_evaluation.feedback_dataset_evaluation.evaluation_card.safety_policy import (
-    EvaluationCardSafetyPolicyError,
+from offline_evaluation.feedback_dataset_evaluation.governance_artifact_safety import (
+    GovernanceArtifactSafetyPolicyError,
     FORBIDDEN_INPUT_COMPACT_TERMS,
     compact_policy_token,
     reject_unsafe_structure,
@@ -498,7 +498,7 @@ def _reject_forbidden_input(value: Any) -> None:
             field_message="forbidden input field",
             value_message="forbidden input value",
         )
-    except EvaluationCardSafetyPolicyError as exc:
+    except GovernanceArtifactSafetyPolicyError as exc:
         raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
 
 

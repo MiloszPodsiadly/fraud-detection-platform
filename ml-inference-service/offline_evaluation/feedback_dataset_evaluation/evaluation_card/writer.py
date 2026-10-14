@@ -14,8 +14,8 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema impor
     FeedbackDatasetEvaluationCardValidationError,
     validate_evaluation_card,
 )
-from offline_evaluation.feedback_dataset_evaluation.evaluation_card.safety_policy import (
-    EvaluationCardSafetyPolicyError,
+from offline_evaluation.feedback_dataset_evaluation.governance_artifact_safety import (
+    GovernanceArtifactSafetyPolicyError,
     reject_unsafe_serialized_payload,
 )
 
@@ -218,6 +218,6 @@ def _reject_forbidden_output(payload: str) -> None:
                 "workflowAuthority",
             ),
         )
-    except EvaluationCardSafetyPolicyError as exc:
+    except GovernanceArtifactSafetyPolicyError as exc:
         raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
 
