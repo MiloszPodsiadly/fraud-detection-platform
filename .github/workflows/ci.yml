@@ -650,11 +650,11 @@ jobs:
           npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/useGovernanceAuditWorkflow.test.js src/workspace/workspaceRefreshContract.test.js src/workspace/workspaceDataHooks.test.js src/components/GovernanceReviewQueue.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/alertsApi.test.js src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp51-vitest.xml
           echo "::endgroup::"
 
-      - name: FDP-52 detail UX
+      - name: Analyst workspace detail UX
         working-directory: analyst-console-ui
         run: |
-          echo "::group::FDP-52 detail UX"
-          npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/components/DetailHeader.test.jsx src/components/DetailStateBanner.test.jsx src/utils/idempotencyKey.test.js src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp52-vitest.xml
+          echo "::group::Analyst workspace detail UX"
+          npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/components/DetailHeader.test.jsx src/components/DetailStateBanner.test.jsx src/utils/idempotencyKey.test.js src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/workspace-detail-vitest.xml
           echo "::endgroup::"
 
       - name: FDP-53 runtime ownership
@@ -673,7 +673,7 @@ jobs:
         env:
           FDP50_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
           FDP51_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-          FDP52_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          WORKSPACE_DETAIL_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
           FDP53_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
         run: |
           echo "::group::FDP-50 API client boundary guard"
@@ -688,9 +688,9 @@ jobs:
           npm run check:scope:fdp51
           echo "fdp51_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
           echo "::endgroup::"
-          echo "::group::FDP-52 scope guard"
-          npm run check:scope:fdp52
-          echo "fdp52_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::group::Workspace detail scope guard"
+          npm run check:scope:workspace-detail
+          echo "workspace_detail_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
           echo "::endgroup::"
           echo "::group::FDP-53 scope guard"
           npm run check:fdp53-scope
@@ -709,7 +709,7 @@ jobs:
           path: |
             analyst-console-ui/test-results/fdp50-vitest.xml
             analyst-console-ui/test-results/fdp51-vitest.xml
-            analyst-console-ui/test-results/fdp52-vitest.xml
+            analyst-console-ui/test-results/workspace-detail-vitest.xml
             analyst-console-ui/test-results/fdp53-vitest.xml
             analyst-console-ui/test-results/frontend-architecture-guards.txt
 

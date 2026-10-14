@@ -372,7 +372,7 @@ export const ciSuites = {
         forbidSkipped: true
       },
       {
-        path: "analyst-console-ui/test-results/fdp52-vitest.xml",
+        path: "analyst-console-ui/test-results/workspace-detail-vitest.xml",
         required: [
           "WorkspaceDashboardShell.test.jsx",
           "WorkspaceDetailRouter.test.jsx",
@@ -426,7 +426,7 @@ export const ciSuites = {
       },
       {
         path: "analyst-console-ui/test-results/frontend-architecture-guards.txt",
-        contains: "fdp52_scope_guard_ran=true"
+        contains: "workspace_detail_scope_guard_ran=true"
       },
       {
         path: "analyst-console-ui/test-results/frontend-architecture-guards.txt",

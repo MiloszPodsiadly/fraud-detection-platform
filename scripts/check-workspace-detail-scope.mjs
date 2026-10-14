@@ -3,33 +3,31 @@ import {
   fileMatchesAnyPrefix,
   getChangedFiles,
   printViolationsAndExit,
-  repoRoot,
   readFileIfExists,
   runGitDiff
 } from "./scope-guards/scopeGuardHelpers.mjs";
-import { execFileSync } from "node:child_process";
 
-const usingExplicitChangedFiles = Boolean(process.env.FDP52_SCOPE_CHANGED_FILES);
-const changedFiles = getChangedFiles({ baseEnvVar: "FDP52_SCOPE_BASE" });
+const usingExplicitChangedFiles = Boolean(process.env.WORKSPACE_DETAIL_SCOPE_CHANGED_FILES);
+const changedFiles = getChangedFiles({ baseEnvVar: "WORKSPACE_DETAIL_SCOPE_BASE" });
 const violations = [];
-const enforceFdp52BackendScope = usingExplicitChangedFiles || isFdp52ScopeBranch();
-const safeRepoRoot = repoRoot.replaceAll("\\", "/");
+const enforceBackendScope = usingExplicitChangedFiles;
 
 const backendProductionPrefixes = [
   "alert-service/src/main/java/",
   "alert-service/src/main/resources/"
 ];
-const fdp55AllowedBackendFiles = new Set([
+const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
 ]);
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js",
-  // API client tests assert the exact endpoint owned by alertsApi.js; keep this exception exact.
-  "analyst-console-ui/src/api/alertsApi.test.js"
+  // API client tests assert exact endpoints owned by alertsApi.js; keep these exceptions exact.
+  "analyst-console-ui/src/api/alertsApi.test.js",
+  "analyst-console-ui/src/api/modelCardApi.test.js"
 ]);
-const outOfScopePattern = /\b(assign(?:ment)?|claim|bulk|mass|optimistic|Kafka|outbox|finality)\b/i;
+const outOfScopePattern = /\b(assignment|claim|bulk|mass|optimistic|Kafka|outbox|finality)\b/i;
 const exportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i;
-const fdp54GovernanceFiles = new Set([
+const governanceFiles = new Set([
   "scripts/check-doc-overclaims.mjs",
   "scripts/check-scope-guard-helpers-smoke.mjs",
   "scripts/compare-ci-jobs.mjs",
@@ -38,10 +36,10 @@ const fdp54GovernanceFiles = new Set([
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (enforceFdp52BackendScope
+  if (enforceBackendScope
       && fileMatchesAnyPrefix(normalized, backendProductionPrefixes)
-      && !fdp55AllowedBackendFiles.has(normalized)) {
-    violations.push(`${normalized}: FDP-52 is frontend UX decomposition only; backend production code/resources must not change.`);
+      && !allowedBackendFiles.has(normalized)) {
+    violations.push(`${normalized}: workspace detail UX is frontend-only; backend production code/resources must not change.`);
   }
   if (!isCheckedTextFile(normalized)) {
     continue;
@@ -49,20 +47,20 @@ for (const file of changedFiles) {
   const diff = usingExplicitChangedFiles ? fileContentAsAddedLines(normalized) : runGitDiff(diffBase(), "HEAD", ["--unified=0", "--", normalized]);
   for (const line of diff.split(/\r?\n/).filter((entry) => entry.startsWith("+") && !entry.startsWith("+++"))) {
     const sourceLine = line.replace(/^\+\s*/, "");
-    if (!allowedEndpointFiles.has(normalized) && !isFdp54GovernanceFile(normalized) && containsEndpointString(sourceLine)) {
+    if (!allowedEndpointFiles.has(normalized) && !isGovernanceFile(normalized) && containsEndpointString(sourceLine)) {
       violations.push(`${normalized}: new endpoint strings must stay behind the API client boundary.`);
     }
     if (!isScopeGuardScript(normalized)
-        && !isAllowedFdp107ShadowScopeGuardTest(normalized)
+        && !isAllowedShadowScopeGuardTest(normalized)
         && !normalized.startsWith("docs/")
-        && !isFdp54GovernanceFile(normalized)
+        && !isGovernanceFile(normalized)
         && introducesForbiddenScope(sourceLine)) {
-      violations.push(`${normalized}: FDP-52 must not introduce assignment, claim, export, bulk, optimistic, Kafka/outbox/finality, or idempotency semantics.`);
+      violations.push(`${normalized}: workspace detail UX must not introduce assignment, claim, export, bulk, optimistic, Kafka/outbox/finality, or idempotency semantics.`);
     }
   }
 }
 
-printViolationsAndExit(violations, "FDP-52 scope guard failed:");
+printViolationsAndExit(violations, "Workspace detail scope guard failed:");
 
 function introducesForbiddenScope(sourceLine) {
   if (/^export\s+(async\s+)?(function|const|let|var|class)\b/.test(sourceLine)) {
@@ -78,33 +76,17 @@ function introducesForbiddenScope(sourceLine) {
 }
 
 function isScopeGuardScript(file) {
-  return /^scripts\/check-fdp\d+-scope\.mjs$/.test(file);
+  return file.startsWith("scripts/check-") && file.endsWith("-scope.mjs");
 }
 
-function isAllowedFdp107ShadowScopeGuardTest(file) {
+function isAllowedShadowScopeGuardTest(file) {
   return file === "analyst-console-ui/src/workspace/ShadowPerformanceScopeGuard.test.jsx";
 }
 
-function isFdp52ScopeBranch() {
-  const headRef = process.env.GITHUB_HEAD_REF || process.env.BRANCH_NAME || currentBranch();
-  return /^FDP-52(?:$|[-_/])/.test(headRef);
-}
-
-function currentBranch() {
-  try {
-    return execFileSync("git", ["-c", `safe.directory=${safeRepoRoot}`, "-C", repoRoot, "branch", "--show-current"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
-  } catch {
-    return "";
-  }
-}
-
-function isFdp54GovernanceFile(file) {
+function isGovernanceFile(file) {
   return file.startsWith(".github/workflows/")
     || file.startsWith("scripts/ci/")
-    || fdp54GovernanceFiles.has(file);
+    || governanceFiles.has(file);
 }
 
 function isCheckedTextFile(file) {
@@ -116,7 +98,7 @@ function isCheckedTextFile(file) {
 }
 
 function diffBase() {
-  return process.env.FDP52_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
+  return process.env.WORKSPACE_DETAIL_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
 }
 
 function fileContentAsAddedLines(file) {

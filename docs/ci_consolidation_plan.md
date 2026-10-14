@@ -19,7 +19,7 @@ Why consolidate:
 Still proves:
 - FDP-50 API client boundary tests and guards.
 - FDP-51 runtime provider tests and scope guard.
-- FDP-52 detail UX tests and scope guard.
+- Analyst workspace detail UX tests and scope guard.
 - FDP-53 runtime ownership tests and scope guard.
 - Full frontend build.
 
@@ -29,12 +29,12 @@ No longer proves:
 Replacement tests/scripts:
 - `npm test -- --run ... --outputFile=./test-results/fdp50-vitest.xml`
 - `npm test -- --run ... --outputFile=./test-results/fdp51-vitest.xml`
-- `npm test -- --run ... --outputFile=./test-results/fdp52-vitest.xml`
+- `npm test -- --run ... --outputFile=./test-results/workspace-detail-vitest.xml`
 - `npm test -- --run ... --outputFile=./test-results/fdp53-vitest.xml`
 - `npm run check:api-client-boundary:fdp50`
 - `npm run check:scope:fdp50`
 - `npm run check:scope:fdp51`
-- `npm run check:scope:fdp52`
+- `npm run check:scope:workspace-detail`
 - `npm run check:fdp53-scope`
 
 Risk:
@@ -133,7 +133,7 @@ Decision:
 Old jobs:
 - `scripts/check-fdp50-scope.mjs`
 - `scripts/check-fdp51-scope.mjs`
-- `scripts/check-fdp52-scope.mjs`
+- `scripts/check-workspace-detail-scope.mjs`
 - `scripts/check-fdp53-scope.mjs`
 
 Proposed new job:
@@ -150,7 +150,7 @@ No longer proves:
 
 Replacement tests/scripts:
 - `scripts/check-scope-guard-helpers-smoke.mjs`
-- `scripts/check-fdp52-scope.mjs` uses shared helpers.
+- `scripts/check-workspace-detail-scope.mjs` uses shared helpers.
 
 Risk:
 - low

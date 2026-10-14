@@ -466,12 +466,12 @@ Candidate for consolidation:
 ## Analyst Console Frontend Architecture Gate
 
 Purpose:
-- Replace the individual FDP-50, FDP-51, FDP-52, and FDP-53 frontend architecture jobs with one merge-blocking job that keeps separate proof sections.
+- Replace the individual frontend architecture jobs, including analyst workspace detail UX, with one merge-blocking job that keeps separate proof sections.
 
 Proves:
 - FDP-50 API client boundary tests and guards run.
 - FDP-51 runtime provider tests and scope guard run.
-- FDP-52 detail UX tests and scope guard run.
+- Analyst workspace detail UX tests and scope guard run.
 - FDP-53 runtime ownership tests and scope guard run.
 - Full frontend build runs after the architecture test sections.
 
@@ -489,7 +489,7 @@ Primary proof files:
 - `scripts/check-fdp50-api-client-boundary.mjs`
 - `scripts/check-fdp50-scope.mjs`
 - `scripts/check-fdp51-scope.mjs`
-- `scripts/check-fdp52-scope.mjs`
+- `scripts/check-workspace-detail-scope.mjs`
 - `scripts/check-fdp53-scope.mjs`
 
 Related FDP branches:
@@ -562,16 +562,16 @@ Candidate for consolidation:
 - Yes
 - Rationale: Implemented by FDP-54 with preserved tests, scope guard, and report verification.
 
-## FDP-52 Workspace Split Detail UX
+## Analyst Workspace Detail UX
 
 Replaced by:
 - Analyst Console Frontend Architecture Gate
 
 Purpose:
-- Former standalone FDP-52 workspace split and detail UX job.
+- Former standalone analyst workspace split and detail UX job.
 
 Proves:
-- Now proved by the `FDP-52 detail UX` section of `Analyst Console Frontend Architecture Gate`.
+- Now proved by the `Analyst workspace detail UX` section of `Analyst Console Frontend Architecture Gate`.
 
 Does not prove:
 - Backend mutation rollback behavior or authorization enforcement.
@@ -583,7 +583,7 @@ Primary proof files:
 - `analyst-console-ui/src/workspace/WorkspaceDetailRouter.test.jsx`
 - `analyst-console-ui/src/components/DetailHeader.test.jsx`
 - `analyst-console-ui/src/utils/idempotencyKey.test.js`
-- `scripts/check-fdp52-scope.mjs`
+- `scripts/check-workspace-detail-scope.mjs`
 
 Related FDP branches:
 - FDP-52

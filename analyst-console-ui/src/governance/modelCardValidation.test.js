@@ -37,7 +37,7 @@ describe("isValidModelCard", () => {
 
   it.each([
     ["unknown field", (card) => { card.approved = true; }],
-    ["promotion claim", (card) => { card.promotionState = "APPROVED"; }],
+    ["approved promotion state", (card) => { card.promotionState = "APPROVED"; }],
     ["artifact mismatch", (card) => { card.modelArtifactVerification.sha256 = "d".repeat(64); }],
     ["decision authority", (card) => { card.verifiedUsageBoundary.runtimeDecisionAuthority = "PRIMARY"; }],
     ["summary subject mismatch", (card) => { card.evaluationSummary.evaluationSubject.modelVersion = "other"; }],
