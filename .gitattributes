@@ -1,4 +1,4 @@
 *.sh text eol=lf
 deployment/local-fixtures/shadow-performance/*.json text eol=lf
-alert-service/src/test/resources/fixtures/model-card/python-generated-available-v1/*.json text eol=lf
-alert-service/src/test/resources/fixtures/model-card/python-generated-available-v1/*.md text eol=lf
+alert-service/src/test/resources/fixtures/model-card/**/*.json text eol=lf
+alert-service/src/test/resources/fixtures/model-card/**/*.md text eol=lf

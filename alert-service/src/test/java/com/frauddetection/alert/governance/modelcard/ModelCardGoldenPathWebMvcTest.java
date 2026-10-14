@@ -36,6 +36,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -66,7 +67,11 @@ class ModelCardGoldenPathWebMvcTest {
     private static final String PATH = "/api/v1/governance/model-card/current";
     private static final String MODEL_SHA =
             "55499538d93a634bb5c5fc2326380d013efaea8b0045320f838cad7405df15b6";
-    private static final Path GOLDEN_SOURCE = goldenCard().getParent();
+    private static final String AVAILABLE_FIXTURE = "python-generated-available-v1";
+    private static final String MIXED_FIXTURE = "python-generated-mixed-v1";
+    private static final String NO_DATA_FIXTURE = "python-generated-no-data-v1";
+    private static final String PARTIAL_TRUNCATED_FIXTURE = "python-generated-partial-truncated-v1";
+    private static final Path FIXTURE_ROOT = fixtureRoot();
     private static final Path RUNTIME_ARTIFACTS = createRuntimeArtifactDirectory();
 
     @jakarta.annotation.Resource
@@ -87,9 +92,13 @@ class ModelCardGoldenPathWebMvcTest {
 
     @BeforeEach
     void resetRuntimeArtifacts() throws IOException {
+        installFixture(AVAILABLE_FIXTURE);
+    }
+
+    private void installFixture(String fixtureName) throws IOException {
         for (String filename : java.util.List.of("ml_model_card.json", "ml_model_card.md", "manifest.json")) {
             Files.copy(
-                    GOLDEN_SOURCE.resolve(filename),
+                    FIXTURE_ROOT.resolve(fixtureName).resolve(filename),
                     RUNTIME_ARTIFACTS.resolve(filename),
                     StandardCopyOption.REPLACE_EXISTING
             );
@@ -98,13 +107,7 @@ class ModelCardGoldenPathWebMvcTest {
 
     @Test
     void authenticatedReadPreservesPythonGeneratedIdentityAndMetrics() throws Exception {
-        var authentication = new UsernamePasswordAuthenticationToken(
-                "governance-admin",
-                null,
-                java.util.List.of(new SimpleGrantedAuthority(AnalystAuthority.MODEL_CARD_READ))
-        );
-
-        mockMvc.perform(get(PATH).with(authentication(authentication)))
+        mockMvc.perform(get(PATH).with(authentication(authorizedAuthentication())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.evaluationEvidence.status").value("AVAILABLE"))
                 .andExpect(jsonPath("$.subject.modelArtifactSha256").value(MODEL_SHA))
@@ -123,19 +126,94 @@ class ModelCardGoldenPathWebMvcTest {
     }
 
     @Test
+    void mixedPopulationPreservesExactRoundedMetricsRankingAndDisagreement() throws Exception {
+        installFixture(MIXED_FIXTURE);
+
+        mockMvc.perform(get(PATH).with(authentication(authorizedAuthentication())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.subject.modelArtifactSha256").value(MODEL_SHA))
+                .andExpect(jsonPath("$.evaluationSummary.population.recordsEvaluated").value(7))
+                .andExpect(jsonPath("$.evaluationSummary.classBalance.positiveClassCount").value(4))
+                .andExpect(jsonPath("$.evaluationSummary.classBalance.negativeClassCount").value(3))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.truePositive").value(2))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.falsePositive").value(1))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.trueNegative").value(2))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.falseNegative").value(2))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.precision.value")
+                        .value(0.666667))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.recall.value")
+                        .value(0.5))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.falsePositiveRate.value")
+                        .value(0.333333))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.falseNegativeRate.value")
+                        .value(0.5))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.precisionAtK['3'].actualK")
+                        .value(3))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.precisionAtK['3'].value.value")
+                        .value(0.666667))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.recallAtK['3'].value.value")
+                        .value(0.5))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.precisionAtK['7'].actualK")
+                        .value(7))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.rulesVsMlDisagreement.categoryCounts.BOTH_HIGH")
+                        .value(1))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.rulesVsMlDisagreement.categoryCounts.BOTH_LOW")
+                        .value(2))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.rulesVsMlDisagreement.categoryCounts.ML_HIGH_RULES_LOW")
+                        .value(2))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.rulesVsMlDisagreement.categoryCounts.RULES_HIGH_ML_LOW")
+                        .value(2))
+                .andExpect(jsonPath("$.evaluationSummary.warnings").isEmpty());
+    }
+
+    @Test
+    void boundaryPopulationPreservesUnavailablePartialTruncatedAndNumericZeroSemantics() throws Exception {
+        installFixture(NO_DATA_FIXTURE);
+
+        mockMvc.perform(get(PATH).with(authentication(authorizedAuthentication())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.evaluationSummary.population.recordsEvaluated").value(0))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.precision.available")
+                        .value(false))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.precision.reason")
+                        .value("NO_PREDICTED_POSITIVES"))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.precision.value")
+                        .value(nullValue()))
+                .andExpect(jsonPath("$.evaluationSummary.warnings[0]")
+                        .value("INSUFFICIENT_MODEL_LINEAGE_RECORDS"))
+                .andExpect(jsonPath("$.evaluationSummary.warnings[1]")
+                        .value("MODEL_PREDICTION_SIGNAL_UNAVAILABLE"));
+
+        installFixture(PARTIAL_TRUNCATED_FIXTURE);
+
+        mockMvc.perform(get(PATH).with(authentication(authorizedAuthentication())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.evaluationSummary.population.recordsConsidered").value(3))
+                .andExpect(jsonPath("$.evaluationSummary.population.recordsEvaluated").value(2))
+                .andExpect(jsonPath("$.evaluationSummary.population.recordsExcludedIdentityMismatch").value(1))
+                .andExpect(jsonPath("$.evaluationSummary.sourceDataset.truncated").value(true))
+                .andExpect(jsonPath("$.evaluationSummary.warnings[0]")
+                        .value("MODEL_EVALUATION_PARTIAL_COVERAGE"))
+                .andExpect(jsonPath("$.evaluationSummary.warnings[1]").value("SOURCE_DATASET_TRUNCATED"))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.falsePositiveRate.available")
+                        .value(true))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.falsePositiveRate.value")
+                        .value(0.0))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.falseNegativeRate.available")
+                        .value(true))
+                .andExpect(jsonPath("$.evaluationSummary.supportedMetrics.mlPredictionMetrics.falseNegativeRate.value")
+                        .value(0.0));
+    }
+
+    @Test
     void configuredInvalidArtifactReturnsSafe503() throws Exception {
         Files.writeString(
                 RUNTIME_ARTIFACTS.resolve("ml_model_card.md"),
                 "tampered\n",
                 StandardCharsets.UTF_8
         );
-        var authentication = new UsernamePasswordAuthenticationToken(
-                "governance-admin",
-                null,
-                java.util.List.of(new SimpleGrantedAuthority(AnalystAuthority.MODEL_CARD_READ))
-        );
 
-        mockMvc.perform(get(PATH).with(authentication(authentication)))
+        mockMvc.perform(get(PATH).with(authentication(authorizedAuthentication())))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.message").value("Model Card unavailable."));
     }
@@ -148,13 +226,21 @@ class ModelCardGoldenPathWebMvcTest {
         Files.deleteIfExists(RUNTIME_ARTIFACTS);
     }
 
-    private static Path goldenCard() {
+    private static UsernamePasswordAuthenticationToken authorizedAuthentication() {
+        return new UsernamePasswordAuthenticationToken(
+                "governance-admin",
+                null,
+                java.util.List.of(new SimpleGrantedAuthority(AnalystAuthority.MODEL_CARD_READ))
+        );
+    }
+
+    private static Path fixtureRoot() {
         try {
             return Path.of(Objects.requireNonNull(ModelCardGoldenPathWebMvcTest.class.getResource(
                     "/fixtures/model-card/python-generated-available-v1/ml_model_card.json"
-            )).toURI());
+            )).toURI()).getParent().getParent();
         } catch (URISyntaxException exception) {
-            throw new IllegalStateException("Golden Model Card fixture path unavailable", exception);
+            throw new IllegalStateException("Golden Model Card fixture root unavailable", exception);
         }
     }
 
