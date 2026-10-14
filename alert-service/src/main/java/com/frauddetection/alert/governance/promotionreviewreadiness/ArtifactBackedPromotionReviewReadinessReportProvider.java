@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.promotionreviewreadiness;
 
+import com.frauddetection.alert.governance.artifact.GovernanceArtifactReadException;
+import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -7,11 +9,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -31,11 +28,21 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
     private final PromotionReviewReadinessReportCurrentProperties properties;
     private final ObjectMapper objectMapper;
     private final PromotionReviewReadinessReportValidator validator;
+    private final GovernanceArtifactReader artifactReader;
 
     public ArtifactBackedPromotionReviewReadinessReportProvider(
             PromotionReviewReadinessReportCurrentProperties properties,
             ObjectMapper objectMapper,
             PromotionReviewReadinessReportValidator validator
+    ) {
+        this(properties, objectMapper, validator, new GovernanceArtifactReader());
+    }
+
+    ArtifactBackedPromotionReviewReadinessReportProvider(
+            PromotionReviewReadinessReportCurrentProperties properties,
+            ObjectMapper objectMapper,
+            PromotionReviewReadinessReportValidator validator,
+            GovernanceArtifactReader artifactReader
     ) {
         this.properties = properties;
         this.objectMapper = objectMapper.rebuild()
@@ -46,6 +53,7 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
                 .configure(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES, true)
                 .build();
         this.validator = validator;
+        this.artifactReader = artifactReader;
     }
 
     @Override
@@ -55,15 +63,7 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
         }
 
         Path artifactPath = configuredArtifactPath();
-        assertJsonArtifact(artifactPath);
-        requireFileName(artifactPath, REPORT_FILENAME);
-        assertNoSymlinkDirectory(artifactPath);
-        assertRegularFile(artifactPath);
-        Path manifestPath = artifactPath.resolveSibling(MANIFEST_FILENAME);
-        assertJsonArtifact(manifestPath);
-        requireFileName(manifestPath, MANIFEST_FILENAME);
-        assertNoSymlinkDirectory(manifestPath);
-        assertRegularFile(manifestPath);
+        Path manifestPath = sibling(artifactPath, MANIFEST_FILENAME);
 
         byte[] manifestPayload = readBoundedArtifact(manifestPath, MAX_MANIFEST_SIZE_BYTES);
         byte[] reportPayload = readBoundedArtifact(artifactPath, properties.maxSizeBytes());
@@ -78,52 +78,17 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
     }
 
     private Path configuredArtifactPath() {
-        String configuredBaseDir = properties.baseDir().trim();
-        String configuredPath = properties.path().trim();
-        if (configuredBaseDir.contains("..") || configuredPath.contains("..")) {
-            throw unavailable();
-        }
         try {
-            Path baseDir = Path.of(configuredBaseDir).toAbsolutePath().normalize();
-            Path artifactPath = Path.of(configuredPath);
-            Path normalizedArtifactPath = (artifactPath.isAbsolute() ? artifactPath : baseDir.resolve(artifactPath))
-                    .toAbsolutePath()
-                    .normalize();
-            if (!normalizedArtifactPath.startsWith(baseDir)) {
-                throw unavailable();
-            }
-            return normalizedArtifactPath;
-        } catch (InvalidPathException exception) {
+            return artifactReader.resolveConfiguredFile(properties.baseDir(), properties.path(), REPORT_FILENAME);
+        } catch (GovernanceArtifactReadException exception) {
             throw unavailable();
         }
     }
 
-    private void assertNoSymlinkDirectory(Path artifactPath) {
-        Path parent = artifactPath.getParent();
-        while (parent != null) {
-            if (Files.isSymbolicLink(parent)) {
-                throw unavailable();
-            }
-            parent = parent.getParent();
-        }
-    }
-
-    private void assertJsonArtifact(Path artifactPath) {
-        Path fileName = artifactPath.getFileName();
-        if (fileName == null || !fileName.toString().endsWith(".json")) {
-            throw unavailable();
-        }
-    }
-
-    private void requireFileName(Path artifactPath, String expected) {
-        Path fileName = artifactPath.getFileName();
-        if (fileName == null || !expected.equals(fileName.toString())) {
-            throw unavailable();
-        }
-    }
-
-    private void assertRegularFile(Path artifactPath) {
-        if (!Files.isRegularFile(artifactPath, LinkOption.NOFOLLOW_LINKS)) {
+    private Path sibling(Path artifactPath, String expectedFilename) {
+        try {
+            return artifactReader.resolveSibling(artifactPath, expectedFilename);
+        } catch (GovernanceArtifactReadException exception) {
             throw unavailable();
         }
     }
@@ -133,14 +98,8 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
             throw unavailable();
         }
         try {
-            try (InputStream stream = Files.newInputStream(artifactPath)) {
-                byte[] payload = stream.readNBytes((int) maxSizeBytes + 1);
-                if (payload.length > maxSizeBytes) {
-                    throw unavailable();
-                }
-                return payload;
-            }
-        } catch (IOException exception) {
+            return artifactReader.read(artifactPath, maxSizeBytes);
+        } catch (GovernanceArtifactReadException exception) {
             throw unavailable();
         }
     }

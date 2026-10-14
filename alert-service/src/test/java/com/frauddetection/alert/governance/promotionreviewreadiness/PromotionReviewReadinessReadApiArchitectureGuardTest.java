@@ -123,20 +123,26 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
     @Test
     void providerReadsOnlyConfiguredCurrentReportArtifact() throws Exception {
         String source = Files.readString(PACKAGE_ROOT.resolve("ArtifactBackedPromotionReviewReadinessReportProvider.java"));
+        String reader = Files.readString(PRODUCTION_ROOT.resolve("governance/artifact/GovernanceArtifactReader.java"));
 
         assertThat(source).contains(
                 "PromotionReviewReadinessReportCurrentProperties",
                 "manifest.json",
                 "PROMOTION_REVIEW_READINESS_ARTIFACT_SET_V1",
                 "promotion-review-readiness-artifact-set-v1",
-                "LinkOption.NOFOLLOW_LINKS",
-                "startsWith(baseDir)",
+                "GovernanceArtifactReader",
+                "resolveConfiguredFile(properties.baseDir(), properties.path(), REPORT_FILENAME)",
                 "readBoundedArtifact(manifestPath, MAX_MANIFEST_SIZE_BYTES)",
                 "readBoundedArtifact(artifactPath, properties.maxSizeBytes())",
                 "validateManifest(manifestPayload, reportPayload, report)",
                 "objectMapper.readValue(payload, PromotionReviewReadinessReport.class)",
-                "validator.validate(report)",
-                "Files.isSymbolicLink"
+                "validator.validate(report)"
+        );
+        assertThat(reader).contains(
+                "LinkOption.NOFOLLOW_LINKS",
+                "Files.isSymbolicLink",
+                "resolved.startsWith(baseDir)",
+                "changed(before, after)"
         );
         assertThat(source).doesNotContain(
                 "Files.size",

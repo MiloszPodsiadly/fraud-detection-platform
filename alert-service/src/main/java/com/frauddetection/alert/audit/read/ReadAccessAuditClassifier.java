@@ -86,6 +86,9 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/governance/promotion-review-readiness/current".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.PROMOTION_REVIEW_READINESS, ReadAccessResourceType.PROMOTION_REVIEW_READINESS, null, request));
         }
+        if ("/api/v1/governance/model-card/current".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.MODEL_CARD, ReadAccessResourceType.MODEL_CARD, null, request));
+        }
         return Optional.empty();
     }
 

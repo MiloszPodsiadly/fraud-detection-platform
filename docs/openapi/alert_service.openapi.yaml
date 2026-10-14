@@ -1576,6 +1576,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+  /api/v1/governance/model-card/current:
+    get:
+      summary: Read the current exact-artifact ML Model Card
+      description: Returns one explicitly configured, manifest-verified Model Card. Requires model-card:read. The response is offline diagnostic evidence only and grants no model promotion, threshold change, production decision, payment authorization, workflow, registry mutation, or scoring authority. The endpoint never scans for a latest artifact and does not expose raw dataset rows or model bytes.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Current validated Model Card returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelCardResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: The configured artifact set is unavailable, inconsistent, or invalid. No paths or validation internals are returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -1598,6 +1624,132 @@ components:
         maxLength: 120
         pattern: "^[A-Za-z0-9._:-]+$"
   schemas:
+    ModelCardResponse:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, cardType, generatedAt, subject, promotionState, modelArtifactVerification, evaluationEvidence, evaluationSummary, verifiedUsageBoundary]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [ml-model-card-v1]
+        cardType:
+          type: string
+          enum: [ML_MODEL_CARD_V1]
+        generatedAt:
+          type: string
+          format: date-time
+        subject:
+          $ref: "#/components/schemas/ModelCardSubject"
+        promotionState:
+          type: string
+          enum: [NOT_EVALUATED_FOR_PROMOTION]
+        modelArtifactVerification:
+          $ref: "#/components/schemas/ModelCardArtifactVerification"
+        evaluationEvidence:
+          $ref: "#/components/schemas/ModelCardEvaluationEvidence"
+        evaluationSummary:
+          nullable: true
+          oneOf:
+            - $ref: "#/components/schemas/GenericObject"
+        verifiedUsageBoundary:
+          $ref: "#/components/schemas/ModelCardUsageBoundary"
+    ModelCardSubject:
+      type: object
+      additionalProperties: false
+      required: [subjectType, modelName, modelVersion, featureContractVersion, modelArtifactSha256, identityCompleteness]
+      properties:
+        subjectType:
+          type: string
+          enum: [ML_MODEL]
+        modelName:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9._-]+$'
+        modelVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9._-]+$'
+        featureContractVersion:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: '^[A-Za-z0-9._-]+$'
+        modelArtifactSha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        identityCompleteness:
+          type: string
+          enum: [COMPLETE]
+    ModelCardArtifactVerification:
+      type: object
+      additionalProperties: false
+      required: [status, sha256]
+      properties:
+        status:
+          type: string
+          enum: [VERIFIED_AGAINST_ARTIFACT_BYTES]
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    ModelCardEvaluationEvidence:
+      type: object
+      description: AVAILABLE contains verified report metadata; NOT_AVAILABLE is permitted only when model evaluation was not configured.
+      additionalProperties: true
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, NOT_AVAILABLE]
+        reason:
+          type: string
+          enum: [MODEL_EVALUATION_NOT_CONFIGURED]
+        reportType:
+          type: string
+          enum: [ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1]
+        artifactSetVersion:
+          type: string
+          enum: [ml-model-feedback-dataset-evaluation-artifact-set-v1]
+        reportGeneratedAt:
+          type: string
+          format: date-time
+        manifestSha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        integrityVerification:
+          type: string
+          enum: [VERIFIED_REPORT_AND_MANIFEST]
+        sourceDatasetVerificationLevel:
+          type: string
+          enum: [CLAIM_ONLY, VERIFIED_AGAINST_SOURCE_BYTES]
+    ModelCardUsageBoundary:
+      type: object
+      additionalProperties: false
+      required: [allowedModes, runtimeDecisionAuthority, promotionAuthority, thresholdChangeAuthority, paymentAuthorizationAuthority, workflowAuthority]
+      properties:
+        allowedModes:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: string
+            enum: [COMPARE, OFFLINE_EVALUATION, SHADOW]
+        runtimeDecisionAuthority:
+          type: string
+          enum: [NONE]
+        promotionAuthority:
+          type: string
+          enum: [NONE]
+        thresholdChangeAuthority:
+          type: string
+          enum: [NONE]
+        paymentAuthorizationAuthority:
+          type: string
+          enum: [NONE]
+        workflowAuthority:
+          type: string
+          enum: [NONE]
     GenericObject:
       type: object
       additionalProperties: true
