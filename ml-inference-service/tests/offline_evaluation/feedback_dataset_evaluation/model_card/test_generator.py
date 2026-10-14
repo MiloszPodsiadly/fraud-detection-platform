@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import tempfile
@@ -20,6 +21,7 @@ from offline_evaluation.feedback_dataset_evaluation.model_card.generator import 
 from offline_evaluation.feedback_dataset_evaluation.model_card.schema import (
     EVALUATION_AVAILABLE,
     EVALUATION_NOT_AVAILABLE,
+    USE_LIMITATIONS,
     ModelCardValidationError,
 )
 from offline_evaluation.feedback_dataset_evaluation.model_card.run_model_card_generation import main
@@ -47,8 +49,22 @@ from offline_evaluation.feedback_dataset_evaluation.report_writer import (
 
 try:
     from feedback_dataset_evaluation.feedback_dataset_fixtures import GENERATED_AT, jsonl, record
+    from feedback_dataset_evaluation.model_card.golden_matrix import (
+        GOLDEN_MATRIX_FIXTURES,
+        MIXED_FIXTURE,
+        NO_DATA_FIXTURE,
+        PARTIAL_TRUNCATED_FIXTURE,
+        generate_golden_matrix,
+    )
 except ModuleNotFoundError:
     from feedback_dataset_fixtures import GENERATED_AT, jsonl, record
+    from golden_matrix import (
+        GOLDEN_MATRIX_FIXTURES,
+        MIXED_FIXTURE,
+        NO_DATA_FIXTURE,
+        PARTIAL_TRUNCATED_FIXTURE,
+        generate_golden_matrix,
+    )
 
 
 CARD_GENERATED_AT = "2026-06-10T00:00:01Z"
@@ -63,6 +79,7 @@ GOLDEN_ARTIFACT_DIR = (
     / "model-card"
     / "python-generated-available-v1"
 )
+GOLDEN_ARTIFACT_ROOT = GOLDEN_ARTIFACT_DIR.parent
 
 
 class ModelCardGeneratorTest(unittest.TestCase):
@@ -196,6 +213,84 @@ class ModelCardGeneratorTest(unittest.TestCase):
         self.assertEqual(EVALUATION_AVAILABLE, validated.card["evaluationEvidence"]["status"])
         self.assertGreater(validated.card["evaluationSummary"]["population"]["recordsEvaluated"], 0)
 
+    def test_python_generated_golden_matrix_is_reproducible_and_semantically_exact(self):
+        output_root = self.root / "golden-matrix"
+        output_root.mkdir()
+        identity, generated = generate_golden_matrix(
+            self.model_artifact,
+            output_root,
+            self.root / "golden-matrix-workspace",
+        )
+
+        self.assertEqual(set(GOLDEN_MATRIX_FIXTURES), set(generated))
+        self.assertEqual(
+            hashlib.sha256(self.model_artifact.read_bytes()).hexdigest(),
+            identity.model_artifact_sha256,
+        )
+        validated_cards = {}
+        for fixture_name, paths in generated.items():
+            committed_dir = GOLDEN_ARTIFACT_ROOT / fixture_name
+            self.assertEqual({path.name for path in paths.values()}, {path.name for path in committed_dir.iterdir()})
+            for generated_path in paths.values():
+                self.assertEqual(
+                    generated_path.read_bytes(),
+                    (committed_dir / generated_path.name).read_bytes(),
+                    f"{fixture_name}/{generated_path.name}",
+                )
+            validated = read_validated_model_card_artifact_set(committed_dir)
+            self.assertEqual(
+                hashlib.sha256((committed_dir / MODEL_CARD_MANIFEST_FILENAME).read_bytes()).hexdigest(),
+                validated.manifest_sha256,
+            )
+            self.assertEqual(identity.as_subject(), dict(validated.card["subject"]))
+            self.assertEqual(
+                "VERIFIED_AGAINST_SOURCE_BYTES",
+                validated.card["evaluationEvidence"]["sourceDatasetVerificationLevel"],
+            )
+            self.assertEqual(tuple(USE_LIMITATIONS), validated.card["verifiedUsageBoundary"]["useLimitations"])
+            validated_cards[fixture_name] = validated.card
+
+        mixed = validated_cards[MIXED_FIXTURE]["evaluationSummary"]
+        mixed_metrics = mixed["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual(
+            {"truePositive": 2, "falsePositive": 1, "trueNegative": 2, "falseNegative": 2},
+            {field: mixed_metrics[field] for field in ("truePositive", "falsePositive", "trueNegative", "falseNegative")},
+        )
+        self.assertEqual(0.666667, mixed_metrics["precision"]["value"])
+        self.assertEqual(0.5, mixed_metrics["recall"]["value"])
+        self.assertEqual(0.333333, mixed_metrics["falsePositiveRate"]["value"])
+        self.assertEqual(0.5, mixed_metrics["falseNegativeRate"]["value"])
+        self.assertEqual(("1", "3", "5", "7"), tuple(mixed_metrics["precisionAtK"]))
+        self.assertEqual(
+            {"BOTH_HIGH": 1, "BOTH_LOW": 2, "ML_HIGH_RULES_LOW": 2, "RULES_HIGH_ML_LOW": 2},
+            dict(mixed["supportedMetrics"]["rulesVsMlDisagreement"]["categoryCounts"]),
+        )
+        self.assertEqual((), mixed["warnings"])
+
+        no_data = validated_cards[NO_DATA_FIXTURE]["evaluationSummary"]
+        no_data_metrics = no_data["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual(0, no_data["population"]["recordsEvaluated"])
+        self.assertEqual(False, no_data_metrics["precision"]["available"])
+        self.assertEqual("NO_PREDICTED_POSITIVES", no_data_metrics["precision"]["reason"])
+        self.assertIsNone(no_data_metrics["precision"]["value"])
+        self.assertEqual(
+            ("INSUFFICIENT_MODEL_LINEAGE_RECORDS", "MODEL_PREDICTION_SIGNAL_UNAVAILABLE"),
+            no_data["warnings"],
+        )
+
+        partial = validated_cards[PARTIAL_TRUNCATED_FIXTURE]["evaluationSummary"]
+        partial_metrics = partial["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual(3, partial["population"]["recordsConsidered"])
+        self.assertEqual(2, partial["population"]["recordsEvaluated"])
+        self.assertEqual(1, partial["population"]["recordsExcludedIdentityMismatch"])
+        self.assertEqual(True, partial["sourceDataset"]["truncated"])
+        self.assertEqual(
+            ("MODEL_EVALUATION_PARTIAL_COVERAGE", "SOURCE_DATASET_TRUNCATED"),
+            partial["warnings"],
+        )
+        self.assertEqual({"available": True, "reason": None, "value": 0.0}, partial_metrics["falsePositiveRate"])
+        self.assertEqual({"available": True, "reason": None, "value": 0.0}, partial_metrics["falseNegativeRate"])
+
     def test_command_line_entrypoint_uses_explicit_artifact_paths(self):
         output = self.root / "command-line-output"
 
@@ -303,7 +398,7 @@ class ModelCardGeneratorTest(unittest.TestCase):
     def test_publication_failure_leaves_no_partial_artifact_set(self):
         output = self.root / "failed-publication"
         with patch(
-                "offline_evaluation.feedback_dataset_evaluation.model_card.writer.os.rename",
+                "offline_evaluation.feedback_dataset_evaluation.model_card.writer.publish_directory_without_replacement",
                 side_effect=OSError("injected publication failure"),
         ):
             with self.assertRaisesRegex(ModelCardValidationError, "publication failed"):
@@ -313,19 +408,48 @@ class ModelCardGeneratorTest(unittest.TestCase):
         self.assertEqual([], list(self.root.glob(f".{output.name}.staging-*")))
         self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
 
+    def test_publication_failure_never_removes_replaced_staging_directory(self):
+        output = self.root / "replaced-staging"
+        foreign_directories = []
+
+        def replace_owned_staging(source, destination):
+            displaced = source.with_name(f"{source.name}-displaced")
+            source.rename(displaced)
+            source.mkdir()
+            marker = source / "foreign-owner.txt"
+            marker.write_text("preserve", encoding="utf-8")
+            foreign_directories.append(source)
+            raise OSError("injected publication failure after staging replacement")
+
+        with patch(
+                "offline_evaluation.feedback_dataset_evaluation.model_card.writer.publish_directory_without_replacement",
+                side_effect=replace_owned_staging,
+        ):
+            with self.assertRaisesRegex(ModelCardValidationError, "publication failed") as caught:
+                self._generate(output.name)
+
+        self.assertEqual(1, len(foreign_directories))
+        self.assertEqual(
+            "preserve",
+            (foreign_directories[0] / "foreign-owner.txt").read_text(encoding="utf-8"),
+        )
+        self.assertTrue(any("changed ownership" in note for note in caught.exception.__notes__))
+        self.assertFalse(output.exists())
+        self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
+
     def test_concurrent_reader_sees_no_partial_artifact_set_before_directory_publish(self):
         output = self.root / "concurrent-publication"
-        real_replace = os.replace
+        real_publish = model_card_writer.publish_directory_without_replacement
         observed_before_publish = []
 
         def inspect_before_publish(source, destination):
             with self.assertRaises(ModelCardValidationError):
                 read_validated_model_card_artifact_set(output)
             observed_before_publish.append(True)
-            return real_replace(source, destination)
+            return real_publish(source, destination)
 
         with patch(
-                "offline_evaluation.feedback_dataset_evaluation.model_card.writer.os.rename",
+                "offline_evaluation.feedback_dataset_evaluation.model_card.writer.publish_directory_without_replacement",
                 side_effect=inspect_before_publish,
         ):
             self._generate(output.name)
@@ -345,6 +469,40 @@ class ModelCardGeneratorTest(unittest.TestCase):
                     self._generate(output.name)
 
                 self.assertEqual(["owned.txt"] if populated else [], [path.name for path in output.iterdir()])
+
+    def test_independent_destination_creator_cannot_be_overwritten(self):
+        output = self.root / "independent-creator-race"
+        real_publish = model_card_writer.publish_directory_without_replacement
+
+        def create_destination_before_publish(source, destination):
+            destination.mkdir()
+            (destination / "independent.txt").write_text("preserve", encoding="utf-8")
+            return real_publish(source, destination)
+
+        with patch(
+                "offline_evaluation.feedback_dataset_evaluation.model_card.writer.publish_directory_without_replacement",
+                side_effect=create_destination_before_publish,
+        ):
+            with self.assertRaisesRegex(ModelCardValidationError, "already exists and is immutable"):
+                self._generate(output.name)
+
+        self.assertEqual("preserve", (output / "independent.txt").read_text(encoding="utf-8"))
+        self.assertEqual([], list(self.root.glob(f".{output.name}.staging-*")))
+        self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
+
+    def test_unsupported_atomic_publication_fails_closed(self):
+        output = self.root / "unsupported-publication"
+        unsupported = model_card_writer.AtomicDirectoryPublicationUnsupported("unsupported")
+        with patch(
+                "offline_evaluation.feedback_dataset_evaluation.model_card.writer.publish_directory_without_replacement",
+                side_effect=unsupported,
+        ):
+            with self.assertRaisesRegex(ModelCardValidationError, "atomic no-replace.*unsupported"):
+                self._generate(output.name)
+
+        self.assertFalse(output.exists())
+        self.assertEqual([], list(self.root.glob(f".{output.name}.staging-*")))
+        self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
 
     def test_concurrent_publishers_cannot_replace_the_same_version(self):
         output = self.root / "concurrent-version"
@@ -372,6 +530,62 @@ class ModelCardGeneratorTest(unittest.TestCase):
         read_validated_model_card_artifact_set(output)
         self.assertEqual([], list(self.root.glob(f".{output.name}.staging-*")))
         self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
+
+    def test_interrupted_publisher_requires_explicit_manual_recovery(self):
+        output = self.root / "interrupted-publication"
+        foreign_staging = self.root / f".{output.name}.staging-foreign"
+        foreign_staging.mkdir()
+        (foreign_staging / "owner.txt").write_text("preserve", encoding="utf-8")
+        publication_lock = model_card_writer._acquire_publication_lock(output)
+        lock_metadata = publication_lock.path.read_text(encoding="utf-8")
+        os.close(publication_lock.descriptor)
+
+        with self.assertRaisesRegex(ModelCardValidationError, "already in progress"):
+            self._generate(output.name)
+
+        self.assertEqual(lock_metadata, publication_lock.path.read_text(encoding="utf-8"))
+        self.assertEqual("preserve", (foreign_staging / "owner.txt").read_text(encoding="utf-8"))
+        self.assertFalse(output.exists())
+
+        publication_lock.path.unlink()
+        publication_lock.path.unlink(missing_ok=True)
+        self._generate(output.name)
+
+        read_validated_model_card_artifact_set(output)
+        self.assertEqual("preserve", (foreign_staging / "owner.txt").read_text(encoding="utf-8"))
+
+    def test_existing_foreign_lock_is_never_removed_by_publisher(self):
+        output = self.root / "foreign-lock"
+        lock_path = self.root / f".{output.name}.publish.lock"
+        lock_path.write_text("foreign-owner\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ModelCardValidationError, "already in progress"):
+            self._generate(output.name)
+
+        self.assertEqual("foreign-owner\n", lock_path.read_text(encoding="utf-8"))
+        self.assertFalse(output.exists())
+
+    def test_lock_release_refuses_changed_ownership(self):
+        output = self.root / "changed-lock-ownership"
+        publication_lock = model_card_writer._acquire_publication_lock(output)
+        with patch(
+                "offline_evaluation.feedback_dataset_evaluation.model_card.writer._same_file_identity",
+                return_value=False,
+        ):
+            with self.assertRaisesRegex(ModelCardValidationError, "refusing to remove foreign lock"):
+                model_card_writer._release_publication_lock(publication_lock)
+
+        self.assertTrue(publication_lock.path.exists())
+        publication_lock.path.unlink()
+
+    def test_published_version_survives_repeated_publication_attempt(self):
+        paths = self._generate("published-version")
+        original_payloads = {name: path.read_bytes() for name, path in paths.items()}
+
+        with self.assertRaisesRegex(ModelCardValidationError, "already exists and is immutable"):
+            self._generate("published-version")
+
+        self.assertEqual(original_payloads, {name: path.read_bytes() for name, path in paths.items()})
 
     def test_failures_before_manifest_and_after_complete_staging_publish_nothing(self):
         cases = (

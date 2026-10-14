@@ -12,9 +12,11 @@ FRONTEND_SOURCE_ROOT = ROOT / "analyst-console-ui" / "src"
 class ModelCardSingleSourceArchitectureTest(unittest.TestCase):
     def test_modelCardHasOneCanonicalWriter(self):
         source = self._python_source(PACKAGE_ROOT)
+        writer = (PACKAGE_ROOT / "writer.py").read_text(encoding="utf-8")
 
         self.assertEqual(1, source.count("def write_model_card_artifacts("))
-        self.assertEqual(1, source.count("os.replace(staging_dir, destination)"))
+        self.assertEqual(1, source.count("def publish_directory_without_replacement("))
+        self.assertIn("publish_directory_without_replacement(staging_dir, destination)", writer)
         self.assertIn("write_model_card_artifacts", (PACKAGE_ROOT / "generator.py").read_text(encoding="utf-8"))
 
     def test_modelCardUsesSharedSafetyPolicyWithoutEvaluationCardOwnership(self):

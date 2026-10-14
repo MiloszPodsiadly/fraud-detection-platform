@@ -3,13 +3,21 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import socket
 import tempfile
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from offline_evaluation.feedback_dataset_evaluation.artifact_integrity import (
     BoundedArtifactReadError,
     reject_symlink_path,
+)
+from offline_evaluation.feedback_dataset_evaluation.model_card.atomic_directory_publish import (
+    AtomicDirectoryPublicationUnsupported,
+    publish_directory_without_replacement,
 )
 from offline_evaluation.feedback_dataset_evaluation.model_card.schema import (
     EVALUATION_AVAILABLE,
@@ -25,6 +33,13 @@ MODEL_CARD_FILENAME = "ml_model_card.json"
 MODEL_CARD_MARKDOWN_FILENAME = "ml_model_card.md"
 MODEL_CARD_MANIFEST_FILENAME = "manifest.json"
 MAX_MODEL_CARD_MARKDOWN_BYTES = 262_144
+
+
+@dataclass(frozen=True)
+class _PublicationLock:
+    path: Path
+    descriptor: int
+    identity: os.stat_result
 
 
 def model_card_json(card: dict[str, Any]) -> str:
@@ -191,12 +206,15 @@ def write_model_card_artifacts(
     validated = validate_model_card(card)
     destination = Path(output_dir)
     _validate_destination(destination, allow_output_root)
-    lock_path, lock_descriptor = _acquire_publication_lock(destination)
+    publication_lock = _acquire_publication_lock(destination)
     staging_dir: Path | None = None
+    staging_identity: os.stat_result | None = None
+    publication_error: Exception | None = None
     try:
         if destination.exists() or destination.is_symlink():
             raise ModelCardValidationError("model card artifact version already exists and is immutable")
         staging_dir = Path(tempfile.mkdtemp(prefix=f".{destination.name}.staging-", dir=destination.parent))
+        staging_identity = os.stat(staging_dir, follow_symlinks=False)
         card_path = staging_dir / MODEL_CARD_FILENAME
         markdown_path = staging_dir / MODEL_CARD_MARKDOWN_FILENAME
         manifest_path = staging_dir / MODEL_CARD_MANIFEST_FILENAME
@@ -214,12 +232,21 @@ def write_model_card_artifacts(
         _validate_staging_directory(staging_dir)
         _publish_new_directory(staging_dir, destination)
         staging_dir = None
-    except Exception:
+    except Exception as exc:
+        publication_error = exc
         if staging_dir is not None:
-            _cleanup_staging_directory(staging_dir)
+            try:
+                _cleanup_staging_directory(staging_dir, staging_identity)
+            except Exception as cleanup_error:
+                exc.add_note(f"owned staging cleanup also failed: {cleanup_error}")
         raise
     finally:
-        _release_publication_lock(lock_path, lock_descriptor)
+        try:
+            _release_publication_lock(publication_lock)
+        except Exception as lock_error:
+            if publication_error is None:
+                raise
+            publication_error.add_note(f"owned publication lock release also failed: {lock_error}")
     return {
         "modelCardJson": destination / MODEL_CARD_FILENAME,
         "modelCardMarkdown": destination / MODEL_CARD_MARKDOWN_FILENAME,
@@ -248,7 +275,7 @@ def _validate_destination(output_dir: Path, allow_output_root: Path | None) -> N
         raise ModelCardValidationError(str(exc)) from exc
 
 
-def _acquire_publication_lock(destination: Path) -> tuple[Path, int]:
+def _acquire_publication_lock(destination: Path) -> _PublicationLock:
     lock_path = destination.parent / f".{destination.name}.publish.lock"
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -258,20 +285,70 @@ def _acquire_publication_lock(destination: Path) -> tuple[Path, int]:
     except OSError as exc:
         raise ModelCardValidationError("model card publication lock cannot be created") from exc
     try:
-        os.write(descriptor, b"model-card-publication-v1\n")
+        identity = os.fstat(descriptor)
     except OSError as exc:
         os.close(descriptor)
-        lock_path.unlink(missing_ok=True)
+        raise ModelCardValidationError(
+            "model card publication lock identity cannot be established"
+        ) from exc
+    publication_lock = _PublicationLock(lock_path, descriptor, identity)
+    payload = (
+        dumps_strict_json(
+            {
+                "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "format": "model-card-publication-lock-v1",
+                "host": socket.gethostname(),
+                "ownerToken": uuid.uuid4().hex,
+                "pid": os.getpid(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+    try:
+        written = os.write(descriptor, payload)
+        if written != len(payload):
+            raise OSError("publication lock metadata was only partially written")
+    except OSError as exc:
+        try:
+            _release_publication_lock(publication_lock)
+        except Exception as cleanup_error:
+            exc.add_note(f"failed publication lock cleanup also failed: {cleanup_error}")
         raise ModelCardValidationError("model card publication lock cannot be written") from exc
-    return lock_path, descriptor
+    return publication_lock
 
 
-def _release_publication_lock(lock_path: Path, descriptor: int) -> None:
-    os.close(descriptor)
+def _release_publication_lock(publication_lock: _PublicationLock) -> None:
+    lock_path = publication_lock.path
+    descriptor = publication_lock.descriptor
+    if not _same_file_identity(lock_path, publication_lock.identity):
+        os.close(descriptor)
+        raise ModelCardValidationError(
+            "model card publication lock ownership changed; refusing to remove foreign lock"
+        )
+
+    if os.name == "nt":
+        os.close(descriptor)
+        if not _same_file_identity(lock_path, publication_lock.identity):
+            raise ModelCardValidationError(
+                "model card publication lock ownership changed; refusing to remove foreign lock"
+            )
+        lock_path.unlink()
+        return
+
     try:
         lock_path.unlink()
+    finally:
+        os.close(descriptor)
+
+
+def _same_file_identity(path: Path, expected: os.stat_result) -> bool:
+    try:
+        current = os.stat(path, follow_symlinks=False)
     except FileNotFoundError:
-        pass
+        return False
+    return os.path.samestat(expected, current)
 
 
 def _validate_staging_directory(staging_dir: Path) -> None:
@@ -287,18 +364,24 @@ def _publish_new_directory(staging_dir: Path, destination: Path) -> None:
     if destination.exists() or destination.is_symlink():
         raise ModelCardValidationError("model card artifact version already exists and is immutable")
     try:
-        os.rename(staging_dir, destination)
+        publish_directory_without_replacement(staging_dir, destination)
     except FileExistsError as exc:
         raise ModelCardValidationError("model card artifact version already exists and is immutable") from exc
+    except AtomicDirectoryPublicationUnsupported as exc:
+        raise ModelCardValidationError(
+            "atomic no-replace model card publication is unsupported on this filesystem"
+        ) from exc
     except OSError as exc:
         raise ModelCardValidationError("model card artifact publication failed") from exc
 
 
-def _cleanup_staging_directory(staging_dir: Path) -> None:
-    if staging_dir.is_symlink():
-        raise RuntimeError("model card staging cleanup refused a symlink")
-    if staging_dir.exists():
-        shutil.rmtree(staging_dir)
+def _cleanup_staging_directory(
+        staging_dir: Path,
+        expected_identity: os.stat_result | None,
+) -> None:
+    if expected_identity is None or not _same_file_identity(staging_dir, expected_identity):
+        raise RuntimeError("model card staging cleanup refused a directory with changed ownership")
+    shutil.rmtree(staging_dir)
 
 
 def _machine_code_section(title: str, values: list[str]) -> list[str]:
