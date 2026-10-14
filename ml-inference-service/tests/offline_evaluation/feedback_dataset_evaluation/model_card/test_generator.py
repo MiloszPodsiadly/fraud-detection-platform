@@ -408,6 +408,116 @@ class ModelCardGeneratorTest(unittest.TestCase):
         self.assertEqual([], list(self.root.glob(f".{output.name}.staging-*")))
         self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
 
+    def test_successful_publication_syncs_files_and_directories_in_order(self):
+        output = self.root / "durable-publication"
+        events = []
+        real_write = model_card_writer._write_text_and_sync
+        real_sync_directory = model_card_writer._sync_directory
+        real_publish = model_card_writer._publish_new_directory
+
+        def record_write(path, payload):
+            events.append(f"file:{path.name}")
+            return real_write(path, payload)
+
+        def record_directory_sync(path):
+            events.append("directory:parent" if path == self.root else "directory:staging")
+            return real_sync_directory(path)
+
+        def record_publish(source, destination):
+            events.append("rename")
+            return real_publish(source, destination)
+
+        with (
+                patch.object(model_card_writer, "_write_text_and_sync", side_effect=record_write),
+                patch.object(model_card_writer, "_sync_directory", side_effect=record_directory_sync),
+                patch.object(model_card_writer, "_publish_new_directory", side_effect=record_publish),
+        ):
+            self._generate(output.name)
+
+        self.assertEqual(
+            [
+                f"file:{MODEL_CARD_FILENAME}",
+                f"file:{MODEL_CARD_MARKDOWN_FILENAME}",
+                f"file:{MODEL_CARD_MANIFEST_FILENAME}",
+                "directory:staging",
+                "rename",
+                "directory:parent",
+            ],
+            events,
+        )
+        read_validated_model_card_artifact_set(output)
+
+    def test_each_artifact_fsync_failure_publishes_nothing(self):
+        real_sync_file = model_card_writer._sync_file
+        for filename in (MODEL_CARD_FILENAME, MODEL_CARD_MARKDOWN_FILENAME, MODEL_CARD_MANIFEST_FILENAME):
+            with self.subTest(filename=filename):
+                output = self.root / f"failed-{filename}"
+
+                def fail_selected_file(descriptor, path):
+                    if path.name == filename:
+                        raise OSError(f"injected {filename} fsync failure")
+                    return real_sync_file(descriptor, path)
+
+                with patch.object(model_card_writer, "_sync_file", side_effect=fail_selected_file):
+                    with self.assertRaisesRegex(OSError, f"injected {filename} fsync failure"):
+                        self._generate(output.name)
+
+                self.assertFalse(output.exists())
+                self.assertEqual([], list(self.root.glob(f".{output.name}.staging-*")))
+                self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
+
+    def test_staging_directory_fsync_failure_publishes_nothing(self):
+        output = self.root / "failed-staging-fsync"
+
+        def fail_staging_sync(path):
+            raise OSError(f"injected staging fsync failure for {path.name}")
+
+        with patch.object(model_card_writer, "_sync_directory", side_effect=fail_staging_sync):
+            with self.assertRaisesRegex(OSError, "injected staging fsync failure"):
+                self._generate(output.name)
+
+        self.assertFalse(output.exists())
+        self.assertEqual([], list(self.root.glob(f".{output.name}.staging-*")))
+        self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
+
+    def test_parent_fsync_failure_reports_indeterminate_visible_publication(self):
+        output = self.root / "indeterminate-parent-fsync"
+        real_sync_directory = model_card_writer._sync_directory
+
+        def fail_parent_sync(path):
+            if path == self.root:
+                raise OSError("injected parent fsync failure")
+            return real_sync_directory(path)
+
+        with (
+                patch.object(model_card_writer, "_sync_directory", side_effect=fail_parent_sync),
+                patch.object(
+                    model_card_writer,
+                    "_cleanup_staging_directory",
+                    wraps=model_card_writer._cleanup_staging_directory,
+                ) as cleanup,
+        ):
+            with self.assertRaisesRegex(
+                    model_card_writer.ModelCardPublicationDurabilityUnconfirmed,
+                    "destination may be visible.*durability is unconfirmed",
+            ) as caught:
+                self._generate(output.name)
+
+        self.assertIsInstance(caught.exception.__cause__, OSError)
+        cleanup.assert_not_called()
+        self.assertTrue(output.is_dir())
+        read_validated_model_card_artifact_set(output)
+        self.assertEqual([], list(self.root.glob(f".{output.name}.staging-*")))
+        self.assertFalse((self.root / f".{output.name}.publish.lock").exists())
+
+    def test_missing_publication_parent_fails_closed(self):
+        output = self.root / "missing-parent" / "version"
+
+        with self.assertRaisesRegex(ModelCardValidationError, "parent must be a pre-provisioned directory"):
+            self._generate_to(output)
+
+        self.assertFalse(output.parent.exists())
+
     def test_publication_failure_never_removes_replaced_staging_directory(self):
         output = self.root / "replaced-staging"
         foreign_directories = []

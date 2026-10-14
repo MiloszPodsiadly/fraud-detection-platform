@@ -6,6 +6,7 @@ import shutil
 import socket
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,10 @@ MODEL_CARD_FILENAME = "ml_model_card.json"
 MODEL_CARD_MARKDOWN_FILENAME = "ml_model_card.md"
 MODEL_CARD_MANIFEST_FILENAME = "manifest.json"
 MAX_MODEL_CARD_MARKDOWN_BYTES = 262_144
+
+
+class ModelCardPublicationDurabilityUnconfirmed(ModelCardValidationError):
+    """The final directory is visible, but its durable persistence is unconfirmed."""
 
 
 @dataclass(frozen=True)
@@ -223,15 +228,21 @@ def write_model_card_artifacts(
             markdown_path: model_card_markdown(validated),
         }
         for path, payload in payloads.items():
-            path.write_text(payload, encoding="utf-8", newline="\n")
-        manifest_path.write_text(
+            _write_text_and_sync(path, payload)
+        _write_text_and_sync(
+            manifest_path,
             build_model_card_manifest(payloads, validated["generatedAt"]),
-            encoding="utf-8",
-            newline="\n",
         )
         _validate_staging_directory(staging_dir)
+        _sync_directory(staging_dir)
         _publish_new_directory(staging_dir, destination)
         staging_dir = None
+        try:
+            _sync_directory(destination.parent)
+        except OSError as exc:
+            raise ModelCardPublicationDurabilityUnconfirmed(
+                "model card destination may be visible, but publication durability is unconfirmed"
+            ) from exc
     except Exception as exc:
         publication_error = exc
         if staging_dir is not None:
@@ -264,15 +275,54 @@ def _validate_destination(output_dir: Path, allow_output_root: Path | None) -> N
     if output_dir.exists():
         raise ModelCardValidationError("model card artifact version already exists and is immutable")
     if allow_output_root is not None:
+        try:
+            reject_symlink_path(allow_output_root, "model card allowed output root")
+        except BoundedArtifactReadError as exc:
+            raise ModelCardValidationError(str(exc)) from exc
+        if not allow_output_root.is_dir():
+            raise ModelCardValidationError(
+                "model card allowed output root must be a pre-provisioned directory"
+            )
         resolved_output = output_dir.resolve()
-        resolved_root = Path(allow_output_root).resolve()
+        resolved_root = allow_output_root.resolve()
         if resolved_output == resolved_root or resolved_root not in resolved_output.parents:
             raise ModelCardValidationError("model card output directory is outside the allowed output root")
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
     try:
         reject_symlink_path(output_dir.parent, "model card output parent")
     except BoundedArtifactReadError as exc:
         raise ModelCardValidationError(str(exc)) from exc
+    if not output_dir.parent.is_dir():
+        raise ModelCardValidationError(
+            "model card publication parent must be a pre-provisioned directory"
+        )
+
+
+def _write_text_and_sync(path: Path, payload: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(payload)
+        handle.flush()
+        _sync_file(handle.fileno(), path)
+
+
+def _sync_file(descriptor: int, _path: Path) -> None:
+    os.fsync(descriptor)
+
+
+def _sync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    with _directory_descriptor(path, flags) as descriptor:
+        os.fsync(descriptor)
+
+
+@contextmanager
+def _directory_descriptor(path: Path, flags: int):
+    descriptor = os.open(path, flags)
+    try:
+        yield descriptor
+    finally:
+        os.close(descriptor)
 
 
 def _acquire_publication_lock(destination: Path) -> _PublicationLock:
