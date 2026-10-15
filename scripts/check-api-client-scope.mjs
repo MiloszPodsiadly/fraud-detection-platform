@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const safeRepoRoot = repoRoot.replaceAll("\\", "/");
 
-const usingExplicitChangedFiles = Boolean(process.env.FDP50_SCOPE_CHANGED_FILES);
+const usingExplicitChangedFiles = Boolean(process.env.API_CLIENT_SCOPE_CHANGED_FILES);
 const changedFiles = resolveChangedFiles();
 const violations = [];
-const enforceFdp50BackendScope = usingExplicitChangedFiles || isFdp50ScopeBranch();
+const enforceBackendScope = usingExplicitChangedFiles;
 
 const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/controller/FraudCaseController.java",
@@ -31,11 +31,11 @@ const allowedEndpointFiles = new Set([
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (enforceFdp50BackendScope && normalized.startsWith("alert-service/src/main/java/") && !allowedBackendFiles.has(normalized)) {
-    violations.push(`${normalized}: FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal and FDP-55 BFF logout allowlist.`);
+  if (enforceBackendScope && normalized.startsWith("alert-service/src/main/java/") && !allowedBackendFiles.has(normalized)) {
+    violations.push(`${normalized}: API client scope backend changes are restricted to the approved fraud-case route removal and BFF logout allowlist.`);
   }
-  if (enforceFdp50BackendScope && forbiddenBackendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
-    violations.push(`${normalized}: FDP-50 must not change backend production code outside the approved alert-service allowlist.`);
+  if (enforceBackendScope && forbiddenBackendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
+    violations.push(`${normalized}: API client scope must not change backend production code outside the approved alert-service allowlist.`);
   }
 }
 
@@ -50,13 +50,13 @@ for (const file of changedFiles) {
       violations.push(`${normalized}: endpoint URL strings must stay inside the API client boundary`);
     }
     if (/\b(bulk|assign(?:ment)?|mass action)\b/i.test(line)) {
-      violations.push(`${normalized}: FDP-50 must not introduce export/bulk/assignment workflows`);
+      violations.push(`${normalized}: API client scope must not introduce export/bulk/assignment workflows`);
     }
   }
 }
 
 if (violations.length > 0) {
-  console.error("FDP-50 scope guard failed:");
+  console.error("API client scope guard failed:");
   for (const violation of violations) {
     console.error(`- ${violation}`);
   }
@@ -64,18 +64,18 @@ if (violations.length > 0) {
 }
 
 function resolveChangedFiles() {
-  const explicit = process.env.FDP50_SCOPE_CHANGED_FILES;
+  const explicit = process.env.API_CLIENT_SCOPE_CHANGED_FILES;
   if (explicit) {
     return explicit.split(/[\r\n,]+/).map((entry) => entry.trim()).filter(Boolean);
   }
   const base = diffBase();
   if (!assertRefExists(base)) {
-    if (process.env.FDP50_SCOPE_ALLOW_HEAD_FALLBACK === "true") {
+    if (process.env.API_CLIENT_SCOPE_ALLOW_HEAD_FALLBACK === "true") {
       return git(["diff", "--name-only", "HEAD~1..HEAD"])
         .split(/\r?\n/)
         .filter(Boolean);
     }
-    console.error(`Cannot resolve FDP-50 scope base ref ${base}`);
+    console.error(`Cannot resolve API client scope base ref ${base}`);
     process.exit(1);
   }
   return git(["diff", "--name-only", `${base}...HEAD`])
@@ -84,7 +84,7 @@ function resolveChangedFiles() {
 }
 
 function diffBase() {
-  return process.env.FDP50_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
+  return process.env.API_CLIENT_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
 }
 
 function assertRefExists(ref) {
@@ -94,11 +94,6 @@ function assertRefExists(ref) {
   } catch {
     return false;
   }
-}
-
-function isFdp50ScopeBranch() {
-  const headRef = process.env.GITHUB_HEAD_REF || process.env.BRANCH_NAME || git(["branch", "--show-current"], { allowFailure: true }).trim();
-  return /^FDP-50(?:$|[-_/])/.test(headRef);
 }
 
 function git(args, { allowFailure = false } = {}) {

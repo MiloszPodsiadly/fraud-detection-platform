@@ -100,63 +100,6 @@ Candidate for consolidation:
 - No
 - Rationale: Backend surface-removal proof has different ownership from frontend architecture gates.
 
-## FDP-43 Retired Fraud Case Lifecycle Guard
-
-Purpose:
-- Prove removed local lifecycle/idempotency support is not restored and current regulated update remains covered.
-
-Proves:
-- Shared primitive compatibility, removed/current surface guards and regulated mutation invariant tests execute.
-
-Does not prove:
-- New frontend runtime boundaries, CI docs integrity, or production IAM hardening.
-
-Required for merge:
-- Yes
-
-Primary proof files:
-- `alert-service/src/test/java/**/FraudCaseRemovedApiSurfaceTest.java`
-- `alert-service/src/test/java/**/FraudCaseCurrentApiSurfaceTest.java`
-- `alert-service/src/test/java/**/FraudCaseMutationInvariantTest.java`
-- `alert-service/src/test/java/**/FraudCasePatchRegulatedMutationProofTest.java`
-- `alert-service/src/test/java/**/FraudCaseRemovedRouteRuntimeTest.java`
-
-Related FDP branches:
-- FDP-43
-
-Candidate for consolidation:
-- No
-- Rationale: It blocks restoration of a retired backend subsystem.
-
-## FDP-44 Retired Fraud Case Lifecycle Guard
-
-Purpose:
-- Prove FDP-44 lifecycle replay/retention implementation remains removed under FDP-81.
-
-Proves:
-- Removed/current surface guards and current mutation invariant tests execute.
-- Alert metrics coverage verifies the remaining metrics without the retired emitter.
-
-Does not prove:
-- UI stale-state behavior, BFF session lifecycle, or release governance.
-
-Required for merge:
-- Yes
-
-Primary proof files:
-- `alert-service/src/test/java/**/FraudCaseRemovedApiSurfaceTest.java`
-- `alert-service/src/test/java/**/FraudCaseCurrentApiSurfaceTest.java`
-- `alert-service/src/test/java/**/FraudCasePatchRegulatedMutationProofTest.java`
-- `alert-service/src/test/java/**/FraudCaseRemovedRouteRuntimeTest.java`
-- `alert-service/src/test/java/**/AlertServiceMetricsTest.java`
-
-Related FDP branches:
-- FDP-44
-
-Candidate for consolidation:
-- No
-- Rationale: The deletion guard remains independently diagnosable.
-
 ## FDP-45 Fraud Case Work Queue Read Model
 
 Purpose:
@@ -408,13 +351,13 @@ Candidate for consolidation:
 - No
 - Rationale: It spans backend BFF security and frontend lifecycle, with different ownership than the architecture gate.
 
-## FDP-49 Security Route Boundary Hardening
+## Security Route Boundary
 
 Purpose:
 - Prove security route ownership, matcher order, API client boundary, and route fallback guardrails.
 
 Proves:
-- FDP-49 backend route tests, frontend API boundary tests, grep guardrails, and report verification execute.
+- Backend route tests, frontend API boundary tests, grep guardrails, and report verification execute.
 
 Does not prove:
 - FDP-50 through FDP-53 workspace runtime behavior or production IAM hardening.
@@ -425,10 +368,10 @@ Required for merge:
 Primary proof files:
 - `alert-service/src/test/java/com/frauddetection/alert/security/config/*`
 - `analyst-console-ui/src/api/apiClientBoundary.test.js`
-- `scripts/check-fdp49-api-client-boundary.mjs`
+- `scripts/check-auth-sensitive-api-boundary.mjs`
 
 Related FDP branches:
-- FDP-49
+- Security route boundary
 
 Candidate for consolidation:
 - No
@@ -469,10 +412,10 @@ Purpose:
 - Replace the individual frontend architecture jobs, including analyst workspace detail UX, with one merge-blocking job that keeps separate proof sections.
 
 Proves:
-- FDP-50 API client boundary tests and guards run.
-- FDP-51 runtime provider tests and scope guard run.
+- API client boundary tests and guards run.
+- Workspace runtime provider tests and scope guard run.
 - Analyst workspace detail UX tests and scope guard run.
-- FDP-53 runtime ownership tests and scope guard run.
+- Workspace runtime ownership tests and scope guard run.
 - Full frontend build runs after the architecture test sections.
 
 Does not prove:
@@ -486,11 +429,11 @@ Primary proof files:
 - `analyst-console-ui/src/workspace/WorkspaceRuntimeProvider.test.jsx`
 - `analyst-console-ui/src/workspace/WorkspaceDetailRouter.test.jsx`
 - `analyst-console-ui/src/workspace/WorkspaceRuntimes.test.jsx`
-- `scripts/check-fdp50-api-client-boundary.mjs`
-- `scripts/check-fdp50-scope.mjs`
-- `scripts/check-fdp51-scope.mjs`
+- `scripts/check-api-client-boundary.mjs`
+- `scripts/check-api-client-scope.mjs`
+- `scripts/check-workspace-runtime-scope.mjs`
 - `scripts/check-workspace-detail-scope.mjs`
-- `scripts/check-fdp53-scope.mjs`
+- `scripts/check-workspace-runtime-ownership-scope.mjs`
 
 Related FDP branches:
 - FDP-50
@@ -503,16 +446,16 @@ Candidate for consolidation:
 - No
 - Rationale: This is the consolidated job. Further consolidation would reduce failure diagnosability.
 
-## FDP-50 Frontend API Client Runtime Boundary
+## Frontend API Client Runtime Boundary
 
 Replaced by:
 - Analyst Console Frontend Architecture Gate
 
 Purpose:
-- Former standalone FDP-50 frontend API client runtime boundary job.
+- Former standalone frontend API client runtime boundary job.
 
 Proves:
-- Now proved by the `FDP-50 API client boundary` section of `Analyst Console Frontend Architecture Gate`.
+- Now proved by the `API client boundary` section of `Analyst Console Frontend Architecture Gate`.
 
 Does not prove:
 - Backend authorization or later workspace ownership behavior by itself.
@@ -522,8 +465,8 @@ Required for merge:
 
 Primary proof files:
 - `analyst-console-ui/src/api/apiClientBoundary.test.js`
-- `scripts/check-fdp50-api-client-boundary.mjs`
-- `scripts/check-fdp50-scope.mjs`
+- `scripts/check-api-client-boundary.mjs`
+- `scripts/check-api-client-scope.mjs`
 
 Related FDP branches:
 - FDP-50
@@ -533,26 +476,26 @@ Candidate for consolidation:
 - Yes
 - Rationale: Implemented by FDP-54 with the same tests, guards, and report verification inside one architecture gate.
 
-## FDP-51 Analyst Console Workspace Runtime
+## Analyst Console Workspace Runtime
 
 Replaced by:
 - Analyst Console Frontend Architecture Gate
 
 Purpose:
-- Former standalone FDP-51 workspace runtime provider job.
+- Former standalone workspace runtime provider job.
 
 Proves:
-- Now proved by the `FDP-51 runtime provider` section of `Analyst Console Frontend Architecture Gate`.
+- Now proved by the `Workspace runtime provider` section of `Analyst Console Frontend Architecture Gate`.
 
 Does not prove:
-- Backend authorization or FDP-52/FDP-53 behavior by itself.
+- Backend authorization, workspace detail, or runtime ownership behavior by itself.
 
 Required for merge:
 - Yes, through replacement job
 
 Primary proof files:
 - `analyst-console-ui/src/workspace/WorkspaceRuntimeProvider.test.jsx`
-- `scripts/check-fdp51-scope.mjs`
+- `scripts/check-workspace-runtime-scope.mjs`
 
 Related FDP branches:
 - FDP-51
@@ -593,16 +536,16 @@ Candidate for consolidation:
 - Yes
 - Rationale: Implemented by FDP-54 with preserved test report checks and scope guard.
 
-## FDP-53 Workspace Runtime Ownership
+## Workspace Runtime Ownership
 
 Replaced by:
 - Analyst Console Frontend Architecture Gate
 
 Purpose:
-- Former standalone FDP-53 workspace runtime ownership job.
+- Former standalone workspace runtime ownership job.
 
 Proves:
-- Now proved by the `FDP-53 runtime ownership` section of `Analyst Console Frontend Architecture Gate`.
+- Now proved by the `Workspace runtime ownership` section of `Analyst Console Frontend Architecture Gate`.
 
 Does not prove:
 - Backend endpoint behavior, new auth modes, or product workflow changes.
@@ -613,7 +556,7 @@ Required for merge:
 Primary proof files:
 - `analyst-console-ui/src/workspace/WorkspaceRouteRegistry.test.jsx`
 - `analyst-console-ui/src/workspace/WorkspaceRuntimes.test.jsx`
-- `scripts/check-fdp53-scope.mjs`
+- `scripts/check-workspace-runtime-ownership-scope.mjs`
 
 Related FDP branches:
 - FDP-53

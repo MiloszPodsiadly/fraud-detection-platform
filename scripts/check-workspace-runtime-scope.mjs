@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const safeRepoRoot = repoRoot.replaceAll("\\", "/");
-const usingExplicitChangedFiles = Boolean(process.env.FDP51_SCOPE_CHANGED_FILES);
+const usingExplicitChangedFiles = Boolean(process.env.WORKSPACE_RUNTIME_SCOPE_CHANGED_FILES);
 const changedFiles = resolveChangedFiles();
 const violations = [];
-const enforceFdp51BackendScope = usingExplicitChangedFiles || isFdp51ScopeBranch();
+const enforceBackendScope = usingExplicitChangedFiles;
 
 const backendProductionPrefixes = [
   "alert-service/src/main/java/",
@@ -17,7 +17,7 @@ const backendProductionPrefixes = [
   "audit-trust-authority/src/main/java/",
   "ml-inference-service/"
 ];
-const fdp55AllowedBackendFiles = new Set([
+const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
 ]);
 const allowedEndpointFiles = new Set([
@@ -48,10 +48,10 @@ const blockedWrapperPattern = new RegExp(`\\b(${blockedDefaultApiWrappers.join("
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (enforceFdp51BackendScope
+  if (enforceBackendScope
       && backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))
-      && !fdp55AllowedBackendFiles.has(normalized)) {
-    violations.push(`${normalized}: FDP-51 is frontend runtime only; backend production code must not change.`);
+      && !allowedBackendFiles.has(normalized)) {
+    violations.push(`${normalized}: workspace runtime scope is frontend-only; backend production code must not change.`);
   }
   if (!normalized.startsWith("analyst-console-ui/src/") || /\.(test|spec)\.[jt]sx?$/.test(normalized)) {
     continue;
@@ -62,16 +62,16 @@ for (const file of changedFiles) {
       violations.push(`${normalized}: route calls must go through API client boundary.`);
     }
     if (introducesForbiddenWorkflow(line)) {
-      violations.push(`${normalized}: export, bulk, assignment, or mass-action workflows are out of scope for FDP-51.`);
+      violations.push(`${normalized}: export, bulk, assignment, or mass-action workflows are outside workspace runtime scope.`);
     }
     if (isAuthSensitiveFrontendFile(normalized) && introducesDirectDefaultApiWrapperUsage(line)) {
-      violations.push(`${normalized}: FDP-51 workspace code must use runtime-provided API clients, not default API wrapper calls.`);
+      violations.push(`${normalized}: workspace code must use runtime-provided API clients, not default API wrapper calls.`);
     }
   }
 }
 
 if (violations.length > 0) {
-  console.error("FDP-51 scope guard failed:");
+  console.error("Workspace runtime scope guard failed:");
   for (const violation of violations) {
     console.error(`- ${violation}`);
   }
@@ -79,23 +79,23 @@ if (violations.length > 0) {
 }
 
 function resolveChangedFiles() {
-  const explicit = process.env.FDP51_SCOPE_CHANGED_FILES;
+  const explicit = process.env.WORKSPACE_RUNTIME_SCOPE_CHANGED_FILES;
   if (explicit) {
     return explicit.split(/[\r\n,]+/).map((entry) => entry.trim()).filter(Boolean);
   }
   const base = diffBase();
   if (!assertRefExists(base)) {
-    if (process.env.FDP51_SCOPE_ALLOW_HEAD_FALLBACK === "true") {
+    if (process.env.WORKSPACE_RUNTIME_SCOPE_ALLOW_HEAD_FALLBACK === "true") {
       return git(["diff", "--name-only", "HEAD~1..HEAD"]).split(/\r?\n/).filter(Boolean);
     }
-    console.error(`Cannot resolve FDP-51 scope base ref ${base}`);
+    console.error(`Cannot resolve workspace runtime scope base ref ${base}`);
     process.exit(1);
   }
   return git(["diff", "--name-only", `${base}...HEAD`]).split(/\r?\n/).filter(Boolean);
 }
 
 function diffBase() {
-  return process.env.FDP51_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
+  return process.env.WORKSPACE_RUNTIME_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
 }
 
 function assertRefExists(ref) {
@@ -105,11 +105,6 @@ function assertRefExists(ref) {
   } catch {
     return false;
   }
-}
-
-function isFdp51ScopeBranch() {
-  const headRef = process.env.GITHUB_HEAD_REF || process.env.BRANCH_NAME || git(["branch", "--show-current"], { allowFailure: true }).trim();
-  return /^FDP-51(?:$|[-_/])/.test(headRef);
 }
 
 function git(args, { allowFailure = false } = {}) {

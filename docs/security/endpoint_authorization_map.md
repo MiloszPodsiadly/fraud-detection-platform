@@ -2,15 +2,15 @@
 
 Status: current source of truth for backend route ownership and authorization matcher intent.
 
-FDP-49 is security architecture hardening only. It decomposes authorization rules and configurers while preserving one `SecurityFilterChain` to avoid filter-order ambiguity.
+The security route boundary is architecture hardening only. It decomposes authorization rules and configurers while preserving one `SecurityFilterChain` to avoid filter-order ambiguity.
 
-No new business endpoints, fraud-case lifecycle changes, idempotency changes, `RegulatedMutationCoordinator` changes, Kafka/outbox/finality changes, export workflow, bulk action workflow, assignment workflow, or UI feature work are part of FDP-49.
+No new business endpoints, fraud-case lifecycle changes, idempotency changes, `RegulatedMutationCoordinator` changes, Kafka/outbox/finality changes, export workflow, bulk action workflow, assignment workflow, or UI feature work are part of this boundary.
 
 ## Non-Goals
 
-FDP-49 does not add business endpoints, change fraud-case lifecycle semantics, change idempotency behavior, change `RegulatedMutationCoordinator`, change Kafka/outbox/finality behavior, change export workflows, change bulk action workflows, change assignment workflows, or add UI product features.
+The security route boundary does not add business endpoints, change fraud-case lifecycle semantics, change idempotency behavior, change `RegulatedMutationCoordinator`, change Kafka/outbox/finality behavior, change export workflows, change bulk action workflows, change assignment workflows, or add UI product features.
 
-FDP-49 does not certify enterprise IAM readiness. Production IAM governance, provider configuration, secret rotation, and deployment hardening remain deployment responsibilities unless configured in this repo.
+The security route boundary does not certify enterprise IAM readiness. Production IAM governance, provider configuration, secret rotation, and deployment hardening remain deployment responsibilities unless configured in this repo.
 
 ## /api/v1/session and CSRF metadata
 
@@ -22,7 +22,7 @@ Unsafe cookie-backed routes require CSRF. Stateless bearer APIs may bypass CSRF 
 
 ## Adding a new backend endpoint safely
 
-Every backend endpoint must be explicitly owned by a route group. New endpoints under `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, `/bff/**`, and `/actuator/**` are denied by default until a route group allowlists them. This is the FDP-49 deny by default rule.
+Every backend endpoint must be explicitly owned by a route group. New endpoints under `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, `/bff/**`, and `/actuator/**` are denied by default until a route group allowlists them. This is the security route boundary deny-by-default rule.
 
 Never add broad `permitAll` rules such as `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, or `/bff/**`. Every public endpoint must explain why it is public.
 
@@ -119,9 +119,9 @@ Production BFF hardening remains deployment responsibility unless configured in 
 | Known frontend routes such as `GET /analyst-console` | `SpaFallbackAuthorizationRules` | Public SPA fallback | GET-only fallback | Unsafe methods denied | `SpaFallbackSecurityTest` |
 | Any other route | `DenyByDefaultAuthorizationRules` | None | Final deny | Denied | `SecurityMatcherOrderRegressionTest` |
 
-## FDP-49 MVC Controller Coverage
+## MVC Controller Coverage
 
-The FDP-49 route ownership docs represent these Spring MVC controllers:
+The route ownership docs represent these Spring MVC controllers:
 
 - `AlertController`
 - `AnalystSessionController`
@@ -153,8 +153,8 @@ The FDP-49 route ownership docs represent these Spring MVC controllers:
 
 ## PR Metadata
 
-Title: `FDP-49: Security Route Boundary Decomposition & Auth Mode Hardening`
+Title: `Security Route Boundary Decomposition and Auth Mode Hardening`
 
-Summary: FDP-49 hardens the post-BFF security architecture by decomposing endpoint authorization into domain-owned route groups, preserving a single fail-closed `SecurityFilterChain`, strengthening auth-mode boundary tests, and reducing legacy frontend API-client coupling.
+Summary: This work hardens the post-BFF security architecture by decomposing endpoint authorization into domain-owned route groups, preserving a single fail-closed `SecurityFilterChain`, strengthening auth-mode boundary tests, and reducing legacy frontend API-client coupling.
 
-Merge gate: `FDP-49 Security Route Boundary Hardening` CI job green, route group tests green, matcher order tests green, BFF/JWT/CSRF boundary tests green, API client boundary guard green, and full CI green.
+Merge gate: `Security Route Boundary` CI job green, route group tests green, matcher order tests green, BFF/JWT/CSRF boundary tests green, API client boundary guard green, and full CI green.

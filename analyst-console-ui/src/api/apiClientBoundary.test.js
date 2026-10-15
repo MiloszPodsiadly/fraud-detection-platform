@@ -13,14 +13,14 @@ describe("api client boundary", () => {
   });
 
   it("runs the API boundary script that blocks wrappers, re-exports, dynamic imports and raw fetch", () => {
-    expect(() => execFileSync("node", ["../scripts/check-fdp49-api-client-boundary.mjs"], {
+    expect(() => execFileSync("node", ["../scripts/check-auth-sensitive-api-boundary.mjs"], {
       cwd: process.cwd(),
       stdio: "pipe"
     })).not.toThrow();
   });
 
   it("runs the AST boundary script for workspace-scoped API clients", () => {
-    expect(() => execFileSync("node", ["../scripts/check-fdp50-api-client-boundary.mjs"], {
+    expect(() => execFileSync("node", ["../scripts/check-api-client-boundary.mjs"], {
       cwd: process.cwd(),
       stdio: "pipe"
     })).not.toThrow();
@@ -34,8 +34,8 @@ describe("api client boundary", () => {
     });
 
     try {
-      expect(() => runBoundaryScript(fixture, "fdp49")).not.toThrow();
-      expect(() => runBoundaryScript(fixture, "fdp50")).not.toThrow();
+      expect(() => runBoundaryScript(fixture, "authSensitive")).not.toThrow();
+      expect(() => runBoundaryScript(fixture, "apiClient")).not.toThrow();
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
@@ -54,8 +54,8 @@ describe("api client boundary", () => {
     const fixture = createBoundaryFixture({ [path]: source });
 
     try {
-      expect(captureBoundaryFailure(fixture, "fdp49")).toContain("Auth-sensitive UI code must use createAlertsApiClient");
-      expect(captureBoundaryFailure(fixture, "fdp50")).toContain("FDP-50 requires auth-sensitive UI code");
+      expect(captureBoundaryFailure(fixture, "authSensitive")).toContain("Auth-sensitive UI code must use createAlertsApiClient");
+      expect(captureBoundaryFailure(fixture, "apiClient")).toContain("API client boundary requires auth-sensitive UI code");
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
@@ -68,7 +68,7 @@ describe("api client boundary", () => {
     });
 
     try {
-      expect(() => runBoundaryScript(fixture, "fdp50")).not.toThrow();
+      expect(() => runBoundaryScript(fixture, "apiClient")).not.toThrow();
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
@@ -80,7 +80,7 @@ describe("api client boundary", () => {
     });
 
     try {
-      expect(captureBoundaryFailure(fixture, "fdp50")).toContain("imports compatibility wrapper listAlerts");
+      expect(captureBoundaryFailure(fixture, "apiClient")).toContain("imports compatibility wrapper listAlerts");
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
@@ -93,7 +93,7 @@ describe("api client boundary", () => {
     });
 
     try {
-      const failure = captureBoundaryFailure(fixture, "fdp50");
+      const failure = captureBoundaryFailure(fixture, "apiClient");
       expect(failure).toContain("src/hooks/useCases.js");
       expect(failure).toContain("src/features/rawFetch.js");
     } finally {
@@ -109,14 +109,14 @@ describe("api client boundary", () => {
     });
 
     try {
-      expect(() => runBoundaryScript(fixture, "fdp50")).not.toThrow();
+      expect(() => runBoundaryScript(fixture, "apiClient")).not.toThrow();
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
   });
 
   it("keeps removed wrapper names blocked by the workspace API guard", () => {
-    const script = readFileSync(join(process.cwd(), "../scripts/check-fdp50-api-client-boundary.mjs"), "utf8");
+    const script = readFileSync(join(process.cwd(), "../scripts/check-api-client-boundary.mjs"), "utf8");
     const removedWrappers = [
       "listAlerts",
       "listFraudCaseWorkQueue",
@@ -140,85 +140,85 @@ describe("api client boundary", () => {
 
   it("fails closed when the API client scope base ref is missing", () => {
     const failure = captureScopeFailure({
-      FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50"
+      API_CLIENT_SCOPE_BASE: "refs/heads/does-not-exist-api-client"
     });
 
-    expect(failure).toContain("Cannot resolve FDP-50 scope base ref refs/heads/does-not-exist-fdp50");
+    expect(failure).toContain("Cannot resolve API client scope base ref refs/heads/does-not-exist-api-client");
   });
 
   it("honors an explicit API client scope base ref", () => {
     expect(() => runScopeGuard({
-      FDP50_SCOPE_BASE: "HEAD"
+      API_CLIENT_SCOPE_BASE: "HEAD"
     })).not.toThrow();
   });
 
   it("lets explicit changed files bypass git base resolution for API client scope fixtures", () => {
     expect(() => runScopeGuard({
-      FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
-      FDP50_SCOPE_CHANGED_FILES: "docs/frontend/api_client_boundary.md"
+      API_CLIENT_SCOPE_BASE: "refs/heads/does-not-exist-api-client",
+      API_CLIENT_SCOPE_CHANGED_FILES: "docs/frontend/api_client_boundary.md"
     })).not.toThrow();
   });
 
   it("allows ES module exports while blocking product export workflows in the runtime scope guard", () => {
-    const script = readFileSync(join(process.cwd(), "../scripts/check-fdp51-scope.mjs"), "utf8");
+    const script = readFileSync(join(process.cwd(), "../scripts/check-workspace-runtime-scope.mjs"), "utf8");
 
     expect(script).toContain("introducesForbiddenWorkflow");
     expect(script).toContain("^export\\s+(async\\s+)?(function|const|let|var|class)\\b");
     expect(script).toContain("route calls must go through API client boundary.");
-    expect(script).toContain("FDP-51 is frontend runtime only; backend production code must not change.");
-    expect(script).toContain("out of scope for FDP-51");
+    expect(script).toContain("workspace runtime scope is frontend-only; backend production code must not change.");
+    expect(script).toContain("outside workspace runtime scope");
     expect(script).toContain("blockedDefaultApiWrappers");
     expect(script).toContain("runtime-provided API clients");
-    expect(script).toContain("isFdp51ScopeBranch");
+    expect(script).toContain("const enforceBackendScope = usingExplicitChangedFiles");
     expect(() => runScopeGuard({
-      FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
-      FDP51_SCOPE_CHANGED_FILES: "analyst-console-ui/src/workspace/useRuntime.js"
-    }, "fdp51")).not.toThrow();
+      WORKSPACE_RUNTIME_SCOPE_BASE: "refs/heads/does-not-exist-workspace-runtime",
+      WORKSPACE_RUNTIME_SCOPE_CHANGED_FILES: "analyst-console-ui/src/workspace/useRuntime.js"
+    }, "workspaceRuntime")).not.toThrow();
   });
 
   it("still rejects explicit backend production files in the runtime scope guard", () => {
     const failure = captureScopeFailure({
-      FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
-      FDP51_SCOPE_CHANGED_FILES: "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/MlFraudScoringEngine.java"
-    }, "fdp51");
+      WORKSPACE_RUNTIME_SCOPE_BASE: "refs/heads/does-not-exist-workspace-runtime",
+      WORKSPACE_RUNTIME_SCOPE_CHANGED_FILES: "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/MlFraudScoringEngine.java"
+    }, "workspaceRuntime");
 
-    expect(failure).toContain("FDP-51 is frontend runtime only; backend production code must not change.");
+    expect(failure).toContain("workspace runtime scope is frontend-only; backend production code must not change.");
   });
 
-  it("keeps the runtime ownership backend guard branch-scoped while honoring explicit fixtures", () => {
-    const script = readFileSync(join(process.cwd(), "../scripts/check-fdp53-scope.mjs"), "utf8");
+  it("keeps the runtime ownership backend guard explicit-fixture scoped", () => {
+    const script = readFileSync(join(process.cwd(), "../scripts/check-workspace-runtime-ownership-scope.mjs"), "utf8");
 
-    expect(script).toContain("isFdp53ScopeBranch");
+    expect(script).toContain("const enforceBackendScope = usingExplicitChangedFiles");
     const failure = captureScopeFailure({
-      FDP53_SCOPE_BASE: "refs/heads/does-not-exist-fdp53",
-      FDP53_SCOPE_CHANGED_FILES: "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/MlFraudScoringEngine.java"
-    }, "fdp53");
+      WORKSPACE_RUNTIME_OWNERSHIP_SCOPE_BASE: "refs/heads/does-not-exist-runtime-ownership",
+      WORKSPACE_RUNTIME_OWNERSHIP_SCOPE_CHANGED_FILES: "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/MlFraudScoringEngine.java"
+    }, "runtimeOwnership");
 
-    expect(failure).toContain("FDP-53 is frontend runtime decomposition only; backend production code/resources must not change.");
+    expect(failure).toContain("workspace runtime ownership is frontend-only; backend production code/resources must not change.");
   });
 
   it("allows only approved backend production files in the API client scope guard", () => {
     expect(() => runScopeGuard({
-      FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
-      FDP50_SCOPE_CHANGED_FILES: [
+      API_CLIENT_SCOPE_BASE: "refs/heads/does-not-exist-api-client",
+      API_CLIENT_SCOPE_CHANGED_FILES: [
         "alert-service/src/main/java/com/frauddetection/alert/controller/FraudCaseController.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/config/FraudCaseAuthorizationRules.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/config/BffSessionSecurityConfigurer.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java",
         "alert-service/src/test/java/com/frauddetection/alert/controller/RetiredFraudCaseRouteTest.java",
         "docs/release/fraud_case_api_cleanup.md",
-        "scripts/check-fdp50-scope.mjs"
+        "scripts/check-api-client-scope.mjs"
       ].join(",")
     })).not.toThrow();
   });
 
   it("rejects unapproved backend production files in the API client scope guard", () => {
     const failure = captureScopeFailure({
-      FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
-      FDP50_SCOPE_CHANGED_FILES: "alert-service/src/main/java/com/frauddetection/alert/service/FraudCaseManagementService.java"
+      API_CLIENT_SCOPE_BASE: "refs/heads/does-not-exist-api-client",
+      API_CLIENT_SCOPE_CHANGED_FILES: "alert-service/src/main/java/com/frauddetection/alert/service/FraudCaseManagementService.java"
     });
 
-    expect(failure).toContain("FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal and FDP-55 BFF logout allowlist.");
+    expect(failure).toContain("API client scope backend changes are restricted to the approved fraud-case route removal and BFF logout allowlist.");
   });
 
   it("documents the frontend API client boundary", () => {
@@ -234,7 +234,7 @@ describe("api client boundary", () => {
 });
 
 function createBoundaryFixture(files) {
-  const root = mkdtempSync(join(tmpdir(), "fdp49-api-boundary-"));
+  const root = mkdtempSync(join(tmpdir(), "auth-sensitive-api-boundary-"));
   for (const [relativePath, source] of Object.entries(files)) {
     const absolutePath = join(root, relativePath);
     mkdirSync(dirname(absolutePath), { recursive: true });
@@ -243,11 +243,11 @@ function createBoundaryFixture(files) {
   return root;
 }
 
-function runBoundaryScript(root, version = "fdp49") {
-  const script = version === "fdp50"
-    ? "../scripts/check-fdp50-api-client-boundary.mjs"
-    : "../scripts/check-fdp49-api-client-boundary.mjs";
-  const rootEnv = version === "fdp50" ? "FDP50_API_BOUNDARY_ROOT" : "FDP49_API_BOUNDARY_ROOT";
+function runBoundaryScript(root, version = "authSensitive") {
+  const script = version === "apiClient"
+    ? "../scripts/check-api-client-boundary.mjs"
+    : "../scripts/check-auth-sensitive-api-boundary.mjs";
+  const rootEnv = version === "apiClient" ? "API_CLIENT_BOUNDARY_ROOT" : "AUTH_SENSITIVE_API_BOUNDARY_ROOT";
   execFileSync("node", [script], {
     cwd: process.cwd(),
     env: { ...process.env, [rootEnv]: root },
@@ -256,22 +256,22 @@ function runBoundaryScript(root, version = "fdp49") {
   });
 }
 
-function captureBoundaryFailure(root, version = "fdp49") {
+function captureBoundaryFailure(root, version = "authSensitive") {
   try {
     runBoundaryScript(root, version);
-    throw new Error("Expected FDP-49 API boundary fixture to fail");
+    throw new Error("Expected auth-sensitive API boundary fixture to fail");
   } catch (error) {
     return String(error.stderr ?? error.message);
   }
 }
 
-function runScopeGuard(env = {}, version = "fdp50") {
+function runScopeGuard(env = {}, version = "apiClient") {
   const scripts = {
-    fdp50: "../scripts/check-fdp50-scope.mjs",
-    fdp51: "../scripts/check-fdp51-scope.mjs",
-    fdp53: "../scripts/check-fdp53-scope.mjs"
+    apiClient: "../scripts/check-api-client-scope.mjs",
+    workspaceRuntime: "../scripts/check-workspace-runtime-scope.mjs",
+    runtimeOwnership: "../scripts/check-workspace-runtime-ownership-scope.mjs"
   };
-  const script = scripts[version] ?? scripts.fdp50;
+  const script = scripts[version] ?? scripts.apiClient;
   execFileSync("node", [script], {
     cwd: process.cwd(),
     env: { ...process.env, ...env },
@@ -280,10 +280,10 @@ function runScopeGuard(env = {}, version = "fdp50") {
   });
 }
 
-function captureScopeFailure(env = {}, version = "fdp50") {
+function captureScopeFailure(env = {}, version = "apiClient") {
   try {
     runScopeGuard(env, version);
-    throw new Error("Expected FDP-50 scope guard fixture to fail");
+    throw new Error("Expected API client scope guard fixture to fail");
   } catch (error) {
     return String(error.stderr ?? error.message);
   }

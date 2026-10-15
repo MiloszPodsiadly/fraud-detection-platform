@@ -106,7 +106,7 @@ They are not API credential freshness keys. API client freshness comes from recr
 
 ## Scope Guard
 
-`check-fdp51-scope.mjs` is a CI guardrail, not a replacement for manual review. It blocks backend production changes, endpoint strings outside the API client boundary, raw fetch patterns covered by the API boundary gates, and export/bulk/assignment/mass-action keywords.
+`check-workspace-runtime-scope.mjs` is a CI guardrail, not a replacement for manual review. It blocks backend production changes, endpoint strings outside the API client boundary, raw fetch patterns covered by the API boundary gates, and export/bulk/assignment/mass-action keywords.
 The guard is regex-based and intentionally conservative.
 
 ## SOLID / ACID Alignment
@@ -122,8 +122,8 @@ The guard is regex-based and intentionally conservative.
 
 - `npm test -- --run`
 - `npm run build`
-- `npm run check:api-client-boundary:fdp50`
-- `npm run check:scope:fdp51`
+- `npm run check:workspace-api-client-boundary`
+- `npm run check:scope:workspace-runtime`
 - CI job: `Analyst Console Frontend Architecture Gate`.
 - CI must reject `.skip` and `.only` in runtime, counter, workspace, app, and API boundary tests.
 - See `docs/ci_evidence_map.md` for the current replacement mapping.

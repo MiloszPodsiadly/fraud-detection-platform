@@ -55,7 +55,7 @@ This is hard API surface cleanup; it is not no-behavior-change cleanup.
 
 ## Additional Cleanup
 
-- Removed duplicate npm script alias `check:scope:fdp53`; `check:fdp53-scope` remains authoritative.
+- Removed the duplicate ticket-named npm alias; `check:scope:workspace-runtime-ownership` remains authoritative.
 - Removed the unowned FraudCase lifecycle facade support, lifecycle/idempotency implementation, local note/decision/
   audit persistence, retired DTOs and the lifecycle idempotency metric after a no-current-owner proof.
 - Kept regulated `PATCH`, candidate ingestion, work queue, detail and evidence read implementations with dedicated

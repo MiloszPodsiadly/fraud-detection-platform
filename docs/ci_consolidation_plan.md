@@ -2,13 +2,13 @@
 
 This plan was written before CI consolidation and then updated after implementation. It preserves branch-specific evidence instead of turning checks into advisory comments.
 
-## Consolidation candidate: FDP-50 through FDP-53 frontend architecture gates
+## Consolidation candidate: frontend architecture gates
 
 Old jobs:
-- `FDP-50 Frontend API Client Runtime Boundary`
-- `FDP-51 Analyst Console Workspace Runtime`
-- `FDP-52 Workspace Split Detail UX`
-- `FDP-53 Workspace Runtime Ownership`
+- `Frontend API Client Runtime Boundary`
+- `Analyst Console Workspace Runtime`
+- `Analyst Workspace Detail UX`
+- `Workspace Runtime Ownership`
 
 Proposed new job:
 - `Analyst Console Frontend Architecture Gate`
@@ -17,25 +17,25 @@ Why consolidate:
 - The four jobs repeat checkout, Node setup, dependency install, UI build, API boundary guards, scope guards, skip/focus guards, and report verification.
 
 Still proves:
-- FDP-50 API client boundary tests and guards.
-- FDP-51 runtime provider tests and scope guard.
+- API client boundary tests and guards.
+- Workspace runtime provider tests and scope guard.
 - Analyst workspace detail UX tests and scope guard.
-- FDP-53 runtime ownership tests and scope guard.
+- Workspace runtime ownership tests and scope guard.
 - Full frontend build.
 
 No longer proves:
-- Nothing intentionally removed. Failure output is grouped by FDP section in the consolidated job.
+- Nothing intentionally removed. Failure output is grouped by business-owned section in the consolidated job.
 
 Replacement tests/scripts:
-- `npm test -- --run ... --outputFile=./test-results/fdp50-vitest.xml`
-- `npm test -- --run ... --outputFile=./test-results/fdp51-vitest.xml`
+- `npm test -- --run ... --outputFile=./test-results/api-client-boundary-vitest.xml`
+- `npm test -- --run ... --outputFile=./test-results/workspace-runtime-vitest.xml`
 - `npm test -- --run ... --outputFile=./test-results/workspace-detail-vitest.xml`
-- `npm test -- --run ... --outputFile=./test-results/fdp53-vitest.xml`
-- `npm run check:api-client-boundary:fdp50`
-- `npm run check:scope:fdp50`
-- `npm run check:scope:fdp51`
+- `npm test -- --run ... --outputFile=./test-results/workspace-runtime-ownership-vitest.xml`
+- `npm run check:workspace-api-client-boundary`
+- `npm run check:scope:api-client`
+- `npm run check:scope:workspace-runtime`
 - `npm run check:scope:workspace-detail`
-- `npm run check:fdp53-scope`
+- `npm run check:scope:workspace-runtime-ownership`
 
 Risk:
 - medium
@@ -78,13 +78,13 @@ Decision:
 ## Consolidation candidate: repeated frontend build/test/report verification steps
 
 Old jobs:
-- FDP-50 through FDP-53 frontend jobs.
+- The frontend architecture jobs.
 
 Proposed new job:
 - `Analyst Console Frontend Architecture Gate`
 
 Why consolidate:
-- One dependency install and one build are enough when each FDP section still runs its own tests and JUnit output.
+- One dependency install and one build are enough when each business section still runs its own tests and JUnit output.
 
 Still proves:
 - Each required test file is present in the matching JUnit report.
@@ -105,7 +105,7 @@ Decision:
 ## Consolidation candidate: repeated skip/only test guard steps
 
 Old jobs:
-- FDP-50 through FDP-53 skip/focus guard steps.
+- Frontend architecture skip/focus guard steps.
 
 Proposed new job:
 - One union skip/focus guard in `Analyst Console Frontend Architecture Gate`.
@@ -114,7 +114,7 @@ Why consolidate:
 - The same grep rule was repeated with overlapping test file lists.
 
 Still proves:
-- Required FDP-50 through FDP-53 test files do not contain `.skip` or `.only`.
+- Required frontend architecture test files do not contain `.skip` or `.only`.
 
 No longer proves:
 - Separate job-local skip guard output per FDP.
@@ -131,10 +131,10 @@ Decision:
 ## Consolidation candidate: repeated scope guard helpers
 
 Old jobs:
-- `scripts/check-fdp50-scope.mjs`
-- `scripts/check-fdp51-scope.mjs`
+- `scripts/check-api-client-scope.mjs`
+- `scripts/check-workspace-runtime-scope.mjs`
 - `scripts/check-workspace-detail-scope.mjs`
-- `scripts/check-fdp53-scope.mjs`
+- `scripts/check-workspace-runtime-ownership-scope.mjs`
 
 Proposed new job:
 - Keep externally coupled branch-specific scripts, and place generic helpers in `scripts/scope-guards/scopeGuardHelpers.mjs`.
@@ -190,6 +190,6 @@ Decision:
 ## Jobs Kept Separate
 
 - Backend mutation and fraud-case proof gates stay separate because they protect backend behavior and transaction semantics.
-- FDP-49 security route boundary stays separate because route ownership failures need direct security output.
+- The security route boundary stays separate because route ownership failures need direct security output.
 - Release governance gates stay separate because they have different ownership and evidence meaning.
 - Docker compose build stays separate because it proves buildability of compose images after upstream gates pass.

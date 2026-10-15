@@ -4,10 +4,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const root = process.env.FDP50_API_BOUNDARY_ROOT ?? repoRoot;
+const root = process.env.API_CLIENT_BOUNDARY_ROOT ?? repoRoot;
 const requireFromFrontend = createRequire(join(repoRoot, "analyst-console-ui/package.json"));
 const { parse } = requireFromFrontend("@babel/parser");
-const failureMessage = "FDP-50 requires auth-sensitive UI code to use explicit workspace-scoped apiClient instances.";
+const failureMessage = "API client boundary requires auth-sensitive UI code to use explicit workspace-scoped apiClient instances.";
 const allowedAlertsApiImports = new Set([
   "createAlertsApiClient",
   "isAbortError",

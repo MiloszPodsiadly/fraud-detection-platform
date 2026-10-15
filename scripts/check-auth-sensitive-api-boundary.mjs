@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = process.env.FDP49_API_BOUNDARY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.AUTH_SENSITIVE_API_BOUNDARY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
 const failureMessage = "Auth-sensitive UI code must use createAlertsApiClient({ session, authProvider }); raw fetch is only allowed in API/auth bootstrap layers.";
 const disallowed = new Set([
   "listAlerts",
