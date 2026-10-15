@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 from offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.artifact_set import (
     MANIFEST_FILENAME,
@@ -16,6 +18,7 @@ from offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performan
     build_exact_model_shadow_performance,
 )
 from offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.publisher import (
+    ExactModelShadowPublicationDurabilityUnconfirmed,
     publish_exact_model_shadow_artifact_set,
 )
 from offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.schema import (
@@ -32,6 +35,18 @@ from feedback_dataset_evaluation.exact_model_shadow_performance.fixtures import 
 
 
 class ExactModelShadowArtifactSetTest(unittest.TestCase):
+    def setUp(self):
+        self._windows_sync_patch = None
+        if os.name == "nt":
+            self._windows_sync_patch = patch(
+                "offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.publisher._sync_directory"
+            )
+            self._windows_sync_patch.start()
+
+    def tearDown(self):
+        if self._windows_sync_patch is not None:
+            self._windows_sync_patch.stop()
+
     def test_publish_read_select_and_idempotent_retry(self):
         summary = self._summary()
         with tempfile.TemporaryDirectory() as directory:
@@ -99,6 +114,29 @@ class ExactModelShadowArtifactSetTest(unittest.TestCase):
             self.assertEqual(results[0], results[1])
             self.assertEqual(1, len([path for path in Path(directory).iterdir() if path.is_dir()]))
 
+    def test_retry_reconfirms_parent_durability_before_reporting_success(self):
+        summary = self._summary()
+        sync_target = (
+            "offline_evaluation.feedback_dataset_evaluation."
+            "exact_model_shadow_performance.publisher._sync_directory"
+        )
+        with tempfile.TemporaryDirectory() as directory, patch(
+                sync_target,
+                side_effect=[None, OSError("initial parent sync failed"),
+                             OSError("retry parent sync failed"), None],
+        ) as sync_directory:
+            with self.assertRaises(ExactModelShadowPublicationDurabilityUnconfirmed):
+                publish_exact_model_shadow_artifact_set(summary, directory)
+            self.assertEqual(1, len([path for path in Path(directory).iterdir() if path.is_dir()]))
+
+            with self.assertRaises(ExactModelShadowPublicationDurabilityUnconfirmed):
+                publish_exact_model_shadow_artifact_set(summary, directory)
+
+            paths = publish_exact_model_shadow_artifact_set(summary, directory)
+
+            self.assertTrue(paths["summary"].is_file())
+            self.assertEqual(4, sync_directory.call_count)
+
     def test_rejects_tampering_unexpected_files_and_noncanonical_json(self):
         for mutation in ("hash", "unexpected", "noncanonical"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
@@ -124,6 +162,15 @@ class ExactModelShadowArtifactSetTest(unittest.TestCase):
                 self.skipTest("symlink creation is unavailable")
             with self.assertRaises(ExactModelShadowPerformanceValidationError):
                 read_exact_model_shadow_artifact_set(target)
+
+    @unittest.skipUnless(os.name == "nt", "Windows-specific fail-closed durability contract")
+    def test_windows_publication_fails_when_directory_durability_cannot_be_confirmed(self):
+        self._windows_sync_patch.stop()
+        self._windows_sync_patch = None
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ExactModelShadowPublicationDurabilityUnconfirmed):
+                publish_exact_model_shadow_artifact_set(self._summary(), directory)
+            self.assertEqual(0, len([path for path in Path(directory).iterdir() if path.is_dir()]))
 
     def _summary(self, identity=IDENTITY):
         return build_exact_model_shadow_performance(representative_evidence(identity), SHADOW_GENERATED_AT)

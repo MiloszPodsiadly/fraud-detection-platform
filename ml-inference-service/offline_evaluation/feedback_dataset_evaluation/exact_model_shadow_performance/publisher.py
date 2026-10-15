@@ -30,7 +30,7 @@ from offline_evaluation.feedback_dataset_evaluation.model_card.atomic_directory_
 
 
 class ExactModelShadowPublicationDurabilityUnconfirmed(ExactModelShadowPerformanceValidationError):
-    """The immutable directory is visible but parent durability is unconfirmed."""
+    """The publisher cannot confirm the required directory durability boundary."""
 
 
 def publish_exact_model_shadow_artifact_set(
@@ -58,7 +58,7 @@ def publish_exact_model_shadow_artifact_set(
         _write_and_sync(staging / SUMMARY_FILENAME, summary_payload)
         _write_and_sync(staging / MANIFEST_FILENAME, manifest_payload)
         read_exact_model_shadow_artifact_set(staging)
-        _sync_directory(staging)
+        _confirm_directory_durability(staging)
         try:
             publish_directory_without_replacement(staging, destination)
             published = True
@@ -68,12 +68,7 @@ def publish_exact_model_shadow_artifact_set(
             raise ExactModelShadowPerformanceValidationError(
                 "atomic no-replace exact-model shadow publication is unsupported"
             ) from exc
-        try:
-            _sync_directory(root)
-        except OSError as exc:
-            raise ExactModelShadowPublicationDurabilityUnconfirmed(
-                "exact-model shadow publication durability is unconfirmed"
-            ) from exc
+        _confirm_parent_durability(destination)
     finally:
         if not published and staging.exists() and _same_identity(staging, identity):
             shutil.rmtree(staging)
@@ -87,7 +82,21 @@ def _idempotent_existing(destination: Path, expected_summary: bytes) -> dict[str
         raise ExactModelShadowPerformanceValidationError(
             "immutable exact-model shadow selection already contains different evidence"
         )
+    _confirm_parent_durability(destination)
     return _paths(destination)
+
+
+def _confirm_parent_durability(destination: Path) -> None:
+    _confirm_directory_durability(destination.parent)
+
+
+def _confirm_directory_durability(directory: Path) -> None:
+    try:
+        _sync_directory(directory)
+    except OSError as exc:
+        raise ExactModelShadowPublicationDurabilityUnconfirmed(
+            "exact-model shadow publication durability is unconfirmed"
+        ) from exc
 
 
 def _thaw(value: Any) -> Any:
@@ -118,7 +127,7 @@ def _write_and_sync(path: Path, payload: str) -> None:
 
 def _sync_directory(path: Path) -> None:
     if os.name == "nt":
-        return
+        raise OSError("directory durability confirmation is unavailable on Windows")
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
     with _directory_descriptor(path, flags) as descriptor:
         os.fsync(descriptor)
