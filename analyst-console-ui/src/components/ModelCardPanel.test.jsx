@@ -150,7 +150,16 @@ function zeroPopulationCard() {
     recordsWithExactMlEvidence: 0,
     recordsCompared: 0,
     recordsExcludedRulesEvidenceUnavailable: 0,
-    categoryCounts: { ML_HIGH_RULES_LOW: 0, RULES_HIGH_ML_LOW: 0, BOTH_HIGH: 0, BOTH_LOW: 0 }
+    categoryCounts: { ML_HIGH_RULES_LOW: 0, RULES_HIGH_ML_LOW: 0, BOTH_HIGH: 0, BOTH_LOW: 0 },
+    disagreementRate: unavailableMetric("RULES_SIGNAL_UNAVAILABLE"),
+    analystLabeledFraudByCategory: {
+      ML_HIGH_RULES_LOW: 0,
+      RULES_HIGH_ML_LOW: 0,
+      BOTH_HIGH: 0,
+      BOTH_LOW: 0
+    },
+    analystLabeledFraudRecordsCompared: 0,
+    analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable: 0
   });
   summary.warnings = ["INSUFFICIENT_MODEL_LINEAGE_RECORDS", "MODEL_PREDICTION_SIGNAL_UNAVAILABLE"];
   return card;
