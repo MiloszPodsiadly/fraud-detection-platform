@@ -1,0 +1,15 @@
+# Explicit read-only runtime overlay for immutable exact-model Shadow Performance artifact sets.
+# Publication happens outside alert-service; the service selects one exact M/V/F/SHA/window directory per request.
+services:
+  alert-service:
+    environment:
+      MODEL_SHADOW_PERFORMANCE_ARTIFACTS_ENABLED: "true"
+      MODEL_SHADOW_PERFORMANCE_ARTIFACTS_BASE_DIR: /run/model-shadow-performance
+      MODEL_SHADOW_PERFORMANCE_MAX_SUMMARY_SIZE_BYTES: ${MODEL_SHADOW_PERFORMANCE_MAX_SUMMARY_SIZE_BYTES:-524288}
+    volumes:
+      - type: bind
+        source: ${MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT:-./local-generated/model-shadow-performance}
+        target: /run/model-shadow-performance
+        read_only: true
+        bind:
+          create_host_path: false
