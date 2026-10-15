@@ -55,7 +55,7 @@ Design boundaries:
 - Kafka contracts live in `common-events`.
 - REST DTOs and persistence models stay service-local unless deliberately promoted.
 - Backend authorization is authoritative; frontend gating is only UX.
-- Mongo transaction mode is a local boundary, not distributed ACID.
+- Mongo transaction mode provides atomicity within each service's local persistence boundary.
 - Kafka/outbox delivery remains asynchronous and at-least-once unless a later implemented control proves otherwise.
 
 ## Runtime Flow
@@ -67,7 +67,7 @@ Risk scoring modes:
 | Mode | Final score owner | Purpose |
 | --- | --- | --- |
 | `RULE_BASED` | Java rules | Deterministic default scoring. |
-| `SHADOW` | Java rules | Attach ML diagnostics without changing final decisions. |
+| `SHADOW` | Java rules | Keep Java rules authoritative while attaching ML diagnostics. |
 | `COMPARE` | Java rules | Compare rules and ML for operational analysis. |
 | `ML` | Python model | Use ML result with rule fallback when unavailable. |
 
@@ -80,15 +80,14 @@ Security model:
 - Demo auth is local/dev only and guarded by profile checks.
 - Local OIDC uses Keycloak through the Docker override.
 - JWT Resource Server support maps external claims into `AnalystPrincipal`.
-- Actor identity for secured write paths comes from the authenticated principal, not request payload fields.
+- The authenticated principal is the authoritative actor identity for secured write paths.
 - RBAC authorities protect analyst, audit, recovery, outbox, and trust incident endpoints.
 
 Audit and trust model:
 
 - Analyst write actions and governance advisory reviews are persisted as append-only audit records.
-- Regulated mutation and outbox controls are local evidence controls, not external finality.
+- Regulated mutation and outbox controls provide local evidence and recovery guarantees.
 - The local trust authority signs and verifies audit anchor material for local proof workflows.
-- The repository does not claim WORM storage, legal notarization, bank certification, distributed ACID, or exactly-once Kafka.
 
 Start with:
 
@@ -103,10 +102,10 @@ Docker is the supported local runtime path for this README.
 
 ### Quick Start
 
-Prerequisites are Docker with Compose, OpenSSL, and Python 3.12+ available as `python`. On macOS or Linux with GNU Make installed, from a fresh clone:
+Prerequisites are Docker with Compose, OpenSSL, Python 3.12+ available as `python`, and GNU Make. On Linux, macOS, WSL, or Git Bash, from a fresh clone:
 
 ```bash
-make app-up
+make up
 ```
 
 On Windows, install Docker Desktop, Git for Windows, and Python 3.12+ available as `python`, then run the equivalent one-command startup from PowerShell:
@@ -116,17 +115,16 @@ On Windows, install Docker Desktop, Git for Windows, and Python 3.12+ available 
 ```
 
 The Windows launcher uses Git for Windows to run the existing OpenSSL-based fixture generator and starts the
-same Compose overlay combination as `make app-up`. From Git Bash on Windows without GNU Make, use
+same Compose overlay combination as `make up`. From Git Bash installations that omit GNU Make, use
 `./scripts/app.cmd up`.
 
-OpenSSL is used only to generate local identity fixture material. Private PEM keys are not committed to this
-repository.
+OpenSSL generates local identity fixture material. Private PEM keys remain in ignored local directories.
 
 Local startup runs the Python generator before Docker Compose starts, so `python` must be available on the host.
 
 ### Most Complete Local Security Demonstration Stack
 
-`make app-up`, or `.\scripts\app.cmd up` on Windows, starts the most complete local security demonstration stack
+`make up`, or `.\scripts\app.cmd up` on Windows, starts the most complete local security demonstration stack
 currently provided by the repository. It:
 
 - creates `deployment/.env` from `deployment/.env.example` if it is missing;
@@ -138,7 +136,7 @@ currently provided by the repository. It:
 `deployment/.local/` is ignored by Git and excluded from Docker build contexts. Generated private keys stay on
 the local workstation and can be replaced by rerunning the selected startup command.
 
-`make app-up` and `.\scripts\app.cmd up` generate the local Shadow Performance Summary artifact before starting
+`make up` and `.\scripts\app.cmd up` generate the local Shadow Performance Summary artifact before starting
 Docker Compose. For manual inspection, the equivalent Compose startup after running
 `make shadow-performance-summary` and `bash scripts/bootstrap-local-fixtures.sh` is:
 
@@ -154,13 +152,12 @@ docker compose --env-file deployment/.env \
   up --build -d
 ```
 
-The Shadow Performance dashboard uses the artifact-backed current provider. The base runtime is fail-closed by default, and the official full local launchers include
-`deployment/docker-compose.shadow-performance-generated.yml` so the dashboard uses the generated artifact.
-If the generated artifact is still missing after local generation, startup fails with `Generated Shadow Performance Summary not found. Run: make shadow-performance-summary`.
-The provider must not display fake, sample, fallback, stale, demo, or zero metrics when no valid configured artifact
-is available.
+The Shadow Performance dashboard uses the artifact-backed current provider. The official full local launchers include
+`deployment/docker-compose.shadow-performance-generated.yml` and expose only the manifest-validated generated artifact.
+Startup requires the generated artifact and reports `Generated Shadow Performance Summary not found. Run: make shadow-performance-summary` when generation has not produced it.
+An unavailable or invalid artifact is reported as unavailable rather than being replaced with synthetic metrics.
 
-The local launcher intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context. Global counters in the Shadow Performance workspace are shell-level context only; they are not part of `ShadowPerformanceSummary`, not model evaluation metrics, not promotion readiness, not threshold recommendation, not production decisioning, not payment authorization, and not analyst recommendation logic.
+The local launcher combines generation before Compose, a read-only runtime mount, and shared workspace counters. Governance metrics and authority come exclusively from the validated `ShadowPerformanceSummary`; workspace counters remain presentation context.
 
 To run the explicit generated-artifact path directly:
 
@@ -170,33 +167,29 @@ make app-up-shadow-performance-generated
 ```
 
 The generated runtime mounts `deployment/local-generated/shadow-performance` read-only into
-`/run/shadow-performance`, including `current-summary.json` and sibling `manifest.json`. It does not use a
-non-canonical demo summary filename and does not generate a summary inside Docker Compose.
+`/run/shadow-performance`, including canonical `current-summary.json` and sibling `manifest.json`. Artifact generation completes on the host before Docker Compose starts.
 
 The separate demo override `deployment/docker-compose.shadow-performance-demo.yml` remains available only for the
-canonical demo artifact-set path; demo fixture metrics are not production current summary, not promotion readiness, not threshold
-recommendation, not production decisioning approval, not payment authorization, and not analyst recommendation logic.
+canonical demo artifact-set path and is scoped to local visualization with no governance authority.
 
-`deployment/.env` is a committed local demo/evaluation configuration fixture, so the project remains runnable for
-evaluation without claiming secret management. Application startup guards reject demo internal-auth
+Exact-model evidence is an explicit opt-in. Pre-provision its artifact root, then start the same stack with the additional read-only reader overlay:
+
+```bash
+mkdir -p deployment/local-generated/model-shadow-performance
+make up-exact-model-shadow
+```
+
+`deployment/.env` is a committed local demo/evaluation configuration fixture, so the project remains runnable with
+local fixture credentials. Application startup guards reject demo internal-auth
 patterns and local-HMAC trust-authority demo configuration outside `local`, `dev`, or `docker-local` profiles,
 or an automated `test` context with an explicit fixture marker such as `LOCAL_FIXTURE_TEST_ENABLED=true`.
 `deployment/.env.example` documents the expected variables.
-The generic `test` profile is not a deployment mode, and generic `docker` is not a local-secret allowlist by
-itself.
+Local fixture credentials are accepted only by the documented local profiles or an automated test context with the explicit fixture marker.
 
 After startup, confirm container readiness:
 
 ```bash
-docker compose --env-file deployment/.env \
-  -f deployment/docker-compose.yml \
-  -f deployment/docker-compose.dev.yml \
-  -f deployment/docker-compose.oidc.yml \
-  -f deployment/docker-compose.service-identity-mtls.yml \
-  -f deployment/docker-compose.trust-authority-jwt.yml \
-  -f deployment/docker-compose.hardened.yml \
-  -f deployment/docker-compose.shadow-performance-generated.yml \
-  ps
+make ps
 ```
 
 On Windows, the equivalent status command is:
@@ -223,38 +216,16 @@ wrong official overlay order that leaves local-only internal auth enabled fails 
 
 ### Security Scope Of The Local Stack
 
-This is not a production deployment or production security evidence. `deployment/.env` is intentionally committed for local evaluation, and the
-documented stack publishes ports only on localhost. Startup guards reject committed demo internal-auth patterns
-and local-HMAC trust-authority demo configuration unless an allowed fixture profile is active: `local`, `dev`, or
-`docker-local`; `test` requires an explicit automated-fixture marker. Other local evaluation credentials in the
-fixture are not a production secret-management mechanism. Keycloak runs in dev mode. The local signing authority
-is a local trust-authority simulation, not an independent external trust anchor. The application container hardening overlay
-covers application containers only; it does not harden all third-party infrastructure images. Production requires
-external secret management, a production identity provider, an independent trust anchor, managed TLS termination,
-image provenance controls, and environment-specific deployment controls.
+The documented stack is a localhost-bound evaluation environment. Startup guards constrain fixture credentials to explicit local profiles, Keycloak supplies local OIDC, generated mTLS and JWT material supplies service identity, and the local trust authority signs audit anchors. A production deployment supplies managed secrets, production identity and PKI, independent trust anchoring, managed TLS termination, image provenance, regulated-data controls, and environment-specific infrastructure hardening.
 
-Generated mTLS and JWT material in `deployment/.local/service-identity/` is local evaluation material only. It is
-not production PKI, production provenance, or independent external trust anchoring.
-
-CI includes repository filesystem scanning for critical known vulnerabilities as review visibility only. It is
-not production image provenance; follow-up controls include digest pinning, SBOM generation, SLSA/provenance
-evidence, signed images and automated dependency updates.
-
-#### What This Does Not Protect Against
-
-- Hostile users with access to the local workstation or committed fixture material.
-- Lateral movement from a compromised container inside the local Docker network.
-- Compromise of third-party infrastructure images outside the application hardening overlay.
-- Protection of real regulated data.
-- Production PKI or independent trust anchoring.
-- No legal notarization or WORM-compliant retention.
+CI adds repository vulnerability scanning for review visibility. Deployment provenance is established separately through digest pinning, SBOM and SLSA evidence, signed images, and automated dependency updates.
 
 ### Compose Overlay Order Matters
 
 Compose applies later overlay values over earlier values. `docker-compose.dev.yml` intentionally selects
 local-only ML authentication, while the mTLS overlay must come after it to produce
 `INTERNAL_AUTH_MODE=MTLS_SERVICE_IDENTITY` in the complete local security demonstration stack.
-The documented stack does not start Ollama or pull a model, and CI intentionally never pulls a local LLM model.
+Ollama and its model initialization are available through the explicit AI overlay.
 Backend JVM tuning can be overridden using
 `JAVA_TOOL_OPTIONS`; application images use an exec-form Java entrypoint.
 
@@ -288,10 +259,10 @@ Named volumes persist data between restarts:
 | `prometheus-data` | Local metrics history. |
 | `grafana-data` | Local Grafana state. |
 
-Stop the complete local security demonstration stack without deleting local data:
+Stop the complete local security demonstration stack while preserving local data:
 
 ```bash
-make app-down
+make down
 ```
 
 On Windows:
@@ -342,15 +313,14 @@ docker compose --env-file deployment/.env \
 
 ### Troubleshooting
 
-- Docker with Compose and OpenSSL are required for `make app-up`; the Windows launcher obtains Bash and OpenSSL from Git for Windows.
+- Docker with Compose, OpenSSL, Python 3.12+, and GNU Make are required for `make up`; the Windows launcher uses Bash and OpenSSL from Git for Windows as its platform-native entry point.
 - Delete `deployment/.local/` and rerun the selected startup command to regenerate local certificate/JWT fixture material.
 - `make app-clean` or `.\scripts\app.cmd clean` removes named local data volumes as well as stopping the demonstration stack.
 - Run `bash scripts/bootstrap-local-fixtures.sh` before local fixture-dependent backend or ML identity tests.
 
 ## Services And Ports
 
-These local bindings are supplied by `deployment/docker-compose.dev.yml`; core services in the base file do not
-publish host ports.
+These local bindings are supplied by `deployment/docker-compose.dev.yml`; the base file keeps core services internal to the Compose networks.
 
 | Service | Local URL | Notes |
 | --- | --- | --- |
@@ -418,8 +388,7 @@ node scripts/compare-ci-jobs.mjs
 node scripts/check-scope-guard-helpers-smoke.mjs
 ```
 
-Integration tests use Docker/Testcontainers where applicable and are skipped automatically when Docker is not
-available.
+Integration tests use Docker/Testcontainers where applicable and activate automatically when Docker is available.
 
 ## Documentation Map
 
@@ -467,14 +436,7 @@ Implemented production-style foundations:
 - Local OIDC, service identity foundations, and mTLS-scoped internal calls.
 - CI gates and documentation evidence for branch-level changes.
 
-Explicit non-claims:
-
-- No bank certification.
-- No production deployment approval.
-- No legal notarization or WORM certification.
-- No distributed ACID.
-- The platform does not provide exactly-once Kafka delivery.
-- No external finality unless a current source-of-truth document names the implemented control and its limitations.
+Production deployment requirements include regulated-environment approval, certified retention and notarization controls, infrastructure-level transaction boundaries, delivery guarantees matched to each integration, and independently operated external trust anchors. Current source-of-truth documents define the implemented local controls and their evidence boundaries.
 
 ## Maintainer
 

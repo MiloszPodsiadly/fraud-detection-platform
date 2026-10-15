@@ -1,10 +1,20 @@
 import fs from "node:fs";
+import path from "node:path";
 
 const variant = process.argv[2];
-const supportedVariants = new Set(["base", "dev", "ai", "security-hardened", "model-shadow-performance"]);
+const requireExistingSource = process.argv.includes("--require-existing-source");
+const supportedVariants = new Set([
+  "base",
+  "dev",
+  "ai",
+  "security-hardened",
+  "model-shadow-performance-source",
+  "model-shadow-performance",
+  "security-hardened-model-shadow-performance"
+]);
 
 if (!supportedVariants.has(variant)) {
-  console.error("Usage: node scripts/check-compose-security-config.mjs <base|dev|ai|security-hardened|model-shadow-performance>");
+  console.error("Usage: node scripts/check-compose-security-config.mjs <variant> [--require-existing-source]");
   process.exit(2);
 }
 
@@ -120,15 +130,117 @@ function assertGeneratedIdentityMount(serviceName, target, expectedSourceSuffix)
   }
 }
 
-function assertReadOnlyArtifactMount(serviceName, target, expectedSourceSuffix) {
+function assertReadOnlyArtifactMount(serviceName, target) {
   const mounts = service(serviceName).volumes ?? [];
-  const mount = mounts.find((volume) => volume.target === target);
-  const source = String(mount?.source ?? "").replaceAll("\\", "/");
-  if (!mount || mount.type !== "bind" || !mount.read_only || !source.endsWith(expectedSourceSuffix)) {
-    fail(`${serviceName} must bind ${expectedSourceSuffix} read-only at ${target}`);
+  const matching = mounts.filter((volume) => volume?.target === target);
+  const mount = matching[0];
+  if (matching.length !== 1) {
+    fail(`${serviceName} must define exactly one mount at ${target}`);
   }
+  if (!mount || mount.type !== "bind" || !mount.source || !mount.read_only) {
+    fail(`${serviceName} must define one sourced read-only bind at ${target}`);
+  }
+  assertConfiguredSource(mount);
+  return mount;
+}
+
+function assertDeclarativeArtifactMount(serviceName, target) {
+  const mount = assertReadOnlyArtifactMount(serviceName, target);
   if (mount?.bind?.create_host_path !== false) {
     fail(`${serviceName} artifact mount ${target} must expose create_host_path:false; resolve with config --no-normalize`);
+  }
+}
+
+function assertNoOverlappingWritableMounts(serviceName, protectedTarget) {
+  const governanceTargets = new Set([
+    "/run/model-card",
+    "/run/model-shadow-performance",
+    "/run/promotion-readiness",
+    "/run/shadow-performance"
+  ]);
+  for (const volume of service(serviceName).volumes ?? []) {
+    if (!volume || typeof volume !== "object") {
+      fail(`${serviceName} must use structured volume declarations`);
+      continue;
+    }
+    const target = String(volume.target ?? "");
+    const overlaps = target.length > 0 && (target === protectedTarget
+      || target.startsWith(`${protectedTarget}/`)
+      || protectedTarget.startsWith(`${target}/`));
+    if ((overlaps || governanceTargets.has(target)) && volume.read_only !== true) {
+      fail(`${serviceName} mount ${target || "<missing>"} must not expose governance evidence as writable`);
+    }
+  }
+}
+
+function assertExactModelReaderDisabled() {
+  if (String(env("alert-service", "MODEL_SHADOW_PERFORMANCE_ARTIFACTS_ENABLED")) === "true") {
+    fail("exact-model shadow reader must remain disabled without its opt-in overlay");
+  }
+  if ((service("alert-service").volumes ?? [])
+      .some((volume) => volume?.target === "/run/model-shadow-performance")) {
+    fail("exact-model shadow mount must be absent without its opt-in overlay");
+  }
+}
+
+function assertExactModelReaderResolved() {
+  expectEqual(
+    "model shadow performance reader enabled",
+    env("alert-service", "MODEL_SHADOW_PERFORMANCE_ARTIFACTS_ENABLED"),
+    "true"
+  );
+  expectEqual(
+    "model shadow performance artifact base directory",
+    env("alert-service", "MODEL_SHADOW_PERFORMANCE_ARTIFACTS_BASE_DIR"),
+    "/run/model-shadow-performance"
+  );
+  const mount = assertReadOnlyArtifactMount(
+    "alert-service",
+    "/run/model-shadow-performance"
+  );
+  assertNoOverlappingWritableMounts("alert-service", "/run/model-shadow-performance");
+  if (requireExistingSource) {
+    assertPreProvisionedSource(mount);
+  }
+}
+
+function assertPreProvisionedSource(mount) {
+  const source = mount?.source;
+  if (typeof source !== "string" || source.length === 0) {
+    fail("exact-model shadow host source is missing");
+    return;
+  }
+  try {
+    const sourceStat = fs.lstatSync(source);
+    if (sourceStat.isSymbolicLink()) {
+      fail("exact-model shadow host source must not be a symbolic link");
+    } else if (!sourceStat.isDirectory()) {
+      fail("exact-model shadow host source must be a pre-provisioned directory");
+    }
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      fail(`exact-model shadow host source is not pre-provisioned: ${source}`);
+    } else {
+      fail(`exact-model shadow host source cannot be inspected: ${error.message}`);
+    }
+  }
+}
+
+function assertConfiguredSource(mount) {
+  const source = mount?.source;
+  if (typeof source !== "string" || source.length === 0) {
+    return;
+  }
+  const configured = process.env.MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT
+    ?? "./local-generated/model-shadow-performance";
+  const expected = path.isAbsolute(configured)
+    ? path.normalize(configured)
+    : path.resolve("deployment", configured);
+  const actual = path.isAbsolute(source)
+    ? path.normalize(source)
+    : path.resolve("deployment", source);
+  if (actual !== expected) {
+    fail(`resolved exact-model shadow source ${source} does not match configured source ${expected}`);
   }
 }
 
@@ -136,6 +248,7 @@ assertNoContainerNames();
 
 if (variant === "base") {
   assertNoPublishedPorts();
+  assertExactModelReaderDisabled();
 }
 
 if (variant === "dev") {
@@ -146,6 +259,7 @@ if (variant === "dev") {
   expectEqual("dev alert-service ASSISTANT_MODE", env("alert-service", "ASSISTANT_MODE"), "DETERMINISTIC");
   assertLocalBindings();
   assertUiLocalPort();
+  assertExactModelReaderDisabled();
 }
 
 if (variant === "ai") {
@@ -155,9 +269,10 @@ if (variant === "ai") {
   expectEqual("AI alert-service OLLAMA_BASE_URL", env("alert-service", "OLLAMA_BASE_URL"), "http://ollama:11434");
   assertLocalBindings();
   assertUiLocalPort();
+  assertExactModelReaderDisabled();
 }
 
-if (variant === "security-hardened") {
+if (variant === "security-hardened" || variant === "security-hardened-model-shadow-performance") {
   expectEqual("security ml-inference-service INTERNAL_AUTH_MODE", env("ml-inference-service", "INTERNAL_AUTH_MODE"), "MTLS_SERVICE_IDENTITY");
   expectEqual("security fraud-scoring-service ML_MODEL_BASE_URL", env("fraud-scoring-service", "ML_MODEL_BASE_URL"), "https://ml-inference-service:8090");
   expectEqual("security alert-service ML_GOVERNANCE_BASE_URL", env("alert-service", "ML_GOVERNANCE_BASE_URL"), "https://ml-inference-service:8090");
@@ -176,24 +291,20 @@ if (variant === "security-hardened") {
   assertLocalBindings();
   assertUiLocalPort();
   assertHardening();
+  if (variant === "security-hardened") {
+    assertExactModelReaderDisabled();
+  }
 }
 
-if (variant === "model-shadow-performance") {
-  expectEqual(
-    "model shadow performance reader enabled",
-    env("alert-service", "MODEL_SHADOW_PERFORMANCE_ARTIFACTS_ENABLED"),
-    "true"
-  );
-  expectEqual(
-    "model shadow performance artifact base directory",
-    env("alert-service", "MODEL_SHADOW_PERFORMANCE_ARTIFACTS_BASE_DIR"),
+if (variant === "model-shadow-performance-source") {
+  assertDeclarativeArtifactMount(
+    "alert-service",
     "/run/model-shadow-performance"
   );
-  assertReadOnlyArtifactMount(
-    "alert-service",
-    "/run/model-shadow-performance",
-    "/deployment/local-generated/model-shadow-performance"
-  );
+}
+
+if (variant === "model-shadow-performance" || variant === "security-hardened-model-shadow-performance") {
+  assertExactModelReaderResolved();
 }
 
 if (failures.length > 0) {

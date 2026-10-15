@@ -34,28 +34,35 @@ The artifact root must already exist. Publication is atomic and no-replace. Succ
 
 ## Runtime
 
-The base application keeps the reader disabled. The explicit overlay mounts a pre-provisioned artifact root read-only and refuses Docker host-path creation:
+The base application keeps the reader disabled. On Linux, WSL, or Git Bash, the repository Makefile is the canonical local entry point:
 
 ```bash
-docker compose --env-file deployment/.env \
-  -f deployment/docker-compose.yml \
-  -f deployment/docker-compose.model-shadow-performance-generated.yml \
-  up --build -d
+make up
+make ps
+make down
 ```
 
-Set `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT` when the host artifact root differs from `deployment/local-generated/model-shadow-performance`. The publishing process must have separate credentials and must not run inside `alert-service`.
+`make up` starts the standard hardened local stack and prepares the required runtime fixtures before generating the ordinary Shadow Performance Summary. Tests remain separate under the `check-*` targets. `make down` stops the stack without deleting volumes.
+
+Enable the exact-model reader after provisioning its artifact root:
+
+```bash
+mkdir -p deployment/local-generated/model-shadow-performance
+make up-exact-model-shadow
+```
+
+The exact-model overlay mounts the pre-provisioned artifact root read-only and refuses Docker host-path creation. Set `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT` when the host artifact root differs from `deployment/local-generated/model-shadow-performance`. The publishing process has separate credentials and runs outside `alert-service`; artifact publication is independent from application startup. The Makefile execution environments are Linux, WSL, and Git Bash.
 
 Before starting the service, validate the resolved reader boundary:
 
 ```bash
-docker compose --env-file deployment/.env \
-  -f deployment/docker-compose.yml \
-  -f deployment/docker-compose.model-shadow-performance-generated.yml \
-  config --no-normalize --format json \
-  | node scripts/check-compose-security-config.mjs model-shadow-performance
+make check-compose
+make check-compose-exact-model-shadow
 ```
 
-The check requires the reader to be explicitly enabled, the canonical container path to be selected, the host artifact root to be bind-mounted read-only, and implicit host-path creation to remain disabled.
+These separate checks require the reader to be explicitly enabled, the canonical container path to be selected, the host artifact root to be bind-mounted read-only, and implicit host-path creation to remain disabled. They also exercise Docker's refusal to create a missing source and its enforcement of the read-only mount. They are not dependencies of `make up`.
+
+The recursive evaluation validator is currently implemented by `ModelCardValidator` and reused by the exact-model validator, so there is one semantic implementation. Extracting that substantial implementation into a neutrally named component is deferred to avoid creating a second validator or changing the active contract during this focused hardening work.
 
 ## Security And Governance
 
