@@ -39,9 +39,11 @@ EXTERNAL_ATTESTATION = "NOT_PROVIDED"
 IMMUTABLE_STORAGE_GUARANTEE = "NOT_CLAIMED"
 MAX_SUMMARY_BYTES = 524_288
 
-COVERAGE_COMPLETE = "COMPLETE"
-COVERAGE_NO_DATA = "NO_DATA"
-COVERAGE_PARTIAL = "PARTIAL_COVERAGE"
+RETURNED_COHORT_COMPLETE = "COMPLETE"
+RETURNED_COHORT_NO_DATA = "NO_DATA"
+RETURNED_COHORT_PARTIAL = "PARTIAL_COVERAGE"
+SOURCE_POPULATION_NOT_TRUNCATED = "BOUNDED_SOURCE_NOT_TRUNCATED"
+SOURCE_POPULATION_TRUNCATED = "BOUNDED_SOURCE_TRUNCATED"
 
 LATENCY_UNAVAILABLE = "EXACT_ARTIFACT_LATENCY_EVIDENCE_UNAVAILABLE"
 FALLBACK_UNAVAILABLE = "EXACT_ARTIFACT_FALLBACK_EVIDENCE_UNAVAILABLE"
@@ -77,7 +79,7 @@ SOURCE_EVALUATION_FIELDS = {
     "externalAttestation",
     "immutableStorageGuarantee",
 }
-COVERAGE_FIELDS = {"status", "sourceTruncated", "sourceInvalid"}
+COVERAGE_FIELDS = {"returnedCohortStatus", "sourcePopulationStatus"}
 OPERATIONAL_FIELDS = {"mlLatencyP95", "fallbackRate", "mlReasonCodeDistribution"}
 GOVERNANCE_FIELDS = {
     "diagnosticOnly",
@@ -201,15 +203,19 @@ def _validate_coverage(value: Any, evaluation: dict[str, Any]) -> None:
     _exact_fields(value, COVERAGE_FIELDS, "coverage")
     population = evaluation["population"]
     if population["recordsEvaluated"] == 0:
-        status = COVERAGE_NO_DATA
+        status = RETURNED_COHORT_NO_DATA
     elif population["recordsEvaluated"] < population["recordsConsidered"]:
-        status = COVERAGE_PARTIAL
+        status = RETURNED_COHORT_PARTIAL
     else:
-        status = COVERAGE_COMPLETE
+        status = RETURNED_COHORT_COMPLETE
+    source_status = (
+        SOURCE_POPULATION_TRUNCATED
+        if evaluation["sourceDataset"]["truncated"]
+        else SOURCE_POPULATION_NOT_TRUNCATED
+    )
     expected = {
-        "status": status,
-        "sourceTruncated": evaluation["sourceDataset"]["truncated"],
-        "sourceInvalid": False,
+        "returnedCohortStatus": status,
+        "sourcePopulationStatus": source_status,
     }
     if value != expected:
         raise ExactModelShadowPerformanceValidationError("coverage is inconsistent with evaluation population")

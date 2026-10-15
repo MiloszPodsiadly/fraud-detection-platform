@@ -147,10 +147,10 @@ function isValidEvaluation(evidence, summary, subject, cardGeneratedAt) {
       || !["CLAIM_ONLY", "VERIFIED_AGAINST_SOURCE_BYTES"].includes(evidence.sourceDatasetVerificationLevel)) {
     return false;
   }
-  return isValidSummary(summary, subject, evidence.reportGeneratedAt, cardGeneratedAt);
+  return isValidModelEvaluationSummary(summary, subject, evidence.reportGeneratedAt, cardGeneratedAt);
 }
 
-function isValidSummary(summary, subject, reportGeneratedAt, cardGeneratedAt) {
+export function isValidModelEvaluationSummary(summary, subject, reportGeneratedAt, cardGeneratedAt) {
   const population = summary?.population;
   const classBalance = summary?.classBalance;
   const sourceDataset = summary?.sourceDataset;
@@ -328,10 +328,15 @@ function isValidSupportedMetrics(metrics, recordsEvaluated, classBalance) {
       recordsEvaluated,
       classBalance.positiveClassCount
     )
-    && isValidDisagreement(metrics.rulesVsMlDisagreement, recordsEvaluated);
+    && isValidDisagreement(
+      metrics.rulesVsMlDisagreement,
+      recordsEvaluated,
+      classBalance.positiveClassCount
+    );
 }
 
-function isValidDisagreement(disagreement, recordsEvaluated) {
+function isValidDisagreement(disagreement, recordsEvaluated, positiveClassCount) {
+  const categoryFields = ["ML_HIGH_RULES_LOW", "RULES_HIGH_ML_LOW", "BOTH_HIGH", "BOTH_LOW"];
   return isPlainObject(disagreement)
     && hasExactKeys(disagreement, [
       "available",
@@ -340,17 +345,38 @@ function isValidDisagreement(disagreement, recordsEvaluated) {
       "recordsWithExactMlEvidence",
       "recordsCompared",
       "recordsExcludedRulesEvidenceUnavailable",
-      "categoryCounts"
+      "categoryCounts",
+      "disagreementRate",
+      "analystLabeledFraudByCategory",
+      "analystLabeledFraudRecordsCompared",
+      "analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable"
     ])
     && disagreement.classificationPolicy === RISK_CLASSIFICATION_POLICY
     && disagreement.recordsWithExactMlEvidence === recordsEvaluated
     && isCount(disagreement.recordsCompared)
     && isCount(disagreement.recordsExcludedRulesEvidenceUnavailable)
     && isPlainObject(disagreement.categoryCounts)
-    && hasExactKeys(disagreement.categoryCounts, ["ML_HIGH_RULES_LOW", "RULES_HIGH_ML_LOW", "BOTH_HIGH", "BOTH_LOW"])
+    && hasExactKeys(disagreement.categoryCounts, categoryFields)
     && Object.values(disagreement.categoryCounts).every((count) => isCount(count))
     && disagreement.recordsCompared + disagreement.recordsExcludedRulesEvidenceUnavailable === recordsEvaluated
     && Object.values(disagreement.categoryCounts).reduce((total, count) => total + count, 0) === disagreement.recordsCompared
+    && isExpectedMetric(
+      disagreement.disagreementRate,
+      disagreement.categoryCounts.ML_HIGH_RULES_LOW + disagreement.categoryCounts.RULES_HIGH_ML_LOW,
+      disagreement.recordsCompared,
+      "RULES_SIGNAL_UNAVAILABLE"
+    )
+    && isPlainObject(disagreement.analystLabeledFraudByCategory)
+    && hasExactKeys(disagreement.analystLabeledFraudByCategory, categoryFields)
+    && Object.values(disagreement.analystLabeledFraudByCategory).every((count) => isCount(count))
+    && categoryFields.every((field) => disagreement.analystLabeledFraudByCategory[field]
+      <= disagreement.categoryCounts[field])
+    && isCount(disagreement.analystLabeledFraudRecordsCompared)
+    && isCount(disagreement.analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable)
+    && Object.values(disagreement.analystLabeledFraudByCategory)
+      .reduce((total, count) => total + count, 0) === disagreement.analystLabeledFraudRecordsCompared
+    && disagreement.analystLabeledFraudRecordsCompared
+      + disagreement.analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable === positiveClassCount
     && isExpectedAvailability(disagreement, disagreement.recordsCompared > 0, "RULES_SIGNAL_UNAVAILABLE");
 }
 

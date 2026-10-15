@@ -1667,7 +1667,14 @@ components:
         cohortEligibility: { type: object, description: Bounded binary analyst-feedback cohort requiring exact ML prediction evidence. }
         sourceEvaluation: { type: object, description: Manifest identity and source verification level for the canonical model-specific evaluation. }
         evaluationSummary: { type: object, description: Complete canonical ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1 summary. }
-        coverage: { type: object, description: Explicit COMPLETE, PARTIAL_COVERAGE, or NO_DATA state. }
+        coverage:
+          type: object
+          additionalProperties: false
+          required: [returnedCohortStatus, sourcePopulationStatus]
+          description: Separates bounded returned-cohort completeness from source-population truncation; neither field establishes global source completeness.
+          properties:
+            returnedCohortStatus: { type: string, enum: [COMPLETE, PARTIAL_COVERAGE, NO_DATA] }
+            sourcePopulationStatus: { type: string, enum: [BOUNDED_SOURCE_NOT_TRUNCATED, BOUNDED_SOURCE_TRUNCATED] }
         operationalDiagnostics: { type: object, description: Exact-artifact operational diagnostics; unavailable fields carry explicit evidence-unavailable reasons. }
         governance: { type: object, description: Diagnostic-only boundary with every authority set to NONE. }
     ModelCardResponse:

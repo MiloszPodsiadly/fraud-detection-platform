@@ -1,15 +1,22 @@
 package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
+import com.frauddetection.alert.governance.GovernanceTimestampContract;
+import com.frauddetection.alert.governance.modelcard.ModelCardValidationException;
+import com.frauddetection.alert.governance.modelcard.ModelCardValidator;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import java.util.Set;
 
 @Component
 public class ExactModelShadowPerformanceValidator {
+
+    private final ModelCardValidator modelEvaluationValidator;
+
+    public ExactModelShadowPerformanceValidator(ModelCardValidator modelEvaluationValidator) {
+        this.modelEvaluationValidator = Objects.requireNonNull(modelEvaluationValidator);
+    }
 
     private static final Set<String> ROOT_FIELDS = Set.of(
             "schemaVersion", "reportType", "generatedAt", "populationType", "cohortEligibility",
@@ -34,7 +41,7 @@ public class ExactModelShadowPerformanceValidator {
             "policy", "eligibleLabels", "requiresExactMlPredictionEvidence", "maximumRecords",
             "metricBasis", "timeBasis"
     );
-    private static final Set<String> COVERAGE_FIELDS = Set.of("status", "sourceTruncated", "sourceInvalid");
+    private static final Set<String> COVERAGE_FIELDS = Set.of("returnedCohortStatus", "sourcePopulationStatus");
     private static final Set<String> LATENCY_FIELDS = Set.of(
             "available", "valueMilliseconds", "sampleSize", "timeBasis", "reason");
     private static final Set<String> RATE_FIELDS = Set.of(
@@ -62,7 +69,9 @@ public class ExactModelShadowPerformanceValidator {
                 "evaluation metricBasis unsupported");
         String evaluationGeneratedAt = text(evaluation, "generatedAt");
         timestamp(evaluationGeneratedAt, "evaluationSummary.generatedAt");
-        require(!Instant.parse(text(summary, "generatedAt")).isBefore(Instant.parse(evaluationGeneratedAt)),
+        require(!GovernanceTimestampContract.parse(text(summary, "generatedAt"), "generatedAt")
+                        .isBefore(GovernanceTimestampContract.parse(
+                                evaluationGeneratedAt, "evaluationSummary.generatedAt")),
                 "generatedAt must not precede evaluationSummary.generatedAt");
         JsonNode subject = object(evaluation, "evaluationSubject");
         exactFields(subject, SUBJECT_FIELDS, "evaluationSubject");
@@ -98,24 +107,47 @@ public class ExactModelShadowPerformanceValidator {
         require("NOT_CLAIMED".equals(text(source, "immutableStorageGuarantee")),
                 "immutable storage guarantee unsupported");
         require(text(source, "manifestSha256").matches("^[0-9a-f]{64}$"), "manifestSha256 invalid");
+        try {
+            modelEvaluationValidator.validateEvaluationSummary(
+                    evaluation,
+                    new ModelCardValidator.ExpectedSubject(
+                            "ML_MODEL",
+                            selector.modelName(),
+                            selector.modelVersion(),
+                            selector.featureContractVersion(),
+                            selector.modelArtifactSha256(),
+                            "COMPLETE"
+                    ),
+                    text(source, "reportGeneratedAt"),
+                    text(summary, "generatedAt")
+            );
+        } catch (ModelCardValidationException exception) {
+            throw new ExactModelShadowPerformanceValidationException(
+                    "evaluationSummary invalid: " + exception.getMessage());
+        }
 
         JsonNode coverage = object(summary, "coverage");
         exactFields(coverage, COVERAGE_FIELDS, "coverage");
-        require(Set.of("COMPLETE", "PARTIAL_COVERAGE", "NO_DATA").contains(text(coverage, "status")),
-                "coverage status unsupported");
-        require(coverage.get("sourceTruncated").isBoolean(), "sourceTruncated must be boolean");
-        require(coverage.get("sourceInvalid").isBoolean() && !coverage.get("sourceInvalid").booleanValue(),
-                "sourceInvalid must be false");
+        require(Set.of("COMPLETE", "PARTIAL_COVERAGE", "NO_DATA")
+                        .contains(text(coverage, "returnedCohortStatus")),
+                "returned cohort status unsupported");
+        require(Set.of("BOUNDED_SOURCE_NOT_TRUNCATED", "BOUNDED_SOURCE_TRUNCATED")
+                        .contains(text(coverage, "sourcePopulationStatus")),
+                "source population status unsupported");
         JsonNode population = object(evaluation, "population");
         int considered = nonNegativeInt(population, "recordsConsidered");
         int evaluated = nonNegativeInt(population, "recordsEvaluated");
         String expectedCoverage = evaluated == 0 ? "NO_DATA"
                 : evaluated < considered ? "PARTIAL_COVERAGE" : "COMPLETE";
-        require(expectedCoverage.equals(text(coverage, "status")), "coverage status inconsistent");
+        require(expectedCoverage.equals(text(coverage, "returnedCohortStatus")),
+                "returned cohort status inconsistent");
         JsonNode sourceDataset = object(evaluation, "sourceDataset");
-        require(sourceDataset.get("truncated") != null && sourceDataset.get("truncated").isBoolean()
-                && sourceDataset.get("truncated").booleanValue() == coverage.get("sourceTruncated").booleanValue(),
-                "sourceTruncated inconsistent");
+        require(sourceDataset.get("truncated") != null && sourceDataset.get("truncated").isBoolean(),
+                "source dataset truncated flag invalid");
+        String expectedSourceStatus = sourceDataset.get("truncated").booleanValue()
+                ? "BOUNDED_SOURCE_TRUNCATED" : "BOUNDED_SOURCE_NOT_TRUNCATED";
+        require(expectedSourceStatus.equals(text(coverage, "sourcePopulationStatus")),
+                "source population status inconsistent");
 
         JsonNode governance = object(summary, "governance");
         exactFields(governance, GOVERNANCE_FIELDS, "governance");
@@ -156,9 +188,21 @@ public class ExactModelShadowPerformanceValidator {
         exactFields(fallback, RATE_FIELDS, "fallbackRate");
         exactFields(reasonCodes, DISTRIBUTION_FIELDS, "mlReasonCodeDistribution");
         unavailable(latency, "EXACT_ARTIFACT_LATENCY_EVIDENCE_UNAVAILABLE");
+        requireNull(latency, "valueMilliseconds", "mlLatencyP95.valueMilliseconds");
+        requireNull(latency, "sampleSize", "mlLatencyP95.sampleSize");
+        requireNull(latency, "timeBasis", "mlLatencyP95.timeBasis");
         unavailable(fallback, "EXACT_ARTIFACT_FALLBACK_EVIDENCE_UNAVAILABLE");
+        requireNull(fallback, "value", "fallbackRate.value");
+        requireNull(fallback, "numerator", "fallbackRate.numerator");
+        requireNull(fallback, "denominator", "fallbackRate.denominator");
+        requireNull(fallback, "timeBasis", "fallbackRate.timeBasis");
         unavailable(reasonCodes,
                 "EXACT_ARTIFACT_REASON_CODE_EVIDENCE_UNAVAILABLE");
+        JsonNode counts = reasonCodes.get("counts");
+        require(counts != null && counts.isObject() && counts.size() == 0,
+                "mlReasonCodeDistribution.counts must be empty");
+        requireNull(reasonCodes, "recordsEvaluated", "mlReasonCodeDistribution.recordsEvaluated");
+        requireNull(reasonCodes, "timeBasis", "mlReasonCodeDistribution.timeBasis");
     }
 
     private int nonNegativeInt(JsonNode value, String field) {
@@ -174,6 +218,10 @@ public class ExactModelShadowPerformanceValidator {
         require(reason.equals(text(metric, "reason")), "operational metric reason unsupported");
     }
 
+    private void requireNull(JsonNode value, String field, String label) {
+        require(value.has(field) && value.get(field).isNull(), label + " must be null");
+    }
+
     private String nullableText(JsonNode value, String field) {
         JsonNode node = value.get(field);
         if (node == null || node.isNull()) {
@@ -186,9 +234,9 @@ public class ExactModelShadowPerformanceValidator {
 
     private void timestamp(String value, String field) {
         try {
-            require(Instant.parse(value).toString().equals(value), field + " must be canonical RFC3339 UTC");
-        } catch (DateTimeParseException exception) {
-            throw new ExactModelShadowPerformanceValidationException(field + " must be RFC3339");
+            GovernanceTimestampContract.parse(value, field);
+        } catch (IllegalArgumentException exception) {
+            throw new ExactModelShadowPerformanceValidationException(exception.getMessage());
         }
     }
 

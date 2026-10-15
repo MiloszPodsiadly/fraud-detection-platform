@@ -74,7 +74,7 @@ class ExactModelShadowPerformanceContractTest(unittest.TestCase):
         )
         available_zero = self._summary()
 
-        self.assertEqual("NO_DATA", no_data["coverage"]["status"])
+        self.assertEqual("NO_DATA", no_data["coverage"]["returnedCohortStatus"])
         self.assertFalse(no_data["evaluationSummary"]["supportedMetrics"]["mlPredictionMetrics"]["available"])
         self.assertTrue(available_zero["evaluationSummary"]["supportedMetrics"]["mlPredictionMetrics"]["falsePositiveRate"]["available"])
         self.assertEqual(0.0, available_zero["evaluationSummary"]["supportedMetrics"]["mlPredictionMetrics"]["falsePositiveRate"]["value"])
@@ -89,8 +89,8 @@ class ExactModelShadowPerformanceContractTest(unittest.TestCase):
 
         summary = build_exact_model_shadow_performance(evidence, SHADOW_GENERATED_AT)
 
-        self.assertEqual("PARTIAL_COVERAGE", summary["coverage"]["status"])
-        self.assertTrue(summary["coverage"]["sourceTruncated"])
+        self.assertEqual("PARTIAL_COVERAGE", summary["coverage"]["returnedCohortStatus"])
+        self.assertEqual("BOUNDED_SOURCE_TRUNCATED", summary["coverage"]["sourcePopulationStatus"])
 
     def test_rejects_contract_and_cross_field_drift(self):
         mutations = (
@@ -134,6 +134,17 @@ class ExactModelShadowPerformanceContractTest(unittest.TestCase):
         window["timeBasis"] = "SCORING_EVENT_TIME"
         with self.assertRaises(ExactModelShadowPerformanceValidationError):
             exact_report_selection_key(summary["evaluationSummary"]["evaluationSubject"], window)
+
+    def test_selection_key_preserves_one_through_nine_fractional_digits(self):
+        summary = self._summary()
+        window = copy.deepcopy(summary["evaluationSummary"]["evaluationWindow"])
+        window["fromInclusive"] = "2026-06-01T00:00:00.1Z"
+        window["toInclusive"] = "2026-06-09T23:59:59.123456789Z"
+
+        self.assertEqual(
+            "5d3decdf6d63c681081974f1b451707e9840b0e4de3c302d8134f1cadb028d83",
+            exact_report_selection_key(summary["evaluationSummary"]["evaluationSubject"], window),
+        )
 
     def _summary(self, identity=IDENTITY):
         return build_exact_model_shadow_performance(representative_evidence(identity), SHADOW_GENERATED_AT)

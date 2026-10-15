@@ -1,12 +1,11 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.GovernanceTimestampContract;
 import tools.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.DateTimeException;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -25,9 +24,6 @@ public class ModelCardValidator {
             "ml-model-feedback-dataset-evaluation-artifact-set-v1";
     private static final Pattern SHA256 = Pattern.compile("^[0-9a-f]{64}$");
     private static final Pattern IDENTITY = Pattern.compile("^[A-Za-z0-9._-]+$");
-    private static final Pattern TIMESTAMP = Pattern.compile(
-            "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
-    );
     private static final int MAX_RECORDS = 1_000;
     private static final Set<String> FORBIDDEN_IDENTITY_TERMS = Set.of(
             "accountid", "apikey", "authorization", "bearer", "cardid", "correlationid", "customerid",
@@ -148,7 +144,27 @@ public class ModelCardValidator {
     }
 
     private void validateSummary(ModelCard card, JsonNode evidence) {
-        JsonNode summary = card.evaluationSummary();
+        validateEvaluationSummary(
+                card.evaluationSummary(),
+                new ExpectedSubject(
+                        card.subject().subjectType(),
+                        card.subject().modelName(),
+                        card.subject().modelVersion(),
+                        card.subject().featureContractVersion(),
+                        card.subject().modelArtifactSha256(),
+                        card.subject().identityCompleteness()
+                ),
+                text(evidence, "reportGeneratedAt"),
+                card.generatedAt()
+        );
+    }
+
+    public void validateEvaluationSummary(
+            JsonNode summary,
+            ExpectedSubject expectedSubject,
+            String reportGeneratedAt,
+            String containerGeneratedAt
+    ) {
         require(summary != null && summary.isObject(), "evaluationSummary must be an object");
         exactFields(summary, SUMMARY_FIELDS, "evaluationSummary");
         require(EVALUATION_REPORT_TYPE.equals(text(summary, "reportType")),
@@ -157,11 +173,13 @@ public class ModelCardValidator {
                 "evaluationSummary.metricBasis unsupported");
         String summaryGeneratedAt = text(summary, "generatedAt");
         timestamp(summaryGeneratedAt, "evaluationSummary.generatedAt");
-        require(summaryGeneratedAt.equals(text(evidence, "reportGeneratedAt")),
+        require(summaryGeneratedAt.equals(reportGeneratedAt),
                 "evaluation report timestamp mismatch");
-        require(!Instant.parse(card.generatedAt()).isBefore(Instant.parse(summaryGeneratedAt)),
+        require(!GovernanceTimestampContract.parse(containerGeneratedAt, "generatedAt")
+                        .isBefore(GovernanceTimestampContract.parse(
+                                summaryGeneratedAt, "evaluationSummary.generatedAt")),
                 "model card predates evaluation");
-        validateSummarySubject(summary.get("evaluationSubject"), card.subject());
+        validateSummarySubject(summary.get("evaluationSubject"), expectedSubject);
         validateSourceDataset(summary.get("sourceDataset"));
         validateWindow(summary.get("evaluationWindow"));
         Map<String, Integer> population = validatePopulation(summary.get("population"));
@@ -179,7 +197,7 @@ public class ModelCardValidator {
         validateExpectedWarnings(summary.get("warnings"), summary.get("sourceDataset"), population, balance);
     }
 
-    private void validateSummarySubject(JsonNode subject, ModelCard.Subject expected) {
+    private void validateSummarySubject(JsonNode subject, ExpectedSubject expected) {
         exactFields(subject, SUBJECT_FIELDS, "evaluationSubject");
         require(expected.subjectType().equals(text(subject, "subjectType")), "evaluation subject mismatch");
         require(expected.modelName().equals(text(subject, "modelName")), "evaluation subject mismatch");
@@ -215,7 +233,10 @@ public class ModelCardValidator {
         JsonNode fromInclusive = window.get("fromInclusive");
         JsonNode toInclusive = window.get("toInclusive");
         if (!fromInclusive.isNull() && !toInclusive.isNull()) {
-            require(!Instant.parse(fromInclusive.textValue()).isAfter(Instant.parse(toInclusive.textValue())),
+            require(!GovernanceTimestampContract.parse(
+                            fromInclusive.textValue(), "evaluationWindow.fromInclusive")
+                            .isAfter(GovernanceTimestampContract.parse(
+                                    toInclusive.textValue(), "evaluationWindow.toInclusive")),
                     "evaluationWindow.fromInclusive must not be later than evaluationWindow.toInclusive");
         }
     }
@@ -276,7 +297,11 @@ public class ModelCardValidator {
                 "supportedMetrics.classBalance"
         );
         validatePredictionMetrics(metrics.get("mlPredictionMetrics"), population.get("recordsEvaluated"), balance);
-        validateDisagreement(metrics.get("rulesVsMlDisagreement"), population.get("recordsEvaluated"));
+        validateDisagreement(
+                metrics.get("rulesVsMlDisagreement"),
+                population.get("recordsEvaluated"),
+                balance.get("positiveClassCount")
+        );
     }
 
     private void validatePredictionMetrics(JsonNode metrics, int recordsEvaluated, Map<String, Integer> balance) {
@@ -375,10 +400,12 @@ public class ModelCardValidator {
                 "complete ranking must include all positive records");
     }
 
-    private void validateDisagreement(JsonNode value, int recordsEvaluated) {
+    private void validateDisagreement(JsonNode value, int recordsEvaluated, int positiveClassCount) {
         exactFields(value, Set.of(
                 "available", "reason", "classificationPolicy", "recordsWithExactMlEvidence", "recordsCompared",
-                "recordsExcludedRulesEvidenceUnavailable", "categoryCounts"
+                "recordsExcludedRulesEvidenceUnavailable", "categoryCounts", "disagreementRate",
+                "analystLabeledFraudByCategory", "analystLabeledFraudRecordsCompared",
+                "analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable"
         ), "rulesVsMlDisagreement");
         require("RISK_HIGH_OR_CRITICAL_POSITIVE_V1".equals(text(value, "classificationPolicy")),
                 "disagreement classificationPolicy unsupported");
@@ -391,6 +418,30 @@ public class ModelCardValidator {
         exactFields(categories, fields, "categoryCounts");
         int total = fields.stream().mapToInt(field -> integer(categories, field, MAX_RECORDS)).sum();
         require(total == compared, "categoryCounts do not reconcile");
+        validateExpectedMetric(
+                value.get("disagreementRate"),
+                integer(categories, "ML_HIGH_RULES_LOW", MAX_RECORDS)
+                        + integer(categories, "RULES_HIGH_ML_LOW", MAX_RECORDS),
+                compared,
+                "RULES_SIGNAL_UNAVAILABLE",
+                "rulesVsMlDisagreement.disagreementRate"
+        );
+        JsonNode analystFraud = value.get("analystLabeledFraudByCategory");
+        exactFields(analystFraud, fields, "analystLabeledFraudByCategory");
+        int analystFraudTotal = fields.stream()
+                .mapToInt(field -> integer(analystFraud, field, MAX_RECORDS))
+                .sum();
+        int analystFraudCompared = integer(value, "analystLabeledFraudRecordsCompared", MAX_RECORDS);
+        int analystFraudUnavailable = integer(
+                value, "analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable", MAX_RECORDS);
+        require(analystFraudTotal == analystFraudCompared,
+                "analyst-labeled fraud category counts do not reconcile");
+        require(analystFraudCompared + analystFraudUnavailable == positiveClassCount,
+                "analyst-labeled fraud population does not reconcile");
+        for (String field : fields) {
+            require(integer(analystFraud, field, MAX_RECORDS) <= integer(categories, field, MAX_RECORDS),
+                    "analyst-labeled fraud category exceeds category population");
+        }
         validateAvailabilityFields(value, compared > 0, "RULES_SIGNAL_UNAVAILABLE");
     }
 
@@ -469,6 +520,16 @@ public class ModelCardValidator {
     }
 
     private record RankedPrefix(int actualK, int positiveCount) {
+    }
+
+    public record ExpectedSubject(
+            String subjectType,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String modelArtifactSha256,
+            String identityCompleteness
+    ) {
     }
 
     private void validateUsageBoundary(ModelCard.VerifiedUsageBoundary boundary) {
@@ -581,12 +642,10 @@ public class ModelCardValidator {
     }
 
     private void timestamp(String value, String field) {
-        require(value != null && value.length() <= 128 && TIMESTAMP.matcher(value).matches(),
-                field + " must be a canonical timestamp");
         try {
-            Instant.parse(value);
-        } catch (DateTimeException exception) {
-            throw new ModelCardValidationException(field + " must be a valid timestamp");
+            GovernanceTimestampContract.parse(value, field);
+        } catch (IllegalArgumentException exception) {
+            throw new ModelCardValidationException(exception.getMessage());
         }
     }
 

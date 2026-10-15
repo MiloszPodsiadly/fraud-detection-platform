@@ -16,6 +16,17 @@ class ExactModelShadowPerformanceSelectorTest {
     }
 
     @Test
+    void selectionKeyPreservesCanonicalFractionalTimestampText() {
+        ExactModelShadowPerformanceSelector selector = new ExactModelShadowPerformanceSelector(
+                "python-logistic-fraud-model", "2026-10-15.shadow", "feature-contract-v2", "a".repeat(64),
+                "2026-06-01T00:00:00.1Z", "2026-06-09T23:59:59.123456789Z"
+        );
+
+        assertThat(selector.selectionKey())
+                .isEqualTo("5d3decdf6d63c681081974f1b451707e9840b0e4de3c302d8134f1cadb028d83");
+    }
+
+    @Test
     void exactArtifactShaAndCanonicalWindowAreMandatory() {
         assertThatThrownBy(() -> selector("A".repeat(64))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new ExactModelShadowPerformanceSelector(

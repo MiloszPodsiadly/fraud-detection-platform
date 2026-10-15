@@ -16,9 +16,11 @@ from offline_evaluation.feedback_dataset_evaluation.report_contract import (
 )
 from offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.schema import (
     COHORT_ELIGIBILITY_POLICY,
-    COVERAGE_COMPLETE,
-    COVERAGE_NO_DATA,
-    COVERAGE_PARTIAL,
+    RETURNED_COHORT_COMPLETE,
+    RETURNED_COHORT_NO_DATA,
+    RETURNED_COHORT_PARTIAL,
+    SOURCE_POPULATION_NOT_TRUNCATED,
+    SOURCE_POPULATION_TRUNCATED,
     EXTERNAL_ATTESTATION,
     IMMUTABLE_STORAGE_GUARANTEE,
     POPULATION_TYPE,
@@ -39,11 +41,11 @@ def build_exact_model_shadow_performance(
     records_evaluated = evaluation["population"]["recordsEvaluated"]
     records_considered = evaluation["population"]["recordsConsidered"]
     if records_evaluated == 0:
-        coverage_status = COVERAGE_NO_DATA
+        coverage_status = RETURNED_COHORT_NO_DATA
     elif records_evaluated < records_considered:
-        coverage_status = COVERAGE_PARTIAL
+        coverage_status = RETURNED_COHORT_PARTIAL
     else:
-        coverage_status = COVERAGE_COMPLETE
+        coverage_status = RETURNED_COHORT_COMPLETE
     summary = {
         "schemaVersion": SCHEMA_VERSION,
         "reportType": REPORT_TYPE,
@@ -69,9 +71,12 @@ def build_exact_model_shadow_performance(
         },
         "evaluationSummary": evaluation,
         "coverage": {
-            "status": coverage_status,
-            "sourceTruncated": evaluation["sourceDataset"]["truncated"],
-            "sourceInvalid": False,
+            "returnedCohortStatus": coverage_status,
+            "sourcePopulationStatus": (
+                SOURCE_POPULATION_TRUNCATED
+                if evaluation["sourceDataset"]["truncated"]
+                else SOURCE_POPULATION_NOT_TRUNCATED
+            ),
         },
         "operationalDiagnostics": unavailable_operational_diagnostics(),
         "governance": diagnostic_governance_boundary(),

@@ -1,3 +1,6 @@
+import { isCanonicalUtcTimestamp, isOrderedCanonicalUtcTimestamp } from "./canonicalUtcTimestamp.js";
+import { isValidModelEvaluationSummary } from "./modelCardValidation.js";
+
 const ROOT_FIELDS = [
   "schemaVersion", "reportType", "generatedAt", "populationType", "cohortEligibility",
   "sourceEvaluation", "evaluationSummary", "coverage", "operationalDiagnostics", "governance"
@@ -7,12 +10,15 @@ const SOURCE_FIELDS = [
   "artifactIntegrityVerification", "sourceDatasetVerificationLevel", "externalAttestation",
   "immutableStorageGuarantee"
 ];
-const COVERAGE_FIELDS = ["status", "sourceTruncated", "sourceInvalid"];
+const COVERAGE_FIELDS = ["returnedCohortStatus", "sourcePopulationStatus"];
 const GOVERNANCE_FIELDS = [
   "diagnosticOnly", "runtimeDecisionAuthority", "promotionAuthority", "thresholdChangeAuthority",
   "paymentAuthorizationAuthority", "workflowAuthority"
 ];
 const OPERATIONAL_FIELDS = ["mlLatencyP95", "fallbackRate", "mlReasonCodeDistribution"];
+const LATENCY_FIELDS = ["available", "valueMilliseconds", "sampleSize", "timeBasis", "reason"];
+const RATE_FIELDS = ["available", "value", "numerator", "denominator", "timeBasis", "reason"];
+const DISTRIBUTION_FIELDS = ["available", "counts", "recordsEvaluated", "timeBasis", "reason"];
 
 export function isValidExactModelShadowPerformance(value) {
   if (!exactObject(value, ROOT_FIELDS)
@@ -29,6 +35,12 @@ export function isValidExactModelShadowPerformance(value) {
   const diagnostics = value.operationalDiagnostics;
   return evaluation?.reportType === "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1"
     && evaluation.metricBasis === "BOUNDED_ANALYST_FEEDBACK_BY_EXACT_ML_MODEL_ARTIFACT"
+    && isValidModelEvaluationSummary(
+      evaluation,
+      evaluation?.evaluationSubject,
+      value.sourceEvaluation?.reportGeneratedAt,
+      value.generatedAt
+    )
     && subject?.subjectType === "ML_MODEL"
     && subject.identityCompleteness === "COMPLETE"
     && identityPart(subject.modelName, 64)
@@ -38,16 +50,22 @@ export function isValidExactModelShadowPerformance(value) {
     && window?.timeBasis === "FEEDBACK_CREATED_AT"
     && optionalTimestamp(window.fromInclusive)
     && optionalTimestamp(window.toInclusive)
+    && (window.fromInclusive === null || window.toInclusive === null
+      || isOrderedCanonicalUtcTimestamp(window.fromInclusive, window.toInclusive))
     && exactObject(value.sourceEvaluation, SOURCE_FIELDS)
     && value.sourceEvaluation.reportType === "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1"
     && value.sourceEvaluation.artifactSetVersion === "ml-model-feedback-dataset-evaluation-artifact-set-v1"
     && value.sourceEvaluation?.reportGeneratedAt === evaluation.generatedAt
+    && /^[0-9a-f]{64}$/.test(value.sourceEvaluation.manifestSha256 || "")
+    && value.sourceEvaluation.artifactIntegrityVerification === "VERIFIED_REPORT_AND_MANIFEST"
     && ["CLAIM_ONLY", "VERIFIED_AGAINST_SOURCE_BYTES"].includes(
       value.sourceEvaluation?.sourceDatasetVerificationLevel
     )
+    && value.sourceEvaluation.externalAttestation === "NOT_PROVIDED"
+    && value.sourceEvaluation.immutableStorageGuarantee === "NOT_CLAIMED"
     && exactObject(value.coverage, COVERAGE_FIELDS)
-    && ["COMPLETE", "PARTIAL_COVERAGE", "NO_DATA"].includes(value.coverage.status)
-    && value.coverage?.sourceInvalid === false
+    && expectedReturnedCohortStatus(evaluation?.population) === value.coverage.returnedCohortStatus
+    && expectedSourcePopulationStatus(evaluation?.sourceDataset) === value.coverage.sourcePopulationStatus
     && exactObject(governance, GOVERNANCE_FIELDS)
     && governance?.diagnosticOnly === true
     && [
@@ -58,13 +76,49 @@ export function isValidExactModelShadowPerformance(value) {
       governance.workflowAuthority
     ].every((authority) => authority === "NONE")
     && exactObject(diagnostics, OPERATIONAL_FIELDS)
-    && unavailable(diagnostics.mlLatencyP95, "EXACT_ARTIFACT_LATENCY_EVIDENCE_UNAVAILABLE")
-    && unavailable(diagnostics?.fallbackRate, "EXACT_ARTIFACT_FALLBACK_EVIDENCE_UNAVAILABLE")
-    && unavailable(diagnostics?.mlReasonCodeDistribution, "EXACT_ARTIFACT_REASON_CODE_EVIDENCE_UNAVAILABLE");
+    && unavailableLatency(diagnostics.mlLatencyP95)
+    && unavailableRate(diagnostics.fallbackRate)
+    && unavailableDistribution(diagnostics.mlReasonCodeDistribution);
 }
 
-function unavailable(metric, reason) {
-  return metric?.available === false && metric.reason === reason;
+function unavailable(metric, fields, reason) {
+  return exactObject(metric, fields)
+    && metric.available === false
+    && metric.reason === reason;
+}
+
+function unavailableLatency(metric) {
+  return unavailable(metric, LATENCY_FIELDS, "EXACT_ARTIFACT_LATENCY_EVIDENCE_UNAVAILABLE")
+    && metric.valueMilliseconds === null
+    && metric.sampleSize === null
+    && metric.timeBasis === null;
+}
+
+function unavailableRate(metric) {
+  return unavailable(metric, RATE_FIELDS, "EXACT_ARTIFACT_FALLBACK_EVIDENCE_UNAVAILABLE")
+    && metric.value === null
+    && metric.numerator === null
+    && metric.denominator === null
+    && metric.timeBasis === null;
+}
+
+function unavailableDistribution(metric) {
+  return unavailable(metric, DISTRIBUTION_FIELDS, "EXACT_ARTIFACT_REASON_CODE_EVIDENCE_UNAVAILABLE")
+    && exactObject(metric.counts, [])
+    && metric.recordsEvaluated === null
+    && metric.timeBasis === null;
+}
+
+function expectedReturnedCohortStatus(population) {
+  if (!population) return null;
+  if (population.recordsEvaluated === 0) return "NO_DATA";
+  return population.recordsEvaluated < population.recordsConsidered ? "PARTIAL_COVERAGE" : "COMPLETE";
+}
+
+function expectedSourcePopulationStatus(sourceDataset) {
+  if (sourceDataset?.truncated === true) return "BOUNDED_SOURCE_TRUNCATED";
+  if (sourceDataset?.truncated === false) return "BOUNDED_SOURCE_NOT_TRUNCATED";
+  return null;
 }
 
 function exactObject(value, fields) {
@@ -85,5 +139,5 @@ function optionalTimestamp(value) {
 }
 
 function validTimestamp(value) {
-  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+  return isCanonicalUtcTimestamp(value);
 }

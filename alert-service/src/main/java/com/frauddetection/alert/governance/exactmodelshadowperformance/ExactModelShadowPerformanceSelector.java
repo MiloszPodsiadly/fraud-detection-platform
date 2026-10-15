@@ -1,10 +1,10 @@
 package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
+import com.frauddetection.alert.governance.GovernanceTimestampContract;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.HexFormat;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -38,7 +38,8 @@ public record ExactModelShadowPerformanceSelector(
         fromInclusive = timestamp(fromInclusive, "fromInclusive");
         toInclusive = timestamp(toInclusive, "toInclusive");
         if (fromInclusive != null && toInclusive != null
-                && Instant.parse(fromInclusive).isAfter(Instant.parse(toInclusive))) {
+                && GovernanceTimestampContract.parse(fromInclusive, "fromInclusive")
+                .isAfter(GovernanceTimestampContract.parse(toInclusive, "toInclusive"))) {
             throw new IllegalArgumentException("fromInclusive must not be after toInclusive");
         }
     }
@@ -71,15 +72,8 @@ public record ExactModelShadowPerformanceSelector(
         if (value == null || value.isBlank()) {
             return null;
         }
-        try {
-            Instant instant = Instant.parse(value);
-            if (!instant.toString().equals(value)) {
-                throw new IllegalArgumentException(field + " must be canonical RFC3339 UTC");
-            }
-            return value;
-        } catch (DateTimeParseException exception) {
-            throw new IllegalArgumentException(field + " must be canonical RFC3339 UTC", exception);
-        }
+        GovernanceTimestampContract.parse(value, field);
+        return value;
     }
 
     private static String nullToEmpty(String value) {

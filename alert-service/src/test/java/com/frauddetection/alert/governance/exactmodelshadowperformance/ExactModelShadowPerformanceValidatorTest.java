@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
 import org.junit.jupiter.api.Test;
+import com.frauddetection.alert.governance.modelcard.ModelCardValidator;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -12,7 +13,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ExactModelShadowPerformanceValidatorTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ExactModelShadowPerformanceValidator validator = new ExactModelShadowPerformanceValidator();
+    private final ExactModelShadowPerformanceValidator validator =
+            new ExactModelShadowPerformanceValidator(new ModelCardValidator());
 
     @Test
     void acceptsCanonicalPythonGeneratedContract() throws Exception {
@@ -27,8 +29,13 @@ class ExactModelShadowPerformanceValidatorTest {
                 .isInstanceOf(ExactModelShadowPerformanceValidationException.class);
 
         ObjectNode coverage = summary();
-        ((ObjectNode) coverage.get("coverage")).put("status", "NO_DATA");
+        ((ObjectNode) coverage.get("coverage")).put("returnedCohortStatus", "NO_DATA");
         assertThatThrownBy(() -> validator.validate(coverage, selector()))
+                .isInstanceOf(ExactModelShadowPerformanceValidationException.class);
+
+        ObjectNode unavailableValue = summary();
+        ((ObjectNode) unavailableValue.at("/operationalDiagnostics/fallbackRate")).put("value", 0.0);
+        assertThatThrownBy(() -> validator.validate(unavailableValue, selector()))
                 .isInstanceOf(ExactModelShadowPerformanceValidationException.class);
     }
 

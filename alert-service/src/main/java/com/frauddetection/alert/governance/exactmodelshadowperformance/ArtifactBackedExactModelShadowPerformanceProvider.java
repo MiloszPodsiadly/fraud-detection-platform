@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReadException;
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
+import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.JsonNode;
@@ -78,9 +79,14 @@ final class ArtifactBackedExactModelShadowPerformanceProvider implements ExactMo
             artifactReader.requireExactDirectoryEntries(directory, ENTRIES);
             byte[] firstManifest = artifactReader.read(manifestPath, MAX_MANIFEST_SIZE_BYTES);
             byte[] firstSummary = artifactReader.read(summaryPath, properties.maxSummarySizeBytes());
+            JsonNode manifest = tree(firstManifest);
             JsonNode summary = tree(firstSummary);
             validator.validate(summary, selector);
-            validateManifest(tree(firstManifest), firstSummary, summary, selectionKey);
+            validateManifest(manifest, firstSummary, summary, selectionKey);
+            require(Arrays.equals(firstSummary, GovernanceCanonicalJson.serialize(objectMapper, summary)),
+                    "summary JSON is not canonical");
+            require(Arrays.equals(firstManifest, GovernanceCanonicalJson.serialize(objectMapper, manifest)),
+                    "manifest JSON is not canonical");
             byte[] secondManifest = artifactReader.read(manifestPath, MAX_MANIFEST_SIZE_BYTES);
             byte[] secondSummary = artifactReader.read(summaryPath, properties.maxSummarySizeBytes());
             artifactReader.requireExactDirectoryEntries(directory, ENTRIES);

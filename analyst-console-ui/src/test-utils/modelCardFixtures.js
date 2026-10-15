@@ -129,7 +129,16 @@ function evaluationSummary(subject) {
         recordsWithExactMlEvidence: 2,
         recordsCompared: 2,
         recordsExcludedRulesEvidenceUnavailable: 0,
-        categoryCounts: { ML_HIGH_RULES_LOW: 0, RULES_HIGH_ML_LOW: 0, BOTH_HIGH: 1, BOTH_LOW: 1 }
+        categoryCounts: { ML_HIGH_RULES_LOW: 0, RULES_HIGH_ML_LOW: 0, BOTH_HIGH: 1, BOTH_LOW: 1 },
+        disagreementRate: metric(0),
+        analystLabeledFraudByCategory: {
+          ML_HIGH_RULES_LOW: 0,
+          RULES_HIGH_ML_LOW: 0,
+          BOTH_HIGH: 1,
+          BOTH_LOW: 0
+        },
+        analystLabeledFraudRecordsCompared: 1,
+        analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable: 0
       }
     },
     limitations: [

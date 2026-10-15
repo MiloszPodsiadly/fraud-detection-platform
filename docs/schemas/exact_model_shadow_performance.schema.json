@@ -51,16 +51,15 @@
     },
     "evaluationSummary": {
       "type": "object",
-      "description": "The complete model-specific evaluation summary, validated by the canonical evaluator contract."
+      "description": "The complete model-specific evaluation summary. Every producer and consumer must apply the authoritative recursive model-evaluation validator, including exact nested field sets and cross-field arithmetic; accepting this outer schema alone is insufficient."
     },
     "coverage": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "sourceTruncated", "sourceInvalid"],
+      "required": ["returnedCohortStatus", "sourcePopulationStatus"],
       "properties": {
-        "status": { "enum": ["COMPLETE", "PARTIAL_COVERAGE", "NO_DATA"] },
-        "sourceTruncated": { "type": "boolean" },
-        "sourceInvalid": { "const": false }
+        "returnedCohortStatus": { "enum": ["COMPLETE", "PARTIAL_COVERAGE", "NO_DATA"] },
+        "sourcePopulationStatus": { "enum": ["BOUNDED_SOURCE_NOT_TRUNCATED", "BOUNDED_SOURCE_TRUNCATED"] }
       }
     },
     "operationalDiagnostics": {
