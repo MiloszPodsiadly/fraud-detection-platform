@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fraud-detection-platform.local/schemas/exact_model_shadow_performance.schema.json",
+  "title": "Exact Model Shadow Performance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reportType",
+    "generatedAt",
+    "populationType",
+    "cohortEligibility",
+    "sourceEvaluation",
+    "evaluationSummary",
+    "coverage",
+    "operationalDiagnostics",
+    "governance"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "exact-model-shadow-performance-v1" },
+    "reportType": { "const": "EXACT_MODEL_SHADOW_PERFORMANCE_V1" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "populationType": { "const": "LABELED_FEEDBACK" },
+    "cohortEligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "eligibleLabels", "requiresExactMlPredictionEvidence", "maximumRecords", "metricBasis", "timeBasis"],
+      "properties": {
+        "policy": { "const": "BINARY_ANALYST_FEEDBACK_WITH_EXACT_ML_PREDICTION" },
+        "eligibleLabels": { "const": ["CONFIRMED_FRAUD", "CONFIRMED_LEGITIMATE"] },
+        "requiresExactMlPredictionEvidence": { "const": true },
+        "maximumRecords": { "const": 1000 },
+        "metricBasis": { "const": "BOUNDED_ANALYST_FEEDBACK_BY_EXACT_ML_MODEL_ARTIFACT" },
+        "timeBasis": { "const": "FEEDBACK_CREATED_AT" }
+      }
+    },
+    "sourceEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reportType", "artifactSetVersion", "reportGeneratedAt", "manifestSha256", "artifactIntegrityVerification", "sourceDatasetVerificationLevel", "externalAttestation", "immutableStorageGuarantee"],
+      "properties": {
+        "reportType": { "const": "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1" },
+        "artifactSetVersion": { "const": "ml-model-feedback-dataset-evaluation-artifact-set-v1" },
+        "reportGeneratedAt": { "type": "string", "format": "date-time" },
+        "manifestSha256": { "$ref": "#/$defs/sha256" },
+        "artifactIntegrityVerification": { "const": "VERIFIED_REPORT_AND_MANIFEST" },
+        "sourceDatasetVerificationLevel": { "enum": ["CLAIM_ONLY", "VERIFIED_AGAINST_SOURCE_BYTES"] },
+        "externalAttestation": { "const": "NOT_PROVIDED" },
+        "immutableStorageGuarantee": { "const": "NOT_CLAIMED" }
+      }
+    },
+    "evaluationSummary": {
+      "type": "object",
+      "description": "The complete model-specific evaluation summary, validated by the canonical evaluator contract."
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "sourceTruncated", "sourceInvalid"],
+      "properties": {
+        "status": { "enum": ["COMPLETE", "PARTIAL_COVERAGE", "NO_DATA"] },
+        "sourceTruncated": { "type": "boolean" },
+        "sourceInvalid": { "const": false }
+      }
+    },
+    "operationalDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mlLatencyP95", "fallbackRate", "mlReasonCodeDistribution"],
+      "properties": {
+        "mlLatencyP95": { "$ref": "#/$defs/unavailableLatency" },
+        "fallbackRate": { "$ref": "#/$defs/unavailableRate" },
+        "mlReasonCodeDistribution": { "$ref": "#/$defs/unavailableDistribution" }
+      }
+    },
+    "governance": { "$ref": "#/$defs/governance" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "unavailableLatency": {
+      "const": { "available": false, "valueMilliseconds": null, "sampleSize": null, "timeBasis": null, "reason": "EXACT_ARTIFACT_LATENCY_EVIDENCE_UNAVAILABLE" }
+    },
+    "unavailableRate": {
+      "const": { "available": false, "value": null, "numerator": null, "denominator": null, "timeBasis": null, "reason": "EXACT_ARTIFACT_FALLBACK_EVIDENCE_UNAVAILABLE" }
+    },
+    "unavailableDistribution": {
+      "const": { "available": false, "counts": {}, "recordsEvaluated": null, "timeBasis": null, "reason": "EXACT_ARTIFACT_REASON_CODE_EVIDENCE_UNAVAILABLE" }
+    },
+    "governance": {
+      "const": {
+        "diagnosticOnly": true,
+        "runtimeDecisionAuthority": "NONE",
+        "promotionAuthority": "NONE",
+        "thresholdChangeAuthority": "NONE",
+        "paymentAuthorizationAuthority": "NONE",
+        "workflowAuthority": "NONE"
+      }
+    }
+  }
+}

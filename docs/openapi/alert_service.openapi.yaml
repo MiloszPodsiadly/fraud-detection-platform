@@ -1602,6 +1602,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+  /api/v1/governance/model-shadow-performance:
+    get:
+      summary: Read Shadow Performance evidence for one exact model artifact
+      description: Returns immutable manifest-verified labeled-feedback evidence for one complete model name, version, feature-contract, artifact-SHA and evaluation-window selector. Requires model-shadow-performance:read. No latest lookup or fallback is performed. The response is diagnostic only and grants no promotion, threshold, payment, workflow, registry, or production decision authority.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - { name: modelName, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$' } }
+        - { name: modelVersion, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$' } }
+        - { name: featureContractVersion, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 96, pattern: '^[A-Za-z0-9._-]+$' } }
+        - { name: modelArtifactSha256, in: query, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+        - { name: fromInclusive, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: toInclusive, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Validated exact-artifact Shadow Performance evidence returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExactModelShadowPerformanceResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     bearerAuth:
@@ -1624,6 +1655,21 @@ components:
         maxLength: 120
         pattern: "^[A-Za-z0-9._:-]+$"
   schemas:
+    ExactModelShadowPerformanceResponse:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, reportType, generatedAt, populationType, cohortEligibility, sourceEvaluation, evaluationSummary, coverage, operationalDiagnostics, governance]
+      properties:
+        schemaVersion: { type: string, enum: [exact-model-shadow-performance-v1] }
+        reportType: { type: string, enum: [EXACT_MODEL_SHADOW_PERFORMANCE_V1] }
+        generatedAt: { type: string, format: date-time }
+        populationType: { type: string, enum: [LABELED_FEEDBACK] }
+        cohortEligibility: { type: object, description: Bounded binary analyst-feedback cohort requiring exact ML prediction evidence. }
+        sourceEvaluation: { type: object, description: Manifest identity and source verification level for the canonical model-specific evaluation. }
+        evaluationSummary: { type: object, description: Complete canonical ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1 summary. }
+        coverage: { type: object, description: Explicit COMPLETE, PARTIAL_COVERAGE, or NO_DATA state. }
+        operationalDiagnostics: { type: object, description: Exact-artifact operational diagnostics; unavailable fields carry explicit evidence-unavailable reasons. }
+        governance: { type: object, description: Diagnostic-only boundary with every authority set to NONE. }
     ModelCardResponse:
       type: object
       additionalProperties: false
