@@ -64,7 +64,7 @@ ROOT_FIELDS = {
 COHORT_FIELDS = {
     "policy",
     "eligibleLabels",
-    "requiresExactMlPredictionEvidence",
+    "requiresExactModelPredictionEvidence",
     "maximumRecords",
     "metricBasis",
     "timeBasis",
@@ -143,7 +143,7 @@ def _validate_cohort(value: Any) -> None:
     expected = {
         "policy": COHORT_ELIGIBILITY_POLICY,
         "eligibleLabels": ["CONFIRMED_FRAUD", "CONFIRMED_LEGITIMATE"],
-        "requiresExactMlPredictionEvidence": True,
+        "requiresExactModelPredictionEvidence": True,
         "maximumRecords": MAX_DATASET_RECORDS,
         "metricBasis": MODEL_EVALUATION_METRIC_BASIS,
         "timeBasis": EVALUATION_TIME_BASIS,

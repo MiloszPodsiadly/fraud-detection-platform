@@ -1,7 +1,9 @@
 package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
+import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import com.frauddetection.alert.governance.modelcard.ModelCardValidator;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
@@ -9,12 +11,14 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,6 +71,12 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
                 summary -> ((ObjectNode) summary.at(
                         "/evaluationSummary/supportedMetrics/rulesVsMlDisagreement/categoryCounts"))
                         .put("BOTH_LOW", 2),
+                summary -> ((ObjectNode) summary.at("/evaluationSummary/evaluationSubject"))
+                        .put("modelArtifactSha256", "b".repeat(64)),
+                summary -> ((ObjectNode) summary.at("/evaluationSummary/evaluationWindow"))
+                        .put("fromInclusive", "2026-06-02T00:00:00Z"),
+                summary -> ((ObjectNode) summary.get("governance"))
+                        .put("runtimeDecisionAuthority", "ML"),
                 summary -> summary.putArray("rawRecords").addObject().put("transactionReference", "forbidden")
         );
         for (int index = 0; index < mutations.size(); index++) {
@@ -80,6 +90,64 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
             assertThatThrownBy(() -> provider.find(selector))
                     .isInstanceOf(ExactModelShadowPerformanceUnavailableException.class);
         }
+    }
+
+    @Test
+    void unexpectedFilesAndRehashedNonCanonicalSummaryFailClosed() throws Exception {
+        ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+        Path destination = root.resolve(selector.selectionKey());
+        copyFixture(destination);
+        Files.writeString(destination.resolve("unexpected.json"), "{}", StandardCharsets.UTF_8);
+
+        assertUnavailable(provider(), selector);
+
+        Files.delete(destination.resolve("unexpected.json"));
+        Path summaryPath = destination.resolve("exact_model_shadow_performance.json");
+        byte[] canonical = Files.readAllBytes(summaryPath);
+        Files.writeString(summaryPath, "  " + new String(canonical, StandardCharsets.UTF_8), StandardCharsets.UTF_8);
+        rewriteManifestDigest(destination);
+
+        assertUnavailable(provider(), selector);
+    }
+
+    @Test
+    void oversizedSummaryAndArtifactChangedBetweenReadsFailClosed() throws Exception {
+        ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+        Path destination = root.resolve(selector.selectionKey());
+        copyFixture(destination);
+
+        assertUnavailable(provider(root, 32L, new GovernanceArtifactReader()), selector);
+
+        AtomicInteger reads = new AtomicInteger();
+        GovernanceArtifactReader changingReader = new GovernanceArtifactReader(path -> {
+            if (reads.incrementAndGet() == 3) {
+                try {
+                    Files.writeString(
+                            destination.resolve("exact_model_shadow_performance.json"),
+                            "changed between reads\n",
+                            StandardCharsets.UTF_8
+                    );
+                } catch (Exception exception) {
+                    throw new IllegalStateException(exception);
+                }
+            }
+        });
+        assertUnavailable(provider(root, 524_288L, changingReader), selector);
+    }
+
+    @Test
+    void symbolicLinkArtifactDirectoryFailsClosed() throws Exception {
+        ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+        Path external = root.resolve("external");
+        copyFixture(external);
+        Path linked = root.resolve(selector.selectionKey());
+        try {
+            Files.createSymbolicLink(linked, external);
+        } catch (UnsupportedOperationException | java.io.IOException | SecurityException exception) {
+            Assumptions.assumeTrue(false, "symbolic links unavailable: " + exception.getMessage());
+        }
+
+        assertUnavailable(provider(), selector);
     }
 
     @Test
@@ -100,12 +168,29 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
     }
 
     private ArtifactBackedExactModelShadowPerformanceProvider provider(Path artifactRoot) {
+        return provider(artifactRoot, 524_288L, new GovernanceArtifactReader());
+    }
+
+    private ArtifactBackedExactModelShadowPerformanceProvider provider(
+            Path artifactRoot,
+            long maxSummarySizeBytes,
+            GovernanceArtifactReader artifactReader
+    ) {
         return new ArtifactBackedExactModelShadowPerformanceProvider(
-                new ExactModelShadowPerformanceProperties(true, artifactRoot.toString(), 524_288L),
+                new ExactModelShadowPerformanceProperties(true, artifactRoot.toString(), maxSummarySizeBytes),
                 new ObjectMapper(),
                 new ExactModelShadowPerformanceValidator(
-                        new ModelCardValidator())
+                        new ModelCardValidator()),
+                artifactReader
         );
+    }
+
+    private void assertUnavailable(
+            ArtifactBackedExactModelShadowPerformanceProvider provider,
+            ExactModelShadowPerformanceSelector selector
+    ) {
+        assertThatThrownBy(() -> provider.find(selector))
+                .isInstanceOf(ExactModelShadowPerformanceUnavailableException.class);
     }
 
     private void rewriteCanonicalArtifact(Path destination, Consumer<ObjectNode> mutation) throws Exception {
@@ -115,7 +200,12 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
         mutation.accept(summary);
         byte[] summaryPayload = GovernanceCanonicalJson.serialize(mapper, summary);
         Files.write(summaryPath, summaryPayload);
+        rewriteManifestDigest(destination);
+    }
 
+    private void rewriteManifestDigest(Path destination) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        byte[] summaryPayload = Files.readAllBytes(destination.resolve("exact_model_shadow_performance.json"));
         Path manifestPath = destination.resolve("manifest.json");
         ObjectNode manifest = (ObjectNode) mapper.readTree(Files.readAllBytes(manifestPath));
         ObjectNode file = (ObjectNode) manifest.at("/files/0");

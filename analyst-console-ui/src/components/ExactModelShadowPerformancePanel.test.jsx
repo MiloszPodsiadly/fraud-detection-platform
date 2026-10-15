@@ -10,8 +10,10 @@ describe("ExactModelShadowPerformancePanel", () => {
 
     expect(screen.getByText("Model Shadow Performance")).toBeInTheDocument();
     expect(screen.getAllByText("50.00%").length).toBeGreaterThan(0);
-    expect(screen.getByText("Confirmed fraud by category")).toBeInTheDocument();
+    expect(screen.getByText("Analyst-labeled fraud by disagreement category")).toBeInTheDocument();
     expect(screen.getByText("Evaluation provenance")).toBeInTheDocument();
+    expect(screen.getByText(/Source dataset bytes were verified upstream/)).toBeInTheDocument();
+    expect(screen.getByText("Immutable storage guarantee")).toBeInTheDocument();
     expect(screen.getByText("Confusion matrix")).toBeInTheDocument();
     expect(screen.getByText("Ranking metrics")).toBeInTheDocument();
     expect(screen.getByText("Governance boundary")).toBeInTheDocument();

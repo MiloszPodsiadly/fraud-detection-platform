@@ -1665,8 +1665,8 @@ components:
         generatedAt: { type: string, format: date-time }
         populationType: { type: string, enum: [LABELED_FEEDBACK] }
         cohortEligibility: { type: object, description: Bounded binary analyst-feedback cohort requiring exact ML prediction evidence. }
-        sourceEvaluation: { type: object, description: Manifest identity and source verification level for the canonical model-specific evaluation. }
-        evaluationSummary: { type: object, description: Complete canonical ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1 summary. }
+        sourceEvaluation: { type: object, description: Published evaluation provenance. Runtime verifies local manifest and artifact bytes; source-byte verification happened upstream at publication and does not imply external attestation or immutable storage. }
+        evaluationSummary: { type: object, description: Complete canonical ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1 summary; consumers must apply the authoritative recursive evaluation validator because this outer OpenAPI shape alone is insufficient. }
         coverage:
           type: object
           additionalProperties: false

@@ -24,11 +24,11 @@
     "cohortEligibility": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["policy", "eligibleLabels", "requiresExactMlPredictionEvidence", "maximumRecords", "metricBasis", "timeBasis"],
+      "required": ["policy", "eligibleLabels", "requiresExactModelPredictionEvidence", "maximumRecords", "metricBasis", "timeBasis"],
       "properties": {
         "policy": { "const": "BINARY_ANALYST_FEEDBACK_WITH_EXACT_ML_PREDICTION" },
         "eligibleLabels": { "const": ["CONFIRMED_FRAUD", "CONFIRMED_LEGITIMATE"] },
-        "requiresExactMlPredictionEvidence": { "const": true },
+        "requiresExactModelPredictionEvidence": { "const": true },
         "maximumRecords": { "const": 1000 },
         "metricBasis": { "const": "BOUNDED_ANALYST_FEEDBACK_BY_EXACT_ML_MODEL_ARTIFACT" },
         "timeBasis": { "const": "FEEDBACK_CREATED_AT" }
@@ -42,9 +42,9 @@
         "reportType": { "const": "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1" },
         "artifactSetVersion": { "const": "ml-model-feedback-dataset-evaluation-artifact-set-v1" },
         "reportGeneratedAt": { "type": "string", "format": "date-time" },
-        "manifestSha256": { "$ref": "#/$defs/sha256" },
-        "artifactIntegrityVerification": { "const": "VERIFIED_REPORT_AND_MANIFEST" },
-        "sourceDatasetVerificationLevel": { "enum": ["CLAIM_ONLY", "VERIFIED_AGAINST_SOURCE_BYTES"] },
+        "manifestSha256": { "$ref": "#/$defs/sha256", "description": "Digest used for local integrity verification; it is not independent authenticity evidence." },
+        "artifactIntegrityVerification": { "const": "VERIFIED_REPORT_AND_MANIFEST", "description": "The runtime verified the published report and manifest bytes." },
+        "sourceDatasetVerificationLevel": { "enum": ["CLAIM_ONLY", "VERIFIED_AGAINST_SOURCE_BYTES"], "description": "Verification performed upstream when the source evaluation was published." },
         "externalAttestation": { "const": "NOT_PROVIDED" },
         "immutableStorageGuarantee": { "const": "NOT_CLAIMED" }
       }

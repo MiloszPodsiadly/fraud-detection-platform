@@ -54,7 +54,7 @@ def build_exact_model_shadow_performance(
         "cohortEligibility": {
             "policy": COHORT_ELIGIBILITY_POLICY,
             "eligibleLabels": ["CONFIRMED_FRAUD", "CONFIRMED_LEGITIMATE"],
-            "requiresExactMlPredictionEvidence": True,
+            "requiresExactModelPredictionEvidence": True,
             "maximumRecords": MAX_DATASET_RECORDS,
             "metricBasis": MODEL_EVALUATION_METRIC_BASIS,
             "timeBasis": EVALUATION_TIME_BASIS,

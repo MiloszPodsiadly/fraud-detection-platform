@@ -38,7 +38,7 @@ public class ExactModelShadowPerformanceValidator {
             "immutableStorageGuarantee"
     );
     private static final Set<String> COHORT_FIELDS = Set.of(
-            "policy", "eligibleLabels", "requiresExactMlPredictionEvidence", "maximumRecords",
+            "policy", "eligibleLabels", "requiresExactModelPredictionEvidence", "maximumRecords",
             "metricBasis", "timeBasis"
     );
     private static final Set<String> COVERAGE_FIELDS = Set.of("returnedCohortStatus", "sourcePopulationStatus");
@@ -165,8 +165,8 @@ public class ExactModelShadowPerformanceValidator {
         exactFields(cohort, COHORT_FIELDS, "cohortEligibility");
         require("BINARY_ANALYST_FEEDBACK_WITH_EXACT_ML_PREDICTION".equals(text(cohort, "policy")),
                 "cohort policy unsupported");
-        require(cohort.get("requiresExactMlPredictionEvidence").isBoolean()
-                && cohort.get("requiresExactMlPredictionEvidence").booleanValue(),
+        require(cohort.get("requiresExactModelPredictionEvidence").isBoolean()
+                && cohort.get("requiresExactModelPredictionEvidence").booleanValue(),
                 "exact ML evidence must be required");
         require(cohort.get("maximumRecords").isInt() && cohort.get("maximumRecords").intValue() == 1000,
                 "maximumRecords unsupported");

@@ -116,6 +116,11 @@ function Summary({ summary }) {
           <p>The returned cohort does not establish completeness of the source population.</p>
         </div>
       )}
+      <p className="sectionCopy">
+        Runtime verification covers the published manifest, canonical artifact bytes, and their local digest.
+        Source dataset bytes were verified upstream when this evaluation was published; the local digest is not
+        independent external attestation or an immutable-storage guarantee.
+      </p>
       <div className="shadowPerformanceGrid">
         <EvidenceSection title="Report identity" rows={[
           ["Schema", summary.schemaVersion],
@@ -139,7 +144,7 @@ function Summary({ summary }) {
         <EvidenceSection title="Cohort eligibility" rows={[
           ["Policy", summary.cohortEligibility.policy],
           ["Eligible labels", summary.cohortEligibility.eligibleLabels.join(", ")],
-          ["Exact ML evidence required", summary.cohortEligibility.requiresExactMlPredictionEvidence ? "YES" : "NO"],
+          ["Exact model prediction evidence required", summary.cohortEligibility.requiresExactModelPredictionEvidence ? "YES" : "NO"],
           ["Maximum records", summary.cohortEligibility.maximumRecords]
         ]} />
         <EvidenceSection title="Evaluation provenance" rows={[
@@ -147,10 +152,10 @@ function Summary({ summary }) {
           ["Artifact set", summary.sourceEvaluation.artifactSetVersion],
           ["Report generated", summary.sourceEvaluation.reportGeneratedAt],
           ["Manifest SHA-256", summary.sourceEvaluation.manifestSha256],
-          ["Artifact integrity", summary.sourceEvaluation.artifactIntegrityVerification],
-          ["Dataset verification", summary.sourceEvaluation.sourceDatasetVerificationLevel],
+          ["Runtime artifact verification", summary.sourceEvaluation.artifactIntegrityVerification],
+          ["Source dataset verification at publication", summary.sourceEvaluation.sourceDatasetVerificationLevel],
           ["External attestation", summary.sourceEvaluation.externalAttestation],
-          ["Immutable storage", summary.sourceEvaluation.immutableStorageGuarantee]
+          ["Immutable storage guarantee", summary.sourceEvaluation.immutableStorageGuarantee]
         ]} />
         <EvidenceSection title="Evaluated population" rows={[
           ["Records considered", population.recordsConsidered],
@@ -207,7 +212,7 @@ function Summary({ summary }) {
           ["Both high", disagreement.categoryCounts.BOTH_HIGH],
           ["Both low", disagreement.categoryCounts.BOTH_LOW]
         ]} />
-        <EvidenceSection title="Confirmed fraud by category" rows={Object.entries(
+        <EvidenceSection title="Analyst-labeled fraud by disagreement category" rows={Object.entries(
           disagreement.analystLabeledFraudByCategory
         )} />
         <EvidenceSection title="Operational diagnostics" rows={[

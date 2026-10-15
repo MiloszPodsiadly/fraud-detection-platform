@@ -34,8 +34,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
+import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(ExactModelShadowPerformanceController.class)
@@ -100,6 +103,30 @@ class ExactModelShadowPerformanceControllerAuthorizationTest {
                         .with(authentication(auth(AnalystAuthority.MODEL_SHADOW_PERFORMANCE_READ))))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(readService);
+    }
+
+    @Test
+    void missingExactArtifactReturnsNotFound() throws Exception {
+        when(readService.find(org.mockito.ArgumentMatchers.any())).thenThrow(
+                new org.springframework.web.server.ResponseStatusException(
+                        NOT_FOUND, "Exact model Shadow Performance artifact not found."));
+
+        mockMvc.perform(request().with(authentication(auth(AnalystAuthority.MODEL_SHADOW_PERFORMANCE_READ))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message")
+                        .value("Exact model Shadow Performance artifact not found."));
+    }
+
+    @Test
+    void unavailableExactArtifactReturnsServiceUnavailable() throws Exception {
+        when(readService.find(org.mockito.ArgumentMatchers.any())).thenThrow(
+                new org.springframework.web.server.ResponseStatusException(
+                        SERVICE_UNAVAILABLE, "Exact model Shadow Performance artifact unavailable."));
+
+        mockMvc.perform(request().with(authentication(auth(AnalystAuthority.MODEL_SHADOW_PERFORMANCE_READ))))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message")
+                        .value("Exact model Shadow Performance artifact unavailable."));
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request() {
