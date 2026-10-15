@@ -4,10 +4,12 @@ set -euo pipefail
 docker version --format 'Docker Engine: {{.Server.Version}}'
 docker compose version
 
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workspace="$(mktemp -d)"
 project="exact-model-bind-$RANDOM-$$"
 compose_file="$workspace/compose.yml"
 artifact_root="$workspace/artifacts"
+resolved_config="$workspace/resolved.json"
 
 cleanup() {
   docker compose --project-name "$project" -f "$compose_file" down --remove-orphans >/dev/null 2>&1 || true
@@ -37,21 +39,42 @@ services:
           create_host_path: false
 YAML
 
-if ARTIFACT_ROOT="$artifact_root" docker compose --project-name "$project" -f "$compose_file" run --rm --no-deps reader; then
-  echo "missing artifact root was accepted" >&2
+MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT="$artifact_root" docker compose \
+  --env-file "$repository_root/deployment/.env.example" \
+  -f "$repository_root/deployment/docker-compose.yml" \
+  -f "$repository_root/deployment/docker-compose.model-shadow-performance-generated.yml" \
+  config --format json >"$resolved_config"
+
+if MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT="$artifact_root" node \
+  "$repository_root/scripts/check-compose-security-config.mjs" \
+  model-shadow-performance --require-existing-source <"$resolved_config"; then
+  echo "missing artifact root passed the startup preflight" >&2
   exit 1
 fi
 if [[ -e "$artifact_root" ]]; then
-  echo "Compose created the missing artifact root" >&2
+  echo "startup preflight created the missing artifact root" >&2
   exit 1
 fi
 
 mkdir "$artifact_root"
 printf 'verified\n' >"$artifact_root/probe"
-ARTIFACT_ROOT="$artifact_root" docker compose --project-name "$project" -f "$compose_file" run --rm --no-deps reader
+MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT="$artifact_root" node \
+  "$repository_root/scripts/check-compose-security-config.mjs" \
+  model-shadow-performance --require-existing-source <"$resolved_config"
+probe_sha256="$(sha256sum "$artifact_root/probe" | awk '{print $1}')"
+ARTIFACT_ROOT="$artifact_root" docker compose --project-name "$project" -f "$compose_file" \
+  up --abort-on-container-exit --exit-code-from reader reader
 
 if [[ -e "$artifact_root/must-not-write" ]]; then
   echo "read-only artifact mount changed the host artifact root" >&2
+  exit 1
+fi
+if [[ "$(sha256sum "$artifact_root/probe" | awk '{print $1}')" != "$probe_sha256" ]]; then
+  echo "read-only artifact mount modified the host probe" >&2
+  exit 1
+fi
+if find "$artifact_root" -mindepth 1 -maxdepth 1 ! -name probe -print -quit | grep -q .; then
+  echo "read-only artifact mount added an unexpected host artifact" >&2
   exit 1
 fi
 

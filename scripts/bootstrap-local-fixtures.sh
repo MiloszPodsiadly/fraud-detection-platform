@@ -1,19 +1,181 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+mode="force"
+if [[ $# -gt 1 ]]; then
+  echo "Usage: $0 [--ensure|--force]" >&2
+  exit 2
+elif [[ "${1:-}" == "--ensure" ]]; then
+  mode="ensure"
+elif [[ $# -gt 0 && "${1:-}" != "--force" ]]; then
+  echo "Usage: $0 [--ensure|--force]" >&2
+  exit 2
+fi
+
 if ! command -v openssl >/dev/null 2>&1; then
   echo "OpenSSL is required to generate local identity fixtures. Install OpenSSL and rerun this command." >&2
   exit 1
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-local_root="$repo_root/deployment/.local"
+local_root="${LOCAL_IDENTITY_FIXTURE_ROOT:-$repo_root/deployment/.local}"
 output_dir="$local_root/service-identity"
+generated_root="${LOCAL_GENERATED_FIXTURE_ROOT:-$repo_root/deployment/local-generated}"
+generated_eval_dir="$generated_root/platform-recommendation-evaluation-card"
+lock_dir="$local_root/bootstrap-local-fixtures.lock"
 
 mkdir -p "$local_root"
+lock_acquired="false"
+for _ in $(seq 1 300); do
+  if mkdir "$lock_dir" 2>/dev/null; then
+    lock_acquired="true"
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$lock_acquired" != "true" ]]; then
+  echo "Timed out waiting for local fixture provisioning lock." >&2
+  exit 1
+fi
+
+staging_dir=""
+cleanup() {
+  if [[ -n "$staging_dir" && -d "$staging_dir" ]]; then
+    rm -rf "$staging_dir"
+  fi
+  rmdir "$lock_dir" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+rsa_modulus_base64url() {
+  local private_key="$1"
+  local hex binary_file encoded
+  binary_file="$(mktemp "$local_root/modulus.XXXXXX")"
+  hex="$(openssl rsa -in "$private_key" -noout -modulus 2>/dev/null)"
+  hex="${hex#Modulus=}"
+  : > "$binary_file"
+  while [[ -n "$hex" ]]; do
+    printf '%b' "\\x${hex:0:2}" >> "$binary_file"
+    hex="${hex:2}"
+  done
+  encoded="$(openssl base64 -A -in "$binary_file" | tr '+/' '-_' | tr -d '=')"
+  rm -f "$binary_file"
+  printf '%s' "$encoded"
+}
+
+canonical_jwks() {
+  local scoring_modulus="$1"
+  local alert_modulus="$2"
+  cat <<EOF
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "alg": "RS256",
+      "kid": "scoring-key-1",
+      "n": "$scoring_modulus",
+      "e": "AQAB"
+    },
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "alg": "RS256",
+      "kid": "alert-key-1",
+      "n": "$alert_modulus",
+      "e": "AQAB"
+    }
+  ]
+}
+EOF
+}
+
+identity_fixtures_valid() {
+  local required=(
+    "$output_dir/jwks.json"
+    "$output_dir/fraud-scoring-service-private.pem"
+    "$output_dir/fraud-scoring-service-public.pem"
+    "$output_dir/alert-service-private.pem"
+    "$output_dir/alert-service-public.pem"
+    "$output_dir/mtls/local-dev-ca.pem"
+    "$output_dir/mtls/local-dev-ca-key.pem"
+    "$output_dir/mtls/ml-inference-service.pem"
+    "$output_dir/mtls/ml-inference-service-key.pem"
+    "$output_dir/mtls/fraud-scoring-service.pem"
+    "$output_dir/mtls/fraud-scoring-service-key.pem"
+    "$output_dir/mtls/alert-service.pem"
+    "$output_dir/mtls/alert-service-key.pem"
+    "$output_dir/mtls/unknown-service.pem"
+    "$output_dir/mtls/unknown-service-key.pem"
+    "$output_dir/mtls/expired-service.pem"
+    "$output_dir/mtls/expired-service-key.pem"
+  )
+  local file
+  for file in "${required[@]}"; do
+    [[ -s "$file" ]] || return 1
+  done
+
+  openssl x509 -checkend 86400 -noout -in "$output_dir/mtls/local-dev-ca.pem" >/dev/null 2>&1 || return 1
+  cmp -s \
+    <(openssl x509 -in "$output_dir/mtls/local-dev-ca.pem" -pubkey -noout 2>/dev/null) \
+    <(openssl pkey -in "$output_dir/mtls/local-dev-ca-key.pem" -pubout 2>/dev/null) || return 1
+  for file in ml-inference-service fraud-scoring-service alert-service unknown-service; do
+    openssl x509 -checkend 86400 -noout -in "$output_dir/mtls/$file.pem" >/dev/null 2>&1 || return 1
+    openssl verify -CAfile "$output_dir/mtls/local-dev-ca.pem" "$output_dir/mtls/$file.pem" >/dev/null 2>&1 || return 1
+    openssl pkey -check -noout -in "$output_dir/mtls/$file-key.pem" >/dev/null 2>&1 || return 1
+    cmp -s \
+      <(openssl x509 -in "$output_dir/mtls/$file.pem" -pubkey -noout 2>/dev/null) \
+      <(openssl pkey -in "$output_dir/mtls/$file-key.pem" -pubout 2>/dev/null) || return 1
+  done
+  openssl x509 -noout -in "$output_dir/mtls/expired-service.pem" >/dev/null 2>&1 || return 1
+  openssl verify -no_check_time -CAfile "$output_dir/mtls/local-dev-ca.pem" \
+    "$output_dir/mtls/expired-service.pem" >/dev/null 2>&1 || return 1
+  openssl pkey -check -noout -in "$output_dir/mtls/expired-service-key.pem" >/dev/null 2>&1 || return 1
+  cmp -s \
+    <(openssl x509 -in "$output_dir/mtls/expired-service.pem" -pubkey -noout 2>/dev/null) \
+    <(openssl pkey -in "$output_dir/mtls/expired-service-key.pem" -pubout 2>/dev/null) || return 1
+  for file in fraud-scoring-service alert-service; do
+    openssl pkey -check -noout -in "$output_dir/$file-private.pem" >/dev/null 2>&1 || return 1
+    cmp -s <(openssl pkey -in "$output_dir/$file-private.pem" -pubout 2>/dev/null) "$output_dir/$file-public.pem" || return 1
+  done
+
+  local scoring_modulus alert_modulus expected_jwks
+  scoring_modulus="$(rsa_modulus_base64url "$output_dir/fraud-scoring-service-private.pem")"
+  alert_modulus="$(rsa_modulus_base64url "$output_dir/alert-service-private.pem")"
+  expected_jwks="$(canonical_jwks "$scoring_modulus" "$alert_modulus")"
+  [[ "$(cat "$output_dir/jwks.json")" == "$expected_jwks" ]] || return 1
+}
+
+evaluation_fixtures_valid() {
+  local required=(
+    "$generated_eval_dir/platform_recommendation_evaluation_card.json"
+    "$generated_eval_dir/platform_recommendation_evaluation_card.md"
+    "$generated_eval_dir/manifest.json"
+  )
+  local file
+  for file in "${required[@]}"; do
+    [[ -s "$file" ]] || return 1
+  done
+
+  local json_sha md_sha
+  json_sha="$(openssl dgst -sha256 "$generated_eval_dir/platform_recommendation_evaluation_card.json" | awk '{print $NF}')"
+  md_sha="$(openssl dgst -sha256 "$generated_eval_dir/platform_recommendation_evaluation_card.md" | awk '{print $NF}')"
+  grep -Fq "\"sha256\": \"$json_sha\"" "$generated_eval_dir/manifest.json" || return 1
+  grep -Fq "\"sha256\": \"$md_sha\"" "$generated_eval_dir/manifest.json" || return 1
+}
+
+identity_valid="false"
+evaluation_valid="false"
+identity_fixtures_valid && identity_valid="true"
+evaluation_fixtures_valid && evaluation_valid="true"
+
+if [[ "$mode" == "ensure" && "$identity_valid" == "true" && "$evaluation_valid" == "true" ]]; then
+  echo "Existing local identity and evaluation fixtures are valid; keeping them unchanged."
+  exit 0
+fi
+
 staging_dir="$(mktemp -d "$local_root/service-identity.tmp.XXXXXX")"
 mtls_dir="$staging_dir/mtls"
-trap 'rm -rf "$staging_dir"' EXIT
 
 umask 077
 mkdir -p "$mtls_dir"
@@ -94,58 +256,35 @@ for service_name in fraud-scoring-service alert-service; do
     -out "$staging_dir/$service_name-public.pem" >/dev/null 2>&1
 done
 
-rsa_modulus_base64url() {
-  local private_key="$1"
-  local hex
-  local binary_file="$staging_dir/modulus.bin"
-  hex="$(openssl rsa -in "$private_key" -noout -modulus 2>/dev/null)"
-  hex="${hex#Modulus=}"
-  : > "$binary_file"
-  while [[ -n "$hex" ]]; do
-    printf '%b' "\\x${hex:0:2}" >> "$binary_file"
-    hex="${hex:2}"
-  done
-  openssl base64 -A -in "$binary_file" | tr '+/' '-_' | tr -d '='
-}
-
 scoring_modulus="$(rsa_modulus_base64url "$staging_dir/fraud-scoring-service-private.pem")"
 alert_modulus="$(rsa_modulus_base64url "$staging_dir/alert-service-private.pem")"
-cat > "$staging_dir/jwks.json" <<EOF
-{
-  "keys": [
-    {
-      "kty": "RSA",
-      "use": "sig",
-      "alg": "RS256",
-      "kid": "scoring-key-1",
-      "n": "$scoring_modulus",
-      "e": "AQAB"
-    },
-    {
-      "kty": "RSA",
-      "use": "sig",
-      "alg": "RS256",
-      "kid": "alert-key-1",
-      "n": "$alert_modulus",
-      "e": "AQAB"
-    }
-  ]
-}
-EOF
+canonical_jwks "$scoring_modulus" "$alert_modulus" > "$staging_dir/jwks.json"
 
 rm -f "$staging_dir"/*.cnf "$staging_dir"/*.csr "$staging_dir/modulus.bin" "$mtls_dir/local-dev-ca.srl"
 chmod 755 "$staging_dir" "$mtls_dir"
 chmod 444 "$staging_dir"/*.pem "$staging_dir/jwks.json" "$mtls_dir"/*.pem
 
-rm -rf "$output_dir"
-mv "$staging_dir" "$output_dir"
-trap - EXIT
+if [[ "$mode" == "ensure" && "$identity_valid" == "true" ]]; then
+  rm -rf "$staging_dir"
+  staging_dir=""
+  echo "Existing local identity fixtures are valid; keeping them unchanged."
+else
+  backup_dir=""
+  if [[ -e "$output_dir" ]]; then
+    backup_dir="$local_root/service-identity.backup.$$"
+    mv "$output_dir" "$backup_dir"
+  fi
+  if ! mv "$staging_dir" "$output_dir"; then
+    [[ -n "$backup_dir" ]] && mv "$backup_dir" "$output_dir"
+    exit 1
+  fi
+  staging_dir=""
+  [[ -n "$backup_dir" ]] && rm -rf "$backup_dir"
+  echo "Generated local-only identity fixtures in deployment/.local/service-identity/."
+  echo "This directory is ignored by Git and excluded from Docker build contexts."
+fi
 
-echo "Generated local-only identity fixtures in deployment/.local/service-identity/."
-echo "This directory is ignored by Git and excluded from Docker build contexts."
-
-generated_eval_dir="$repo_root/deployment/local-generated/platform-recommendation-evaluation-card"
-generated_shadow_dir="$repo_root/deployment/local-generated/shadow-performance"
+generated_shadow_dir="$generated_root/shadow-performance"
 
 fixtures_eval_dir="$repo_root/deployment/local-fixtures/platform-recommendation-evaluation-card"
 fixtures_shadow_dir="$repo_root/deployment/local-fixtures/shadow-performance"

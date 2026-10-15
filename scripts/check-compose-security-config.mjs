@@ -3,6 +3,15 @@ import path from "node:path";
 
 const variant = process.argv[2];
 const requireExistingSource = process.argv.includes("--require-existing-source");
+const sourceFile = optionValue("--source-file");
+const exactModelTarget = "/run/model-shadow-performance";
+const exactModelSource = "${MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT:-./local-generated/model-shadow-performance}";
+const protectedGovernanceRoots = [
+  "/run/model-card",
+  "/run/model-shadow-performance",
+  "/run/promotion-readiness",
+  "/run/shadow-performance"
+];
 const supportedVariants = new Set([
   "base",
   "dev",
@@ -14,20 +23,41 @@ const supportedVariants = new Set([
 ]);
 
 if (!supportedVariants.has(variant)) {
-  console.error("Usage: node scripts/check-compose-security-config.mjs <variant> [--require-existing-source]");
+  console.error(
+    "Usage: node scripts/check-compose-security-config.mjs <variant> "
+      + "[--source-file <compose.yml>] [--require-existing-source]"
+  );
   process.exit(2);
 }
 
-let config;
-try {
-  config = JSON.parse(fs.readFileSync(0, "utf8"));
-} catch (error) {
-  console.error(`Resolved Compose config must be JSON on stdin: ${error.message}`);
+if (variant === "model-shadow-performance-source" && !sourceFile) {
+  console.error("model-shadow-performance-source requires --source-file");
   process.exit(2);
+}
+
+let config = { services: {} };
+if (variant !== "model-shadow-performance-source") {
+  try {
+    config = JSON.parse(fs.readFileSync(0, "utf8"));
+  } catch (error) {
+    console.error(`Resolved Compose config must be JSON on stdin: ${error.message}`);
+    process.exit(2);
+  }
 }
 
 const services = config.services ?? {};
 const failures = [];
+
+function optionValue(name) {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return undefined;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`${name} requires a value`);
+    process.exit(2);
+  }
+  return value;
+}
 
 function fail(message) {
   failures.push(message);
@@ -140,37 +170,172 @@ function assertReadOnlyArtifactMount(serviceName, target) {
   if (!mount || mount.type !== "bind" || !mount.source || !mount.read_only) {
     fail(`${serviceName} must define one sourced read-only bind at ${target}`);
   }
-  assertConfiguredSource(mount);
   return mount;
 }
 
-function assertDeclarativeArtifactMount(serviceName, target) {
-  const mount = assertReadOnlyArtifactMount(serviceName, target);
-  if (mount?.bind?.create_host_path !== false) {
-    fail(`${serviceName} artifact mount ${target} must expose create_host_path:false; resolve with config --no-normalize`);
+function assertDeclarativeArtifactMount(file) {
+  let source;
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    fail(`exact-model Compose overlay cannot be read: ${error.message}`);
+    return;
+  }
+  if (source.includes("\t")) {
+    fail("exact-model Compose overlay must not use tab indentation");
+    return;
+  }
+
+  const lines = source.replaceAll("\r\n", "\n").split("\n");
+  const servicesBlock = mappingBlock(lines, "services", 0, 0, lines.length);
+  const alertServiceBlock = servicesBlock
+    ? mappingBlock(lines, "alert-service", 2, servicesBlock.start, servicesBlock.end)
+    : undefined;
+  const volumesBlock = alertServiceBlock
+    ? mappingBlock(lines, "volumes", 4, alertServiceBlock.start, alertServiceBlock.end)
+    : undefined;
+  if (!servicesBlock || !alertServiceBlock || !volumesBlock) return;
+
+  const mounts = longSyntaxSequence(lines, volumesBlock.start, volumesBlock.end, 6);
+  if (mounts.length !== 1) {
+    fail("alert-service exact-model overlay must declare exactly one long-syntax volume");
+    return;
+  }
+  const mount = mounts[0];
+  expectEqual("exact-model source mount type", mount.type, "bind");
+  expectEqual("exact-model source mount source", mount.source, exactModelSource);
+  expectEqual("exact-model source mount target", mount.target, exactModelTarget);
+  if (mount.read_only !== true) {
+    fail("exact-model source mount must explicitly declare read_only:true");
+  }
+  if (mount.bind?.create_host_path !== false) {
+    fail("exact-model source mount must explicitly declare bind.create_host_path:false");
   }
 }
 
-function assertNoOverlappingWritableMounts(serviceName, protectedTarget) {
-  const governanceTargets = new Set([
-    "/run/model-card",
-    "/run/model-shadow-performance",
-    "/run/promotion-readiness",
-    "/run/shadow-performance"
-  ]);
+function mappingBlock(lines, key, indent, start, end) {
+  const prefix = `${" ".repeat(indent)}${key}:`;
+  const matches = [];
+  for (let index = start; index < end; index += 1) {
+    if (lines[index].trimEnd() === prefix) matches.push(index);
+  }
+  if (matches.length !== 1) {
+    fail(`exact-model Compose overlay must declare exactly one ${key} mapping at indentation ${indent}`);
+    return undefined;
+  }
+  const blockStart = matches[0] + 1;
+  let blockEnd = end;
+  for (let index = blockStart; index < end; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    if (leadingSpaces(line) <= indent) {
+      blockEnd = index;
+      break;
+    }
+  }
+  return { start: blockStart, end: blockEnd };
+}
+
+function longSyntaxSequence(lines, start, end, itemIndent) {
+  const mounts = [];
+  let current;
+  let nestedKey;
+  for (let index = start; index < end; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    const indent = leadingSpaces(line);
+    const content = line.trim();
+    if (indent === itemIndent && content.startsWith("- ")) {
+      current = {};
+      mounts.push(current);
+      nestedKey = undefined;
+      assignYamlField(current, content.slice(2), "volume item");
+    } else if (current && indent === itemIndent + 2) {
+      const [key, value] = yamlField(content, "volume field");
+      if (value === undefined) {
+        assignUnique(current, key, {}, "volume field");
+        nestedKey = key;
+      } else {
+        assignUnique(current, key, value, "volume field");
+        nestedKey = undefined;
+      }
+    } else if (current && nestedKey && indent === itemIndent + 4) {
+      assignYamlField(current[nestedKey], content, `volume ${nestedKey} field`);
+    } else {
+      fail(`unsupported exact-model volume declaration at source line ${index + 1}`);
+    }
+  }
+  return mounts;
+}
+
+function assignYamlField(target, content, label) {
+  const [key, value] = yamlField(content, label);
+  if (value === undefined) {
+    fail(`${label} ${key} must have a scalar value`);
+    return;
+  }
+  assignUnique(target, key, value, label);
+}
+
+function yamlField(content, label) {
+  const separator = content.indexOf(":");
+  if (separator <= 0) {
+    fail(`${label} must use mapping syntax`);
+    return ["<invalid>", undefined];
+  }
+  const key = content.slice(0, separator).trim();
+  const raw = content.slice(separator + 1).trim();
+  if (!/^[a-z_]+$/.test(key)) {
+    fail(`${label} has unsupported key ${key}`);
+  }
+  if (raw === "") return [key, undefined];
+  if (raw === "true") return [key, true];
+  if (raw === "false") return [key, false];
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    return [key, raw.slice(1, -1)];
+  }
+  return [key, raw];
+}
+
+function assignUnique(target, key, value, label) {
+  if (Object.hasOwn(target, key)) {
+    fail(`${label} duplicates ${key}`);
+    return;
+  }
+  target[key] = value;
+}
+
+function leadingSpaces(line) {
+  return line.length - line.trimStart().length;
+}
+
+function assertNoOverlappingWritableMounts(serviceName) {
   for (const volume of service(serviceName).volumes ?? []) {
     if (!volume || typeof volume !== "object") {
       fail(`${serviceName} must use structured volume declarations`);
       continue;
     }
     const target = String(volume.target ?? "");
-    const overlaps = target.length > 0 && (target === protectedTarget
-      || target.startsWith(`${protectedTarget}/`)
-      || protectedTarget.startsWith(`${target}/`));
-    if ((overlaps || governanceTargets.has(target)) && volume.read_only !== true) {
+    if (overlapsProtectedGovernanceRoot(target) && volume.read_only !== true) {
       fail(`${serviceName} mount ${target || "<missing>"} must not expose governance evidence as writable`);
     }
   }
+  for (const declaration of service(serviceName).tmpfs ?? []) {
+    const target = typeof declaration === "string"
+      ? declaration.split(":", 1)[0]
+      : String(declaration?.target ?? "");
+    if (overlapsProtectedGovernanceRoot(target)) {
+      fail(`${serviceName} tmpfs ${target || "<missing>"} must not overlap governance evidence`);
+    }
+  }
+}
+
+function overlapsProtectedGovernanceRoot(target) {
+  if (!target.startsWith("/")) return false;
+  const normalized = path.posix.normalize(target);
+  return normalized === "/" || protectedGovernanceRoots.some((root) => normalized === root
+    || normalized.startsWith(`${root}/`)
+    || root.startsWith(`${normalized}/`));
 }
 
 function assertExactModelReaderDisabled() {
@@ -196,9 +361,9 @@ function assertExactModelReaderResolved() {
   );
   const mount = assertReadOnlyArtifactMount(
     "alert-service",
-    "/run/model-shadow-performance"
+    exactModelTarget
   );
-  assertNoOverlappingWritableMounts("alert-service", "/run/model-shadow-performance");
+  assertNoOverlappingWritableMounts("alert-service");
   if (requireExistingSource) {
     assertPreProvisionedSource(mount);
   }
@@ -211,10 +376,18 @@ function assertPreProvisionedSource(mount) {
     return;
   }
   try {
-    const sourceStat = fs.lstatSync(source);
-    if (sourceStat.isSymbolicLink()) {
-      fail("exact-model shadow host source must not be a symbolic link");
-    } else if (!sourceStat.isDirectory()) {
+    const resolvedSource = path.resolve(source);
+    let candidate = resolvedSource;
+    while (true) {
+      if (fs.lstatSync(candidate).isSymbolicLink()) {
+        fail(`exact-model shadow host source must not traverse a symbolic link: ${candidate}`);
+        return;
+      }
+      const parent = path.dirname(candidate);
+      if (parent === candidate) break;
+      candidate = parent;
+    }
+    if (!fs.lstatSync(resolvedSource).isDirectory()) {
       fail("exact-model shadow host source must be a pre-provisioned directory");
     }
   } catch (error) {
@@ -226,22 +399,9 @@ function assertPreProvisionedSource(mount) {
   }
 }
 
-function assertConfiguredSource(mount) {
-  const source = mount?.source;
-  if (typeof source !== "string" || source.length === 0) {
-    return;
-  }
-  const configured = process.env.MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT
-    ?? "./local-generated/model-shadow-performance";
-  const expected = path.isAbsolute(configured)
-    ? path.normalize(configured)
-    : path.resolve("deployment", configured);
-  const actual = path.isAbsolute(source)
-    ? path.normalize(source)
-    : path.resolve("deployment", source);
-  if (actual !== expected) {
-    fail(`resolved exact-model shadow source ${source} does not match configured source ${expected}`);
-  }
+if (variant === "model-shadow-performance-source") {
+  assertDeclarativeArtifactMount(sourceFile);
+  finish();
 }
 
 assertNoContainerNames();
@@ -296,23 +456,21 @@ if (variant === "security-hardened" || variant === "security-hardened-model-shad
   }
 }
 
-if (variant === "model-shadow-performance-source") {
-  assertDeclarativeArtifactMount(
-    "alert-service",
-    "/run/model-shadow-performance"
-  );
-}
-
 if (variant === "model-shadow-performance" || variant === "security-hardened-model-shadow-performance") {
   assertExactModelReaderResolved();
 }
 
-if (failures.length > 0) {
-  console.error(`Resolved Compose security assertion failed for ${variant}:`);
-  for (const failure of failures) {
-    console.error(`- ${failure}`);
-  }
-  process.exit(1);
-}
+finish();
 
-console.log(`Resolved Compose security assertions passed for ${variant}.`);
+function finish() {
+  if (failures.length > 0) {
+    console.error(`Compose security assertion failed for ${variant}:`);
+    for (const failure of failures) {
+      console.error(`- ${failure}`);
+    }
+    process.exit(1);
+  }
+
+  console.log(`Compose security assertions passed for ${variant}.`);
+  process.exit(0);
+}

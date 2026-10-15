@@ -1,4 +1,6 @@
-SECURITY_HARDENED_BASE_COMPOSE = docker compose --env-file deployment/.env \
+COMPOSE_PROJECT_NAME ?= fraud-detection-platform
+
+SECURITY_HARDENED_BASE_COMPOSE = docker compose --project-name $(COMPOSE_PROJECT_NAME) --env-file deployment/.env \
 	-f deployment/docker-compose.yml \
 	-f deployment/docker-compose.dev.yml \
 	-f deployment/docker-compose.oidc.yml \
@@ -20,14 +22,18 @@ EXACT_MODEL_SHADOW_COMPOSE = $(SECURITY_HARDENED_COMPOSE) \
 
 .PHONY: up up-exact-model-shadow down ps check-compose check-compose-exact-model-shadow \
 	app-up app-up-exact-model-shadow app-down app-clean app-ps check-python local-runtime-fixtures \
+	regenerate-local-runtime-fixtures \
 	exact-model-shadow-preflight shadow-performance-summary promotion-readiness-report \
-	app-up-shadow-performance-generated shadow-performance-local-loop
+	app-up-shadow-performance-generated shadow-performance-local-loop check-local-startup
 
 deployment/.env:
 	cp deployment/.env.example deployment/.env
 
 local-runtime-fixtures:
-	bash scripts/bootstrap-local-fixtures.sh
+	bash scripts/bootstrap-local-fixtures.sh --ensure
+
+regenerate-local-runtime-fixtures:
+	bash scripts/bootstrap-local-fixtures.sh --force
 
 app-up: deployment/.env shadow-performance-summary
 	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
@@ -56,12 +62,16 @@ check-compose: deployment/.env
 	$(SECURITY_HARDENED_COMPOSE) config --format json | node scripts/check-compose-security-config.mjs security-hardened
 
 exact-model-shadow-preflight: deployment/.env
-	$(EXACT_MODEL_SHADOW_COMPOSE) config --no-normalize --format json | node scripts/check-compose-security-config.mjs model-shadow-performance-source
+	node scripts/check-compose-security-config.mjs model-shadow-performance-source \
+		--source-file deployment/docker-compose.model-shadow-performance-generated.yml
 	$(EXACT_MODEL_SHADOW_COMPOSE) config --format json | node scripts/check-compose-security-config.mjs security-hardened-model-shadow-performance --require-existing-source
 
 check-compose-exact-model-shadow: exact-model-shadow-preflight
 	node --test scripts/check-compose-security-config.test.mjs
 	bash scripts/ci/check-compose-bind-mount-security.sh
+
+check-local-startup:
+	node --test scripts/local-startup-contract.test.mjs
 
 app-up-exact-model-shadow: deployment/.env shadow-performance-summary exact-model-shadow-preflight
 	$(EXACT_MODEL_SHADOW_COMPOSE) up --build -d

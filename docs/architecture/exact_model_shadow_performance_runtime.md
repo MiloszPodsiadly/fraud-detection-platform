@@ -51,7 +51,7 @@ mkdir -p deployment/local-generated/model-shadow-performance
 make up-exact-model-shadow
 ```
 
-The exact-model overlay mounts the pre-provisioned artifact root read-only and refuses Docker host-path creation. Set `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT` when the host artifact root differs from `deployment/local-generated/model-shadow-performance`. The publishing process has separate credentials and runs outside `alert-service`; artifact publication is independent from application startup. The Makefile execution environments are Linux, WSL, and Git Bash.
+The exact-model overlay declares the pre-provisioned artifact root as a read-only bind with host-path creation disabled. The launcher also rejects a missing or symlink-traversing source before invoking Docker, preserving fail-closed startup on supported Compose versions. Set `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT` when the host artifact root differs from `deployment/local-generated/model-shadow-performance`. The publishing process has separate credentials and runs outside `alert-service`; artifact publication is independent from application startup. The Makefile execution environments are Linux, WSL, and Git Bash.
 
 Before starting the service, validate the resolved reader boundary:
 
@@ -60,7 +60,7 @@ make check-compose
 make check-compose-exact-model-shadow
 ```
 
-These separate checks require the reader to be explicitly enabled, the canonical container path to be selected, the host artifact root to be bind-mounted read-only, and implicit host-path creation to remain disabled. They also exercise Docker's refusal to create a missing source and its enforcement of the read-only mount. They are not dependencies of `make up`.
+These separate checks require the reader to be explicitly enabled, the canonical container path to be selected, the host artifact root to be bind-mounted read-only, and implicit host-path creation to remain disabled. They also exercise the fail-closed startup preflight before Docker can create a missing source and Docker's enforcement of the read-only mount. They are not dependencies of `make up`.
 
 The recursive evaluation validator is currently implemented by `ModelCardValidator` and reused by the exact-model validator, so there is one semantic implementation. Extracting that substantial implementation into a neutrally named component is deferred to avoid creating a second validator or changing the active contract during this focused hardening work.
 

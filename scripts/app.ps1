@@ -14,6 +14,7 @@ $generatedSummaryFile = Join-Path $repoRoot "deployment\local-generated\shadow-p
 $generatedManifestFile = Join-Path $repoRoot "deployment\local-generated\shadow-performance\manifest.json"
 $composeArgs = @(
     "compose",
+    "--project-name", "fraud-detection-platform",
     "--env-file", "deployment/.env",
     "-f", "deployment/docker-compose.yml",
     "-f", "deployment/docker-compose.dev.yml",
@@ -110,7 +111,7 @@ try {
     switch ($Action) {
         "up" {
             $gitBash = Find-GitBash
-            & $gitBash "./scripts/bootstrap-local-fixtures.sh"
+            & $gitBash "./scripts/bootstrap-local-fixtures.sh" "--ensure"
             if ($LASTEXITCODE -ne 0) {
                 throw "Local fixture generation failed with exit code $LASTEXITCODE."
             }
