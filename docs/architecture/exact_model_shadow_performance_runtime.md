@@ -15,6 +15,8 @@ The selector is hashed with the canonical Python/Java selection-key contract. Th
 
 The response population is `LABELED_FEEDBACK`. It is not an operational scoring-occurrence population. Exact-artifact p95 latency, fallback rate, and reason-code distribution remain explicitly unavailable because the governed feedback artifact does not contain those observations.
 
+The embedded `evaluationSummary` is not an opaque object. Python, Java, and the analyst UI apply the same authoritative model-evaluation semantics recursively: exact nested field sets, finite metric values, confusion-matrix and population arithmetic, ranking denominators, disagreement categories, warnings, limitations, identity, and time-window consistency. A valid manifest hash cannot make semantically invalid or unexpected nested evidence acceptable, and raw feedback records are never part of this read contract.
+
 ## Publication
 
 The publisher consumes an already validated model-specific evaluation artifact set. It does not recalculate metrics independently:
@@ -28,7 +30,7 @@ PYTHONPATH=. python -m offline_evaluation.feedback_dataset_evaluation.exact_mode
   --generated-at 2026-10-15T12:00:00Z
 ```
 
-The artifact root must already exist. Publication is atomic and no-replace. An identical retry is idempotent; a different payload for the same selector fails closed. The committed JSON contract is [exact_model_shadow_performance.schema.json](../schemas/exact_model_shadow_performance.schema.json).
+The artifact root must already exist. Publication is atomic and no-replace. Success is returned only after the artifact files, destination directory, and parent directory have been durably synchronized. An identical retry revalidates the complete artifact set and reconfirms parent-directory durability before returning success; a different payload for the same selector fails closed. Directory durability is not silently weakened on unsupported filesystems. One immutable artifact set is permitted for each exact selector; revisions for an unchanged selector are not part of this contract. The committed JSON contract is [exact_model_shadow_performance.schema.json](../schemas/exact_model_shadow_performance.schema.json).
 
 ## Runtime
 
@@ -43,6 +45,18 @@ docker compose --env-file deployment/.env \
 
 Set `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT` when the host artifact root differs from `deployment/local-generated/model-shadow-performance`. The publishing process must have separate credentials and must not run inside `alert-service`.
 
+Before starting the service, validate the resolved reader boundary:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.model-shadow-performance-generated.yml \
+  config --format json \
+  | node scripts/check-compose-security-config.mjs model-shadow-performance
+```
+
+The check requires the reader to be explicitly enabled, the canonical container path to be selected, the host artifact root to be bind-mounted read-only, and implicit host-path creation to remain disabled.
+
 ## Security And Governance
 
-The endpoint requires `model-shadow-performance:read`. Sensitive-read audit records the selected artifact SHA and a bounded hash of the complete query. The response is diagnostic evidence only: it grants no production decision, promotion, threshold, payment, workflow, or registry authority. Existing Model Card and Platform Recommendation Shadow Performance contracts remain separate and unchanged.
+The endpoint requires `model-shadow-performance:read`. Sensitive-read audit records the selected artifact SHA and a bounded hash of the complete query. `coverage.returnedCohortStatus` describes only whether the bounded returned cohort was fully evaluated; `coverage.sourcePopulationStatus` independently reports source truncation and never claims global source completeness. The response is diagnostic evidence only: it grants no production decision, promotion, threshold, payment, workflow, or registry authority. Existing Model Card and Platform Recommendation Shadow Performance contracts remain separate and unchanged.

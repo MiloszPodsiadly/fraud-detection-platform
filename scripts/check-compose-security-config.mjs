@@ -1,10 +1,10 @@
 import fs from "node:fs";
 
 const variant = process.argv[2];
-const supportedVariants = new Set(["base", "dev", "ai", "security-hardened"]);
+const supportedVariants = new Set(["base", "dev", "ai", "security-hardened", "model-shadow-performance"]);
 
 if (!supportedVariants.has(variant)) {
-  console.error("Usage: node scripts/check-compose-security-config.mjs <base|dev|ai|security-hardened>");
+  console.error("Usage: node scripts/check-compose-security-config.mjs <base|dev|ai|security-hardened|model-shadow-performance>");
   process.exit(2);
 }
 
@@ -120,6 +120,18 @@ function assertGeneratedIdentityMount(serviceName, target, expectedSourceSuffix)
   }
 }
 
+function assertReadOnlyArtifactMount(serviceName, target, expectedSourceSuffix) {
+  const mounts = service(serviceName).volumes ?? [];
+  const mount = mounts.find((volume) => volume.target === target);
+  const source = String(mount?.source ?? "").replaceAll("\\", "/");
+  if (!mount || mount.type !== "bind" || !mount.read_only || !source.endsWith(expectedSourceSuffix)) {
+    fail(`${serviceName} must bind ${expectedSourceSuffix} read-only at ${target}`);
+  }
+  if (mount?.bind?.create_host_path !== false) {
+    fail(`${serviceName} artifact mount ${target} must refuse implicit host-path creation`);
+  }
+}
+
 assertNoContainerNames();
 
 if (variant === "base") {
@@ -164,6 +176,24 @@ if (variant === "security-hardened") {
   assertLocalBindings();
   assertUiLocalPort();
   assertHardening();
+}
+
+if (variant === "model-shadow-performance") {
+  expectEqual(
+    "model shadow performance reader enabled",
+    env("alert-service", "MODEL_SHADOW_PERFORMANCE_ARTIFACTS_ENABLED"),
+    "true"
+  );
+  expectEqual(
+    "model shadow performance artifact base directory",
+    env("alert-service", "MODEL_SHADOW_PERFORMANCE_ARTIFACTS_BASE_DIR"),
+    "/run/model-shadow-performance"
+  );
+  assertReadOnlyArtifactMount(
+    "alert-service",
+    "/run/model-shadow-performance",
+    "/deployment/local-generated/model-shadow-performance"
+  );
 }
 
 if (failures.length > 0) {

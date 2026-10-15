@@ -9,8 +9,12 @@ describe("ExactModelShadowPerformancePanel", () => {
     render(<ExactModelShadowPerformancePanel state={state({ summary: fixture() })} canRead />);
 
     expect(screen.getByText("Model Shadow Performance")).toBeInTheDocument();
-    expect(screen.getByText("50.00%")).toBeInTheDocument();
+    expect(screen.getAllByText("50.00%").length).toBeGreaterThan(0);
     expect(screen.getByText("Confirmed fraud by category")).toBeInTheDocument();
+    expect(screen.getByText("Evaluation provenance")).toBeInTheDocument();
+    expect(screen.getByText("Confusion matrix")).toBeInTheDocument();
+    expect(screen.getByText("Ranking metrics")).toBeInTheDocument();
+    expect(screen.getByText("Governance boundary")).toBeInTheDocument();
     expect(screen.getByText("UNAVAILABLE: EXACT_ARTIFACT_LATENCY_EVIDENCE_UNAVAILABLE")).toBeInTheDocument();
     expect(screen.getByText(/Diagnostic evidence only; production authority: NONE/)).toBeInTheDocument();
   });
@@ -44,6 +48,49 @@ describe("ExactModelShadowPerformancePanel", () => {
     expect(screen.getByText("Required permission: model-shadow-performance:read.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load exact artifact" })).not.toBeInTheDocument();
   });
+
+  it("invalidates stale evidence and refreshes an untouched Model Card selector", () => {
+    const clear = vi.fn();
+    const summary = fixture();
+    const view = render(<ExactModelShadowPerformancePanel
+      state={state({ clear })}
+      canRead
+      modelCard={modelCard(summary)}
+    />);
+    const changed = structuredClone(summary);
+    changed.evaluationSummary.evaluationSubject.modelVersion = "2026-10-16.shadow";
+
+    view.rerender(<ExactModelShadowPerformancePanel
+      state={state({ clear })}
+      canRead
+      modelCard={modelCard(changed)}
+    />);
+
+    expect(screen.getByLabelText("Model version")).toHaveValue("2026-10-16.shadow");
+    expect(clear).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves an explicit selector edit when Model Card identity changes", () => {
+    const clear = vi.fn();
+    const summary = fixture();
+    const view = render(<ExactModelShadowPerformancePanel
+      state={state({ clear })}
+      canRead
+      modelCard={modelCard(summary)}
+    />);
+    fireEvent.change(screen.getByLabelText("Model version"), { target: { value: "manual-version" } });
+    const changed = structuredClone(summary);
+    changed.evaluationSummary.evaluationSubject.modelVersion = "2026-10-16.shadow";
+
+    view.rerender(<ExactModelShadowPerformancePanel
+      state={state({ clear })}
+      canRead
+      modelCard={modelCard(changed)}
+    />);
+
+    expect(screen.getByLabelText("Model version")).toHaveValue("manual-version");
+    expect(clear).toHaveBeenCalledTimes(2);
+  });
 });
 
 function state(overrides = {}) {
@@ -58,4 +105,11 @@ function fixture() {
     "..", "alert-service", "src", "test", "resources", "fixtures",
     "exact-model-shadow-performance", "python-generated-v1", "exact_model_shadow_performance.json"
   ), "utf8"));
+}
+
+function modelCard(summary) {
+  return {
+    subject: summary.evaluationSummary.evaluationSubject,
+    evaluationSummary: summary.evaluationSummary
+  };
 }

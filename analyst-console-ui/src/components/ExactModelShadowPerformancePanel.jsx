@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LoadingPanel } from "./LoadingPanel.jsx";
 
 const EMPTY_SELECTOR = Object.freeze({
@@ -16,20 +16,30 @@ export function ExactModelShadowPerformancePanel({
   modelCard
 }) {
   const [draft, setDraft] = useState(EMPTY_SELECTOR);
+  const lastPrefill = useRef(null);
 
   useEffect(() => {
     const subject = modelCard?.subject;
     const window = modelCard?.evaluationSummary?.evaluationWindow;
-    if (!subject) return;
-    setDraft((current) => current.modelArtifactSha256 ? current : {
+    if (!subject) {
+      state.clear?.();
+      return;
+    }
+    const nextPrefill = {
       modelName: subject.modelName || "",
       modelVersion: subject.modelVersion || "",
       featureContractVersion: subject.featureContractVersion || "",
       modelArtifactSha256: subject.modelArtifactSha256 || "",
       fromInclusive: window?.fromInclusive || "",
       toInclusive: window?.toInclusive || ""
+    };
+    state.clear?.();
+    setDraft((current) => {
+      const mayReplace = lastPrefill.current === null || selectorsEqual(current, lastPrefill.current);
+      lastPrefill.current = nextPrefill;
+      return mayReplace ? nextPrefill : current;
     });
-  }, [modelCard]);
+  }, [modelCard, state.clear]);
 
   function update(field, value) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -89,30 +99,109 @@ function SelectorField({ label, value, onChange, required = true, pattern }) {
 function Summary({ summary }) {
   const evaluation = summary.evaluationSummary;
   const subject = evaluation.evaluationSubject;
+  const source = evaluation.sourceDataset;
   const population = evaluation.population;
+  const metrics = evaluation.supportedMetrics.mlPredictionMetrics;
   const disagreement = evaluation.supportedMetrics.rulesVsMlDisagreement;
+  const sourceTruncated = summary.coverage.sourcePopulationStatus === "BOUNDED_SOURCE_TRUNCATED";
   return (
     <div className="shadowPerformanceStack">
       <div className="stateBanner shadowPerformanceBanner" role="status">
-        {summary.coverage.status}. Diagnostic evidence only; production authority: NONE.
+        Returned cohort: {summary.coverage.returnedCohortStatus}. Source population: {summary.coverage.sourcePopulationStatus}.
+        Diagnostic evidence only; production authority: NONE.
       </div>
+      {sourceTruncated && (
+        <div className="statePanel warningPanel" role="status">
+          <h3>Bounded source truncated</h3>
+          <p>The returned cohort does not establish completeness of the source population.</p>
+        </div>
+      )}
       <div className="shadowPerformanceGrid">
+        <EvidenceSection title="Report identity" rows={[
+          ["Schema", summary.schemaVersion],
+          ["Report type", summary.reportType],
+          ["Generated at", summary.generatedAt],
+          ["Population type", summary.populationType]
+        ]} />
         <EvidenceSection title="Exact model identity" rows={[
           ["Model", subject.modelName],
           ["Version", subject.modelVersion],
           ["Feature contract", subject.featureContractVersion],
-          ["Artifact SHA-256", subject.modelArtifactSha256]
+          ["Artifact SHA-256", subject.modelArtifactSha256],
+          ["Identity completeness", subject.identityCompleteness]
+        ]} />
+        <EvidenceSection title="Evaluation window" rows={[
+          ["Time basis", evaluation.evaluationWindow.timeBasis],
+          ["From", display(evaluation.evaluationWindow.fromInclusive)],
+          ["To", display(evaluation.evaluationWindow.toInclusive)],
+          ["Metric basis", evaluation.metricBasis]
+        ]} />
+        <EvidenceSection title="Cohort eligibility" rows={[
+          ["Policy", summary.cohortEligibility.policy],
+          ["Eligible labels", summary.cohortEligibility.eligibleLabels.join(", ")],
+          ["Exact ML evidence required", summary.cohortEligibility.requiresExactMlPredictionEvidence ? "YES" : "NO"],
+          ["Maximum records", summary.cohortEligibility.maximumRecords]
+        ]} />
+        <EvidenceSection title="Evaluation provenance" rows={[
+          ["Source report", summary.sourceEvaluation.reportType],
+          ["Artifact set", summary.sourceEvaluation.artifactSetVersion],
+          ["Report generated", summary.sourceEvaluation.reportGeneratedAt],
+          ["Manifest SHA-256", summary.sourceEvaluation.manifestSha256],
+          ["Artifact integrity", summary.sourceEvaluation.artifactIntegrityVerification],
+          ["Dataset verification", summary.sourceEvaluation.sourceDatasetVerificationLevel],
+          ["External attestation", summary.sourceEvaluation.externalAttestation],
+          ["Immutable storage", summary.sourceEvaluation.immutableStorageGuarantee]
         ]} />
         <EvidenceSection title="Evaluated population" rows={[
           ["Records considered", population.recordsConsidered],
           ["Records evaluated", population.recordsEvaluated],
+          ["Records with prediction evidence", population.recordsWithPredictionEvidence],
           ["Positive class", evaluation.classBalance.positiveClassCount],
           ["Negative class", evaluation.classBalance.negativeClassCount],
-          ["Source truncated", summary.coverage.sourceTruncated ? "YES" : "NO"]
+          ["Returned cohort", summary.coverage.returnedCohortStatus],
+          ["Source population", summary.coverage.sourcePopulationStatus]
+        ]} />
+        <EvidenceSection title="Population exclusions" rows={[
+          ["Identity mismatch", population.recordsExcludedIdentityMismatch],
+          ["Source identity mismatch", population.recordsExcludedSourceIdentityMismatch],
+          ["Missing prediction evidence", population.recordsExcludedMissingPredictionEvidence],
+          ["Unexpected evidence loss", population.recordsExcludedUnexpectedMissingPredictionEvidence],
+          ["Invalid prediction evidence", population.recordsExcludedInvalidPredictionEvidence]
+        ]} />
+        <EvidenceSection title="Source-data quality" rows={[
+          ["Dataset version", source.datasetVersion],
+          ["Dataset SHA-256", source.sha256],
+          ["Raw rows read", source.rawRowsRead],
+          ["Records returned", source.recordsReturned],
+          ["Unresolved excluded", source.excludedUnresolvedCount],
+          ["Governance review excluded", source.excludedGovernanceReviewCount],
+          ["Missing required fields skipped", source.skippedMissingRequiredFieldCount],
+          ["Invalid source rows skipped", source.skippedInvalidSourceRecordCount]
+        ]} />
+        <EvidenceSection title="Prediction metrics" rows={[
+          ["Availability", availability(metrics)],
+          ["Precision", metric(metrics.precision)],
+          ["Recall", metric(metrics.recall)],
+          ["True positive rate", metric(metrics.truePositiveRate)],
+          ["False positive rate", metric(metrics.falsePositiveRate)],
+          ["False negative rate", metric(metrics.falseNegativeRate)],
+          ["Classification policy", display(metrics.classificationPolicy)]
+        ]} />
+        <EvidenceSection title="Confusion matrix" rows={[
+          ["True positive", display(metrics.truePositive)],
+          ["False positive", display(metrics.falsePositive)],
+          ["True negative", display(metrics.trueNegative)],
+          ["False negative", display(metrics.falseNegative)]
         ]} />
         <EvidenceSection title="Rules vs ML" rows={[
+          ["Availability", availability(disagreement)],
+          ["Classification policy", display(disagreement.classificationPolicy)],
+          ["Records with exact ML evidence", display(disagreement.recordsWithExactMlEvidence)],
           ["Records compared", disagreement.recordsCompared],
           ["Disagreement rate", metric(disagreement.disagreementRate)],
+          ["Rules evidence unavailable", disagreement.recordsExcludedRulesEvidenceUnavailable],
+          ["Analyst fraud records compared", disagreement.analystLabeledFraudRecordsCompared],
+          ["Analyst fraud rules evidence unavailable", disagreement.analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable],
           ["ML high, Rules low", disagreement.categoryCounts.ML_HIGH_RULES_LOW],
           ["Rules high, ML low", disagreement.categoryCounts.RULES_HIGH_ML_LOW],
           ["Both high", disagreement.categoryCounts.BOTH_HIGH],
@@ -126,7 +215,18 @@ function Summary({ summary }) {
           ["Fallback rate", unavailable(summary.operationalDiagnostics.fallbackRate)],
           ["Reason codes", unavailable(summary.operationalDiagnostics.mlReasonCodeDistribution)]
         ]} />
+        <EvidenceSection title="Governance boundary" rows={[
+          ["Diagnostic only", summary.governance.diagnosticOnly ? "YES" : "NO"],
+          ["Runtime decision authority", summary.governance.runtimeDecisionAuthority],
+          ["Promotion authority", summary.governance.promotionAuthority],
+          ["Threshold authority", summary.governance.thresholdChangeAuthority],
+          ["Payment authority", summary.governance.paymentAuthorizationAuthority],
+          ["Workflow authority", summary.governance.workflowAuthority]
+        ]} />
+        <EvidenceList title="Warnings" items={evaluation.warnings} empty="No evaluation warnings reported." />
+        <EvidenceList title="Limitations" items={evaluation.limitations} empty="No limitations reported." />
       </div>
+      <RankingMetrics precisionAtK={metrics.precisionAtK} recallAtK={metrics.recallAtK} />
     </div>
   );
 }
@@ -138,6 +238,39 @@ function EvidenceSection({ title, rows }) {
       <dl className="shadowPerformanceDefinitionList">
         {rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}
       </dl>
+    </section>
+  );
+}
+
+function EvidenceList({ title, items, empty }) {
+  return (
+    <section className="shadowPerformanceSubpanel">
+      <h3>{title}</h3>
+      {items.length > 0
+        ? <ul className="shadowPerformanceList">{items.map((item) => <li key={item}>{item}</li>)}</ul>
+        : <p className="sectionCopy">{empty}</p>}
+    </section>
+  );
+}
+
+function RankingMetrics({ precisionAtK, recallAtK }) {
+  const keys = Object.keys(precisionAtK).sort((left, right) => Number(left) - Number(right));
+  return (
+    <section className="shadowPerformanceSubpanel">
+      <h3>Ranking metrics</h3>
+      <div className="tableShell">
+        <table className="dataTable">
+          <thead><tr><th scope="col">K</th><th scope="col">Actual K</th><th scope="col">Precision at K</th><th scope="col">Recall at K</th></tr></thead>
+          <tbody>{keys.map((key) => (
+            <tr key={key}>
+              <th scope="row">{precisionAtK[key].requestedK}</th>
+              <td>{precisionAtK[key].actualK}</td>
+              <td>{metric(precisionAtK[key].value)}</td>
+              <td>{metric(recallAtK[key].value)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -166,9 +299,21 @@ function State({ title, message, onRetry }) {
 }
 
 function metric(value) {
-  return value.available ? `${(value.value * 100).toFixed(2)}%` : `UNAVAILABLE: ${value.reason}`;
+  return value?.available ? `${(value.value * 100).toFixed(2)}%` : `UNAVAILABLE: ${value?.reason}`;
 }
 
 function unavailable(value) {
   return value.available ? "AVAILABLE" : `UNAVAILABLE: ${value.reason}`;
+}
+
+function availability(value) {
+  return value.available ? "AVAILABLE" : `UNAVAILABLE: ${value.reason}`;
+}
+
+function display(value) {
+  return value === null || value === undefined || value === "" ? "UNAVAILABLE" : value;
+}
+
+function selectorsEqual(left, right) {
+  return Object.keys(EMPTY_SELECTOR).every((field) => left[field] === right[field]);
 }
