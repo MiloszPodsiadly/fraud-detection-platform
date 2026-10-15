@@ -26,6 +26,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ArtifactBackedExactModelShadowPerformanceProviderTest {
 
+    private static final String SUMMARY_FILENAME = "exact_model_shadow_performance.json";
+    private static final String MANIFEST_FILENAME = "manifest.json";
+
     @TempDir
     Path root;
 
@@ -41,6 +44,21 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
         assertThat(result.at("/evaluationSummary/supportedMetrics/rulesVsMlDisagreement/disagreementRate/value")
                 .doubleValue()).isEqualTo(0.5);
         assertThat(result.at("/operationalDiagnostics/fallbackRate/available").booleanValue()).isFalse();
+    }
+
+    @Test
+    void readsPythonGeneratedClaimOnlyArtifactWithoutUpgradingProvenance() throws Exception {
+        ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+        copyFixture(root.resolve(selector.selectionKey()), "python-generated-claim-only-v1");
+
+        JsonNode result = provider().find(selector).orElseThrow();
+
+        assertThat(result.at("/sourceEvaluation/sourceDatasetVerificationLevel").textValue())
+                .isEqualTo("CLAIM_ONLY");
+        assertThat(result.at("/sourceEvaluation/externalAttestation").textValue())
+                .isEqualTo("NOT_PROVIDED");
+        assertThat(result.at("/sourceEvaluation/immutableStorageGuarantee").textValue())
+                .isEqualTo("NOT_CLAIMED");
     }
 
     @Test
@@ -71,10 +89,6 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
                 summary -> ((ObjectNode) summary.at(
                         "/evaluationSummary/supportedMetrics/rulesVsMlDisagreement/categoryCounts"))
                         .put("BOTH_LOW", 2),
-                summary -> ((ObjectNode) summary.at("/evaluationSummary/evaluationSubject"))
-                        .put("modelArtifactSha256", "b".repeat(64)),
-                summary -> ((ObjectNode) summary.at("/evaluationSummary/evaluationWindow"))
-                        .put("fromInclusive", "2026-06-02T00:00:00Z"),
                 summary -> ((ObjectNode) summary.get("governance"))
                         .put("runtimeDecisionAuthority", "ML"),
                 summary -> summary.putArray("rawRecords").addObject().put("transactionReference", "forbidden")
@@ -93,6 +107,49 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
     }
 
     @Test
+    void exactIdentityAndWindowMismatchFailClosedAfterRehash() throws Exception {
+        List<Consumer<ObjectNode>> mutations = List.of(
+                summary -> ((ObjectNode) summary.at("/evaluationSummary/evaluationSubject"))
+                        .put("modelArtifactSha256", "b".repeat(64)),
+                summary -> ((ObjectNode) summary.at("/evaluationSummary/evaluationWindow"))
+                        .put("fromInclusive", "2026-06-02T00:00:00Z")
+        );
+        for (int index = 0; index < mutations.size(); index++) {
+            ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+            Path destination = root.resolve("selector-mismatch-" + index).resolve(selector.selectionKey());
+            Files.createDirectories(destination.getParent());
+            copyFixture(destination);
+            rewriteCanonicalArtifact(destination, mutations.get(index));
+
+            assertUnavailable(provider(destination.getParent()), selector);
+        }
+    }
+
+    @Test
+    void malformedOversizedAndNonCanonicalManifestFailClosed() throws Exception {
+        ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+
+        Path malformed = root.resolve("malformed").resolve(selector.selectionKey());
+        Files.createDirectories(malformed.getParent());
+        copyFixture(malformed);
+        Files.writeString(malformed.resolve(MANIFEST_FILENAME), "{\n", StandardCharsets.UTF_8);
+        assertUnavailable(provider(malformed.getParent()), selector);
+
+        Path oversized = root.resolve("oversized").resolve(selector.selectionKey());
+        Files.createDirectories(oversized.getParent());
+        copyFixture(oversized);
+        Files.writeString(oversized.resolve(MANIFEST_FILENAME), "x".repeat(65_537), StandardCharsets.UTF_8);
+        assertUnavailable(provider(oversized.getParent()), selector);
+
+        Path nonCanonical = root.resolve("noncanonical").resolve(selector.selectionKey());
+        Files.createDirectories(nonCanonical.getParent());
+        copyFixture(nonCanonical);
+        Path manifest = nonCanonical.resolve(MANIFEST_FILENAME);
+        Files.writeString(manifest, " " + Files.readString(manifest), StandardCharsets.UTF_8);
+        assertUnavailable(provider(nonCanonical.getParent()), selector);
+    }
+
+    @Test
     void unexpectedFilesAndRehashedNonCanonicalSummaryFailClosed() throws Exception {
         ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
         Path destination = root.resolve(selector.selectionKey());
@@ -102,12 +159,57 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
         assertUnavailable(provider(), selector);
 
         Files.delete(destination.resolve("unexpected.json"));
-        Path summaryPath = destination.resolve("exact_model_shadow_performance.json");
+        Path summaryPath = destination.resolve(SUMMARY_FILENAME);
         byte[] canonical = Files.readAllBytes(summaryPath);
         Files.writeString(summaryPath, "  " + new String(canonical, StandardCharsets.UTF_8), StandardCharsets.UTF_8);
         rewriteManifestDigest(destination);
 
         assertUnavailable(provider(), selector);
+    }
+
+    @Test
+    void symbolicLinkSummaryAndManifestFilesFailClosed() throws Exception {
+        for (String filename : List.of(SUMMARY_FILENAME, MANIFEST_FILENAME)) {
+            ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+            Path caseRoot = root.resolve("linked-" + filename.replace('.', '-'));
+            Path destination = caseRoot.resolve(selector.selectionKey());
+            Files.createDirectories(caseRoot);
+            copyFixture(destination);
+            Path linked = destination.resolve(filename);
+            Path external = caseRoot.resolve("external-" + filename);
+            Files.move(linked, external);
+            try {
+                Files.createSymbolicLink(linked, external);
+            } catch (UnsupportedOperationException | java.io.IOException | SecurityException exception) {
+                Assumptions.assumeTrue(false, "symbolic links unavailable: " + exception.getMessage());
+            }
+
+            assertUnavailable(provider(caseRoot), selector);
+        }
+    }
+
+    @Test
+    void manifestAndSummaryChangesBetweenStableReadPassesFailClosed() throws Exception {
+        assertChangedBetweenPassesFailsClosed(true);
+        assertChangedBetweenPassesFailsClosed(false);
+    }
+
+    @Test
+    void corruptSelectionDoesNotFallBackToValidNeighbor() throws Exception {
+        ExactModelShadowPerformanceSelector selected = selector("a".repeat(64));
+        ExactModelShadowPerformanceSelector neighbor = selector("b".repeat(64));
+        Path selectedDirectory = root.resolve(selected.selectionKey());
+        Path neighborDirectory = root.resolve(neighbor.selectionKey());
+        copyFixture(selectedDirectory);
+        copyFixture(neighborDirectory);
+        rewriteCanonicalArtifact(neighborDirectory, summary ->
+                ((ObjectNode) summary.at("/evaluationSummary/evaluationSubject"))
+                        .put("modelArtifactSha256", "b".repeat(64)));
+        rewriteManifestSelectionKey(neighborDirectory, neighbor.selectionKey());
+        Files.writeString(selectedDirectory.resolve(SUMMARY_FILENAME), "corrupt\n", StandardCharsets.UTF_8);
+
+        assertThat(provider().find(neighbor)).isPresent();
+        assertUnavailable(provider(), selected);
     }
 
     @Test
@@ -195,7 +297,7 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
 
     private void rewriteCanonicalArtifact(Path destination, Consumer<ObjectNode> mutation) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
-        Path summaryPath = destination.resolve("exact_model_shadow_performance.json");
+        Path summaryPath = destination.resolve(SUMMARY_FILENAME);
         ObjectNode summary = (ObjectNode) mapper.readTree(Files.readAllBytes(summaryPath));
         mutation.accept(summary);
         byte[] summaryPayload = GovernanceCanonicalJson.serialize(mapper, summary);
@@ -205,8 +307,8 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
 
     private void rewriteManifestDigest(Path destination) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
-        byte[] summaryPayload = Files.readAllBytes(destination.resolve("exact_model_shadow_performance.json"));
-        Path manifestPath = destination.resolve("manifest.json");
+        byte[] summaryPayload = Files.readAllBytes(destination.resolve(SUMMARY_FILENAME));
+        Path manifestPath = destination.resolve(MANIFEST_FILENAME);
         ObjectNode manifest = (ObjectNode) mapper.readTree(Files.readAllBytes(manifestPath));
         ObjectNode file = (ObjectNode) manifest.at("/files/0");
         file.put("sha256", HexFormat.of().formatHex(
@@ -215,15 +317,53 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
         Files.write(manifestPath, GovernanceCanonicalJson.serialize(mapper, manifest));
     }
 
+    private void rewriteManifestSelectionKey(Path destination, String selectionKey) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        Path manifestPath = destination.resolve(MANIFEST_FILENAME);
+        ObjectNode manifest = (ObjectNode) mapper.readTree(Files.readAllBytes(manifestPath));
+        manifest.put("selectionKey", selectionKey);
+        Files.write(manifestPath, GovernanceCanonicalJson.serialize(mapper, manifest));
+    }
+
+    private void assertChangedBetweenPassesFailsClosed(boolean changeManifest) throws Exception {
+        ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+        Path caseRoot = root.resolve(changeManifest ? "changing-manifest" : "changing-summary");
+        Path destination = caseRoot.resolve(selector.selectionKey());
+        Files.createDirectories(caseRoot);
+        copyFixture(destination);
+        AtomicInteger manifestReads = new AtomicInteger();
+        AtomicInteger summaryReads = new AtomicInteger();
+        GovernanceArtifactReader changingReader = new GovernanceArtifactReader(path -> {
+            try {
+                if (changeManifest && path.getFileName().toString().equals(SUMMARY_FILENAME)
+                        && summaryReads.incrementAndGet() == 1) {
+                    Path manifest = destination.resolve(MANIFEST_FILENAME);
+                    Files.writeString(manifest, " " + Files.readString(manifest), StandardCharsets.UTF_8);
+                } else if (!changeManifest && path.getFileName().toString().equals(MANIFEST_FILENAME)
+                        && manifestReads.incrementAndGet() == 2) {
+                    Files.writeString(destination.resolve(SUMMARY_FILENAME), "changed\n", StandardCharsets.UTF_8);
+                }
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        });
+
+        assertUnavailable(provider(caseRoot, 524_288L, changingReader), selector);
+    }
+
     private void copyFixture(Path destination) throws Exception {
+        copyFixture(destination, "python-generated-v1");
+    }
+
+    private void copyFixture(Path destination, String fixtureName) throws Exception {
         URI fixture = Objects.requireNonNull(getClass().getResource(
-                "/fixtures/exact-model-shadow-performance/python-generated-v1/manifest.json")).toURI();
+                "/fixtures/exact-model-shadow-performance/" + fixtureName + "/" + MANIFEST_FILENAME)).toURI();
         Path source = Path.of(fixture).getParent();
         Files.createDirectory(destination);
-        Files.copy(source.resolve("manifest.json"), destination.resolve("manifest.json"));
+        Files.copy(source.resolve(MANIFEST_FILENAME), destination.resolve(MANIFEST_FILENAME));
         Files.copy(
-                source.resolve("exact_model_shadow_performance.json"),
-                destination.resolve("exact_model_shadow_performance.json")
+                source.resolve(SUMMARY_FILENAME),
+                destination.resolve(SUMMARY_FILENAME)
         );
     }
 
