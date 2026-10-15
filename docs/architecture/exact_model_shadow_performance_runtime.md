@@ -51,7 +51,7 @@ Before starting the service, validate the resolved reader boundary:
 docker compose --env-file deployment/.env \
   -f deployment/docker-compose.yml \
   -f deployment/docker-compose.model-shadow-performance-generated.yml \
-  config --format json \
+  config --no-normalize --format json \
   | node scripts/check-compose-security-config.mjs model-shadow-performance
 ```
 

@@ -83,7 +83,7 @@ jobs:
         run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml config --format json | node scripts/check-compose-security-config.mjs security-hardened
 
       - name: Assert exact-model evidence reader is read-only and explicit
-        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.model-shadow-performance-generated.yml config --format json | node scripts/check-compose-security-config.mjs model-shadow-performance
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.model-shadow-performance-generated.yml config --no-normalize --format json | node scripts/check-compose-security-config.mjs model-shadow-performance
 
   runtime-smoke:
     name: Runtime Smoke / default dev without AI

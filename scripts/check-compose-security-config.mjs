@@ -128,7 +128,7 @@ function assertReadOnlyArtifactMount(serviceName, target, expectedSourceSuffix) 
     fail(`${serviceName} must bind ${expectedSourceSuffix} read-only at ${target}`);
   }
   if (mount?.bind?.create_host_path !== false) {
-    fail(`${serviceName} artifact mount ${target} must refuse implicit host-path creation`);
+    fail(`${serviceName} artifact mount ${target} must expose create_host_path:false; resolve with config --no-normalize`);
   }
 }
 
