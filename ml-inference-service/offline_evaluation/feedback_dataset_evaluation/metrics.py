@@ -141,6 +141,15 @@ def build_binary_classification_metrics_from_counts(
     }
 
 
+def build_rate_metric(
+        numerator: int,
+        denominator: int,
+        unavailable_reason: str,
+) -> dict[str, float | bool | str | None]:
+    """Build the canonical bounded rate availability object."""
+    return _metric_value(numerator, denominator, unavailable_reason)
+
+
 def _risk_level_breakdown(records: list[FeedbackDatasetRecord]) -> dict[str, dict[str, int]]:
     buckets: dict[str, Counter[str]] = {}
     for record in records:

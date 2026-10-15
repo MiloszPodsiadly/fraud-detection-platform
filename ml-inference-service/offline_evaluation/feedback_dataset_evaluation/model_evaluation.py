@@ -18,6 +18,7 @@ from offline_evaluation.feedback_dataset_evaluation.metrics import (
     DEFAULT_TOP_K_VALUES,
     build_binary_classification_metrics,
     build_binary_classification_metrics_from_counts,
+    build_rate_metric,
     build_ranked_classification_metrics,
     build_ranked_metric_rows,
 )
@@ -130,6 +131,10 @@ RULES_VS_ML_DISAGREEMENT_FIELDS = {
     "recordsCompared",
     "recordsExcludedRulesEvidenceUnavailable",
     "categoryCounts",
+    "disagreementRate",
+    "analystLabeledFraudByCategory",
+    "analystLabeledFraudRecordsCompared",
+    "analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable",
 }
 RULES_VS_ML_CATEGORY_FIELDS = {
     "ML_HIGH_RULES_LOW",
@@ -337,6 +342,16 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
     return summary
 
 
+def validate_model_evaluation_subject(value: Any) -> dict[str, str]:
+    _validate_subject(value)
+    return value
+
+
+def validate_model_evaluation_window(value: Any) -> dict[str, str | None]:
+    _validate_window(value)
+    return value
+
+
 def build_source_dataset_identity(dataset: FeedbackDataset) -> dict[str, Any]:
     if dataset.metadata.records_returned != len(dataset.records):
         raise ValueError("source dataset recordsReturned must match parsed records")
@@ -472,15 +487,20 @@ def _validate_supported_metrics(
         value.get("rulesVsMlDisagreement"),
         "supportedMetrics.rulesVsMlDisagreement",
         records_evaluated,
+        class_balance["positiveClassCount"],
     )
 
 
 def _build_rules_vs_ml_disagreement(records: list[FeedbackDatasetRecord]) -> dict[str, Any]:
     counts = {category: 0 for category in sorted(RULES_VS_ML_CATEGORY_FIELDS)}
+    analyst_fraud_counts = {category: 0 for category in sorted(RULES_VS_ML_CATEGORY_FIELDS)}
     unavailable = 0
+    analyst_fraud_unavailable = 0
     for record in records:
         if record.rules_evidence_status != "AVAILABLE" or record.rules_risk_level is None:
             unavailable += 1
+            if record.is_positive_class:
+                analyst_fraud_unavailable += 1
             continue
         ml_high = is_positive_risk(record.ml_prediction_risk_level)
         rules_high = is_positive_risk(record.rules_risk_level)
@@ -493,7 +513,10 @@ def _build_rules_vs_ml_disagreement(records: list[FeedbackDatasetRecord]) -> dic
         else:
             category = "BOTH_LOW"
         counts[category] += 1
+        if record.is_positive_class:
+            analyst_fraud_counts[category] += 1
     compared = len(records) - unavailable
+    disagreement_count = counts["ML_HIGH_RULES_LOW"] + counts["RULES_HIGH_ML_LOW"]
     return {
         "available": compared > 0,
         "reason": None if compared else RULES_SIGNAL_UNAVAILABLE,
@@ -502,6 +525,14 @@ def _build_rules_vs_ml_disagreement(records: list[FeedbackDatasetRecord]) -> dic
         "recordsCompared": compared,
         "recordsExcludedRulesEvidenceUnavailable": unavailable,
         "categoryCounts": counts,
+        "disagreementRate": build_rate_metric(
+            disagreement_count,
+            compared,
+            RULES_SIGNAL_UNAVAILABLE,
+        ),
+        "analystLabeledFraudByCategory": analyst_fraud_counts,
+        "analystLabeledFraudRecordsCompared": sum(analyst_fraud_counts.values()),
+        "analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable": analyst_fraud_unavailable,
     }
 
 
@@ -509,6 +540,7 @@ def _validate_rules_vs_ml_disagreement(
         value: Any,
         location: str,
         records_evaluated: int,
+        positive_class_count: int,
 ) -> None:
     if not isinstance(value, dict):
         raise ValueError(f"{location} must be an object")
@@ -538,6 +570,45 @@ def _validate_rules_vs_ml_disagreement(
     )
     if category_total != compared:
         raise ValueError(f"{location}.categoryCounts must sum to recordsCompared")
+    disagreement_count = categories["ML_HIGH_RULES_LOW"] + categories["RULES_HIGH_ML_LOW"]
+    expected_disagreement_rate = build_rate_metric(
+        disagreement_count,
+        compared,
+        RULES_SIGNAL_UNAVAILABLE,
+    )
+    _validate_metric_value(value.get("disagreementRate"), f"{location}.disagreementRate")
+    if value["disagreementRate"] != expected_disagreement_rate:
+        raise ValueError(f"{location}.disagreementRate is inconsistent")
+    analyst_fraud = value.get("analystLabeledFraudByCategory")
+    if not isinstance(analyst_fraud, dict):
+        raise ValueError(f"{location}.analystLabeledFraudByCategory must be an object")
+    _reject_unknown_or_missing(
+        analyst_fraud,
+        RULES_VS_ML_CATEGORY_FIELDS,
+        f"{location}.analystLabeledFraudByCategory",
+    )
+    analyst_fraud_total = sum(
+        _bounded_count(
+            analyst_fraud.get(category),
+            f"{location}.analystLabeledFraudByCategory.{category}",
+        )
+        for category in RULES_VS_ML_CATEGORY_FIELDS
+    )
+    analyst_fraud_compared = _bounded_count(
+        value.get("analystLabeledFraudRecordsCompared"),
+        f"{location}.analystLabeledFraudRecordsCompared",
+    )
+    analyst_fraud_unavailable = _bounded_count(
+        value.get("analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable"),
+        f"{location}.analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable",
+    )
+    if analyst_fraud_total != analyst_fraud_compared:
+        raise ValueError(f"{location} analyst-labeled fraud category counts must reconcile")
+    if analyst_fraud_compared + analyst_fraud_unavailable != positive_class_count:
+        raise ValueError(f"{location} analyst-labeled fraud population must match positive class count")
+    for category in RULES_VS_ML_CATEGORY_FIELDS:
+        if analyst_fraud[category] > categories[category]:
+            raise ValueError(f"{location} analyst-labeled fraud category exceeds category population")
     expected_availability = {"available": compared > 0, "reason": None if compared else RULES_SIGNAL_UNAVAILABLE}
     if {"available": value.get("available"), "reason": value.get("reason")} != expected_availability:
         raise ValueError(f"{location} availability is inconsistent")
