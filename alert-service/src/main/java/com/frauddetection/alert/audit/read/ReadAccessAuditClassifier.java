@@ -89,6 +89,14 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/governance/model-card/current".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.MODEL_CARD, ReadAccessResourceType.MODEL_CARD, null, request));
         }
+        if ("/api/v1/governance/model-shadow-performance".equals(pattern)) {
+            return Optional.of(target(
+                    ReadAccessEndpointCategory.EXACT_MODEL_SHADOW_PERFORMANCE,
+                    ReadAccessResourceType.EXACT_MODEL_SHADOW_PERFORMANCE,
+                    request.getParameter("modelArtifactSha256"),
+                    request
+            ));
+        }
         return Optional.empty();
     }
 
