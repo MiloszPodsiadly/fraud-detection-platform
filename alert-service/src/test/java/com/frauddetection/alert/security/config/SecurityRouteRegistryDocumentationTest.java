@@ -32,7 +32,7 @@ class SecurityRouteRegistryDocumentationTest {
     void routeOwnershipMapMentionsEveryAuthorizationRuleGroup() throws IOException {
         String doc = readEndpointAuthorizationMap();
 
-        assertThat(doc).contains("FDP-49 is security architecture hardening only");
+        assertThat(doc).contains("The security route boundary is architecture hardening only");
         assertThat(SecurityRuleSource.ROUTE_GROUPS)
                 .allSatisfy(group -> assertThat(doc).contains(group));
         assertThat(SecurityRouteOwnershipRegistry.DENY_BY_DEFAULT_FAMILIES)
@@ -53,7 +53,7 @@ class SecurityRouteRegistryDocumentationTest {
                 .contains("SameSite policy selected and documented")
                 .contains("direct SPA OIDC disabled unless separately approved")
                 .contains("demo auth disabled")
-                .contains("FDP-49 does not certify enterprise IAM readiness")
+                .contains("The security route boundary does not certify enterprise IAM readiness")
                 .contains("CSRF token is not authentication material")
                 .contains("not a secret against XSS")
                 .contains("must not expose an access token, refresh token, ID token")
@@ -105,7 +105,7 @@ class SecurityRouteRegistryDocumentationTest {
                 .allSatisfy(controller -> {
                     String simpleName = controller.substring(controller.lastIndexOf('.') + 1);
                     assertThat(doc)
-                            .as("Controller %s is not represented in FDP-49 endpoint authorization documentation.",
+                            .as("Controller %s is not represented in endpoint authorization documentation.",
                                     simpleName)
                             .contains(simpleName);
                 });

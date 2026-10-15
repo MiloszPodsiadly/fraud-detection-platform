@@ -22,7 +22,7 @@ Unsafe cookie-backed routes require CSRF. Stateless bearer APIs may bypass CSRF 
 
 ## Adding a new backend endpoint safely
 
-Every backend endpoint must be explicitly owned by a route group. New endpoints under `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, `/bff/**`, and `/actuator/**` are denied by default until a route group allowlists them. This is the security route boundary deny-by-default rule.
+Every backend endpoint must be explicitly owned by a route group. New endpoints under `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, `/bff/**`, and `/actuator/**` are denied by default until a route group allowlists them. This is the security route boundary deny by default rule.
 
 Never add broad `permitAll` rules such as `/api/**`, `/api/v1/**`, `/internal/**`, `/governance/**`, `/system/**`, or `/bff/**`. Every public endpoint must explain why it is public.
 
