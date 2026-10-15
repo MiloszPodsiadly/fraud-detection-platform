@@ -116,11 +116,7 @@ function Summary({ summary }) {
           <p>The returned cohort does not establish completeness of the source population.</p>
         </div>
       )}
-      <p className="sectionCopy">
-        Runtime verification covers the published manifest, canonical artifact bytes, and their local digest.
-        Source dataset bytes were verified upstream when this evaluation was published; the local digest is not
-        independent external attestation or an immutable-storage guarantee.
-      </p>
+      <ProvenanceExplanation sourceEvaluation={summary.sourceEvaluation} />
       <div className="shadowPerformanceGrid">
         <EvidenceSection title="Report identity" rows={[
           ["Schema", summary.schemaVersion],
@@ -232,6 +228,23 @@ function Summary({ summary }) {
         <EvidenceList title="Limitations" items={evaluation.limitations} empty="No limitations reported." />
       </div>
       <RankingMetrics precisionAtK={metrics.precisionAtK} recallAtK={metrics.recallAtK} />
+    </div>
+  );
+}
+
+function ProvenanceExplanation({ sourceEvaluation }) {
+  const sourceMeaning = sourceEvaluation.sourceDatasetVerificationLevel === "VERIFIED_AGAINST_SOURCE_BYTES"
+    ? "Source dataset bytes were verified at the upstream evaluation validation and publication boundary."
+    : "The upstream artifact contains a source dataset identity claim. Source dataset bytes were not independently checked during exact-model Shadow Performance generation.";
+  return (
+    <div>
+      <p className="sectionCopy">{sourceMeaning}</p>
+      <p className="sectionCopy">
+        The Java runtime verifies the local published artifact and manifest. It does not re-read the upstream
+        evaluation artifact. The local manifest SHA-256 is an integrity check, not an external attestation or
+        immutable-storage guarantee. External attestation remains {sourceEvaluation.externalAttestation}; immutable
+        storage remains {sourceEvaluation.immutableStorageGuarantee}.
+      </p>
     </div>
   );
 }

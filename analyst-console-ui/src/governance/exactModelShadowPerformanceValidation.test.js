@@ -12,6 +12,11 @@ describe("exact Model Shadow Performance validation", () => {
     expect(isValidExactModelShadowPerformance(value)).toBe(true);
   });
 
+  it("accepts both Python-produced source verification levels", () => {
+    expect(isValidExactModelShadowPerformance(fixture())).toBe(true);
+    expect(isValidExactModelShadowPerformance(fixture("python-generated-claim-only-v1"))).toBe(true);
+  });
+
   it("rejects permissive timestamps and semantic drift", () => {
     const cases = [
       (value) => { value.evaluationSummary.evaluationWindow.fromInclusive = "2026-06-01T02:00:00+02:00"; },
@@ -19,7 +24,9 @@ describe("exact Model Shadow Performance validation", () => {
       (value) => { value.evaluationSummary.supportedMetrics.rulesVsMlDisagreement.unexpected = true; },
       (value) => { value.rawRecords = [{ transactionReference: "forbidden" }]; },
       (value) => { value.coverage.sourcePopulationStatus = "COMPLETE"; },
-      (value) => { value.operationalDiagnostics.fallbackRate.value = 0; }
+      (value) => { value.operationalDiagnostics.fallbackRate.value = 0; },
+      (value) => { value.sourceEvaluation.sourceDatasetVerificationLevel = "UNKNOWN"; },
+      (value) => { delete value.sourceEvaluation.sourceDatasetVerificationLevel; }
     ];
 
     for (const mutate of cases) {
@@ -30,9 +37,9 @@ describe("exact Model Shadow Performance validation", () => {
   });
 });
 
-function fixture() {
+function fixture(directory = "python-generated-v1") {
   return JSON.parse(readFileSync(resolve(
     "..", "alert-service", "src", "test", "resources", "fixtures",
-    "exact-model-shadow-performance", "python-generated-v1", "exact_model_shadow_performance.json"
+    "exact-model-shadow-performance", directory, "exact_model_shadow_performance.json"
   ), "utf8"));
 }

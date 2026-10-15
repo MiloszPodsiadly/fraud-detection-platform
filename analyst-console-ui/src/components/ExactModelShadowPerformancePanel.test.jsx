@@ -5,14 +5,18 @@ import { describe, expect, it, vi } from "vitest";
 import { ExactModelShadowPerformancePanel } from "./ExactModelShadowPerformancePanel.jsx";
 
 describe("ExactModelShadowPerformancePanel", () => {
-  it("renders exact-artifact population, disagreement and unavailable diagnostics", () => {
+  it("renders source-byte-verified provenance without moving verification to runtime", () => {
     render(<ExactModelShadowPerformancePanel state={state({ summary: fixture() })} canRead />);
 
     expect(screen.getByText("Model Shadow Performance")).toBeInTheDocument();
     expect(screen.getAllByText("50.00%").length).toBeGreaterThan(0);
     expect(screen.getByText("Analyst-labeled fraud by disagreement category")).toBeInTheDocument();
     expect(screen.getByText("Evaluation provenance")).toBeInTheDocument();
-    expect(screen.getByText(/Source dataset bytes were verified upstream/)).toBeInTheDocument();
+    expect(screen.getByText(/Source dataset bytes were verified at the upstream evaluation validation and publication boundary/)).toBeInTheDocument();
+    expect(screen.getByText("VERIFIED_AGAINST_SOURCE_BYTES")).toBeInTheDocument();
+    expect(screen.getByText(/The Java runtime verifies the local published artifact and manifest/)).toHaveTextContent(
+      "It does not re-read the upstream evaluation artifact."
+    );
     expect(screen.getByText("Immutable storage guarantee")).toBeInTheDocument();
     expect(screen.getByText("Confusion matrix")).toBeInTheDocument();
     expect(screen.getByText("Ranking metrics")).toBeInTheDocument();
@@ -20,6 +24,35 @@ describe("ExactModelShadowPerformancePanel", () => {
     expect(screen.getByText("UNAVAILABLE: EXACT_ARTIFACT_LATENCY_EVIDENCE_UNAVAILABLE")).toBeInTheDocument();
     expect(screen.getByText(/Diagnostic evidence only; production authority: NONE/)).toBeInTheDocument();
   });
+
+  it("renders claim-only provenance as an explicit source-verification limitation", () => {
+    render(<ExactModelShadowPerformancePanel state={state({ summary: fixture("python-generated-claim-only-v1") })} canRead />);
+
+    expect(screen.getByText("CLAIM_ONLY")).toBeInTheDocument();
+    expect(screen.getByText(/contains a source dataset identity claim/)).toHaveTextContent(
+      "Source dataset bytes were not independently checked during exact-model Shadow Performance generation."
+    );
+    expect(screen.queryByText(/Source dataset bytes were verified/)).not.toBeInTheDocument();
+    expect(screen.getByText(/External attestation remains NOT_PROVIDED/)).toHaveTextContent(
+      "immutable storage remains NOT_CLAIMED"
+    );
+  });
+
+  it.each(["python-generated-v1", "python-generated-claim-only-v1"])(
+    "preserves exact identity, window and diagnostic-only boundaries for %s",
+    (directory) => {
+      render(<ExactModelShadowPerformancePanel state={state({ summary: fixture(directory) })} canRead />);
+
+      expect(screen.getByText("python-logistic-fraud-model")).toBeInTheDocument();
+      expect(screen.getByText("2026-10-15.shadow")).toBeInTheDocument();
+      expect(screen.getByText("feature-contract-v2")).toBeInTheDocument();
+      expect(screen.getByText("a".repeat(64))).toBeInTheDocument();
+      expect(screen.getByText("2026-06-01T00:00:00Z")).toBeInTheDocument();
+      expect(screen.getByText("2026-06-09T23:59:59Z")).toBeInTheDocument();
+      expect(screen.getByText(/Diagnostic evidence only; production authority: NONE/)).toBeInTheDocument();
+      expect(screen.queryByText(/\bWORM\b/i)).not.toBeInTheDocument();
+    }
+  );
 
   it("submits the complete selector prefilled from Model Card evidence", () => {
     const load = vi.fn();
@@ -102,10 +135,10 @@ function state(overrides = {}) {
   };
 }
 
-function fixture() {
+function fixture(directory = "python-generated-v1") {
   return JSON.parse(readFileSync(resolve(
     "..", "alert-service", "src", "test", "resources", "fixtures",
-    "exact-model-shadow-performance", "python-generated-v1", "exact_model_shadow_performance.json"
+    "exact-model-shadow-performance", directory, "exact_model_shadow_performance.json"
   ), "utf8"));
 }
 

@@ -17,8 +17,24 @@ class ExactModelShadowPerformanceValidatorTest {
             new ExactModelShadowPerformanceValidator(new ModelCardValidator());
 
     @Test
-    void acceptsCanonicalPythonGeneratedContract() throws Exception {
-        assertThatCode(() -> validator.validate(summary(), selector())).doesNotThrowAnyException();
+    void acceptsCanonicalPythonGeneratedContractsForBothSourceVerificationLevels() throws Exception {
+        assertThatCode(() -> validator.validate(summary("python-generated-v1"), selector()))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> validator.validate(summary("python-generated-claim-only-v1"), selector()))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsMissingOrUnknownSourceVerificationLevel() throws Exception {
+        ObjectNode unknown = summary();
+        ((ObjectNode) unknown.get("sourceEvaluation")).put("sourceDatasetVerificationLevel", "UNKNOWN");
+        assertThatThrownBy(() -> validator.validate(unknown, selector()))
+                .isInstanceOf(ExactModelShadowPerformanceValidationException.class);
+
+        ObjectNode missing = summary();
+        ((ObjectNode) missing.get("sourceEvaluation")).remove("sourceDatasetVerificationLevel");
+        assertThatThrownBy(() -> validator.validate(missing, selector()))
+                .isInstanceOf(ExactModelShadowPerformanceValidationException.class);
     }
 
     @Test
@@ -40,8 +56,12 @@ class ExactModelShadowPerformanceValidatorTest {
     }
 
     private ObjectNode summary() throws Exception {
+        return summary("python-generated-v1");
+    }
+
+    private ObjectNode summary(String fixture) throws Exception {
         return (ObjectNode) objectMapper.readTree(Objects.requireNonNull(getClass().getResourceAsStream(
-                "/fixtures/exact-model-shadow-performance/python-generated-v1/exact_model_shadow_performance.json")));
+                "/fixtures/exact-model-shadow-performance/" + fixture + "/exact_model_shadow_performance.json")));
     }
 
     private ExactModelShadowPerformanceSelector selector() {
