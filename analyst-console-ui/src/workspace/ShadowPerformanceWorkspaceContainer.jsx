@@ -5,9 +5,14 @@ export function ShadowPerformanceWorkspaceContainer({
   summaryState,
   promotionReadinessState = { report: null, isLoading: false, error: null },
   modelCardState = { card: null, isLoading: false, error: null },
+  exactModelShadowPerformanceState = {
+    summary: null, selector: null, isLoading: false, error: null,
+    load: () => null, refresh: () => null
+  },
   canReadShadowPerformance,
   canReadPromotionReadiness,
-  canReadModelCard
+  canReadModelCard,
+  canReadExactModelShadowPerformance
 }) {
   return (
     <ShadowPerformanceDashboardPage
@@ -22,9 +27,11 @@ export function ShadowPerformanceWorkspaceContainer({
       modelCardIsLoading={modelCardState.isLoading}
       modelCardError={modelCardState.error}
       onModelCardRetry={modelCardState.refresh}
+      exactModelShadowPerformanceState={exactModelShadowPerformanceState}
       canReadShadowPerformance={canReadShadowPerformance}
       canReadPromotionReadiness={canReadPromotionReadiness}
       canReadModelCard={canReadModelCard}
+      canReadExactModelShadowPerformance={canReadExactModelShadowPerformance}
       onRetry={summaryState.refresh}
       workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />

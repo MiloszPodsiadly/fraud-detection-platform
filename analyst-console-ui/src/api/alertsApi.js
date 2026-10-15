@@ -4,6 +4,7 @@ import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 import { isValidPromotionReviewReadinessReport } from "../governance/promotionReviewReadinessReportValidation.js";
 import { isValidModelCard } from "../governance/modelCardValidation.js";
+import { isValidExactModelShadowPerformance } from "../governance/exactModelShadowPerformanceValidation.js";
 import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
 
 export { isAbortError } from "./apiErrors.js";
@@ -39,6 +40,9 @@ export function createAlertsApiClient({
     getCurrentShadowPerformanceSummary: (requestOptions) => shadowPerformanceSummaryRequest(request, requestOptions),
     getCurrentPromotionReviewReadinessReport: (requestOptions) => promotionReviewReadinessReportRequest(request, requestOptions),
     getCurrentModelCard: (requestOptions) => modelCardRequest(request, requestOptions),
+    getExactModelShadowPerformance: (selector, requestOptions) => exactModelShadowPerformanceRequest(
+      request, selector, requestOptions
+    ),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -295,6 +299,26 @@ async function modelCardRequest(request, { signal } = {}) {
     ...(signal ? { signal } : {})
   });
   if (!isValidModelCard(response)) {
+    return Object.freeze({ state: "invalid-response" });
+  }
+  return response;
+}
+
+async function exactModelShadowPerformanceRequest(request, selector, { signal } = {}) {
+  const params = new URLSearchParams();
+  for (const field of ["modelName", "modelVersion", "featureContractVersion", "modelArtifactSha256"]) {
+    const value = String(selector?.[field] || "").trim();
+    if (!value) throw new TypeError(`${field} is required`);
+    params.set(field, value);
+  }
+  for (const field of ["fromInclusive", "toInclusive"]) {
+    const value = String(selector?.[field] || "").trim();
+    if (value) params.set(field, value);
+  }
+  const response = await request(`/api/v1/governance/model-shadow-performance?${params.toString()}`, {
+    ...(signal ? { signal } : {})
+  });
+  if (!isValidExactModelShadowPerformance(response)) {
     return Object.freeze({ state: "invalid-response" });
   }
   return response;

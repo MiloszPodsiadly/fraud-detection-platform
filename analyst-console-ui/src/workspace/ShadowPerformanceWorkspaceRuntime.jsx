@@ -2,6 +2,7 @@ import { ShadowPerformanceWorkspaceContainer } from "./ShadowPerformanceWorkspac
 import { usePromotionReviewReadinessReport } from "./usePromotionReviewReadinessReport.js";
 import { useModelCard } from "./useModelCard.js";
 import { useShadowPerformanceSummary } from "./useShadowPerformanceSummary.js";
+import { useExactModelShadowPerformance } from "./useExactModelShadowPerformance.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 import { createWorkspaceRuntimeResult } from "./workspaceRuntimeResult.js";
 
@@ -10,7 +11,12 @@ export function ShadowPerformanceWorkspaceRuntime({
   sharedWorkspaceReadsEnabled,
   children
 }) {
-  const { canReadModelCard, canReadPromotionReadiness, canReadShadowPerformance } = useWorkspaceRuntime();
+  const {
+    canReadExactModelShadowPerformance,
+    canReadModelCard,
+    canReadPromotionReadiness,
+    canReadShadowPerformance
+  } = useWorkspaceRuntime();
   const summaryState = useShadowPerformanceSummary({
     enabled: sharedWorkspaceReadsEnabled && canReadShadowPerformance === true
   });
@@ -20,11 +26,15 @@ export function ShadowPerformanceWorkspaceRuntime({
   const modelCardState = useModelCard({
     enabled: sharedWorkspaceReadsEnabled && canReadModelCard === true
   });
+  const exactModelShadowPerformanceState = useExactModelShadowPerformance({
+    enabled: sharedWorkspaceReadsEnabled && canReadExactModelShadowPerformance === true
+  });
 
   function refreshWorkspace() {
     summaryState.refresh();
     promotionReadinessState.refresh();
     modelCardState.refresh();
+    exactModelShadowPerformanceState.refresh();
   }
 
   return children(createWorkspaceRuntimeResult({
@@ -34,9 +44,11 @@ export function ShadowPerformanceWorkspaceRuntime({
         summaryState={summaryState}
         promotionReadinessState={promotionReadinessState}
         modelCardState={modelCardState}
+        exactModelShadowPerformanceState={exactModelShadowPerformanceState}
         canReadShadowPerformance={canReadShadowPerformance}
         canReadPromotionReadiness={canReadPromotionReadiness}
         canReadModelCard={canReadModelCard}
+        canReadExactModelShadowPerformance={canReadExactModelShadowPerformance}
       />
     ),
     error: summaryState.error,

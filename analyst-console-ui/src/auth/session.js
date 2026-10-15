@@ -5,7 +5,8 @@ export { AUTHORITIES } from "./generatedAuthorities.js";
 export const MODEL_GOVERNANCE_READ_AUTHORITIES = Object.freeze([
   AUTHORITIES.SHADOW_PERFORMANCE_READ,
   AUTHORITIES.PROMOTION_READINESS_READ,
-  AUTHORITIES.MODEL_CARD_READ
+  AUTHORITIES.MODEL_CARD_READ,
+  AUTHORITIES.MODEL_SHADOW_PERFORMANCE_READ
 ]);
 
 export const ROLE_AUTHORITIES = {
@@ -55,6 +56,7 @@ export const AUTHORITY_LABELS = {
   [AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE]: "record governance advisory review",
   [AUTHORITIES.SHADOW_PERFORMANCE_READ]: "read shadow performance summary",
   [AUTHORITIES.MODEL_CARD_READ]: "read exact model card",
+  [AUTHORITIES.MODEL_SHADOW_PERFORMANCE_READ]: "read exact model shadow performance",
   [AUTHORITIES.AUDIT_READ]: "read platform audit events"
 };
 

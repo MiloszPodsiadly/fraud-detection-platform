@@ -16,6 +16,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
   const shadowPerformanceRead = authorityState(session, AUTHORITIES.SHADOW_PERFORMANCE_READ);
   const promotionReadinessRead = authorityState(session, AUTHORITIES.PROMOTION_READINESS_READ);
   const modelCardRead = authorityState(session, AUTHORITIES.MODEL_CARD_READ);
+  const modelShadowPerformanceRead = authorityState(session, AUTHORITIES.MODEL_SHADOW_PERFORMANCE_READ);
   const modelGovernanceRead = authorityGroupState(session, MODEL_GOVERNANCE_READ_AUTHORITIES);
   // Capability flags are frontend UX/request gates only. Backend authorization still enforces every protected API call.
   const value = useMemo(() => ({
@@ -31,6 +32,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadShadowPerformance: shadowPerformanceRead,
     canReadPromotionReadiness: promotionReadinessRead,
     canReadModelCard: modelCardRead,
+    canReadExactModelShadowPerformance: modelShadowPerformanceRead,
     // Governance advisory read views are backed by TRANSACTION_MONITOR_READ in the current backend authorization model.
     // Governance audit writes require GOVERNANCE_ADVISORY_AUDIT_WRITE; do not reuse read capability for write affordances.
     canReadGovernanceAdvisories: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
@@ -42,6 +44,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     enabled,
     authenticated,
     modelCardRead,
+    modelShadowPerformanceRead,
     modelGovernanceRead,
     promotionReadinessRead,
     session,

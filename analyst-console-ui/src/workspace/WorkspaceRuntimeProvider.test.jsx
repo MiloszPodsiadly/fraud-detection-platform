@@ -188,6 +188,22 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadPromotionReadiness).toBe(false);
   });
 
+  it("exactModelShadowPerformanceReadMakesGovernanceVisibleWithoutGrantingOtherEvidence", () => {
+    const session = authenticatedSession({ authorities: ["model-shadow-performance:read"] });
+    const { result } = renderHook(() => useWorkspaceRuntime(), {
+      wrapper: ({ children }) => (
+        <WorkspaceRuntimeProvider session={session} authProvider={{ kind: "oidc" }}>
+          {children}
+        </WorkspaceRuntimeProvider>
+      )
+    });
+
+    expect(result.current.canReadModelGovernance).toBe(true);
+    expect(result.current.canReadExactModelShadowPerformance).toBe(true);
+    expect(result.current.canReadModelCard).toBe(false);
+    expect(result.current.canReadShadowPerformance).toBe(false);
+  });
+
   it.each([
     ["genericTransactionReadDoesNotShowDashboard", ["transaction-monitor:read"]],
     ["fraudCaseReadDoesNotShowDashboard", ["fraud-case:read"]],
