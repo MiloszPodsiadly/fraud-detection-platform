@@ -55,8 +55,8 @@ Unused legacy API wrappers are removed, and guard coverage prevents their reintr
 The frontend architecture gate runs:
 
 - `npm run check:api-client-boundary`
-- `npm run check:api-client-boundary:fdp49`
-- `npm run check:api-client-boundary:fdp50`
+- `npm run check:auth-sensitive-api-boundary`
+- `npm run check:workspace-api-client-boundary`
 - frontend unit tests covering API client boundary behavior
 
 These guards prevent raw fetch, default wrapper reintroduction, dynamic wrapper imports, and route strings outside the

@@ -139,6 +139,7 @@ function runtimeValue(apiClient) {
     canReadTransactions: true,
     canReadSuspiciousTransactions: true,
     canReadGovernanceAdvisories: true,
+    canReadModelGovernance: true,
     canReadShadowPerformance: true,
     canWriteGovernanceAudit: false,
     workspaceSessionResetKey: "demo:analyst-1",

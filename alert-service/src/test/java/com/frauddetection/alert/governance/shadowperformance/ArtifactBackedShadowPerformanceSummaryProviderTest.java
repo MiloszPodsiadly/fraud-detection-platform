@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
+import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -615,8 +616,7 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     @Test
     void rejectsArtifactReplacedBetweenAttributeCheckAndReadEvenWhenPayloadBytesMatch() throws Exception {
         Path artifact = writeSummary(validSummary());
-        ArtifactBackedShadowPerformanceSummaryProvider.PortableArtifactReader reader =
-                new ArtifactBackedShadowPerformanceSummaryProvider.PortableArtifactReader(path -> {
+        GovernanceArtifactReader reader = new GovernanceArtifactReader(path -> {
                     if (path.getFileName().toString().equals("current-summary.json")) {
                         try {
                             Files.delete(path);

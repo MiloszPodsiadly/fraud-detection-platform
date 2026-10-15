@@ -2,6 +2,7 @@ import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WORKSPACE_ROUTE_REGISTRY } from "./WorkspaceRouteRegistry.jsx";
 import { WorkspaceRuntimeContext } from "./useWorkspaceRuntime.js";
+import { modelCard } from "../test-utils/modelCardFixtures.js";
 
 const apiClient = {
   getFraudCaseWorkQueueSummary: vi.fn(),
@@ -14,6 +15,7 @@ const apiClient = {
   getGovernanceAdvisoryAnalytics: vi.fn(),
   getCurrentShadowPerformanceSummary: vi.fn(),
   getCurrentPromotionReviewReadinessReport: vi.fn(),
+  getCurrentModelCard: vi.fn(),
   getGovernanceAdvisoryAudit: vi.fn(),
   recordGovernanceAdvisoryAudit: vi.fn()
 };
@@ -31,6 +33,7 @@ describe("workspace runtime ownership", () => {
     apiClient.getGovernanceAdvisoryAnalytics.mockResolvedValue(analytics(1));
     apiClient.getCurrentShadowPerformanceSummary.mockResolvedValue(shadowSummary());
     apiClient.getCurrentPromotionReviewReadinessReport.mockResolvedValue(promotionReadinessReport());
+    apiClient.getCurrentModelCard.mockResolvedValue(modelCard());
     apiClient.getGovernanceAdvisoryAudit.mockResolvedValue({ status: "AVAILABLE", audit_events: [] });
     apiClient.recordGovernanceAdvisoryAudit.mockResolvedValue(undefined);
   });
@@ -72,6 +75,7 @@ describe("workspace runtime ownership", () => {
     rerender(runtimeElement("shadowPerformance"));
     await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiClient.getCurrentModelCard).toHaveBeenCalledTimes(1));
   });
 
   it("keeps governance queue and reports analytics as separate active owners", async () => {
@@ -113,6 +117,13 @@ describe("workspace runtime ownership", () => {
 
     await waitFor(() => expect(lastRuntimeResult(onResult)).toBeDefined());
     expect(apiClient.getCurrentPromotionReviewReadinessReport).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch Model Card data when Model Card authority is missing", async () => {
+    renderRuntime("shadowPerformance", { canReadModelCard: false }, runtimeValue({ canReadModelCard: false }));
+
+    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
+    expect(apiClient.getCurrentModelCard).not.toHaveBeenCalled();
   });
 
   it("shadow performance read alone does not grant promotion readiness read", async () => {
@@ -178,16 +189,18 @@ describe("workspace runtime ownership", () => {
     expect(container.textContent).toContain("REVIEWABLE");
   });
 
-  it("refresh reloads both shadow and promotion readiness safely", async () => {
+  it("refresh reloads all governance evidence safely", async () => {
     const onResult = vi.fn();
     renderRuntime("shadowPerformance", {}, runtimeValue(), { ...runtimeProps(), onResult });
     await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiClient.getCurrentModelCard).toHaveBeenCalledTimes(1));
 
     lastRuntimeResult(onResult).refreshWorkspace();
 
     await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiClient.getCurrentModelCard).toHaveBeenCalledTimes(2));
   });
 
   it("does not introduce promotion readiness write calls", async () => {
@@ -255,8 +268,10 @@ function runtimeValue(overrides = {}) {
     canReadTransactions: true,
     canReadSuspiciousTransactions: true,
     canReadGovernanceAdvisories: true,
+    canReadModelGovernance: true,
     canReadShadowPerformance: true,
     canReadPromotionReadiness: true,
+    canReadModelCard: true,
     canWriteGovernanceAudit: false,
     workspaceSessionResetKey: "demo:analyst-1",
     runtimeStatus: "ready",

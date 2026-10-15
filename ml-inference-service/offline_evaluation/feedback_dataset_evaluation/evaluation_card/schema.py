@@ -27,8 +27,8 @@ from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     validate_platform_evaluation_artifact_identity,
     validate_platform_evaluation_artifact_provenance,
 )
-from offline_evaluation.feedback_dataset_evaluation.evaluation_card.safety_policy import (
-    EvaluationCardSafetyPolicyError,
+from offline_evaluation.feedback_dataset_evaluation.governance_artifact_safety import (
+    GovernanceArtifactSafetyPolicyError,
     reject_unsafe_policy_value,
     reject_unsafe_structure,
 )
@@ -456,12 +456,12 @@ def _bounded_string(raw: dict[str, Any], field: str, max_length: int) -> str:
 def _reject_unsafe(value: Any) -> None:
     try:
         reject_unsafe_structure(value, safe_values=SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES)
-    except EvaluationCardSafetyPolicyError as exc:
+    except GovernanceArtifactSafetyPolicyError as exc:
         raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
 
 
 def _reject_unsafe_value(value: str) -> None:
     try:
         reject_unsafe_policy_value(value, safe_values=SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES)
-    except EvaluationCardSafetyPolicyError as exc:
+    except GovernanceArtifactSafetyPolicyError as exc:
         raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc

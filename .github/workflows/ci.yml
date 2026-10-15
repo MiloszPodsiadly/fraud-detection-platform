@@ -128,95 +128,6 @@ jobs:
             alert-service/target/surefire-reports/
             alert-service/target/failsafe-reports/
 
-  fdp43-fraud-case-cleanup-guard:
-    name: FDP-43 Retired Fraud Case Lifecycle Guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs:
-      - backend
-      - fdp42-fraud-case-management
-      - regulated-mutation-regression
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-
-      - name: Verify Docker is available for Testcontainers
-        run: docker version
-
-      - name: Run FDP-43 retired lifecycle cleanup guard suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseMutationInvariantTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,RegulatedMutationIdempotencyPrimitiveStabilityTest" test
-
-      - name: Verify FDP-43 proof suite reports
-        run: node scripts/ci/verify-junit-reports.mjs --suite fdp43
-
-      - name: Upload FDP-43 test reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: fdp43-retired-lifecycle-guard-test-reports
-          if-no-files-found: error
-          path: |
-            alert-service/target/surefire-reports/
-            alert-service/target/failsafe-reports/
-
-  fdp44-fraud-case-cleanup-guard:
-    name: FDP-44 Retired Fraud Case Lifecycle Guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs:
-      - backend
-      - fdp42-fraud-case-management
-      - regulated-mutation-regression
-      - fdp43-fraud-case-cleanup-guard
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-
-      - name: Verify Docker is available for Testcontainers
-        run: docker version
-
-      - name: Run FDP-44 retired lifecycle cleanup guard suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseMutationInvariantTest,AlertServiceMetricsTest" test
-
-      - name: Verify FDP-44 proof suite reports
-        run: node scripts/ci/verify-junit-reports.mjs --suite fdp44
-
-      - name: Upload FDP-44 test reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: fdp44-retired-lifecycle-guard-test-reports
-          if-no-files-found: error
-          path: |
-            alert-service/target/surefire-reports/
-            alert-service/target/failsafe-reports/
-
   fdp45-fraud-case-work-queue-read-model:
     name: FDP-45 Fraud Case Work Queue Read Model
     runs-on: ubuntu-latest
@@ -225,8 +136,6 @@ jobs:
       - backend
       - fdp42-fraud-case-management
       - regulated-mutation-regression
-      - fdp43-fraud-case-cleanup-guard
-      - fdp44-fraud-case-cleanup-guard
 
     steps:
       - name: Checkout
@@ -496,8 +405,8 @@ jobs:
         working-directory: analyst-console-ui
         run: npm run build
 
-  fdp49-security-route-boundary-hardening:
-    name: FDP-49 Security Route Boundary Hardening
+  security-route-boundary:
+    name: Security Route Boundary
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs:
@@ -523,20 +432,20 @@ jobs:
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
-      # FDP-49 protects post-BFF route/auth boundaries and must remain required for merge.
-      - name: Ensure FDP-49 tests are not skipped
-        run: node scripts/ci/guard-test-activation.mjs --suite fdp49
+      # Post-BFF route/auth boundaries remain required for merge.
+      - name: Ensure security route boundary tests are not skipped
+        run: node scripts/ci/guard-test-activation.mjs --suite securityRouteBoundary
 
-      - name: Run FDP-49 backend security route tests
+      - name: Run backend security route tests
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=AuthorizationRulesCoverageTest,AuthorizationRuleGroupRegistrationTest,RouteCoverageAgainstMvcMappingsTest,SecurityMatcherOrderRegressionTest,DenyByDefaultSecurityTest,SpaFallbackSecurityTest,BffCsrfBoundaryRegressionTest,BearerVsSessionCsrfRegressionTest,BffSessionSecurityIntegrationTest,SecurityRouteRegistryDocumentationTest,SecurityRouteOwnershipRegistryTest,SingleSecurityFilterChainGuardTest,AlertServiceMetricsTest" test
 
-      - name: Verify FDP-49 backend reports
-        run: node scripts/ci/verify-junit-reports.mjs --suite fdp49
+      - name: Verify security route boundary backend reports
+        run: node scripts/ci/verify-junit-reports.mjs --suite securityRouteBoundary
 
-      - name: Run FDP-49 security grep guardrails
+      - name: Run security route grep guardrails
         run: |
           if grep -R "anyRequest()\.permitAll()" alert-service/src/main/java/com/frauddetection/alert/security/config; then
-            echo "FDP-49 forbids anyRequest().permitAll() in alert-service security config" >&2
+            echo "Security route boundary forbids anyRequest().permitAll() in alert-service security config" >&2
             exit 1
           fi
           if grep -R 'requestMatchers("/api/\*\*")\.permitAll()' alert-service/src/main/java/com/frauddetection/alert/security/config; then exit 1; fi
@@ -545,7 +454,7 @@ jobs:
           if grep -R 'requestMatchers("/system/\*\*")\.permitAll()' alert-service/src/main/java/com/frauddetection/alert/security/config; then exit 1; fi
           if grep -R 'requestMatchers("/bff/\*\*")\.permitAll()' alert-service/src/main/java/com/frauddetection/alert/security/config; then exit 1; fi
           if grep -R "HttpMethod\.POST\|HttpMethod\.PUT\|HttpMethod\.PATCH\|HttpMethod\.DELETE" alert-service/src/main/java/com/frauddetection/alert/security/config/SpaFallbackAuthorizationRules.java; then
-            echo "FDP-49 SPA fallback must remain GET-only" >&2
+            echo "Security route boundary requires the SPA fallback to remain GET-only" >&2
             exit 1
           fi
 
@@ -555,33 +464,33 @@ jobs:
           test "$(npm config get ignore-scripts)" = "true"
           npm ci --ignore-scripts
 
-      - name: Run FDP-49 frontend API client boundary tests
+      - name: Run frontend API client boundary tests
         working-directory: analyst-console-ui
-        run: npm test -- --run src/api/apiClientBoundary.test.js src/auth/authProvider.test.js src/api/alertsApi.test.js src/workspace/workspaceDataHooks.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp49-vitest.xml
+        run: npm test -- --run src/api/apiClientBoundary.test.js src/auth/authProvider.test.js src/api/alertsApi.test.js src/workspace/workspaceDataHooks.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js --reporter=default --reporter=junit --outputFile=./test-results/security-route-boundary-vitest.xml
 
-      - name: Guard FDP-49 API client boundary
+      - name: Guard auth-sensitive API boundary
         working-directory: analyst-console-ui
         run: |
-          npm run check:api-client-boundary:fdp49
-          echo "fdp49_api_client_boundary_guard_ran=true" > test-results/fdp49-api-client-boundary-guard.txt
+          npm run check:auth-sensitive-api-boundary
+          echo "auth_sensitive_api_boundary_guard_ran=true" > test-results/auth-sensitive-api-boundary-guard.txt
 
-      - name: Verify FDP-49 frontend report
-        run: node scripts/ci/verify-vitest-reports.mjs --suite fdp49
+      - name: Verify security route boundary frontend report
+        run: node scripts/ci/verify-vitest-reports.mjs --suite securityRouteBoundary
 
-      - name: Build FDP-49 UI
+      - name: Build security route boundary UI
         working-directory: analyst-console-ui
         run: npm run build
 
-      - name: Upload FDP-49 route boundary reports
+      - name: Upload security route boundary reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: fdp49-route-boundary-reports
+          name: security-route-boundary-reports
           if-no-files-found: ignore
           path: |
             alert-service/target/surefire-reports/
-            analyst-console-ui/test-results/fdp49-vitest.xml
-            analyst-console-ui/test-results/fdp49-api-client-boundary-guard.txt
+            analyst-console-ui/test-results/security-route-boundary-vitest.xml
+            analyst-console-ui/test-results/auth-sensitive-api-boundary-guard.txt
 
   fdp54-ci-docs-governance:
     name: FDP-54 CI Docs Governance
@@ -612,7 +521,7 @@ jobs:
     timeout-minutes: 30
     needs:
       - frontend
-      - fdp49-security-route-boundary-hardening
+      - security-route-boundary
 
     steps:
       - name: Checkout
@@ -636,32 +545,32 @@ jobs:
       - name: Ensure frontend architecture tests are not skipped or focused
         run: node scripts/ci/guard-test-activation.mjs --suite frontend-architecture
 
-      - name: FDP-50 API client boundary
+      - name: API client boundary
         working-directory: analyst-console-ui
         run: |
-          echo "::group::FDP-50 API client boundary"
-          npm test -- --run src/api/apiClientBoundary.test.js src/auth/authProvider.test.js src/api/alertsApi.test.js src/workspace/workspaceDataHooks.test.js src/workspace/useWorkspaceRoute.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp50-vitest.xml
+          echo "::group::API client boundary"
+          npm test -- --run src/api/apiClientBoundary.test.js src/auth/authProvider.test.js src/api/alertsApi.test.js src/workspace/workspaceDataHooks.test.js src/workspace/useWorkspaceRoute.test.js src/fraudCases/useFraudCaseWorkQueue.test.js src/fraudCases/useFraudCaseWorkQueueSummary.test.js src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/api-client-boundary-vitest.xml
           echo "::endgroup::"
 
-      - name: FDP-51 runtime provider
+      - name: Workspace runtime provider
         working-directory: analyst-console-ui
         run: |
-          echo "::group::FDP-51 runtime provider"
-          npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/useGovernanceAuditWorkflow.test.js src/workspace/workspaceRefreshContract.test.js src/workspace/workspaceDataHooks.test.js src/components/GovernanceReviewQueue.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/alertsApi.test.js src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/fdp51-vitest.xml
+          echo "::group::Workspace runtime provider"
+          npm test -- --run src/workspace/WorkspaceRuntimeProvider.test.jsx src/workspace/useWorkspaceCounters.test.js src/workspace/useGovernanceAuditWorkflow.test.js src/workspace/workspaceRefreshContract.test.js src/workspace/workspaceDataHooks.test.js src/components/GovernanceReviewQueue.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/pages/AlertsListPage.test.jsx src/App.test.jsx src/api/alertsApi.test.js src/api/apiClientBoundary.test.js --reporter=default --reporter=junit --outputFile=./test-results/workspace-runtime-vitest.xml
           echo "::endgroup::"
 
-      - name: FDP-52 detail UX
+      - name: Analyst workspace detail UX
         working-directory: analyst-console-ui
         run: |
-          echo "::group::FDP-52 detail UX"
-          npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/components/DetailHeader.test.jsx src/components/DetailStateBanner.test.jsx src/utils/idempotencyKey.test.js src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp52-vitest.xml
+          echo "::group::Analyst workspace detail UX"
+          npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/AnalystWorkspaceContainer.test.jsx src/workspace/FraudTransactionWorkspaceContainer.test.jsx src/workspace/TransactionScoringWorkspaceContainer.test.jsx src/workspace/GovernanceWorkspaceContainer.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/components/DetailHeader.test.jsx src/components/DetailStateBanner.test.jsx src/utils/idempotencyKey.test.js src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/workspace-detail-vitest.xml
           echo "::endgroup::"
 
-      - name: FDP-53 runtime ownership
+      - name: Workspace runtime ownership
         working-directory: analyst-console-ui
         run: |
-          echo "::group::FDP-53 runtime ownership"
-          npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceRouteRegistry.test.jsx src/workspace/WorkspaceRuntimes.test.jsx src/workspace/workspaceRefreshContract.test.js src/workspace/useWorkspaceRefreshNotice.test.js src/workspace/workspaceRuntimeResult.test.js src/workspace/useWorkspaceRoute.test.js src/pages/AlertsListPage.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/fdp53-vitest.xml
+          echo "::group::Workspace runtime ownership"
+          npm test -- --run src/workspace/WorkspaceDashboardShell.test.jsx src/workspace/WorkspaceRouteRegistry.test.jsx src/workspace/WorkspaceRuntimes.test.jsx src/workspace/workspaceRefreshContract.test.js src/workspace/useWorkspaceRefreshNotice.test.js src/workspace/workspaceRuntimeResult.test.js src/workspace/useWorkspaceRoute.test.js src/pages/AlertsListPage.test.jsx src/workspace/ReportsWorkspaceContainer.test.jsx src/workspace/WorkspaceDetailRouter.test.jsx src/workspace/WorkspaceContainerBoundary.test.jsx src/pages/AlertDetailsPage.test.jsx src/pages/FraudCaseDetailsPage.test.jsx src/App.test.jsx --reporter=default --reporter=junit --outputFile=./test-results/workspace-runtime-ownership-vitest.xml
           echo "::endgroup::"
 
       - name: Build architecture-gated UI
@@ -671,30 +580,30 @@ jobs:
       - name: Run frontend architecture scope guards
         working-directory: analyst-console-ui
         env:
-          FDP50_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-          FDP51_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-          FDP52_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-          FDP53_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          API_CLIENT_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          WORKSPACE_RUNTIME_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          WORKSPACE_DETAIL_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          WORKSPACE_RUNTIME_OWNERSHIP_SCOPE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
         run: |
-          echo "::group::FDP-50 API client boundary guard"
-          npm run check:api-client-boundary:fdp50
-          echo "fdp50_api_client_boundary_guard_ran=true" > test-results/frontend-architecture-guards.txt
+          echo "::group::API client boundary guard"
+          npm run check:workspace-api-client-boundary
+          echo "api_client_boundary_guard_ran=true" > test-results/frontend-architecture-guards.txt
           echo "::endgroup::"
-          echo "::group::FDP-50 scope guard"
-          npm run check:scope:fdp50
-          echo "fdp50_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::group::API client scope guard"
+          npm run check:scope:api-client
+          echo "api_client_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
           echo "::endgroup::"
-          echo "::group::FDP-51 scope guard"
-          npm run check:scope:fdp51
-          echo "fdp51_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::group::Workspace runtime scope guard"
+          npm run check:scope:workspace-runtime
+          echo "workspace_runtime_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
           echo "::endgroup::"
-          echo "::group::FDP-52 scope guard"
-          npm run check:scope:fdp52
-          echo "fdp52_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::group::Workspace detail scope guard"
+          npm run check:scope:workspace-detail
+          echo "workspace_detail_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
           echo "::endgroup::"
-          echo "::group::FDP-53 scope guard"
-          npm run check:fdp53-scope
-          echo "fdp53_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
+          echo "::group::Workspace runtime ownership scope guard"
+          npm run check:scope:workspace-runtime-ownership
+          echo "workspace_runtime_ownership_scope_guard_ran=true" >> test-results/frontend-architecture-guards.txt
           echo "::endgroup::"
 
       - name: Verify frontend architecture reports
@@ -707,10 +616,10 @@ jobs:
           name: analyst-console-frontend-architecture-gate-reports
           if-no-files-found: ignore
           path: |
-            analyst-console-ui/test-results/fdp50-vitest.xml
-            analyst-console-ui/test-results/fdp51-vitest.xml
-            analyst-console-ui/test-results/fdp52-vitest.xml
-            analyst-console-ui/test-results/fdp53-vitest.xml
+            analyst-console-ui/test-results/api-client-boundary-vitest.xml
+            analyst-console-ui/test-results/workspace-runtime-vitest.xml
+            analyst-console-ui/test-results/workspace-detail-vitest.xml
+            analyst-console-ui/test-results/workspace-runtime-ownership-vitest.xml
             analyst-console-ui/test-results/frontend-architecture-guards.txt
 
   fdp36-real-chaos:

@@ -15,8 +15,8 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema impor
     FeedbackDatasetEvaluationCardValidationError,
     validate_evaluation_card,
 )
-from offline_evaluation.feedback_dataset_evaluation.evaluation_card.safety_policy import (
-    EvaluationCardSafetyPolicyError,
+from offline_evaluation.feedback_dataset_evaluation.governance_artifact_safety import (
+    GovernanceArtifactSafetyPolicyError,
     compact_policy_token,
     reject_unsafe_serialized_payload,
     reject_unsafe_structure,
@@ -193,20 +193,20 @@ class FeedbackDatasetEvaluationCardSchemaTest(unittest.TestCase):
         self._assert_rejected(metricsSummary=metrics)
 
     def test_safetyPolicyRejectsUnsafeNestedFieldAndValue(self):
-        with self.assertRaises(EvaluationCardSafetyPolicyError):
+        with self.assertRaises(GovernanceArtifactSafetyPolicyError):
             reject_unsafe_structure({"safe": {"rawPayload": "x"}})
-        with self.assertRaises(EvaluationCardSafetyPolicyError):
+        with self.assertRaises(GovernanceArtifactSafetyPolicyError):
             reject_unsafe_structure({"safe": ["payment authorization"]})
 
     def test_safetyPolicyRejectsUnsafeSerializedPayload(self):
-        with self.assertRaises(EvaluationCardSafetyPolicyError):
+        with self.assertRaises(GovernanceArtifactSafetyPolicyError):
             reject_unsafe_serialized_payload('{"safe":"raw payload"}')
 
     def test_safetyPolicyAcceptsExactSafeNegatedCodeButRejectsNearMatch(self):
         safe = {"NO_PAYMENT_AUTHORIZATION"}
 
         reject_unsafe_structure("NO_PAYMENT_AUTHORIZATION", safe_values=safe)
-        with self.assertRaises(EvaluationCardSafetyPolicyError):
+        with self.assertRaises(GovernanceArtifactSafetyPolicyError):
             reject_unsafe_structure("NO_PAYMENT_AUTHORIZATION_NOW", safe_values=safe)
 
     def test_safetyPolicyCompactsTokensConsistently(self):

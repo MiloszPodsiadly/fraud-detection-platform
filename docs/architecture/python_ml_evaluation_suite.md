@@ -172,9 +172,10 @@ the manifest `sha256` and `sizeBytes`. The manifest is not external publishing, 
 publication requires a separate security, governance, and observability review.
 
 The `platform-evaluation/` and `model-evaluation/` families are independently complete under their own manifests.
-No current production or offline consumer treats the parent directory as an atomically published combined artifact
-set. Before a future Model Card or Promotion consumer relies on both families as one governed run, a run-level
-completion manifest or equivalent last-written publication boundary is required.
+The current exact-artifact Model Card consumes only the `model-evaluation/` family. No current production or offline
+consumer treats the parent directory as an atomically published combined artifact set. If a future governance
+consumer relies on both families as one governed run, a run-level completion manifest or equivalent last-written
+publication boundary is required.
 
 An evaluation output directory represents exactly one evaluation run. A run may use a new directory or an existing
 empty directory only. Any non-empty output directory is rejected before `platform-evaluation/` or `model-evaluation/`

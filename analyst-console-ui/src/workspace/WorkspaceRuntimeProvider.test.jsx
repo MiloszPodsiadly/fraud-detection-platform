@@ -35,8 +35,10 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadAlerts).toBe(true);
     expect(result.current.canReadSuspiciousTransactions).toBe(false);
     expect(result.current.canReadGovernanceAdvisories).toBe(true);
+    expect(result.current.canReadModelGovernance).toBe(false);
     expect(result.current.canReadShadowPerformance).toBe(false);
     expect(result.current.canReadPromotionReadiness).toBe(false);
+    expect(result.current.canReadModelCard).toBe(false);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.runtimeStatus).toBe("ready");
   });
@@ -57,8 +59,10 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadFraudCases).toBe(true);
     expect(result.current.canReadTransactions).toBe(true);
     expect(result.current.canReadSuspiciousTransactions).toBe(true);
+    expect(result.current.canReadModelGovernance).toBe(false);
     expect(result.current.canReadShadowPerformance).toBe(false);
     expect(result.current.canReadPromotionReadiness).toBe(false);
+    expect(result.current.canReadModelCard).toBe(false);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.apiClient).toEqual({ client: true });
   });
@@ -115,7 +119,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canWriteGovernanceAudit).toBe(false);
   });
 
-  it("dashboardRouteRequiresShadowPerformanceRead", () => {
+  it("modelGovernanceRouteRequiresAtLeastOneEvidenceReadAuthority", () => {
     const session = authenticatedSession({
       authorities: ["transaction-monitor:read", "fraud-case:read", "assistant-summary:read"]
     });
@@ -129,6 +133,8 @@ describe("WorkspaceRuntimeProvider", () => {
 
     expect(result.current.canReadShadowPerformance).toBe(false);
     expect(result.current.canReadPromotionReadiness).toBe(false);
+    expect(result.current.canReadModelCard).toBe(false);
+    expect(result.current.canReadModelGovernance).toBe(false);
     expect(result.current.canReadGovernanceAdvisories).toBe(true);
   });
 
@@ -145,6 +151,7 @@ describe("WorkspaceRuntimeProvider", () => {
     });
 
     expect(result.current.canReadShadowPerformance).toBe(true);
+    expect(result.current.canReadModelGovernance).toBe(true);
     expect(result.current.canReadPromotionReadiness).toBe(false);
   });
 
@@ -161,7 +168,24 @@ describe("WorkspaceRuntimeProvider", () => {
     });
 
     expect(result.current.canReadPromotionReadiness).toBe(true);
+    expect(result.current.canReadModelGovernance).toBe(true);
     expect(result.current.canReadShadowPerformance).toBe(false);
+  });
+
+  it("modelCardReadMakesModelGovernanceRouteVisibleWithoutGrantingOtherEvidence", () => {
+    const session = authenticatedSession({ authorities: ["model-card:read"] });
+    const { result } = renderHook(() => useWorkspaceRuntime(), {
+      wrapper: ({ children }) => (
+        <WorkspaceRuntimeProvider session={session} authProvider={{ kind: "oidc" }}>
+          {children}
+        </WorkspaceRuntimeProvider>
+      )
+    });
+
+    expect(result.current.canReadModelGovernance).toBe(true);
+    expect(result.current.canReadModelCard).toBe(true);
+    expect(result.current.canReadShadowPerformance).toBe(false);
+    expect(result.current.canReadPromotionReadiness).toBe(false);
   });
 
   it.each([
@@ -215,6 +239,8 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadGovernanceAdvisories).toBeUndefined();
     expect(result.current.canReadShadowPerformance).toBeUndefined();
     expect(result.current.canReadPromotionReadiness).toBeUndefined();
+    expect(result.current.canReadModelCard).toBeUndefined();
+    expect(result.current.canReadModelGovernance).toBeUndefined();
     expect(result.current.canWriteGovernanceAudit).toBeUndefined();
   });
 

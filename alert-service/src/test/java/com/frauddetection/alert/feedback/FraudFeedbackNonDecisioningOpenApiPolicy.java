@@ -19,7 +19,10 @@ final class FraudFeedbackNonDecisioningOpenApiPolicy {
             "BLOCKTRANSACTION",
             "AUTHORIZEPAYMENT"
     );
-    private static final Set<String> ALLOWED_NEGATED_LIMITATIONS = Set.of("DOES_NOT_AUTHORIZE_PAYMENTS");
+    private static final Set<String> ALLOWED_NEGATED_LIMITATIONS = Set.of(
+            "DOES_NOT_AUTHORIZE_PAYMENTS",
+            "MODEL_SPECIFIC_EVALUATION_DOES_NOT_AUTHORIZE_PAYMENTS"
+    );
     private static final Set<String> ACTIVE_SCALAR_FIELDS = Set.of(
             "operationId",
             "action",

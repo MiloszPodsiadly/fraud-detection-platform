@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const safeRepoRoot = repoRoot.replaceAll("\\", "/");
-const usingExplicitChangedFiles = Boolean(process.env.FDP53_SCOPE_CHANGED_FILES);
+const usingExplicitChangedFiles = Boolean(process.env.WORKSPACE_RUNTIME_OWNERSHIP_SCOPE_CHANGED_FILES);
 const changedFiles = resolveChangedFiles();
 const violations = [];
-const enforceFdp53BackendScope = usingExplicitChangedFiles || isFdp53ScopeBranch();
+const enforceBackendScope = usingExplicitChangedFiles;
 
 const backendProductionPrefixes = [
   "alert-service/src/main/java/",
@@ -19,24 +19,25 @@ const backendProductionPrefixes = [
   "audit-trust-authority/src/main/java/",
   "ml-inference-service/"
 ];
-const fdp55AllowedBackendFiles = new Set([
+const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
 ]);
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js",
   // API client tests assert exact API-client-owned paths; keep this exception exact.
-  "analyst-console-ui/src/api/alertsApi.test.js"
+  "analyst-console-ui/src/api/alertsApi.test.js",
+  "analyst-console-ui/src/api/modelCardApi.test.js"
 ]);
 const workspaceRuntimePrefixes = [
   "analyst-console-ui/src/workspace/"
 ];
-const scriptPath = "scripts/check-fdp53-scope.mjs";
+const scriptPath = "scripts/check-workspace-runtime-ownership-scope.mjs";
 const forbiddenWorkflowPattern = /\b(assign(?:ment)?|claim|bulk|mass[ -]?action|optimistic|Kafka|outbox|finality|idempotency)\b/i;
 const forbiddenExportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i;
 const prefetchPattern = /\b(prefetch|pre-load|preload|warm[ -]?up)\b/i;
 const newAuthModePattern = /\b(new auth mode|auth mode|oidc mode|bearer mode|session mode)\b/i;
 const defaultWrapperPattern = /from\s+["'][^"']*\/api\/alertsApi\.js["']/;
-const fdp54GovernanceFiles = new Set([
+const governanceFiles = new Set([
   "scripts/check-doc-overclaims.mjs",
   "scripts/check-scope-guard-helpers-smoke.mjs",
   "scripts/compare-ci-jobs.mjs",
@@ -45,10 +46,10 @@ const fdp54GovernanceFiles = new Set([
 
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
-  if (enforceFdp53BackendScope
+  if (enforceBackendScope
       && backendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))
-      && !fdp55AllowedBackendFiles.has(normalized)) {
-    violations.push(`${normalized}: FDP-53 is frontend runtime decomposition only; backend production code/resources must not change.`);
+      && !allowedBackendFiles.has(normalized)) {
+    violations.push(`${normalized}: workspace runtime ownership is frontend-only; backend production code/resources must not change.`);
   }
   if (!isCheckedTextFile(normalized)) {
     continue;
@@ -62,8 +63,8 @@ for (const file of changedFiles) {
     }
     if (!isAllowedNarrativeFile(normalized)
         && introducesForbiddenScope(sourceLine)
-        && !isAllowedFdp98FeedbackApiClientScope(normalized, sourceLine)) {
-      violations.push(`${normalized}: FDP-53 must not introduce product workflow, idempotency, Kafka/outbox/finality, auth mode, or speculative prefetch semantics.`);
+        && !isAllowedFeedbackApiClientScope(normalized, sourceLine)) {
+      violations.push(`${normalized}: workspace runtime ownership must not introduce product workflow, idempotency, Kafka/outbox/finality, auth mode, or speculative prefetch semantics.`);
     }
     if (isWorkspaceRuntimeFile(normalized) && defaultWrapperPattern.test(sourceLine)) {
       violations.push(`${normalized}: workspace/runtime/container code must not import default API wrappers.`);
@@ -98,7 +99,7 @@ for (const staleRefreshFile of [
   "analyst-console-ui/src/workspace/useWorkspaceRefreshController.test.js"
 ]) {
   if (existsSync(join(repoRoot, staleRefreshFile))) {
-    violations.push(`${staleRefreshFile}: FDP-53 refresh semantics must use workspaceRefreshContract, not the stale refresh controller.`);
+    violations.push(`${staleRefreshFile}: workspace refresh semantics must use workspaceRefreshContract, not the stale refresh controller.`);
   }
 }
 
@@ -112,7 +113,7 @@ for (const file of changedFiles.map((entry) => entry.replaceAll("\\", "/"))) {
 }
 
 if (violations.length > 0) {
-  console.error("FDP-53 scope guard failed:");
+  console.error("Workspace runtime ownership scope guard failed:");
   for (const violation of violations) {
     console.error(`- ${violation}`);
   }
@@ -134,7 +135,7 @@ function introducesForbiddenScope(sourceLine) {
     || newAuthModePattern.test(sourceLine);
 }
 
-function isAllowedFdp98FeedbackApiClientScope(file, sourceLine) {
+function isAllowedFeedbackApiClientScope(file, sourceLine) {
   return file === "analyst-console-ui/src/api/alertsApi.js"
     && /submitEngineIntelligenceFeedback|engine-intelligence\/feedback|idempotencyKey|X-Idempotency-Key/.test(sourceLine);
 }
@@ -149,7 +150,7 @@ function isCheckedTextFile(file) {
 
 function isAllowedNarrativeFile(file) {
   return isScopeGuardScript(file)
-    || fdp54GovernanceFiles.has(file)
+    || governanceFiles.has(file)
     || file.startsWith("scripts/ci/")
     || file.startsWith("docs/")
     || file.startsWith(".github/workflows/")
@@ -157,7 +158,7 @@ function isAllowedNarrativeFile(file) {
 }
 
 function isScopeGuardScript(file) {
-  return /^scripts\/check-fdp\d+-scope\.mjs$/.test(file);
+  return file.startsWith("scripts/check-") && file.endsWith("-scope.mjs");
 }
 
 function isWorkspaceRuntimeFile(file) {
@@ -173,23 +174,23 @@ function isAllowedRawFetchFile(file) {
 }
 
 function resolveChangedFiles() {
-  const explicit = process.env.FDP53_SCOPE_CHANGED_FILES;
+  const explicit = process.env.WORKSPACE_RUNTIME_OWNERSHIP_SCOPE_CHANGED_FILES;
   if (explicit) {
     return explicit.split(/[\r\n,]+/).map((entry) => entry.trim()).filter(Boolean);
   }
   const base = diffBase();
   if (!assertRefExists(base)) {
-    if (process.env.FDP53_SCOPE_ALLOW_HEAD_FALLBACK === "true") {
+    if (process.env.WORKSPACE_RUNTIME_OWNERSHIP_SCOPE_ALLOW_HEAD_FALLBACK === "true") {
       return git(["diff", "--name-only", "HEAD~1..HEAD"]).split(/\r?\n/).filter(Boolean);
     }
-    console.error(`Cannot resolve FDP-53 scope base ref ${base}`);
+    console.error(`Cannot resolve workspace runtime ownership scope base ref ${base}`);
     process.exit(1);
   }
   return git(["diff", "--name-only", `${base}...HEAD`]).split(/\r?\n/).filter(Boolean);
 }
 
 function diffBase() {
-  return process.env.FDP53_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
+  return process.env.WORKSPACE_RUNTIME_OWNERSHIP_SCOPE_BASE || `origin/${process.env.GITHUB_BASE_REF || "master"}`;
 }
 
 function assertRefExists(ref) {
@@ -199,11 +200,6 @@ function assertRefExists(ref) {
   } catch {
     return false;
   }
-}
-
-function isFdp53ScopeBranch() {
-  const headRef = process.env.GITHUB_HEAD_REF || process.env.BRANCH_NAME || git(["branch", "--show-current"], { allowFailure: true }).trim();
-  return /^FDP-53(?:$|[-_/])/.test(headRef);
 }
 
 function fileContentAsAddedLines(file) {

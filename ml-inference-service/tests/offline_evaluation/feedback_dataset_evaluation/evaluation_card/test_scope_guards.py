@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[4] / "offline_evaluation" / "feedback_dataset_evaluation" / "evaluation_card"
+SHARED_SAFETY_POLICY = PACKAGE_ROOT.parent / "governance_artifact_safety.py"
 DOC_PATHS = [
     Path(__file__).resolve().parents[5] / "docs" / "architecture" / "evaluation_card_v1.md",
     Path(__file__).resolve().parents[5] / "docs" / "architecture" / "python_ml_evaluation_suite.md",
@@ -75,16 +76,19 @@ class FeedbackDatasetEvaluationCardScopeGuardTest(unittest.TestCase):
         self.assertIn("not a signature, notarization, external attestation", text)
 
     def test_safetyPolicyHasSingleExecutableOwner(self):
-        policy = (PACKAGE_ROOT / "safety_policy.py").read_text(encoding="utf-8")
+        policy = SHARED_SAFETY_POLICY.read_text(encoding="utf-8")
         schema = (PACKAGE_ROOT / "schema.py").read_text(encoding="utf-8")
         generator = (PACKAGE_ROOT / "generator.py").read_text(encoding="utf-8")
         writer = (PACKAGE_ROOT / "writer.py").read_text(encoding="utf-8")
 
+        self.assertFalse((PACKAGE_ROOT / "safety_policy.py").exists())
+        self.assertIn("class GovernanceArtifactSafetyPolicyError", policy)
         self.assertIn("def compact_policy_token", policy)
         self.assertIn("def reject_unsafe_structure", policy)
         self.assertIn("def reject_unsafe_serialized_payload", policy)
         for source in (schema, generator, writer):
             self.assertNotIn("character.isalnum()", source)
+            self.assertIn("governance_artifact_safety", source)
         self.assertIn("reject_unsafe_structure", schema)
         self.assertIn("reject_unsafe_structure", generator)
         self.assertIn("reject_unsafe_serialized_payload", writer)

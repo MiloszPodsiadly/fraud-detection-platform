@@ -118,7 +118,7 @@ describe("WorkspaceNavigation shadow performance diagnostic boundary", () => {
       />
     );
 
-    expect(screen.getByText("Shadow diagnostics")).toBeInTheDocument();
+    expect(screen.getByText("Model evidence")).toBeInTheDocument();
     expect(screen.getByText("Current")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Transactions\s*44/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Alerts\s*41/ })).toBeInTheDocument();

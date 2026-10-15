@@ -18,34 +18,6 @@ export const ciSuites = {
       "AnalystRoleTest"
     ]
   },
-  fdp43: {
-    label: "FDP-43",
-    reports: "alert-service/target/surefire-reports",
-    junitRequired: [
-      "IdempotencyCanonicalHasherTest",
-      "SharedIdempotencyKeyPolicyTest",
-      "FraudCasePatchRegulatedMutationProofTest",
-      "FraudCaseRemovedRouteRuntimeTest",
-      "FraudCaseRemovedApiSurfaceTest",
-      "FraudCaseCurrentApiSurfaceTest",
-      "FraudCaseMutationInvariantTest",
-      "FraudCaseControllerTest",
-      "FraudCaseSecurityIntegrationTest",
-      "RegulatedMutationIdempotencyPrimitiveStabilityTest"
-    ]
-  },
-  fdp44: {
-    label: "FDP-44",
-    reports: "alert-service/target/surefire-reports",
-    junitRequired: [
-      "FraudCasePatchRegulatedMutationProofTest",
-      "FraudCaseRemovedRouteRuntimeTest",
-      "FraudCaseRemovedApiSurfaceTest",
-      "FraudCaseCurrentApiSurfaceTest",
-      "FraudCaseMutationInvariantTest",
-      "AlertServiceMetricsTest"
-    ]
-  },
   fdp45: {
     label: "FDP-45",
     reports: "alert-service/target/surefire-reports",
@@ -212,8 +184,8 @@ export const ciSuites = {
       }
     ]
   },
-  fdp49: {
-    label: "FDP-49",
+  securityRouteBoundary: {
+    label: "Security route boundary",
     reports: "alert-service/target/surefire-reports",
     junitRequired: [
       "com.frauddetection.alert.security.config.AuthorizationRulesCoverageTest",
@@ -232,7 +204,7 @@ export const ciSuites = {
     ],
     activationGroups: [
       {
-        label: "FDP-49 backend tests",
+        label: "Security route boundary backend tests",
         pattern: "java-no-disabled",
         files: [
           "alert-service/src/test/java/com/frauddetection/alert/security/config/AuthorizationRulesCoverageTest.java",
@@ -250,7 +222,7 @@ export const ciSuites = {
         ]
       },
       {
-        label: "FDP-49 frontend tests",
+        label: "Security route boundary frontend tests",
         pattern: "vitest-no-skip-or-only",
         files: [
           "analyst-console-ui/src/api/apiClientBoundary.test.js",
@@ -264,7 +236,7 @@ export const ciSuites = {
     ],
     vitestReports: [
       {
-        path: "analyst-console-ui/test-results/fdp49-vitest.xml",
+        path: "analyst-console-ui/test-results/security-route-boundary-vitest.xml",
         required: [
           "apiClientBoundary.test.js",
           "authProvider.test.js",
@@ -278,8 +250,8 @@ export const ciSuites = {
     ],
     markerFiles: [
       {
-        path: "analyst-console-ui/test-results/fdp49-api-client-boundary-guard.txt",
-        contains: "fdp49_api_client_boundary_guard_ran=true"
+        path: "analyst-console-ui/test-results/auth-sensitive-api-boundary-guard.txt",
+        contains: "auth_sensitive_api_boundary_guard_ran=true"
       }
     ]
   },
@@ -340,7 +312,7 @@ export const ciSuites = {
     ],
     vitestReports: [
       {
-        path: "analyst-console-ui/test-results/fdp50-vitest.xml",
+        path: "analyst-console-ui/test-results/api-client-boundary-vitest.xml",
         required: [
           "apiClientBoundary.test.js",
           "authProvider.test.js",
@@ -354,7 +326,7 @@ export const ciSuites = {
         forbidSkipped: true
       },
       {
-        path: "analyst-console-ui/test-results/fdp51-vitest.xml",
+        path: "analyst-console-ui/test-results/workspace-runtime-vitest.xml",
         required: [
           "WorkspaceRuntimeProvider.test.jsx",
           "useWorkspaceCounters.test.js",
@@ -372,7 +344,7 @@ export const ciSuites = {
         forbidSkipped: true
       },
       {
-        path: "analyst-console-ui/test-results/fdp52-vitest.xml",
+        path: "analyst-console-ui/test-results/workspace-detail-vitest.xml",
         required: [
           "WorkspaceDashboardShell.test.jsx",
           "WorkspaceDetailRouter.test.jsx",
@@ -391,7 +363,7 @@ export const ciSuites = {
         forbidSkipped: true
       },
       {
-        path: "analyst-console-ui/test-results/fdp53-vitest.xml",
+        path: "analyst-console-ui/test-results/workspace-runtime-ownership-vitest.xml",
         required: [
           "WorkspaceDashboardShell.test.jsx",
           "WorkspaceRouteRegistry.test.jsx",
@@ -414,23 +386,23 @@ export const ciSuites = {
     markerFiles: [
       {
         path: "analyst-console-ui/test-results/frontend-architecture-guards.txt",
-        contains: "fdp50_api_client_boundary_guard_ran=true"
+        contains: "api_client_boundary_guard_ran=true"
       },
       {
         path: "analyst-console-ui/test-results/frontend-architecture-guards.txt",
-        contains: "fdp50_scope_guard_ran=true"
+        contains: "api_client_scope_guard_ran=true"
       },
       {
         path: "analyst-console-ui/test-results/frontend-architecture-guards.txt",
-        contains: "fdp51_scope_guard_ran=true"
+        contains: "workspace_runtime_scope_guard_ran=true"
       },
       {
         path: "analyst-console-ui/test-results/frontend-architecture-guards.txt",
-        contains: "fdp52_scope_guard_ran=true"
+        contains: "workspace_detail_scope_guard_ran=true"
       },
       {
         path: "analyst-console-ui/test-results/frontend-architecture-guards.txt",
-        contains: "fdp53_scope_guard_ran=true"
+        contains: "workspace_runtime_ownership_scope_guard_ran=true"
       }
     ]
   }

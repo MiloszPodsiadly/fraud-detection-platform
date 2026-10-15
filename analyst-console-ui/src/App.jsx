@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getConfiguredAuthProvider } from "./auth/authProvider.js";
 import { isOidcCallbackPath } from "./auth/oidcClient.js";
-import { AUTHORITIES, hasAuthority, normalizeSession } from "./auth/session.js";
+import {
+  AUTHORITIES,
+  MODEL_GOVERNANCE_READ_AUTHORITIES,
+  hasAnyAuthority,
+  hasAuthority,
+  normalizeSession
+} from "./auth/session.js";
 import { SESSION_STATES, getSessionStateForProvider } from "./auth/sessionState.js";
 import { SessionBadge, SessionSettingsMenu } from "./components/SessionBadge.jsx";
 import { WorkspaceDashboardShell } from "./workspace/WorkspaceDashboardShell.jsx";
@@ -250,7 +256,7 @@ export default function App() {
 function visiblePrimaryPages(workspacePages, session) {
   return Object.entries(workspacePages).filter(([page]) => (
     (page !== "suspiciousTransactions" || hasAuthority(session, AUTHORITIES.SUSPICIOUS_TRANSACTION_READ))
-    && (page !== "shadowPerformance" || hasAuthority(session, AUTHORITIES.SHADOW_PERFORMANCE_READ))
+    && (page !== "shadowPerformance" || hasAnyAuthority(session, MODEL_GOVERNANCE_READ_AUTHORITIES))
   ));
 }
 

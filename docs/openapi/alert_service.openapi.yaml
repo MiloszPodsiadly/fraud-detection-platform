@@ -1576,6 +1576,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+  /api/v1/governance/model-card/current:
+    get:
+      summary: Read the current exact-artifact ML Model Card
+      description: Returns one explicitly configured, manifest-verified Model Card. Requires model-card:read. The response is offline diagnostic evidence only and grants no model promotion, threshold change, production decision, payment authorization, workflow, registry mutation, or scoring authority. The endpoint never scans for a latest artifact and does not expose raw dataset rows or model bytes.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Current validated Model Card returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelCardResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: The configured artifact set is unavailable, inconsistent, or invalid. No paths or validation internals are returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -1598,6 +1624,312 @@ components:
         maxLength: 120
         pattern: "^[A-Za-z0-9._:-]+$"
   schemas:
+    ModelCardResponse:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, cardType, generatedAt, subject, promotionState, modelArtifactVerification, evaluationEvidence, evaluationSummary, verifiedUsageBoundary]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [ml-model-card-v1]
+        cardType:
+          type: string
+          enum: [ML_MODEL_CARD_V1]
+        generatedAt:
+          type: string
+          format: date-time
+        subject:
+          $ref: "#/components/schemas/ModelCardSubject"
+        promotionState:
+          type: string
+          enum: [NOT_EVALUATED_FOR_PROMOTION]
+        modelArtifactVerification:
+          $ref: "#/components/schemas/ModelCardArtifactVerification"
+        evaluationEvidence:
+          $ref: "#/components/schemas/ModelCardEvaluationEvidence"
+        evaluationSummary:
+          nullable: true
+          oneOf:
+            - $ref: "#/components/schemas/ModelCardEvaluationSummary"
+        verifiedUsageBoundary:
+          $ref: "#/components/schemas/ModelCardUsageBoundary"
+    ModelCardSubject:
+      type: object
+      additionalProperties: false
+      required: [subjectType, modelName, modelVersion, featureContractVersion, modelArtifactSha256, identityCompleteness]
+      properties:
+        subjectType:
+          type: string
+          enum: [ML_MODEL]
+        modelName:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9._-]+$'
+        modelVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9._-]+$'
+        featureContractVersion:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: '^[A-Za-z0-9._-]+$'
+        modelArtifactSha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        identityCompleteness:
+          type: string
+          enum: [COMPLETE]
+    ModelCardArtifactVerification:
+      type: object
+      additionalProperties: false
+      required: [status, sha256]
+      properties:
+        status:
+          type: string
+          enum: [VERIFIED_AGAINST_ARTIFACT_BYTES]
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    ModelCardEvaluationEvidence:
+      description: AVAILABLE contains verified report metadata; NOT_AVAILABLE is permitted only when model evaluation was not configured.
+      oneOf:
+        - $ref: "#/components/schemas/ModelCardEvaluationAvailable"
+        - $ref: "#/components/schemas/ModelCardEvaluationUnavailable"
+    ModelCardEvaluationAvailable:
+      type: object
+      additionalProperties: false
+      required: [status, reportType, artifactSetVersion, reportGeneratedAt, manifestSha256, integrityVerification, sourceDatasetVerificationLevel]
+      properties:
+        status: { type: string, enum: [AVAILABLE] }
+        reportType: { type: string, enum: [ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1] }
+        artifactSetVersion: { type: string, enum: [ml-model-feedback-dataset-evaluation-artifact-set-v1] }
+        reportGeneratedAt: { type: string, format: date-time }
+        manifestSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        integrityVerification: { type: string, enum: [VERIFIED_REPORT_AND_MANIFEST] }
+        sourceDatasetVerificationLevel: { type: string, enum: [CLAIM_ONLY, VERIFIED_AGAINST_SOURCE_BYTES] }
+    ModelCardEvaluationUnavailable:
+      type: object
+      additionalProperties: false
+      required: [status, reason]
+      properties:
+        status: { type: string, enum: [NOT_AVAILABLE] }
+        reason: { type: string, enum: [MODEL_EVALUATION_NOT_CONFIGURED] }
+    ModelCardEvaluationSummary:
+      type: object
+      additionalProperties: false
+      required: [reportType, generatedAt, sourceDataset, metricBasis, evaluationSubject, evaluationWindow, population, classBalance, lineagePolicy, supportedMetrics, limitations, warnings]
+      properties:
+        reportType: { type: string, enum: [ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1] }
+        generatedAt: { type: string, format: date-time }
+        sourceDataset: { $ref: "#/components/schemas/ModelCardSourceDataset" }
+        metricBasis: { type: string, enum: [BOUNDED_ANALYST_FEEDBACK_BY_EXACT_ML_MODEL_ARTIFACT] }
+        evaluationSubject: { $ref: "#/components/schemas/ModelCardSubject" }
+        evaluationWindow: { $ref: "#/components/schemas/ModelCardEvaluationWindow" }
+        population: { $ref: "#/components/schemas/ModelCardEvaluationPopulation" }
+        classBalance: { $ref: "#/components/schemas/ModelCardClassBalance" }
+        lineagePolicy: { $ref: "#/components/schemas/ModelCardLineagePolicy" }
+        supportedMetrics: { $ref: "#/components/schemas/ModelCardSupportedMetrics" }
+        limitations:
+          type: array
+          minItems: 5
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            enum: [ANALYST_FEEDBACK_LABELS_ARE_REVIEW_SIGNALS, ML_PREDICTION_METRICS_REQUIRE_DIRECT_ML_OUTPUT_SIGNALS, MODEL_SPECIFIC_EVALUATION_DOES_NOT_APPROVE_PROMOTION, MODEL_SPECIFIC_EVALUATION_DOES_NOT_AUTHORIZE_PAYMENTS, MODEL_SPECIFIC_EVALUATION_DOES_NOT_CHANGE_SCORING]
+        warnings:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items:
+            type: string
+            enum: [INSUFFICIENT_MODEL_LINEAGE_RECORDS, INVALID_ML_EVIDENCE_PRESENT, MODEL_EVALUATION_PARTIAL_COVERAGE, MODEL_PREDICTION_SIGNAL_UNAVAILABLE, SINGLE_CLASS_MODEL_LINEAGE_RECORDS, SOURCE_DATASET_INVALID_ROWS_SKIPPED, SOURCE_DATASET_REQUIRED_FIELDS_MISSING, SOURCE_DATASET_TRUNCATED, UNEXPECTED_ML_EVIDENCE_LOSS]
+    ModelCardSourceDataset:
+      type: object
+      additionalProperties: false
+      required: [datasetVersion, sha256, rawRowsRead, recordsReturned, excludedUnresolvedCount, excludedGovernanceReviewCount, skippedMissingRequiredFieldCount, skippedInvalidSourceRecordCount, truncated]
+      properties:
+        datasetVersion: { type: string, enum: [feedback-dataset-v3] }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        rawRowsRead: { type: integer, minimum: 0, maximum: 1001 }
+        recordsReturned: { type: integer, minimum: 0, maximum: 1000 }
+        excludedUnresolvedCount: { type: integer, minimum: 0, maximum: 1000 }
+        excludedGovernanceReviewCount: { type: integer, minimum: 0, maximum: 1000 }
+        skippedMissingRequiredFieldCount: { type: integer, minimum: 0, maximum: 1000 }
+        skippedInvalidSourceRecordCount: { type: integer, minimum: 0, maximum: 1000 }
+        truncated: { type: boolean }
+    ModelCardEvaluationWindow:
+      type: object
+      additionalProperties: false
+      required: [timeBasis, fromInclusive, toInclusive]
+      properties:
+        timeBasis: { type: string, enum: [FEEDBACK_CREATED_AT] }
+        fromInclusive: { type: string, format: date-time, nullable: true }
+        toInclusive: { type: string, format: date-time, nullable: true }
+    ModelCardEvaluationPopulation:
+      type: object
+      additionalProperties: false
+      required: [recordsConsidered, recordsWithPredictionEvidence, recordsEvaluated, recordsExcludedIdentityMismatch, recordsExcludedSourceIdentityMismatch, recordsExcludedMissingPredictionEvidence, recordsExcludedUnexpectedMissingPredictionEvidence, recordsExcludedInvalidPredictionEvidence]
+      properties:
+        recordsConsidered: { type: integer, minimum: 0, maximum: 1000 }
+        recordsWithPredictionEvidence: { type: integer, minimum: 0, maximum: 1000 }
+        recordsEvaluated: { type: integer, minimum: 0, maximum: 1000 }
+        recordsExcludedIdentityMismatch: { type: integer, minimum: 0, maximum: 1000 }
+        recordsExcludedSourceIdentityMismatch: { type: integer, minimum: 0, maximum: 1000 }
+        recordsExcludedMissingPredictionEvidence: { type: integer, minimum: 0, maximum: 1000 }
+        recordsExcludedUnexpectedMissingPredictionEvidence: { type: integer, minimum: 0, maximum: 1000 }
+        recordsExcludedInvalidPredictionEvidence: { type: integer, minimum: 0, maximum: 1000 }
+    ModelCardClassBalance:
+      type: object
+      additionalProperties: false
+      required: [positiveClassCount, negativeClassCount]
+      properties:
+        positiveClassCount: { type: integer, minimum: 0, maximum: 1000 }
+        negativeClassCount: { type: integer, minimum: 0, maximum: 1000 }
+    ModelCardLineagePolicy:
+      type: object
+      additionalProperties: false
+      required: [policy, identityMismatchBehavior, identityMismatchReason]
+      properties:
+        policy: { type: string, enum: [REQUESTED_EXACT_ARTIFACT_IDENTITY] }
+        identityMismatchBehavior: { type: string, enum: [EXCLUDE] }
+        identityMismatchReason: { type: string, enum: [MODEL_IDENTITY_MISMATCH] }
+    ModelCardSupportedMetrics:
+      type: object
+      additionalProperties: false
+      required: [classBalance, mlPredictionMetrics, rulesVsMlDisagreement]
+      properties:
+        classBalance: { $ref: "#/components/schemas/ModelCardAvailability" }
+        mlPredictionMetrics: { $ref: "#/components/schemas/ModelCardPredictionMetrics" }
+        rulesVsMlDisagreement: { $ref: "#/components/schemas/ModelCardDisagreementMetrics" }
+    ModelCardAvailability:
+      type: object
+      additionalProperties: false
+      required: [available, reason]
+      properties:
+        available: { type: boolean }
+        reason:
+          type: string
+          nullable: true
+          enum: [INSUFFICIENT_MODEL_LINEAGE_RECORDS, null]
+    ModelCardPredictionMetrics:
+      type: object
+      additionalProperties: false
+      required: [available, reason, classificationPolicy, rankingPolicy, recordsEvaluated, truePositive, falsePositive, trueNegative, falseNegative, precision, recall, truePositiveRate, falsePositiveRate, falseNegativeRate, precisionAtK, recallAtK]
+      properties:
+        available: { type: boolean }
+        reason: { type: string, nullable: true, enum: [MODEL_PREDICTION_SIGNAL_UNAVAILABLE, null] }
+        classificationPolicy: { type: string, enum: [RISK_HIGH_OR_CRITICAL_POSITIVE_V1] }
+        rankingPolicy: { type: string, enum: [EXACT_ML_PREDICTION_SCORE_DESC_EVALUATION_RECORD_ID_ASC_V1] }
+        recordsEvaluated: { type: integer, minimum: 0, maximum: 1000 }
+        truePositive: { type: integer, minimum: 0, maximum: 1000 }
+        falsePositive: { type: integer, minimum: 0, maximum: 1000 }
+        trueNegative: { type: integer, minimum: 0, maximum: 1000 }
+        falseNegative: { type: integer, minimum: 0, maximum: 1000 }
+        precision: { $ref: "#/components/schemas/ModelCardMetricValue" }
+        recall: { $ref: "#/components/schemas/ModelCardMetricValue" }
+        truePositiveRate: { $ref: "#/components/schemas/ModelCardMetricValue" }
+        falsePositiveRate: { $ref: "#/components/schemas/ModelCardMetricValue" }
+        falseNegativeRate: { $ref: "#/components/schemas/ModelCardMetricValue" }
+        precisionAtK: { $ref: "#/components/schemas/ModelCardRankingMetrics" }
+        recallAtK: { $ref: "#/components/schemas/ModelCardRankingMetrics" }
+    ModelCardMetricValue:
+      type: object
+      additionalProperties: false
+      required: [available, reason, value]
+      properties:
+        available: { type: boolean }
+        reason: { type: string, nullable: true, enum: [NO_ACTUAL_NEGATIVES, NO_ACTUAL_POSITIVES, NO_PREDICTED_POSITIVES, NO_POSITIVE_RECORDS, NO_SCORED_RECORDS, null] }
+        value: { type: number, format: double, minimum: 0, maximum: 1, nullable: true }
+    ModelCardRankingMetrics:
+      type: object
+      minProperties: 1
+      maxProperties: 32
+      additionalProperties:
+        $ref: "#/components/schemas/ModelCardRankingMetric"
+    ModelCardRankingMetric:
+      type: object
+      additionalProperties: false
+      required: [requestedK, actualK, value]
+      properties:
+        requestedK: { type: integer, minimum: 1, maximum: 1000 }
+        actualK: { type: integer, minimum: 0, maximum: 1000 }
+        value: { $ref: "#/components/schemas/ModelCardMetricValue" }
+    ModelCardDisagreementMetrics:
+      type: object
+      additionalProperties: false
+      required: [available, reason, classificationPolicy, recordsWithExactMlEvidence, recordsCompared, recordsExcludedRulesEvidenceUnavailable, categoryCounts]
+      properties:
+        available: { type: boolean }
+        reason: { type: string, nullable: true, enum: [RULES_SIGNAL_UNAVAILABLE, null] }
+        classificationPolicy: { type: string, enum: [RISK_HIGH_OR_CRITICAL_POSITIVE_V1] }
+        recordsWithExactMlEvidence: { type: integer, minimum: 0, maximum: 1000 }
+        recordsCompared: { type: integer, minimum: 0, maximum: 1000 }
+        recordsExcludedRulesEvidenceUnavailable: { type: integer, minimum: 0, maximum: 1000 }
+        categoryCounts:
+          type: object
+          additionalProperties: false
+          required: [ML_HIGH_RULES_LOW, RULES_HIGH_ML_LOW, BOTH_HIGH, BOTH_LOW]
+          properties:
+            ML_HIGH_RULES_LOW: { type: integer, minimum: 0, maximum: 1000 }
+            RULES_HIGH_ML_LOW: { type: integer, minimum: 0, maximum: 1000 }
+            BOTH_HIGH: { type: integer, minimum: 0, maximum: 1000 }
+            BOTH_LOW: { type: integer, minimum: 0, maximum: 1000 }
+    ModelCardUsageBoundary:
+      type: object
+      additionalProperties: false
+      required: [allowedModes, intendedUse, notIntendedUse, useLimitations, runtimeDecisionAuthority, promotionAuthority, thresholdChangeAuthority, paymentAuthorizationAuthority, workflowAuthority]
+      properties:
+        allowedModes:
+          type: array
+          minItems: 3
+          maxItems: 3
+          uniqueItems: true
+          items:
+            type: string
+            enum: [COMPARE, OFFLINE_EVALUATION, SHADOW]
+        intendedUse:
+          type: array
+          minItems: 3
+          maxItems: 3
+          uniqueItems: true
+          items:
+            type: string
+            enum: [EXACT_MODEL_OFFLINE_EVALUATION, RULES_VS_ML_DIAGNOSTIC_COMPARISON, SHADOW_MODEL_MONITORING]
+        notIntendedUse:
+          type: array
+          minItems: 6
+          maxItems: 6
+          uniqueItems: true
+          items:
+            type: string
+            enum: [AUTOMATIC_APPROVE_DECLINE_OR_BLOCK, MODEL_PROMOTION_APPROVAL, PAYMENT_AUTHORIZATION, PRIMARY_PRODUCTION_FRAUD_DECISIONING, SCORING_THRESHOLD_CHANGE, WORKFLOW_OR_ANALYST_RECOMMENDATION]
+        useLimitations:
+          type: array
+          minItems: 6
+          maxItems: 6
+          uniqueItems: true
+          items:
+            type: string
+            enum: [ANALYST_FEEDBACK_IS_REVIEW_SIGNAL_NOT_GROUND_TRUTH, BOUNDED_RETURNED_POPULATION_ONLY, DOES_NOT_ESTABLISH_GLOBAL_DATASET_COMPLETENESS, DOES_NOT_ESTABLISH_MODEL_CALIBRATION, DOES_NOT_ESTABLISH_PRODUCTION_READINESS, SOURCE_VERIFICATION_LEVEL_MUST_BE_INTERPRETED_EXPLICITLY]
+        runtimeDecisionAuthority:
+          type: string
+          enum: [NONE]
+        promotionAuthority:
+          type: string
+          enum: [NONE]
+        thresholdChangeAuthority:
+          type: string
+          enum: [NONE]
+        paymentAuthorizationAuthority:
+          type: string
+          enum: [NONE]
+        workflowAuthority:
+          type: string
+          enum: [NONE]
     GenericObject:
       type: object
       additionalProperties: true

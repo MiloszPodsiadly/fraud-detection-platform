@@ -69,7 +69,8 @@ public class ReadAccessResultCountExtractor {
                     SCORED_TRANSACTION_DETAIL,
                     GOVERNANCE_ADVISORY_DETAIL,
                     SHADOW_PERFORMANCE_SUMMARY,
-                    PROMOTION_REVIEW_READINESS -> 1;
+                    PROMOTION_REVIEW_READINESS,
+                    MODEL_CARD -> 1;
             case SCORED_TRANSACTION_SEARCH,
                     ENGINE_INTELLIGENCE_READ,
                     ENGINE_INTELLIGENCE_FEEDBACK_READ,

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { createAlertsApiClient } from "../api/alertsApi.js";
-import { AUTHORITIES, hasAuthority } from "../auth/session.js";
+import { AUTHORITIES, MODEL_GOVERNANCE_READ_AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { WorkspaceRuntimeContext } from "./useWorkspaceRuntime.js";
 
 export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true, children }) {
@@ -13,6 +13,10 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     () => workspaceSessionResetKeyFor(session, authProvider),
     [authProvider, session]
   );
+  const shadowPerformanceRead = authorityState(session, AUTHORITIES.SHADOW_PERFORMANCE_READ);
+  const promotionReadinessRead = authorityState(session, AUTHORITIES.PROMOTION_READINESS_READ);
+  const modelCardRead = authorityState(session, AUTHORITIES.MODEL_CARD_READ);
+  const modelGovernanceRead = authorityGroupState(session, MODEL_GOVERNANCE_READ_AUTHORITIES);
   // Capability flags are frontend UX/request gates only. Backend authorization still enforces every protected API call.
   const value = useMemo(() => ({
     session,
@@ -23,14 +27,27 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadFraudCases: authorityState(session, AUTHORITIES.FRAUD_CASE_READ),
     canReadTransactions: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
     canReadSuspiciousTransactions: authorityState(session, AUTHORITIES.SUSPICIOUS_TRANSACTION_READ),
-    canReadShadowPerformance: authorityState(session, AUTHORITIES.SHADOW_PERFORMANCE_READ),
-    canReadPromotionReadiness: authorityState(session, AUTHORITIES.PROMOTION_READINESS_READ),
+    canReadModelGovernance: modelGovernanceRead,
+    canReadShadowPerformance: shadowPerformanceRead,
+    canReadPromotionReadiness: promotionReadinessRead,
+    canReadModelCard: modelCardRead,
     // Governance advisory read views are backed by TRANSACTION_MONITOR_READ in the current backend authorization model.
     // Governance audit writes require GOVERNANCE_ADVISORY_AUDIT_WRITE; do not reuse read capability for write affordances.
     canReadGovernanceAdvisories: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
     canWriteGovernanceAudit: authorityState(session, AUTHORITIES.GOVERNANCE_ADVISORY_AUDIT_WRITE),
     runtimeStatus: enabled && authenticated ? "ready" : "disabled"
-  }), [apiClient, authProvider, enabled, authenticated, session, workspaceSessionResetKey]);
+  }), [
+    apiClient,
+    authProvider,
+    enabled,
+    authenticated,
+    modelCardRead,
+    modelGovernanceRead,
+    promotionReadinessRead,
+    session,
+    shadowPerformanceRead,
+    workspaceSessionResetKey
+  ]);
 
   return (
     <WorkspaceRuntimeContext.Provider value={value}>
@@ -40,13 +57,17 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
 }
 
 function authorityState(session, authority) {
+  return authorityGroupState(session, [authority]);
+}
+
+function authorityGroupState(session, authorities) {
   if (!session?.userId) {
     return undefined;
   }
   if (!Array.isArray(session.authorities) || session.authorities.length === 0) {
     return undefined;
   }
-  return hasAuthority(session, authority);
+  return authorities.some((authority) => hasAuthority(session, authority));
 }
 
 function workspaceSessionResetKeyFor(session, authProvider) {

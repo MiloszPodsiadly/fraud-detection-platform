@@ -61,12 +61,12 @@ export const WORKSPACE_ROUTE_REGISTRY = Object.freeze({
   }),
   shadowPerformance: Object.freeze({
     key: "shadowPerformance",
-    label: "Shadow Performance",
-    navigationLabel: "Shadow diagnostics",
+    label: "Model Governance",
+    navigationLabel: "Model evidence",
     routeValue: "shadow-performance",
     href: "?workspace=shadow-performance",
-    capabilityKey: "canReadShadowPerformance",
-    heading: Object.freeze({ label: "Shadow Performance Summary" }),
+    capabilityKey: "canReadModelGovernance",
+    heading: Object.freeze({ label: "Model Governance Evidence" }),
     Runtime: ShadowPerformanceWorkspaceRuntime
   }),
   compliance: Object.freeze({

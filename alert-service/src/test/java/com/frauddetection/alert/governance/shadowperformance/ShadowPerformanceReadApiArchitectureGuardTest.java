@@ -204,17 +204,25 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String source = Files.readString(PRODUCTION_ROOT.resolve(
                 "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
         ));
+        String reader = Files.readString(PRODUCTION_ROOT.resolve(
+                "governance/artifact/GovernanceArtifactReader.java"
+        ));
 
         assertThat(source).contains(
                 "ShadowPerformanceSummaryCurrentProperties",
-                "LinkOption.NOFOLLOW_LINKS",
-                "Files.isSymbolicLink",
-                "startsWith(baseDir)",
+                "GovernanceArtifactReader",
+                "resolveConfiguredFile(properties.baseDir(), properties.path(), SUMMARY_FILENAME)",
                 "readBoundedArtifact(manifestPath, MAX_MANIFEST_SIZE_BYTES)",
                 "readBoundedArtifact(artifactPath, properties.maxSizeBytes())",
                 "validateManifest(manifestPayload, summaryPayload, summary)",
                 "objectMapper.readValue(payload, ShadowPerformanceSummary.class)",
                 "validator.validate(summary)"
+        );
+        assertThat(reader).contains(
+                "LinkOption.NOFOLLOW_LINKS",
+                "Files.isSymbolicLink",
+                "resolved.startsWith(baseDir)",
+                "changed(before, after)"
         );
         assertThat(source).doesNotContain(
                 "Files.size",
