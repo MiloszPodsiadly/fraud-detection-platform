@@ -38,6 +38,8 @@ test("uses Compose interpolation as the authority for default, env-file, and she
     const envFile = path.join(temporary, "custom.env");
     const envRoot = path.join(temporary, "env root");
     const shellRoot = path.join(temporary, "shell root");
+    writeArtifactRootSentinel(envRoot);
+    writeArtifactRootSentinel(shellRoot);
     fs.writeFileSync(envFile, `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT=${envRoot}\n`, "utf8");
 
     const fromEnvFile = resolveActualCompose(envFile);
@@ -59,7 +61,13 @@ test("uses Compose interpolation as the authority for default, env-file, and she
 });
 
 test("rejects unsafe mutations of the actual source declaration", () => {
+  const sentinelDeclaration = [
+    "    label_file:",
+    `      - ${sourceExpression}/.artifact-root-ready.labels`,
+    ""
+  ].join("\n");
   const mutations = [
+    ["missing artifact-root sentinel", canonicalSource.replace(sentinelDeclaration, "")],
     ["writable mount", canonicalSource.replace("read_only: true", "read_only: false")],
     ["missing read_only", canonicalSource.replace("        read_only: true\n", "")],
     ["host path creation", canonicalSource.replace("create_host_path: false", "create_host_path: true")],
@@ -83,6 +91,12 @@ test("rejects resolved exact-model mount and runtime environment drift", () => {
       }],
       ["wrong target", (config) => {
         config.services["alert-service"].volumes[0].target = "/run/wrong";
+      }],
+      ["missing artifact-root readiness label", (config) => {
+        delete config.services["alert-service"].labels;
+      }],
+      ["wrong artifact-root readiness label", (config) => {
+        config.services["alert-service"].labels["com.frauddetection.artifact-root-ready"] = "false";
       }],
       ["duplicate target", (config) => {
         config.services["alert-service"].volumes.push({ ...config.services["alert-service"].volumes[0] });
@@ -151,10 +165,30 @@ test("rejects missing and symbolic-link artifact roots", (context) => {
   }
 });
 
+test("hardened identity mounts expose only each service's own mTLS material", () => {
+  const resolved = resolveHardenedCompose();
+  assert.equal(resolved.status, 0, resolved.stderr || resolved.error?.message);
+  const config = JSON.parse(resolved.stdout);
+  const accepted = runChecker(config, "security-hardened");
+  assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
+
+  config.services["ml-inference-service"].volumes.push({
+    type: "bind",
+    source: path.join(repositoryRoot, "deployment", ".local", "service-identity", "mtls", "alert-service-key.pem"),
+    target: "/run/service-identity/mtls/alert-service-key.pem",
+    read_only: true
+  });
+  const peerKeyExposure = runChecker(config, "security-hardened");
+  assert.notEqual(peerKeyExposure.status, 0, "peer private-key exposure unexpectedly passed");
+});
+
 function canonicalConfig(source) {
   return {
     services: {
       "alert-service": {
+        labels: {
+          "com.frauddetection.artifact-root-ready": "true"
+        },
         environment: {
           MODEL_SHADOW_PERFORMANCE_ARTIFACTS_ENABLED: "true",
           MODEL_SHADOW_PERFORMANCE_ARTIFACTS_BASE_DIR: target
@@ -215,17 +249,42 @@ function runResolved(config, requireExisting) {
   });
 }
 
+function runChecker(config, variant) {
+  return spawnSync(process.execPath, [checker, variant], {
+    cwd: repositoryRoot,
+    input: JSON.stringify(config),
+    encoding: "utf8"
+  });
+}
+
 function resolveActualCompose(envFile, environment = {}) {
   return spawnSync("docker", [
     "compose",
     "--env-file", envFile,
     "-f", "deployment/docker-compose.yml",
     "-f", "deployment/docker-compose.model-shadow-performance-generated.yml",
-    "config", "--format", "json"
+    "config", "--no-env-resolution", "--format", "json"
   ], {
     cwd: repositoryRoot,
     encoding: "utf8",
     env: { ...process.env, ...environment }
+  });
+}
+
+function resolveHardenedCompose() {
+  return spawnSync("docker", [
+    "compose",
+    "--env-file", "deployment/.env.example",
+    "-f", "deployment/docker-compose.yml",
+    "-f", "deployment/docker-compose.dev.yml",
+    "-f", "deployment/docker-compose.oidc.yml",
+    "-f", "deployment/docker-compose.service-identity-mtls.yml",
+    "-f", "deployment/docker-compose.trust-authority-jwt.yml",
+    "-f", "deployment/docker-compose.hardened.yml",
+    "config", "--format", "json"
+  ], {
+    cwd: repositoryRoot,
+    encoding: "utf8"
   });
 }
 
@@ -247,8 +306,22 @@ function withSourceOverlay(source, callback) {
 function withArtifactRoot(callback) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "model-shadow-artifacts-"));
   try {
+    fs.writeFileSync(
+      path.join(root, ".artifact-root-ready.labels"),
+      "com.frauddetection.artifact-root-ready=true\n",
+      "utf8"
+    );
     callback(root);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+}
+
+function writeArtifactRootSentinel(root) {
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".artifact-root-ready.labels"),
+    "com.frauddetection.artifact-root-ready=true\n",
+    "utf8"
+  );
 }

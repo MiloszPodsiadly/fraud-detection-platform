@@ -22,6 +22,7 @@ local_root="${LOCAL_IDENTITY_FIXTURE_ROOT:-$repo_root/deployment/.local}"
 output_dir="$local_root/service-identity"
 generated_root="${LOCAL_GENERATED_FIXTURE_ROOT:-$repo_root/deployment/local-generated}"
 generated_eval_dir="$generated_root/platform-recommendation-evaluation-card"
+generated_model_shadow_dir="$generated_root/model-shadow-performance"
 lock_dir="$local_root/bootstrap-local-fixtures.lock"
 
 mkdir -p "$local_root"
@@ -46,6 +47,18 @@ cleanup() {
   rmdir "$lock_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
+
+mkdir -p "$generated_model_shadow_dir"
+artifact_root_marker="$generated_model_shadow_dir/.artifact-root-ready.labels"
+if [[ "$(cat "$artifact_root_marker" 2>/dev/null || true)" \
+    != "com.frauddetection.artifact-root-ready=true" ]]; then
+  artifact_root_marker_staging="$generated_model_shadow_dir/.artifact-root-ready.labels.tmp.$$"
+  printf 'com.frauddetection.artifact-root-ready=true\n' > "$artifact_root_marker_staging"
+  chmod 400 "$artifact_root_marker_staging"
+  mv -f "$artifact_root_marker_staging" "$artifact_root_marker"
+fi
+chmod 700 "$generated_model_shadow_dir"
+chmod 400 "$artifact_root_marker"
 
 rsa_modulus_base64url() {
   local private_key="$1"
@@ -115,6 +128,14 @@ identity_fixtures_valid() {
     [[ -s "$file" ]] || return 1
   done
 
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+      [[ "$(stat -c '%a' "$output_dir")" == "700" ]] || return 1
+      [[ "$(stat -c '%a' "$output_dir/mtls")" == "700" ]] || return 1
+      ;;
+  esac
+
   openssl x509 -checkend 86400 -noout -in "$output_dir/mtls/local-dev-ca.pem" >/dev/null 2>&1 || return 1
   cmp -s \
     <(openssl x509 -in "$output_dir/mtls/local-dev-ca.pem" -pubkey -noout 2>/dev/null) \
@@ -157,12 +178,29 @@ evaluation_fixtures_valid() {
     [[ -s "$file" ]] || return 1
   done
 
-  local json_sha md_sha
-  json_sha="$(openssl dgst -sha256 "$generated_eval_dir/platform_recommendation_evaluation_card.json" | awk '{print $NF}')"
-  md_sha="$(openssl dgst -sha256 "$generated_eval_dir/platform_recommendation_evaluation_card.md" | awk '{print $NF}')"
-  grep -Fq "\"sha256\": \"$json_sha\"" "$generated_eval_dir/manifest.json" || return 1
-  grep -Fq "\"sha256\": \"$md_sha\"" "$generated_eval_dir/manifest.json" || return 1
+  (
+    cd "$repo_root/ml-inference-service"
+    PYTHONPATH=. "$python_cmd" -m \
+      offline_evaluation.feedback_dataset_evaluation.evaluation_card.artifact_reader \
+      "$generated_eval_dir/platform_recommendation_evaluation_card.json" \
+      "$generated_eval_dir/manifest.json"
+  ) >/dev/null 2>&1
 }
+
+python_cmd="${PYTHON_EXECUTABLE:-}"
+if [[ -z "$python_cmd" ]]; then
+  if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    echo "Python 3 is required to validate local evaluation fixtures." >&2
+    exit 1
+  fi
+elif ! "$python_cmd" --version >/dev/null 2>&1; then
+  echo "PYTHON_EXECUTABLE does not identify a working Python interpreter." >&2
+  exit 1
+fi
 
 identity_valid="false"
 evaluation_valid="false"
@@ -174,8 +212,9 @@ if [[ "$mode" == "ensure" && "$identity_valid" == "true" && "$evaluation_valid" 
   exit 0
 fi
 
-staging_dir="$(mktemp -d "$local_root/service-identity.tmp.XXXXXX")"
-mtls_dir="$staging_dir/mtls"
+if [[ "$mode" == "force" || "$identity_valid" != "true" ]]; then
+  staging_dir="$(mktemp -d "$local_root/service-identity.tmp.XXXXXX")"
+  mtls_dir="$staging_dir/mtls"
 
 umask 077
 mkdir -p "$mtls_dir"
@@ -261,14 +300,9 @@ alert_modulus="$(rsa_modulus_base64url "$staging_dir/alert-service-private.pem")
 canonical_jwks "$scoring_modulus" "$alert_modulus" > "$staging_dir/jwks.json"
 
 rm -f "$staging_dir"/*.cnf "$staging_dir"/*.csr "$staging_dir/modulus.bin" "$mtls_dir/local-dev-ca.srl"
-chmod 755 "$staging_dir" "$mtls_dir"
+chmod 700 "$staging_dir" "$mtls_dir"
 chmod 444 "$staging_dir"/*.pem "$staging_dir/jwks.json" "$mtls_dir"/*.pem
 
-if [[ "$mode" == "ensure" && "$identity_valid" == "true" ]]; then
-  rm -rf "$staging_dir"
-  staging_dir=""
-  echo "Existing local identity fixtures are valid; keeping them unchanged."
-else
   backup_dir=""
   if [[ -e "$output_dir" ]]; then
     backup_dir="$local_root/service-identity.backup.$$"
@@ -282,6 +316,8 @@ else
   [[ -n "$backup_dir" ]] && rm -rf "$backup_dir"
   echo "Generated local-only identity fixtures in deployment/.local/service-identity/."
   echo "This directory is ignored by Git and excluded from Docker build contexts."
+else
+  echo "Existing local identity fixtures are valid; keeping them unchanged."
 fi
 
 generated_shadow_dir="$generated_root/shadow-performance"
@@ -289,15 +325,18 @@ generated_shadow_dir="$generated_root/shadow-performance"
 fixtures_eval_dir="$repo_root/deployment/local-fixtures/platform-recommendation-evaluation-card"
 fixtures_shadow_dir="$repo_root/deployment/local-fixtures/shadow-performance"
 
-mkdir -p "$generated_eval_dir" "$generated_shadow_dir"
+mkdir -p "$generated_shadow_dir"
 
 if [ -d "$fixtures_shadow_dir" ]; then
   cp -r "$fixtures_shadow_dir"/* "$generated_shadow_dir/" 2>/dev/null || true
 fi
 
-if [ -d "$fixtures_eval_dir" ]; then
-  cp -r "$fixtures_eval_dir"/* "$generated_eval_dir/" 2>/dev/null || true
-fi
+if [[ "$mode" == "force" || "$evaluation_valid" != "true" ]]; then
+  mkdir -p "$generated_eval_dir"
+
+  if [ -d "$fixtures_eval_dir" ]; then
+    cp -r "$fixtures_eval_dir"/* "$generated_eval_dir/" 2>/dev/null || true
+  fi
 
 cat > "$generated_eval_dir/platform_recommendation_evaluation_card.json" <<'EOF'
 {
@@ -443,3 +482,10 @@ cat > "$generated_eval_dir/manifest.json" <<EOF
 EOF
 
 echo "Generated local evaluation fixtures in deployment/local-generated/."
+evaluation_fixtures_valid || {
+  echo "Generated local evaluation fixtures failed canonical validation." >&2
+  exit 1
+}
+else
+  echo "Existing local evaluation fixtures are valid; keeping them unchanged."
+fi

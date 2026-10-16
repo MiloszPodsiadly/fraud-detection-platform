@@ -160,6 +160,38 @@ function assertGeneratedIdentityMount(serviceName, target, expectedSourceSuffix)
   }
 }
 
+function assertMtlsIdentityMounts(serviceName, filenames) {
+  const targetRoot = "/run/service-identity/mtls/";
+  const mounts = (service(serviceName).volumes ?? [])
+    .filter((volume) => String(volume?.target ?? "").startsWith(targetRoot));
+  const expectedTargets = new Set(filenames.map((filename) => `${targetRoot}${filename}`));
+  const observedTargets = new Set();
+  if (mounts.length !== expectedTargets.size) {
+    fail(`${serviceName} must expose only its CA, certificate and private key mTLS files`);
+  }
+  for (const mount of mounts) {
+    const target = String(mount?.target ?? "");
+    const filename = target.slice(targetRoot.length);
+    const source = String(mount?.source ?? "").replaceAll("\\", "/");
+    if (observedTargets.has(target)) {
+      fail(`${serviceName} must not define duplicate mTLS mount ${target}`);
+      continue;
+    }
+    observedTargets.add(target);
+    if (!expectedTargets.has(target)) {
+      fail(`${serviceName} must not receive peer mTLS identity ${filename || "<missing>"}`);
+      continue;
+    }
+    if (mount.type !== "bind" || mount.read_only !== true
+        || !source.endsWith(`/deployment/.local/service-identity/mtls/${filename}`)) {
+      fail(`${serviceName} must read ${target} from its generated read-only local fixture`);
+    }
+  }
+  for (const target of expectedTargets) {
+    if (!observedTargets.has(target)) fail(`${serviceName} is missing required mTLS mount ${target}`);
+  }
+}
+
 function assertReadOnlyArtifactMount(serviceName, target) {
   const mounts = service(serviceName).volumes ?? [];
   const matching = mounts.filter((volume) => volume?.target === target);
@@ -194,7 +226,16 @@ function assertDeclarativeArtifactMount(file) {
   const volumesBlock = alertServiceBlock
     ? mappingBlock(lines, "volumes", 4, alertServiceBlock.start, alertServiceBlock.end)
     : undefined;
-  if (!servicesBlock || !alertServiceBlock || !volumesBlock) return;
+  const sentinelFileBlock = alertServiceBlock
+    ? mappingBlock(lines, "label_file", 4, alertServiceBlock.start, alertServiceBlock.end)
+    : undefined;
+  if (!servicesBlock || !alertServiceBlock || !volumesBlock || !sentinelFileBlock) return;
+
+  const sentinelFiles = scalarSequence(lines, sentinelFileBlock.start, sentinelFileBlock.end, 6);
+  if (sentinelFiles.length !== 1
+      || sentinelFiles[0] !== `${exactModelSource}/.artifact-root-ready.labels`) {
+    fail("exact-model overlay must require its pre-provisioned artifact-root sentinel");
+  }
 
   const mounts = longSyntaxSequence(lines, volumesBlock.start, volumesBlock.end, 6);
   if (mounts.length !== 1) {
@@ -266,6 +307,20 @@ function longSyntaxSequence(lines, start, end, itemIndent) {
     }
   }
   return mounts;
+}
+
+function scalarSequence(lines, start, end, itemIndent) {
+  const values = [];
+  for (let index = start; index < end; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    if (leadingSpaces(line) !== itemIndent || !line.trim().startsWith("- ")) {
+      fail(`unsupported exact-model scalar sequence at source line ${index + 1}`);
+      continue;
+    }
+    values.push(line.trim().slice(2));
+  }
+  return values;
 }
 
 function assignYamlField(target, content, label) {
@@ -359,6 +414,11 @@ function assertExactModelReaderResolved() {
     env("alert-service", "MODEL_SHADOW_PERFORMANCE_ARTIFACTS_BASE_DIR"),
     "/run/model-shadow-performance"
   );
+  expectEqual(
+    "model shadow performance artifact root readiness label",
+    service("alert-service").labels?.["com.frauddetection.artifact-root-ready"],
+    "true"
+  );
   const mount = assertReadOnlyArtifactMount(
     "alert-service",
     exactModelTarget
@@ -443,9 +503,15 @@ if (variant === "security-hardened" || variant === "security-hardened-model-shad
   expectEqual("security audit-trust-authority TRUST_AUTHORITY_IDENTITY_MODE", env("audit-trust-authority", "TRUST_AUTHORITY_IDENTITY_MODE"), "jwt-service-identity");
   expectEqual("security alert-service ASSISTANT_MODE", env("alert-service", "ASSISTANT_MODE"), "DETERMINISTIC");
   expectEqual("security analyst-console-ui VITE_AUTH_PROVIDER", service("analyst-console-ui").build?.args?.VITE_AUTH_PROVIDER, "bff");
-  assertGeneratedIdentityMount("ml-inference-service", "/run/service-identity/mtls", "/deployment/.local/service-identity/mtls");
-  assertGeneratedIdentityMount("fraud-scoring-service", "/run/service-identity/mtls", "/deployment/.local/service-identity/mtls");
-  assertGeneratedIdentityMount("alert-service", "/run/service-identity/mtls", "/deployment/.local/service-identity/mtls");
+  assertMtlsIdentityMounts("ml-inference-service", [
+    "local-dev-ca.pem", "ml-inference-service.pem", "ml-inference-service-key.pem"
+  ]);
+  assertMtlsIdentityMounts("fraud-scoring-service", [
+    "local-dev-ca.pem", "fraud-scoring-service.pem", "fraud-scoring-service-key.pem"
+  ]);
+  assertMtlsIdentityMounts("alert-service", [
+    "local-dev-ca.pem", "alert-service.pem", "alert-service-key.pem"
+  ]);
   assertGeneratedIdentityMount("alert-service", "/run/service-identity/alert-service-private.pem", "/deployment/.local/service-identity/alert-service-private.pem");
   assertGeneratedIdentityMount("audit-trust-authority", "/run/service-identity/jwks.json", "/deployment/.local/service-identity/jwks.json");
   assertLocalBindings();

@@ -2,6 +2,8 @@
 # Publication happens outside alert-service; the service selects one exact M/V/F/SHA/window directory per request.
 services:
   alert-service:
+    label_file:
+      - ${MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT:-./local-generated/model-shadow-performance}/.artifact-root-ready.labels
     environment:
       MODEL_SHADOW_PERFORMANCE_ARTIFACTS_ENABLED: "true"
       MODEL_SHADOW_PERFORMANCE_ARTIFACTS_BASE_DIR: /run/model-shadow-performance

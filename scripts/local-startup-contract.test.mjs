@@ -19,11 +19,23 @@ test("ordinary fixture provisioning is repeatable and parallel-safe", async (con
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "local-startup-"));
   const environment = {
     ...process.env,
-    LOCAL_IDENTITY_FIXTURE_ROOT: path.join(temporary, "identity"),
-    LOCAL_GENERATED_FIXTURE_ROOT: path.join(temporary, "generated")
+    LOCAL_IDENTITY_FIXTURE_ROOT: shellPath(path.join(temporary, "identity")),
+    LOCAL_GENERATED_FIXTURE_ROOT: shellPath(path.join(temporary, "generated"))
   };
   try {
+    const artifactRootMarker = path.join(
+      temporary,
+      "generated",
+      "model-shadow-performance",
+      ".artifact-root-ready.labels"
+    );
+    fs.mkdirSync(path.dirname(artifactRootMarker), { recursive: true });
+    fs.writeFileSync(artifactRootMarker, "malformed=true\n", { mode: 0o400 });
     runBootstrap("--force", environment);
+    assert.equal(
+      fs.readFileSync(artifactRootMarker, "utf8"),
+      "com.frauddetection.artifact-root-ready=true\n"
+    );
     const before = fixtureFingerprint(temporary);
     const identityRoot = path.join(temporary, "identity", "service-identity");
     const originalIdentity = fixtureFingerprint(identityRoot);
@@ -43,6 +55,25 @@ test("ordinary fixture provisioning is repeatable and parallel-safe", async (con
       "manifest.json"
     );
     fs.writeFileSync(evaluationManifest, "invalid\n", "utf8");
+    runBootstrap("--ensure", environment);
+    assert.equal(fixtureFingerprint(identityRoot), originalIdentity);
+
+    const evaluationRoot = path.dirname(evaluationManifest);
+    const evaluationCard = path.join(evaluationRoot, "platform_recommendation_evaluation_card.json");
+    const invalidCard = JSON.parse(fs.readFileSync(evaluationCard, "utf8"));
+    invalidCard.runtimeDecisionAuthority = "AUTOMATIC";
+    fs.writeFileSync(evaluationCard, `${JSON.stringify(invalidCard, null, 2)}\n`, "utf8");
+    refreshManifestEntry(evaluationManifest, evaluationCard);
+    const evaluationRepair = runBootstrap("--ensure", environment);
+    assert.match(evaluationRepair.stdout, /Existing local identity fixtures are valid/);
+    assert.equal(fixtureFingerprint(identityRoot), originalIdentity);
+    assert.equal(
+      JSON.parse(fs.readFileSync(evaluationCard, "utf8")).runtimeDecisionAuthority,
+      "NONE"
+    );
+
+    fs.writeFileSync(evaluationCard, `${" ".repeat(262_145)}\n`, "utf8");
+    refreshManifestEntry(evaluationManifest, evaluationCard);
     runBootstrap("--ensure", environment);
     assert.equal(fixtureFingerprint(identityRoot), originalIdentity);
 
@@ -95,6 +126,7 @@ function runBootstrap(mode, environment) {
     encoding: "utf8"
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result;
 }
 
 function runBootstrapAsync(mode, environment) {
@@ -121,6 +153,16 @@ function fixtureFingerprint(root) {
   return hash.digest("hex");
 }
 
+function refreshManifestEntry(manifestPath, artifactPath) {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const bytes = fs.readFileSync(artifactPath);
+  const entry = manifest.files.find(({ name }) => name === path.basename(artifactPath));
+  assert.ok(entry, `missing manifest entry for ${path.basename(artifactPath)}`);
+  entry.sizeBytes = bytes.length;
+  entry.sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
 function walk(root) {
   return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const candidate = path.join(root, entry.name);
@@ -142,4 +184,9 @@ function findBash() {
     process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "Git", "bin", "bash.exe")
   ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function shellPath(value) {
+  if (process.platform !== "win32") return value;
+  return value.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll("\\", "/");
 }

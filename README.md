@@ -180,6 +180,8 @@ Exact-model evidence is an explicit opt-in. Pre-provision its artifact root, the
 
 ```bash
 mkdir -p deployment/local-generated/model-shadow-performance
+printf 'com.frauddetection.artifact-root-ready=true\n' \
+  > deployment/local-generated/model-shadow-performance/.artifact-root-ready.labels
 make up-exact-model-shadow
 ```
 

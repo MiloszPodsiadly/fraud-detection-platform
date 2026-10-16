@@ -64,7 +64,7 @@ check-compose: deployment/.env
 exact-model-shadow-preflight: deployment/.env
 	node scripts/check-compose-security-config.mjs model-shadow-performance-source \
 		--source-file deployment/docker-compose.model-shadow-performance-generated.yml
-	$(EXACT_MODEL_SHADOW_COMPOSE) config --format json | node scripts/check-compose-security-config.mjs security-hardened-model-shadow-performance --require-existing-source
+	$(EXACT_MODEL_SHADOW_COMPOSE) config --no-env-resolution --format json | node scripts/check-compose-security-config.mjs security-hardened-model-shadow-performance --require-existing-source
 
 check-compose-exact-model-shadow: exact-model-shadow-preflight
 	node --test scripts/check-compose-security-config.test.mjs
