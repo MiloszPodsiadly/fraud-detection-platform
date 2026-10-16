@@ -154,6 +154,41 @@ describe("ExactModelShadowPerformancePanel", () => {
     });
   });
 
+  it("does not relabel a manually loaded report when Model Card arrives late", () => {
+    const clear = vi.fn();
+    const load = vi.fn();
+    const report = fixture();
+    report.evaluationSummary.evaluationSubject.modelVersion = "manual-version";
+    const view = render(<ExactModelShadowPerformancePanel state={state({ clear, load })} canRead />);
+    enterManualSelector();
+    fireEvent.click(screen.getByRole("button", { name: "Load exact artifact" }));
+
+    view.rerender(<ExactModelShadowPerformancePanel
+      state={state({ clear, load, summary: report })}
+      canRead
+      modelCard={modelCard(fixture())}
+    />);
+
+    expect(screen.getByLabelText("Model version")).toHaveValue("manual-version");
+    expect(screen.getAllByText("manual-version")).toHaveLength(1);
+    expect(clear).toHaveBeenCalledTimes(6);
+  });
+
+  it("preserves a manually entered selector when Model Card arrives before load", () => {
+    const clear = vi.fn();
+    const view = render(<ExactModelShadowPerformancePanel state={state({ clear })} canRead />);
+    enterManualSelector();
+
+    view.rerender(<ExactModelShadowPerformancePanel
+      state={state({ clear })}
+      canRead
+      modelCard={modelCard(fixture())}
+    />);
+
+    expect(screen.getByLabelText("Model version")).toHaveValue("manual-version");
+    expect(clear).toHaveBeenCalledTimes(6);
+  });
+
   it("invalidates stale evidence and refreshes an untouched Model Card selector", () => {
     const clear = vi.fn();
     const summary = fixture();
@@ -234,6 +269,34 @@ describe("ExactModelShadowPerformancePanel", () => {
     expect(screen.getByLabelText("Model version")).toHaveValue("manual-version");
     expect(screen.getByText("Analyst-labeled fraud by disagreement category")).toBeInTheDocument();
   });
+
+  it("preserves manual evidence selected between Model Card identities", () => {
+    const clear = vi.fn();
+    const load = vi.fn();
+    const first = fixture();
+    const report = fixture();
+    report.evaluationSummary.evaluationSubject.modelVersion = "manual-version";
+    const next = fixture();
+    next.evaluationSummary.evaluationSubject.modelVersion = "2026-10-16.shadow";
+    const view = render(<ExactModelShadowPerformancePanel
+      state={state({ clear, load })}
+      canRead
+      modelCard={modelCard(first)}
+    />);
+
+    view.rerender(<ExactModelShadowPerformancePanel state={state({ clear, load })} canRead />);
+    enterManualSelector();
+    fireEvent.click(screen.getByRole("button", { name: "Load exact artifact" }));
+    view.rerender(<ExactModelShadowPerformancePanel
+      state={state({ clear, load, summary: report })}
+      canRead
+      modelCard={modelCard(next)}
+    />);
+
+    expect(screen.getByLabelText("Model version")).toHaveValue("manual-version");
+    expect(screen.getAllByText("manual-version")).toHaveLength(1);
+    expect(clear).toHaveBeenCalledTimes(6);
+  });
 });
 
 function state(overrides = {}) {
@@ -255,4 +318,18 @@ function modelCard(summary) {
     subject: summary.evaluationSummary.evaluationSubject,
     evaluationSummary: summary.evaluationSummary
   };
+}
+
+function enterManualSelector() {
+  const values = {
+    "Model name": "manual-model",
+    "Model version": "manual-version",
+    "Feature contract": "manual-contract",
+    "Artifact SHA-256": "b".repeat(64),
+    "Window from (UTC)": "2026-06-02T00:00:00Z",
+    "Window to (UTC)": "2026-06-10T23:59:59Z"
+  };
+  for (const [label, value] of Object.entries(values)) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  }
 }

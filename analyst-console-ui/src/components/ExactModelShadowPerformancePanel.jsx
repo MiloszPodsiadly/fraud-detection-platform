@@ -11,6 +11,7 @@ const EMPTY_SELECTOR = Object.freeze({
 });
 const MODEL_CARD_ORIGIN = "MODEL_CARD";
 const MANUAL_ORIGIN = "MANUAL";
+const UNOWNED_ORIGIN = "UNOWNED";
 
 export function ExactModelShadowPerformancePanel({
   state,
@@ -19,7 +20,7 @@ export function ExactModelShadowPerformancePanel({
 }) {
   const [draft, setDraft] = useState(EMPTY_SELECTOR);
   const lastPrefill = useRef(null);
-  const draftOrigin = useRef(MANUAL_ORIGIN);
+  const draftOrigin = useRef(UNOWNED_ORIGIN);
   const loadedOrigin = useRef(null);
   const subject = modelCard?.subject;
   const hasSubject = subject !== null && subject !== undefined;
@@ -38,7 +39,7 @@ export function ExactModelShadowPerformancePanel({
         loadedOrigin.current = null;
         setDraft((current) => {
           if (draftOrigin.current !== MODEL_CARD_ORIGIN) return current;
-          draftOrigin.current = MANUAL_ORIGIN;
+          draftOrigin.current = UNOWNED_ORIGIN;
           return EMPTY_SELECTOR;
         });
         lastPrefill.current = null;
@@ -56,7 +57,8 @@ export function ExactModelShadowPerformancePanel({
     if (selectorsEqual(nextPrefill, lastPrefill.current)) return;
     if (loadedOrigin.current === MODEL_CARD_ORIGIN) state.clear?.();
     loadedOrigin.current = null;
-    const mayReplace = lastPrefill.current === null || draftOrigin.current === MODEL_CARD_ORIGIN;
+    const mayReplace = draftOrigin.current === UNOWNED_ORIGIN
+      || draftOrigin.current === MODEL_CARD_ORIGIN;
     lastPrefill.current = nextPrefill;
     setDraft((current) => {
       if (!mayReplace) return current;
