@@ -61,6 +61,12 @@ model-card:
     max-card-size-bytes: ${MODEL_CARD_CURRENT_MAX_CARD_SIZE_BYTES:524288}
     max-markdown-size-bytes: ${MODEL_CARD_CURRENT_MAX_MARKDOWN_SIZE_BYTES:262144}
 
+model-shadow-performance:
+  artifacts:
+    enabled: ${MODEL_SHADOW_PERFORMANCE_ARTIFACTS_ENABLED:false}
+    base-dir: ${MODEL_SHADOW_PERFORMANCE_ARTIFACTS_BASE_DIR:/run/model-shadow-performance}
+    max-summary-size-bytes: ${MODEL_SHADOW_PERFORMANCE_MAX_SUMMARY_SIZE_BYTES:524288}
+
 app:
   fraud-cases:
     work-queue:

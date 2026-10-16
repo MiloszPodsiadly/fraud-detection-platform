@@ -1002,6 +1002,18 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             "ML_HIGH_RULES_LOW": 1,
             "RULES_HIGH_ML_LOW": 1,
         }, disagreement["categoryCounts"])
+        self.assertEqual(
+            {"available": True, "reason": None, "value": 0.5},
+            disagreement["disagreementRate"],
+        )
+        self.assertEqual({
+            "BOTH_HIGH": 1,
+            "BOTH_LOW": 1,
+            "ML_HIGH_RULES_LOW": 1,
+            "RULES_HIGH_ML_LOW": 1,
+        }, disagreement["analystLabeledFraudByCategory"])
+        self.assertEqual(4, disagreement["analystLabeledFraudRecordsCompared"])
+        self.assertEqual(0, disagreement["analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable"])
 
     def test_rulesVsMlDisagreementKeepsUnavailableSignalsOutOfLowRisk(self):
         summary = self._model_summary(
@@ -1026,6 +1038,11 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertEqual(0, disagreement["recordsCompared"])
         self.assertEqual(1, disagreement["recordsExcludedRulesEvidenceUnavailable"])
         self.assertEqual(0, sum(disagreement["categoryCounts"].values()))
+        self.assertEqual(
+            {"available": False, "reason": RULES_SIGNAL_UNAVAILABLE, "value": None},
+            disagreement["disagreementRate"],
+        )
+        self.assertEqual(1, disagreement["analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable"])
 
     def test_rulesVsMlDisagreementDoesNotCombineRulesSignalFromAnotherModelOccurrence(self):
         summary = self._model_summary(
@@ -1175,6 +1192,19 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
                 "ML_HIGH_RULES_LOW": 0,
                 "RULES_HIGH_ML_LOW": 0,
             },
+            "disagreementRate": {
+                "available": bool(evaluated),
+                "reason": None if evaluated else RULES_SIGNAL_UNAVAILABLE,
+                "value": 0.0 if evaluated else None,
+            },
+            "analystLabeledFraudByCategory": {
+                "BOTH_HIGH": positives,
+                "BOTH_LOW": 0,
+                "ML_HIGH_RULES_LOW": 0,
+                "RULES_HIGH_ML_LOW": 0,
+            },
+            "analystLabeledFraudRecordsCompared": positives,
+            "analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable": 0,
         }
         warnings = []
         if evaluated == 0:

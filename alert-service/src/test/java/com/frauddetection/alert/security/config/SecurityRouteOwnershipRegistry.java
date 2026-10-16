@@ -65,6 +65,7 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "GET", "/api/v1/governance/promotion-review-readiness/current",
                 "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/model-card/current", "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/model-shadow-performance", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/audit/events", "AuditAuthorizationRules");
         route(routes, "GET", "/api/v1/audit/integrity", "AuditAuthorizationRules");
         route(routes, "GET", "/api/v1/audit/integrity/external", "AuditAuthorizationRules");

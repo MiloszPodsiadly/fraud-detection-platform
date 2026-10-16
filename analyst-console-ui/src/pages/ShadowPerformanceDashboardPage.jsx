@@ -1,6 +1,7 @@
 import { ShadowPerformanceDashboard } from "../components/ShadowPerformanceDashboard.jsx";
 import { PromotionReviewReadinessPanel } from "../components/PromotionReviewReadinessPanel.jsx";
 import { ModelCardPanel } from "../components/ModelCardPanel.jsx";
+import { ExactModelShadowPerformancePanel } from "../components/ExactModelShadowPerformancePanel.jsx";
 
 export function ShadowPerformanceDashboardPage({
   summary,
@@ -14,9 +15,11 @@ export function ShadowPerformanceDashboardPage({
   modelCardIsLoading,
   modelCardError,
   onModelCardRetry,
+  exactModelShadowPerformanceState,
   canReadShadowPerformance,
   canReadPromotionReadiness,
   canReadModelCard,
+  canReadExactModelShadowPerformance,
   onRetry,
   workspaceHeadingProps = {}
 }) {
@@ -43,6 +46,11 @@ export function ShadowPerformanceDashboardPage({
         error={modelCardError}
         canReadModelCard={canReadModelCard}
         onRetry={onModelCardRetry}
+      />
+      <ExactModelShadowPerformancePanel
+        state={exactModelShadowPerformanceState}
+        canRead={canReadExactModelShadowPerformance}
+        modelCard={modelCard}
       />
     </>
   );

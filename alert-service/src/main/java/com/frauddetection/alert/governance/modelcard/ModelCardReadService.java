@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -34,7 +36,7 @@ public class ModelCardReadService {
         }
         try {
             validator.validate(card);
-        } catch (ModelCardValidationException exception) {
+        } catch (ModelEvaluationValidationException exception) {
             metrics.record(ModelCardReadMetrics.Outcome.INVALID);
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Model Card is invalid.");
         }

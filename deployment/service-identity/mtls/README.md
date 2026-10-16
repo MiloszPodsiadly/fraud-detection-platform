@@ -3,7 +3,7 @@
 No private mTLS keys are committed here. Generate the local-only fixture set with:
 
 ```bash
-bash scripts/bootstrap-local-fixtures.sh
+bash scripts/bootstrap-local-fixtures.sh --ensure
 ```
 
 Generated files are written to `deployment/.local/service-identity/mtls/`, which is ignored by Git and excluded

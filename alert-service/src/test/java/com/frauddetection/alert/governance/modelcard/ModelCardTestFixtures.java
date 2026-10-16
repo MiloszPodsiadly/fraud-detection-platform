@@ -167,7 +167,16 @@ final class ModelCardTestFixtures {
                                 "RULES_HIGH_ML_LOW":0,
                                 "BOTH_HIGH":1,
                                 "BOTH_LOW":1
-                              }
+                              },
+                              "disagreementRate":{"available":true,"reason":null,"value":0.0},
+                              "analystLabeledFraudByCategory":{
+                                "ML_HIGH_RULES_LOW":0,
+                                "RULES_HIGH_ML_LOW":0,
+                                "BOTH_HIGH":1,
+                                "BOTH_LOW":0
+                              },
+                              "analystLabeledFraudRecordsCompared":1,
+                              "analystLabeledFraudRecordsExcludedRulesEvidenceUnavailable":0
                             }
                           },
                           "limitations":[

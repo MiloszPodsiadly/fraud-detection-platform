@@ -9,7 +9,24 @@ services:
       INTERNAL_AUTH_MTLS_CA_FILE: /run/service-identity/mtls/local-dev-ca.pem
       INTERNAL_AUTH_MTLS_SPIFFE_TRUST_DOMAIN: fraud-platform
     volumes:
-      - ./.local/service-identity/mtls:/run/service-identity/mtls:ro
+      - type: bind
+        source: ./.local/service-identity/mtls/local-dev-ca.pem
+        target: /run/service-identity/mtls/local-dev-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/service-identity/mtls/ml-inference-service.pem
+        target: /run/service-identity/mtls/ml-inference-service.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/service-identity/mtls/ml-inference-service-key.pem
+        target: /run/service-identity/mtls/ml-inference-service-key.pem
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD", "python", "-c", "import ssl,urllib.request; ctx=ssl.create_default_context(cafile='/run/service-identity/mtls/local-dev-ca.pem'); urllib.request.urlopen('https://localhost:8090/health', context=ctx, timeout=2).read()"]
 
@@ -25,7 +42,24 @@ services:
       INTERNAL_AUTH_MTLS_EXPECTED_SERVER_IDENTITY: ml-inference-service
       INTERNAL_AUTH_MTLS_TRUST_ALL: "false"
     volumes:
-      - ./.local/service-identity/mtls:/run/service-identity/mtls:ro
+      - type: bind
+        source: ./.local/service-identity/mtls/local-dev-ca.pem
+        target: /run/service-identity/mtls/local-dev-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/service-identity/mtls/fraud-scoring-service.pem
+        target: /run/service-identity/mtls/fraud-scoring-service.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/service-identity/mtls/fraud-scoring-service-key.pem
+        target: /run/service-identity/mtls/fraud-scoring-service-key.pem
+        read_only: true
+        bind:
+          create_host_path: false
 
   alert-service:
     environment:
@@ -39,4 +73,21 @@ services:
       INTERNAL_AUTH_MTLS_EXPECTED_SERVER_IDENTITY: ml-inference-service
       INTERNAL_AUTH_MTLS_TRUST_ALL: "false"
     volumes:
-      - ./.local/service-identity/mtls:/run/service-identity/mtls:ro
+      - type: bind
+        source: ./.local/service-identity/mtls/local-dev-ca.pem
+        target: /run/service-identity/mtls/local-dev-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/service-identity/mtls/alert-service.pem
+        target: /run/service-identity/mtls/alert-service.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/service-identity/mtls/alert-service-key.pem
+        target: /run/service-identity/mtls/alert-service-key.pem
+        read_only: true
+        bind:
+          create_host_path: false

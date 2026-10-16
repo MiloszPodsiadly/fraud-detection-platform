@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
+
 import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
 import com.frauddetection.alert.audit.read.ReadAccessAuditResponseAdvice;
 import com.frauddetection.alert.audit.read.ReadAccessAuditService;
@@ -58,6 +60,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ReadAccessResultCountExtractor.class,
         ModelCardProviderConfiguration.class,
         ModelCardReadService.class,
+        ModelEvaluationGovernanceValidator.class,
         ModelCardValidator.class,
         ModelCardReadMetrics.class
 })

@@ -1,10 +1,10 @@
 package com.frauddetection.alert.governance.modelcard;
 
-import tools.jackson.core.JacksonException;
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
+
+import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -17,12 +17,7 @@ final class ModelCardCanonicalArtifact {
     }
 
     static byte[] json(ObjectMapper objectMapper, JsonNode value) {
-        try {
-            return (objectMapper.writeValueAsString(sorted(objectMapper, value)) + "\n")
-                    .getBytes(StandardCharsets.UTF_8);
-        } catch (JacksonException exception) {
-            throw new ModelCardValidationException("model card canonical JSON unavailable");
-        }
+        return GovernanceCanonicalJson.serialize(objectMapper, value);
     }
 
     static byte[] markdown(JsonNode card) {
@@ -154,22 +149,6 @@ final class ModelCardCanonicalArtifact {
         return String.join("\n", lines).getBytes(StandardCharsets.UTF_8);
     }
 
-    private static JsonNode sorted(ObjectMapper objectMapper, JsonNode value) {
-        if (value.isObject()) {
-            ObjectNode result = objectMapper.createObjectNode();
-            value.properties().stream()
-                    .sorted(Map.Entry.comparingByKey())
-                    .forEach(entry -> result.set(entry.getKey(), sorted(objectMapper, entry.getValue())));
-            return result;
-        }
-        if (value.isArray()) {
-            ArrayNode result = objectMapper.createArrayNode();
-            value.forEach(item -> result.add(sorted(objectMapper, item)));
-            return result;
-        }
-        return value;
-    }
-
     private static String line(String label, JsonNode parent, String field) {
         return "- " + label + ": " + code(parent.get(field));
     }
@@ -220,7 +199,7 @@ final class ModelCardCanonicalArtifact {
 
     private static String code(String value) {
         if (value.indexOf('`') >= 0 || value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0) {
-            throw new ModelCardValidationException("model card markdown value contains unsupported control characters");
+            throw new ModelEvaluationValidationException("model card markdown value contains unsupported control characters");
         }
         return "`" + value + "`";
     }

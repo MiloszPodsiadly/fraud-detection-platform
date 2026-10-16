@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
+
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -11,7 +13,9 @@ class ModelCardProviderConfigurationTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withUserConfiguration(ModelCardProviderConfiguration.class)
             .withBean(ObjectMapper.class, ObjectMapper::new)
-            .withBean(ModelCardValidator.class, ModelCardValidator::new);
+            .withBean(ModelEvaluationGovernanceValidator.class, ModelEvaluationGovernanceValidator::new)
+            .withBean(ModelCardValidator.class,
+                    () -> new ModelCardValidator(new ModelEvaluationGovernanceValidator()));
 
     @Test
     void defaultConfigurationUsesEmptyProvider() {

@@ -15,6 +15,8 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
                 .hasAuthority(AnalystAuthority.PROMOTION_READINESS_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/model-card/current")
                 .hasAuthority(AnalystAuthority.MODEL_CARD_READ)
+                .requestMatchers(HttpMethod.GET, "/api/v1/governance/model-shadow-performance")
+                .hasAuthority(AnalystAuthority.MODEL_SHADOW_PERFORMANCE_READ)
                 .requestMatchers(HttpMethod.GET, "/governance/advisories/analytics").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                 .requestMatchers(HttpMethod.GET, "/governance/advisories").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                 .requestMatchers(HttpMethod.GET, "/governance/advisories/{eventId}").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)

@@ -42,6 +42,10 @@ jobs:
             files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml
           - name: generated-shadow-performance-local
             files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml -f deployment/docker-compose.shadow-performance-generated.yml
+          - name: exact-model-shadow-performance-reader
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.model-shadow-performance-generated.yml
+          - name: exact-model-shadow-performance-hardened
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml -f deployment/docker-compose.shadow-performance-generated.yml -f deployment/docker-compose.model-shadow-performance-generated.yml
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -79,6 +83,40 @@ jobs:
 
       - name: Assert recommended local security demonstration and app hardening
         run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml config --format json | node scripts/check-compose-security-config.mjs security-hardened
+
+      - name: Assert exact-model evidence mount declaration is read-only and explicit
+        run: >-
+          node scripts/check-compose-security-config.mjs model-shadow-performance-source
+          --source-file deployment/docker-compose.model-shadow-performance-generated.yml
+
+      - name: Assert resolved exact-model evidence reader boundary
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.model-shadow-performance-generated.yml config --no-env-resolution --format json | node scripts/check-compose-security-config.mjs model-shadow-performance
+
+      - name: Assert hardened stack preserves the exact-model reader boundary
+        run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml -f deployment/docker-compose.shadow-performance-generated.yml -f deployment/docker-compose.model-shadow-performance-generated.yml config --no-env-resolution --format json | node scripts/check-compose-security-config.mjs security-hardened-model-shadow-performance
+
+      - name: Verify resolved exact-model source and reader ACL
+        run: make exact-model-shadow-preflight
+
+      - name: Test Compose security assertion mutations
+        run: node --test scripts/check-compose-security-config.test.mjs
+
+      - name: Test local startup contract
+        run: node --test scripts/local-startup-contract.test.mjs
+
+      - name: Verify artifact preflight and Docker read-only behavior
+        run: bash scripts/ci/check-compose-bind-mount-security.sh
+
+  exact-model-runtime-boundary:
+    name: Exact Model / non-root artifact reader
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Verify publisher, reader ACL, and HTTP boundary
+        run: bash scripts/ci/check-exact-model-runtime-boundary.sh
 
   runtime-smoke:
     name: Runtime Smoke / default dev without AI

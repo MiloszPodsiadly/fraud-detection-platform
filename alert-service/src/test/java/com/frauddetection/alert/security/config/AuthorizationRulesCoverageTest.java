@@ -125,6 +125,11 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
         expectDenied(get("/api/v1/governance/model-card/current")
                 .with(userWith(AnalystAuthority.PROMOTION_READINESS_READ)));
         expectDenied(get("/api/v1/governance/model-card/current"));
+        expectSecurityLayerDoesNotReject(get("/api/v1/governance/model-shadow-performance")
+                .with(userWith(AnalystAuthority.MODEL_SHADOW_PERFORMANCE_READ)));
+        expectDenied(get("/api/v1/governance/model-shadow-performance")
+                .with(userWith(AnalystAuthority.MODEL_CARD_READ)));
+        expectDenied(get("/api/v1/governance/model-shadow-performance"));
         expectDenied(get("/governance/advisories").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/governance/advisories"));
         expectDenied(get("/governance/not-real")

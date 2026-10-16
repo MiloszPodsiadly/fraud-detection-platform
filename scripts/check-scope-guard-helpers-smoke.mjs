@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import {
   containsEndpointString,
+  containsAnalystWorkflowClaim,
   containsRawFetch,
   containsSkippedOrFocusedTest,
   fileMatchesAnyPrefix,
   findNamedImportsFrom,
   isBackendProductionFile,
   isFrontendSourceFile,
+  isOwnedApiClientContractTest,
   readFileIfExists
 } from "./scope-guards/scopeGuardHelpers.mjs";
 
@@ -16,6 +18,10 @@ assert.equal(isBackendProductionFile("alert-service/src/test/java/com/example/Fo
 assert.equal(isFrontendSourceFile("analyst-console-ui/src/App.jsx"), true);
 assert.equal(containsRawFetch("const result = fet" + "ch('/" + "api/test')"), true);
 assert.equal(containsEndpointString("client.get('/" + "api/fraud-cases')"), true);
+assert.equal(containsAnalystWorkflowClaim("contains a source dataset identity claim"), false);
+assert.equal(containsAnalystWorkflowClaim("claim case from analyst queue"), true);
+assert.equal(isOwnedApiClientContractTest("analyst-console-ui/src/api/exactModelShadowPerformanceApi.test.js"), true);
+assert.equal(isOwnedApiClientContractTest("analyst-console-ui/src/components/UnrelatedPanel.jsx"), false);
 assert.equal(containsSkippedOrFocusedTest("describe.only('x', () => {})"), true);
 assert.deepEqual(
   findNamedImportsFrom("import { listAlerts, getAlert as readAlert } from '../api/alertsApi.js';", "api/alertsApi.js"),

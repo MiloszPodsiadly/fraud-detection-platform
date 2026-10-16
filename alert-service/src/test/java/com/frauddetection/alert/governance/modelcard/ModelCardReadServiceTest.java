@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
+
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -15,7 +17,8 @@ import static org.mockito.Mockito.when;
 class ModelCardReadServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ModelCardValidator validator = new ModelCardValidator();
+    private final ModelCardValidator validator =
+            new ModelCardValidator(new ModelEvaluationGovernanceValidator());
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final ModelCardReadMetrics metrics = new ModelCardReadMetrics(meterRegistry);
     private final ModelCardProvider provider = mock(ModelCardProvider.class);

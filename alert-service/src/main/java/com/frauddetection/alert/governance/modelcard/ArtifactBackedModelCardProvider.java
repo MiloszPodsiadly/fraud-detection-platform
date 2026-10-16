@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
+
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReadException;
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
 import tools.jackson.core.JacksonException;
@@ -98,7 +100,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
                 throw unavailable();
             }
             return Optional.of(card);
-        } catch (GovernanceArtifactReadException | ModelCardValidationException exception) {
+        } catch (GovernanceArtifactReadException | ModelEvaluationValidationException exception) {
             throw unavailable();
         }
     }
@@ -195,7 +197,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
 
     private void require(boolean condition, String message) {
         if (!condition) {
-            throw new ModelCardValidationException(message);
+            throw new ModelEvaluationValidationException(message);
         }
     }
 

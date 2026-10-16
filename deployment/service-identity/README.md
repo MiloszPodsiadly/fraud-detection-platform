@@ -2,8 +2,9 @@
 
 Private cryptographic key material is not committed in this directory.
 
-Run `bash scripts/bootstrap-local-fixtures.sh` from the repository root to generate local mTLS certificate/key
-pairs, JWT signing key pairs, and JWKS under `deployment/.local/service-identity/`. The Docker Compose
+Run `bash scripts/bootstrap-local-fixtures.sh --ensure` from the repository root to provision missing or invalid
+local mTLS certificate/key pairs, JWT signing key pairs, and JWKS under `deployment/.local/service-identity/`.
+Use `make regenerate-local-runtime-fixtures` only for intentional local identity rotation. The Docker Compose
 service-identity overlays mount that generated directory only.
 
 The generated material is ignored by Git and excluded from Docker build contexts. It exists for local Docker

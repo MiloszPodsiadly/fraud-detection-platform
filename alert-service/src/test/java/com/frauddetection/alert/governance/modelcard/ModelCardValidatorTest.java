@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
+
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -15,7 +18,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ModelCardValidatorTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ModelCardValidator validator = new ModelCardValidator();
+    private final ModelEvaluationGovernanceValidator evaluationValidator =
+            new ModelEvaluationGovernanceValidator();
+    private final ModelCardValidator validator = new ModelCardValidator(evaluationValidator);
 
     @Test
     void acceptsExactArtifactCardWithoutGrantingDecisionAuthority() {
@@ -33,8 +38,8 @@ class ModelCardValidatorTest {
 
     @Test
     void matchesCanonicalPythonSixDecimalFloatRounding() {
-        assertThat(ModelCardValidator.roundedMetricValue(1, 640)).isEqualByComparingTo("0.001563");
-        assertThat(ModelCardValidator.roundedMetricValue(3, 640)).isEqualByComparingTo("0.004687");
+        assertThat(ModelEvaluationGovernanceValidator.roundedMetricValue(1, 640)).isEqualByComparingTo("0.001563");
+        assertThat(ModelEvaluationGovernanceValidator.roundedMetricValue(3, 640)).isEqualByComparingTo("0.004687");
     }
 
     @Test
@@ -43,8 +48,8 @@ class ModelCardValidatorTest {
         ModelCard unknownSchema = copy(valid, "other-schema", valid.promotionState(), valid.evaluationEvidence());
         ModelCard promoted = copy(valid, valid.schemaVersion(), "APPROVED", valid.evaluationEvidence());
 
-        assertThatThrownBy(() -> validator.validate(unknownSchema)).isInstanceOf(ModelCardValidationException.class);
-        assertThatThrownBy(() -> validator.validate(promoted)).isInstanceOf(ModelCardValidationException.class);
+        assertThatThrownBy(() -> validator.validate(unknownSchema)).isInstanceOf(ModelEvaluationValidationException.class);
+        assertThatThrownBy(() -> validator.validate(promoted)).isInstanceOf(ModelEvaluationValidationException.class);
     }
 
     @Test
@@ -65,8 +70,8 @@ class ModelCardValidatorTest {
                 )
         );
 
-        assertThatThrownBy(() -> validator.validate(unknownEvidence)).isInstanceOf(ModelCardValidationException.class);
-        assertThatThrownBy(() -> validator.validate(authority)).isInstanceOf(ModelCardValidationException.class);
+        assertThatThrownBy(() -> validator.validate(unknownEvidence)).isInstanceOf(ModelEvaluationValidationException.class);
+        assertThatThrownBy(() -> validator.validate(authority)).isInstanceOf(ModelEvaluationValidationException.class);
     }
 
     @Test
@@ -82,7 +87,7 @@ class ModelCardValidatorTest {
                 valid.verifiedUsageBoundary()
         );
 
-        assertThatThrownBy(() -> validator.validate(sensitive)).isInstanceOf(ModelCardValidationException.class);
+        assertThatThrownBy(() -> validator.validate(sensitive)).isInstanceOf(ModelEvaluationValidationException.class);
     }
 
     @Test
@@ -92,8 +97,8 @@ class ModelCardValidatorTest {
                 .put("fromInclusive", "2026-10-14T10:00:00Z")
                 .put("toInclusive", "2026-10-13T10:00:00Z");
 
-        assertThatThrownBy(() -> validator.validateWindow(window))
-                .isInstanceOf(ModelCardValidationException.class)
+        assertThatThrownBy(() -> evaluationValidator.validateWindow(window))
+                .isInstanceOf(ModelEvaluationValidationException.class)
                 .hasMessageContaining("fromInclusive must not be later than");
     }
 
@@ -221,21 +226,21 @@ class ModelCardValidatorTest {
         ObjectNode source = warningSource(false, 0, 0);
         Map<String, Integer> population = population(3, 2, 1, 0);
         Map<String, Integer> balance = balance(1, 1);
-        assertThatThrownBy(() -> validator.validateExpectedWarnings(
+        assertThatThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings("MODEL_EVALUATION_PARTIAL_COVERAGE"), source, population, balance
-        )).isInstanceOf(ModelCardValidationException.class);
-        assertThatThrownBy(() -> validator.validateExpectedWarnings(
+        )).isInstanceOf(ModelEvaluationValidationException.class);
+        assertThatThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings("MODEL_EVALUATION_PARTIAL_COVERAGE", "UNEXPECTED_ML_EVIDENCE_LOSS", "EXTRA"),
                 source, population, balance
-        )).isInstanceOf(ModelCardValidationException.class);
-        assertThatThrownBy(() -> validator.validateExpectedWarnings(
+        )).isInstanceOf(ModelEvaluationValidationException.class);
+        assertThatThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings("UNEXPECTED_ML_EVIDENCE_LOSS", "MODEL_EVALUATION_PARTIAL_COVERAGE"),
                 source, population, balance
-        )).isInstanceOf(ModelCardValidationException.class);
-        assertThatThrownBy(() -> validator.validateExpectedWarnings(
+        )).isInstanceOf(ModelEvaluationValidationException.class);
+        assertThatThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings("MODEL_EVALUATION_PARTIAL_COVERAGE", "MODEL_EVALUATION_PARTIAL_COVERAGE"),
                 source, population, balance
-        )).isInstanceOf(ModelCardValidationException.class);
+        )).isInstanceOf(ModelEvaluationValidationException.class);
     }
 
     @Test
@@ -250,7 +255,7 @@ class ModelCardValidatorTest {
                 valid.schemaVersion(), valid.cardType(), valid.generatedAt(), valid.subject(), valid.promotionState(),
                 valid.modelArtifactVerification(), valid.evaluationEvidence(), valid.evaluationSummary(), null
         );
-        assertThatThrownBy(() -> validator.validate(missing)).isInstanceOf(ModelCardValidationException.class);
+        assertThatThrownBy(() -> validator.validate(missing)).isInstanceOf(ModelEvaluationValidationException.class);
     }
 
     @Test
@@ -263,8 +268,8 @@ class ModelCardValidatorTest {
                 valid.modelArtifactVerification(), valid.evaluationEvidence(), valid.evaluationSummary(),
                 valid.verifiedUsageBoundary()
         );
-        assertThatThrownBy(() -> validator.validate(invalidMode)).isInstanceOf(ModelCardValidationException.class);
-        assertThatThrownBy(() -> validator.validate(invalidTimestamp)).isInstanceOf(ModelCardValidationException.class);
+        assertThatThrownBy(() -> validator.validate(invalidMode)).isInstanceOf(ModelEvaluationValidationException.class);
+        assertThatThrownBy(() -> validator.validate(invalidTimestamp)).isInstanceOf(ModelEvaluationValidationException.class);
         assertAvailableCardRejected(summary -> metric(summary, "precision").remove("value"));
     }
 
@@ -275,15 +280,15 @@ class ModelCardValidatorTest {
         assertThatThrownBy(() -> validator.validate(withUsagePolicy(
                 valid, null, valid.verifiedUsageBoundary().notIntendedUse(),
                 valid.verifiedUsageBoundary().useLimitations()
-        ))).isInstanceOf(ModelCardValidationException.class);
+        ))).isInstanceOf(ModelEvaluationValidationException.class);
         assertThatThrownBy(() -> validator.validate(withUsagePolicy(
                 valid, valid.verifiedUsageBoundary().intendedUse(), List.of("PRIMARY_PRODUCTION_FRAUD_DECISIONING"),
                 valid.verifiedUsageBoundary().useLimitations()
-        ))).isInstanceOf(ModelCardValidationException.class);
+        ))).isInstanceOf(ModelEvaluationValidationException.class);
         assertThatThrownBy(() -> validator.validate(withUsagePolicy(
                 valid, valid.verifiedUsageBoundary().intendedUse(),
                 valid.verifiedUsageBoundary().notIntendedUse(), List.of()
-        ))).isInstanceOf(ModelCardValidationException.class);
+        ))).isInstanceOf(ModelEvaluationValidationException.class);
     }
 
     private void assertAvailableCardRejected(Consumer<ObjectNode> mutation) throws Exception {
@@ -295,7 +300,7 @@ class ModelCardValidatorTest {
                 valid.modelArtifactVerification(), valid.evaluationEvidence(), summary, valid.verifiedUsageBoundary()
         );
 
-        assertThatThrownBy(() -> validator.validate(mutated)).isInstanceOf(ModelCardValidationException.class);
+        assertThatThrownBy(() -> validator.validate(mutated)).isInstanceOf(ModelEvaluationValidationException.class);
     }
 
     private ObjectNode prediction(ObjectNode summary) {
@@ -320,7 +325,7 @@ class ModelCardValidatorTest {
             Map<String, Integer> population,
             Map<String, Integer> balance
     ) {
-        assertThatNoException().isThrownBy(() -> validator.validateExpectedWarnings(
+        assertThatNoException().isThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings(expected.toArray(String[]::new)), source, population, balance
         ));
     }
@@ -364,7 +369,7 @@ class ModelCardValidatorTest {
         assertThatThrownBy(() -> validator.validate(withBoundary(
                 valid, runtime, promotion, threshold, payment, workflow,
                 List.of("COMPARE", "OFFLINE_EVALUATION", "SHADOW")
-        ))).isInstanceOf(ModelCardValidationException.class);
+        ))).isInstanceOf(ModelEvaluationValidationException.class);
     }
 
     private ModelCard withBoundary(

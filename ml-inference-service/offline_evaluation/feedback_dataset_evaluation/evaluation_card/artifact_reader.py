@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -146,3 +147,19 @@ def _load_json_bytes(payload: bytes, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise FeedbackDatasetEvaluationCardValidationError(f"{label} must be a JSON object")
     return value
+
+
+def _main(arguments: list[str]) -> int:
+    if len(arguments) != 2:
+        print("usage: artifact_reader.py EVALUATION_CARD MANIFEST", file=sys.stderr)
+        return 2
+    try:
+        read_validated_evaluation_card_artifact_set(Path(arguments[0]), Path(arguments[1]))
+    except (OSError, FeedbackDatasetEvaluationCardValidationError) as exception:
+        print(f"invalid evaluation card artifact set: {exception}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main(sys.argv[1:]))
