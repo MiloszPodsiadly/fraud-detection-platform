@@ -36,14 +36,32 @@ from feedback_dataset_evaluation.exact_model_shadow_performance.fixtures import 
 
 class ExactModelShadowArtifactSetTest(unittest.TestCase):
     def setUp(self):
+        self._access_patches = [patch(
+            "offline_evaluation.feedback_dataset_evaluation."
+            "exact_model_shadow_performance.publisher.verify_artifact_root_access"
+        )]
         self._windows_sync_patch = None
         if os.name == "nt":
             self._windows_sync_patch = patch(
                 "offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.publisher._sync_directory"
             )
             self._windows_sync_patch.start()
+            for function_name in (
+                    "apply_artifact_reader_access",
+                    "apply_selection_reader_access",
+                    "verify_artifact_reader_access",
+                    "verify_selection_reader_access",
+            ):
+                self._access_patches.append(patch(
+                    "offline_evaluation.feedback_dataset_evaluation."
+                    f"exact_model_shadow_performance.publisher.{function_name}"
+                ))
+        for access_patch in self._access_patches:
+            access_patch.start()
 
     def tearDown(self):
+        for access_patch in reversed(self._access_patches):
+            access_patch.stop()
         if self._windows_sync_patch is not None:
             self._windows_sync_patch.stop()
 

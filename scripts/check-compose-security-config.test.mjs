@@ -172,15 +172,73 @@ test("hardened identity mounts expose only each service's own mTLS material", ()
   const accepted = runChecker(config, "security-hardened");
   assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
 
-  config.services["ml-inference-service"].volumes.push({
-    type: "bind",
-    source: path.join(repositoryRoot, "deployment", ".local", "service-identity", "mtls", "alert-service-key.pem"),
-    target: "/run/service-identity/mtls/alert-service-key.pem",
-    read_only: true
+  const mtlsRoot = path.join(repositoryRoot, "deployment", ".local", "service-identity", "mtls");
+  const directoryMount = (target, readOnly = true) => ({
+    type: "bind", source: mtlsRoot, target, read_only: readOnly
   });
-  const peerKeyExposure = runChecker(config, "security-hardened");
-  assert.notEqual(peerKeyExposure.status, 0, "peer private-key exposure unexpectedly passed");
+  const mutations = [
+    ["exact mTLS directory", (value) => value.services["ml-inference-service"].volumes.push(
+      directoryMount("/run/service-identity/mtls")
+    )],
+    ["service identity parent", (value) => value.services["ml-inference-service"].volumes.push(
+      directoryMount("/run/service-identity")
+    )],
+    ["writable identity directory", (value) => value.services["ml-inference-service"].volumes.push(
+      directoryMount("/run/service-identity/mtls", false)
+    )],
+    ["peer identity directory", (value) => value.services["ml-inference-service"].volumes.push(
+      directoryMount("/run/service-identity/mtls/peer-identities")
+    )],
+    ["alternative target alias", (value) => value.services["ml-inference-service"].volumes.push(
+      directoryMount("/tmp/keys")
+    )],
+    ["renamed peer private key", (value) => {
+      const key = value.services["ml-inference-service"].volumes.find(
+        ({ target }) => target === "/run/service-identity/mtls/ml-inference-service-key.pem"
+      );
+      key.source = path.join(mtlsRoot, "alert-service-key.pem");
+    }],
+    ["duplicate mount", (value) => value.services["ml-inference-service"].volumes.push({
+      ...value.services["ml-inference-service"].volumes.find(
+        ({ target }) => target === "/run/service-identity/mtls/local-dev-ca.pem"
+      )
+    })],
+    ["outside source", (value) => {
+      const certificate = value.services["ml-inference-service"].volumes.find(
+        ({ target }) => target === "/run/service-identity/mtls/ml-inference-service.pem"
+      );
+      certificate.source = path.join(repositoryRoot, "deployment", ".env.example");
+    }]
+  ];
+  for (const [label, mutate] of mutations) {
+    const candidate = structuredClone(config);
+    mutate(candidate);
+    assertIdentityMutationRejected(candidate, label);
+  }
+
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mtls-source-alias-"));
+  try {
+    const alias = path.join(temporary, "ca.pem");
+    try {
+      fs.symlinkSync(path.join(mtlsRoot, "local-dev-ca.pem"), alias, "file");
+    } catch (error) {
+      if (process.platform !== "win32") throw error;
+      return;
+    }
+    const candidate = structuredClone(config);
+    candidate.services["ml-inference-service"].volumes.find(
+      ({ target }) => target === "/run/service-identity/mtls/local-dev-ca.pem"
+    ).source = alias;
+    assertIdentityMutationRejected(candidate, "symbolic-link source");
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 });
+
+function assertIdentityMutationRejected(config, label) {
+  const result = runChecker(config, "security-hardened");
+  assert.notEqual(result.status, 0, `${label} unexpectedly passed`);
+}
 
 function canonicalConfig(source) {
   return {

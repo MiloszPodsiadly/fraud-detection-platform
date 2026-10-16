@@ -104,6 +104,17 @@ jobs:
       - name: Verify artifact preflight and Docker read-only behavior
         run: bash scripts/ci/check-compose-bind-mount-security.sh
 
+  exact-model-runtime-boundary:
+    name: Exact Model / non-root artifact reader
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Verify publisher, reader ACL, and HTTP boundary
+        run: bash scripts/ci/check-exact-model-runtime-boundary.sh
+
   runtime-smoke:
     name: Runtime Smoke / default dev without AI
     runs-on: ubuntu-latest

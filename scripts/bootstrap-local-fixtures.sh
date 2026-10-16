@@ -48,18 +48,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$generated_model_shadow_dir"
-artifact_root_marker="$generated_model_shadow_dir/.artifact-root-ready.labels"
-if [[ "$(cat "$artifact_root_marker" 2>/dev/null || true)" \
-    != "com.frauddetection.artifact-root-ready=true" ]]; then
-  artifact_root_marker_staging="$generated_model_shadow_dir/.artifact-root-ready.labels.tmp.$$"
-  printf 'com.frauddetection.artifact-root-ready=true\n' > "$artifact_root_marker_staging"
-  chmod 400 "$artifact_root_marker_staging"
-  mv -f "$artifact_root_marker_staging" "$artifact_root_marker"
-fi
-chmod 700 "$generated_model_shadow_dir"
-chmod 400 "$artifact_root_marker"
-
 rsa_modulus_base64url() {
   local private_key="$1"
   local hex binary_file encoded
@@ -201,6 +189,22 @@ elif ! "$python_cmd" --version >/dev/null 2>&1; then
   echo "PYTHON_EXECUTABLE does not identify a working Python interpreter." >&2
   exit 1
 fi
+
+case "$(uname -s)" in
+  Linux*)
+    (
+      cd "$repo_root/ml-inference-service"
+      PYTHONPATH=. "$python_cmd" -m \
+        offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.reader_access \
+        --artifact-root "$generated_model_shadow_dir" \
+        --authorized-parent "$generated_root" \
+        --reader-uid 10001
+    )
+    ;;
+  *)
+    echo "Skipping optional exact-model artifact root: Linux POSIX ACL support is required."
+    ;;
+esac
 
 identity_valid="false"
 evaluation_valid="false"

@@ -61,7 +61,10 @@ check-compose: deployment/.env
 	$(SECURITY_HARDENED_COMPOSE) config --quiet
 	$(SECURITY_HARDENED_COMPOSE) config --format json | node scripts/check-compose-security-config.mjs security-hardened
 
-exact-model-shadow-preflight: deployment/.env
+exact-model-shadow-preflight: deployment/.env local-runtime-fixtures
+	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.reader_access \
+		--artifact-root ../deployment/local-generated/model-shadow-performance \
+		--authorized-parent ../deployment/local-generated --reader-uid 10001 --verify-only
 	node scripts/check-compose-security-config.mjs model-shadow-performance-source \
 		--source-file deployment/docker-compose.model-shadow-performance-generated.yml
 	$(EXACT_MODEL_SHADOW_COMPOSE) config --no-env-resolution --format json | node scripts/check-compose-security-config.mjs security-hardened-model-shadow-performance --require-existing-source

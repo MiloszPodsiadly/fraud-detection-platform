@@ -23,19 +23,15 @@ test("ordinary fixture provisioning is repeatable and parallel-safe", async (con
     LOCAL_GENERATED_FIXTURE_ROOT: shellPath(path.join(temporary, "generated"))
   };
   try {
-    const artifactRootMarker = path.join(
-      temporary,
-      "generated",
-      "model-shadow-performance",
-      ".artifact-root-ready.labels"
-    );
-    fs.mkdirSync(path.dirname(artifactRootMarker), { recursive: true });
-    fs.writeFileSync(artifactRootMarker, "malformed=true\n", { mode: 0o400 });
+    const artifactRootMarker = path.join(temporary, "generated", "model-shadow-performance", ".artifact-root-ready.labels");
+    if (process.platform !== "win32") {
+      fs.mkdirSync(path.dirname(artifactRootMarker), { recursive: true });
+      fs.writeFileSync(artifactRootMarker, "malformed=true\n", { mode: 0o400 });
+    }
     runBootstrap("--force", environment);
-    assert.equal(
-      fs.readFileSync(artifactRootMarker, "utf8"),
-      "com.frauddetection.artifact-root-ready=true\n"
-    );
+    if (process.platform !== "win32") {
+      assert.equal(fs.readFileSync(artifactRootMarker, "utf8"), "com.frauddetection.artifact-root-ready=true\n");
+    }
     const before = fixtureFingerprint(temporary);
     const identityRoot = path.join(temporary, "identity", "service-identity");
     const originalIdentity = fixtureFingerprint(identityRoot);
@@ -88,6 +84,45 @@ test("ordinary fixture provisioning is repeatable and parallel-safe", async (con
     fs.writeFileSync(certificate, "invalid\n", "utf8");
     runBootstrap("--ensure", environment);
     assert.notEqual(fixtureFingerprint(identityRoot), originalIdentity);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("fixture bootstrap rejects a symlinked exact-model root before external mutation", (context) => {
+  if (!bashExecutable || process.platform === "win32") {
+    context.skip("Linux Bash symlink contract is unavailable");
+    return;
+  }
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "local-startup-symlink-"));
+  try {
+    const identityRoot = path.join(temporary, "identity");
+    const generatedRoot = path.join(temporary, "generated");
+    const external = path.join(temporary, "external");
+    fs.mkdirSync(identityRoot, { recursive: true });
+    fs.mkdirSync(generatedRoot, { recursive: true });
+    fs.mkdirSync(external, { mode: 0o711 });
+    fs.writeFileSync(path.join(identityRoot, "unchanged"), "identity\n", "utf8");
+    fs.writeFileSync(path.join(external, "unchanged"), "external\n", "utf8");
+    fs.symlinkSync(external, path.join(generatedRoot, "model-shadow-performance"), "dir");
+    const identityBefore = fixtureFingerprint(identityRoot);
+    const externalBefore = fixtureFingerprint(external);
+    const externalMode = fs.statSync(external).mode;
+
+    const result = spawnSync(bashExecutable, [bootstrap, "--ensure"], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        LOCAL_IDENTITY_FIXTURE_ROOT: identityRoot,
+        LOCAL_GENERATED_FIXTURE_ROOT: generatedRoot
+      },
+      encoding: "utf8"
+    });
+
+    assert.notEqual(result.status, 0, "symlinked exact-model root unexpectedly passed");
+    assert.equal(fixtureFingerprint(identityRoot), identityBefore);
+    assert.equal(fixtureFingerprint(external), externalBefore);
+    assert.equal(fs.statSync(external).mode, externalMode);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

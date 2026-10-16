@@ -161,35 +161,101 @@ function assertGeneratedIdentityMount(serviceName, target, expectedSourceSuffix)
 }
 
 function assertMtlsIdentityMounts(serviceName, filenames) {
-  const targetRoot = "/run/service-identity/mtls/";
-  const mounts = (service(serviceName).volumes ?? [])
-    .filter((volume) => String(volume?.target ?? "").startsWith(targetRoot));
-  const expectedTargets = new Set(filenames.map((filename) => `${targetRoot}${filename}`));
+  const targetRoot = "/run/service-identity/mtls";
+  const sourceRoot = path.resolve("deployment", ".local", "service-identity", "mtls");
+  const realSourceRoot = realPathIfPresent(sourceRoot);
+  const expected = new Map(filenames.map((filename) => [
+    `${targetRoot}/${filename}`,
+    path.join(sourceRoot, filename)
+  ]));
+  const mounts = (service(serviceName).volumes ?? []).filter((mount) => {
+    if (mount?.type !== "bind") return false;
+    const source = path.resolve(String(mount.source ?? ""));
+    const target = normalizeContainerPath(mount.target);
+    const realSource = realPathIfPresent(source);
+    return pathsOverlap(source, sourceRoot)
+      || pathsOverlap(realSource, realSourceRoot)
+      || pathsOverlap(target, targetRoot);
+  });
   const observedTargets = new Set();
-  if (mounts.length !== expectedTargets.size) {
+  if (mounts.length !== expected.size) {
     fail(`${serviceName} must expose only its CA, certificate and private key mTLS files`);
   }
   for (const mount of mounts) {
-    const target = String(mount?.target ?? "");
-    const filename = target.slice(targetRoot.length);
-    const source = String(mount?.source ?? "").replaceAll("\\", "/");
+    const target = normalizeContainerPath(mount?.target);
+    const source = path.resolve(String(mount?.source ?? ""));
     if (observedTargets.has(target)) {
       fail(`${serviceName} must not define duplicate mTLS mount ${target}`);
       continue;
     }
     observedTargets.add(target);
-    if (!expectedTargets.has(target)) {
-      fail(`${serviceName} must not receive peer mTLS identity ${filename || "<missing>"}`);
+    const expectedSource = expected.get(target);
+    if (!expectedSource) {
+      fail(`${serviceName} must not expose mTLS identity material at ${target || "<missing>"}`);
       continue;
     }
-    if (mount.type !== "bind" || mount.read_only !== true
-        || !source.endsWith(`/deployment/.local/service-identity/mtls/${filename}`)) {
+    if (mount.read_only !== true || normalizeHostPath(source) !== normalizeHostPath(expectedSource)) {
       fail(`${serviceName} must read ${target} from its generated read-only local fixture`);
     }
+    assertSafeIdentitySource(serviceName, source, expectedSource);
   }
-  for (const target of expectedTargets) {
+  for (const target of expected.keys()) {
     if (!observedTargets.has(target)) fail(`${serviceName} is missing required mTLS mount ${target}`);
   }
+}
+
+function assertSafeIdentitySource(serviceName, source, expectedSource) {
+  if (normalizeHostPath(realPathIfPresent(source)) !== normalizeHostPath(realPathIfPresent(expectedSource))) {
+    fail(`${serviceName} mTLS source must not use an alias or symbolic-link traversal: ${source}`);
+    return;
+  }
+  let candidate = source;
+  while (true) {
+    try {
+      if (fs.lstatSync(candidate).isSymbolicLink()) {
+        fail(`${serviceName} mTLS source must not traverse symbolic link ${candidate}`);
+        return;
+      }
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        fail(`${serviceName} mTLS source is missing: ${source}`);
+      } else {
+        fail(`${serviceName} mTLS source cannot be inspected: ${error.message}`);
+      }
+      return;
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) return;
+    candidate = parent;
+  }
+}
+
+function realPathIfPresent(value) {
+  try {
+    return fs.realpathSync(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+function normalizeHostPath(value) {
+  const normalized = path.resolve(String(value)).replaceAll("\\", "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function normalizeContainerPath(value) {
+  return path.posix.normalize(String(value ?? ""));
+}
+
+function pathsOverlap(left, right) {
+  const first = normalizeComparablePath(left);
+  const second = normalizeComparablePath(right);
+  return first === second || first.startsWith(`${second}/`) || second.startsWith(`${first}/`);
+}
+
+function normalizeComparablePath(value) {
+  const normalized = String(value ?? "").replaceAll("\\", "/").replace(/\/$/, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function assertReadOnlyArtifactMount(serviceName, target) {

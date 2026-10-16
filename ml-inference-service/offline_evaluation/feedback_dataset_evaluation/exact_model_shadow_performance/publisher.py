@@ -23,6 +23,13 @@ from offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performan
     exact_report_selection_key,
     validate_exact_model_shadow_performance,
 )
+from offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.reader_access import (
+    apply_artifact_reader_access,
+    apply_selection_reader_access,
+    verify_artifact_reader_access,
+    verify_artifact_root_access,
+    verify_selection_reader_access,
+)
 from offline_evaluation.feedback_dataset_evaluation.model_card.atomic_directory_publish import (
     AtomicDirectoryPublicationUnsupported,
     publish_directory_without_replacement,
@@ -58,6 +65,9 @@ def publish_exact_model_shadow_artifact_set(
         _write_and_sync(staging / SUMMARY_FILENAME, summary_payload)
         _write_and_sync(staging / MANIFEST_FILENAME, manifest_payload)
         read_exact_model_shadow_artifact_set(staging)
+        apply_artifact_reader_access(staging / SUMMARY_FILENAME)
+        apply_artifact_reader_access(staging / MANIFEST_FILENAME)
+        apply_selection_reader_access(staging)
         _confirm_directory_durability(staging)
         try:
             publish_directory_without_replacement(staging, destination)
@@ -76,6 +86,9 @@ def publish_exact_model_shadow_artifact_set(
 
 
 def _idempotent_existing(destination: Path, expected_summary: bytes) -> dict[str, Path]:
+    verify_selection_reader_access(destination)
+    verify_artifact_reader_access(destination / SUMMARY_FILENAME)
+    verify_artifact_reader_access(destination / MANIFEST_FILENAME)
     evidence = read_exact_model_shadow_artifact_set(destination)
     actual = canonical_summary_json(_thaw(evidence.summary)).encode("utf-8")
     if actual != expected_summary:
@@ -116,6 +129,7 @@ def _validate_root(root: Path) -> None:
         raise ExactModelShadowPerformanceValidationError(
             "exact-model shadow artifact root must be pre-provisioned"
         )
+    verify_artifact_root_access(root)
 
 
 def _write_and_sync(path: Path, payload: str) -> None:
