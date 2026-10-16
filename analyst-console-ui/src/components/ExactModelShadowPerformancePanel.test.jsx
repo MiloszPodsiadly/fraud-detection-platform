@@ -104,7 +104,7 @@ describe("ExactModelShadowPerformancePanel", () => {
 
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
-    expect(clear).toHaveBeenCalledTimes(2);
+    expect(clear).toHaveBeenCalledOnce();
   });
 
   it("does not invalidate evidence for a semantically equivalent Model Card rerender", () => {
@@ -122,7 +122,7 @@ describe("ExactModelShadowPerformancePanel", () => {
       modelCard={structuredClone(modelCard(summary))}
     />);
 
-    expect(clear).toHaveBeenCalledOnce();
+    expect(clear).not.toHaveBeenCalled();
   });
 
   it("supports a complete manually entered selector without Model Card evidence", () => {
@@ -164,6 +164,7 @@ describe("ExactModelShadowPerformancePanel", () => {
     />);
     const changed = structuredClone(summary);
     changed.evaluationSummary.evaluationSubject.modelVersion = "2026-10-16.shadow";
+    fireEvent.click(screen.getByRole("button", { name: "Load exact artifact" }));
 
     view.rerender(<ExactModelShadowPerformancePanel
       state={state({ clear })}
@@ -172,7 +173,25 @@ describe("ExactModelShadowPerformancePanel", () => {
     />);
 
     expect(screen.getByLabelText("Model version")).toHaveValue("2026-10-16.shadow");
-    expect(clear).toHaveBeenCalledTimes(2);
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
+  it("clears evidence and prefilled identity when its Model Card disappears", () => {
+    const clear = vi.fn();
+    const load = vi.fn();
+    const summary = fixture();
+    const view = render(<ExactModelShadowPerformancePanel
+      state={state({ clear, load, summary })}
+      canRead
+      modelCard={modelCard(summary)}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "Load exact artifact" }));
+
+    view.rerender(<ExactModelShadowPerformancePanel state={state({ clear, load })} canRead />);
+
+    expect(clear).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Model name")).toHaveValue("");
+    expect(screen.queryByText("Analyst-labeled fraud by disagreement category")).not.toBeInTheDocument();
   });
 
   it("preserves an explicit selector edit when Model Card identity changes", () => {
@@ -194,7 +213,26 @@ describe("ExactModelShadowPerformancePanel", () => {
     />);
 
     expect(screen.getByLabelText("Model version")).toHaveValue("manual-version");
-    expect(clear).toHaveBeenCalledTimes(3);
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
+  it("preserves manually loaded evidence when its former Model Card disappears", () => {
+    const clear = vi.fn();
+    const load = vi.fn();
+    const summary = fixture();
+    const view = render(<ExactModelShadowPerformancePanel
+      state={state({ clear, load, summary })}
+      canRead
+      modelCard={modelCard(summary)}
+    />);
+    fireEvent.change(screen.getByLabelText("Model version"), { target: { value: "manual-version" } });
+    fireEvent.click(screen.getByRole("button", { name: "Load exact artifact" }));
+
+    view.rerender(<ExactModelShadowPerformancePanel state={state({ clear, load, summary })} canRead />);
+
+    expect(clear).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Model version")).toHaveValue("manual-version");
+    expect(screen.getByText("Analyst-labeled fraud by disagreement category")).toBeInTheDocument();
   });
 });
 

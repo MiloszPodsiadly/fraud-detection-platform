@@ -9,6 +9,8 @@ const EMPTY_SELECTOR = Object.freeze({
   fromInclusive: "",
   toInclusive: ""
 });
+const MODEL_CARD_ORIGIN = "MODEL_CARD";
+const MANUAL_ORIGIN = "MANUAL";
 
 export function ExactModelShadowPerformancePanel({
   state,
@@ -17,6 +19,8 @@ export function ExactModelShadowPerformancePanel({
 }) {
   const [draft, setDraft] = useState(EMPTY_SELECTOR);
   const lastPrefill = useRef(null);
+  const draftOrigin = useRef(MANUAL_ORIGIN);
+  const loadedOrigin = useRef(null);
   const subject = modelCard?.subject;
   const hasSubject = subject !== null && subject !== undefined;
   const window = modelCard?.evaluationSummary?.evaluationWindow;
@@ -29,6 +33,16 @@ export function ExactModelShadowPerformancePanel({
 
   useEffect(() => {
     if (!hasSubject) {
+      if (lastPrefill.current !== null) {
+        if (loadedOrigin.current === MODEL_CARD_ORIGIN) state.clear?.();
+        loadedOrigin.current = null;
+        setDraft((current) => {
+          if (draftOrigin.current !== MODEL_CARD_ORIGIN) return current;
+          draftOrigin.current = MANUAL_ORIGIN;
+          return EMPTY_SELECTOR;
+        });
+        lastPrefill.current = null;
+      }
       return;
     }
     const nextPrefill = {
@@ -39,11 +53,15 @@ export function ExactModelShadowPerformancePanel({
       fromInclusive,
       toInclusive
     };
-    state.clear?.();
+    if (selectorsEqual(nextPrefill, lastPrefill.current)) return;
+    if (loadedOrigin.current === MODEL_CARD_ORIGIN) state.clear?.();
+    loadedOrigin.current = null;
+    const mayReplace = lastPrefill.current === null || draftOrigin.current === MODEL_CARD_ORIGIN;
+    lastPrefill.current = nextPrefill;
     setDraft((current) => {
-      const mayReplace = lastPrefill.current === null || selectorsEqual(current, lastPrefill.current);
-      lastPrefill.current = nextPrefill;
-      return mayReplace ? nextPrefill : current;
+      if (!mayReplace) return current;
+      draftOrigin.current = MODEL_CARD_ORIGIN;
+      return nextPrefill;
     });
   }, [
     featureContractVersion,
@@ -57,17 +75,23 @@ export function ExactModelShadowPerformancePanel({
   ]);
 
   useEffect(() => {
-    if (canRead === false) state.clear?.();
+    if (canRead === false) {
+      loadedOrigin.current = null;
+      state.clear?.();
+    }
   }, [canRead, state.clear]);
 
   function update(field, value) {
     if (draft[field] === value) return;
+    draftOrigin.current = MANUAL_ORIGIN;
+    loadedOrigin.current = null;
     state.clear?.();
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
   function submit(event) {
     event.preventDefault();
+    loadedOrigin.current = draftOrigin.current;
     state.load(Object.fromEntries(
       Object.entries(draft).map(([field, value]) => [field, value.trim()])
     ));
@@ -354,5 +378,6 @@ function display(value) {
 }
 
 function selectorsEqual(left, right) {
-  return Object.keys(EMPTY_SELECTOR).every((field) => left[field] === right[field]);
+  return left !== null && right !== null
+    && Object.keys(EMPTY_SELECTOR).every((field) => left[field] === right[field]);
 }

@@ -3,7 +3,7 @@ import { isAbortError } from "./apiErrors.js";
 import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 import { isValidPromotionReviewReadinessReport } from "../governance/promotionReviewReadinessReportValidation.js";
-import { isValidModelCard } from "../governance/modelEvaluationGovernanceValidation.js";
+import { isValidModelCard } from "../governance/modelCardValidation.js";
 import { isValidExactModelShadowPerformance } from "../governance/exactModelShadowPerformanceValidation.js";
 import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
 

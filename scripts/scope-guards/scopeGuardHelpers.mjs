@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 
 export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const safeRepoRoot = repoRoot.replaceAll("\\", "/");
+const ownedApiClientContractTests = new Set([
+  "analyst-console-ui/src/api/alertsApi.test.js",
+  "analyst-console-ui/src/api/modelCardApi.test.js",
+  "analyst-console-ui/src/api/exactModelShadowPerformanceApi.test.js"
+]);
+const analystWorkflowClaimPattern = /\b(claim|claimed|claiming)\s+(an?\s+)?(alert|case|work\s*item|queue\s*item)\b|\b(onClaim|handleClaim|claimAlert|claimCase|claimWorkItem)\b/i;
 
 export function getChangedFiles({ baseEnvVar, defaultBase = "master" }) {
   const prefix = baseEnvVar.replace(/_BASE$/, "");
@@ -58,6 +64,14 @@ export function containsRawFetch(source) {
 
 export function containsEndpointString(source) {
   return /["']\/(?:api|governance|system|bff)\//.test(source);
+}
+
+export function containsAnalystWorkflowClaim(source) {
+  return analystWorkflowClaimPattern.test(source);
+}
+
+export function isOwnedApiClientContractTest(file) {
+  return ownedApiClientContractTests.has(file.replaceAll("\\", "/"));
 }
 
 export function containsSkippedOrFocusedTest(source) {

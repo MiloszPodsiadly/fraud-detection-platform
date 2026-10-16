@@ -1,8 +1,10 @@
 import {
   containsEndpointString,
+  containsAnalystWorkflowClaim,
   fileMatchesAnyPrefix,
   getChangedFiles,
   printViolationsAndExit,
+  isOwnedApiClientContractTest,
   readFileIfExists,
   runGitDiff
 } from "./scope-guards/scopeGuardHelpers.mjs";
@@ -20,14 +22,9 @@ const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
 ]);
 const allowedEndpointFiles = new Set([
-  "analyst-console-ui/src/api/alertsApi.js",
-  // API client tests assert exact endpoints owned by alertsApi.js; keep these exceptions exact.
-  "analyst-console-ui/src/api/alertsApi.test.js",
-  "analyst-console-ui/src/api/modelCardApi.test.js",
-  "analyst-console-ui/src/api/exactModelShadowPerformanceApi.test.js"
+  "analyst-console-ui/src/api/alertsApi.js"
 ]);
 const outOfScopePattern = /\b(assignment|bulk|mass|optimistic|Kafka|outbox|finality)\b/i;
-const claimWorkflowPattern = /\b(claim|claimed|claiming)\s+(an?\s+)?(alert|case|work\s*item|queue\s*item)\b|\b(onClaim|handleClaim|claimAlert|claimCase|claimWorkItem)\b/i;
 const exportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i;
 const governanceFiles = new Set([
   "scripts/check-doc-overclaims.mjs",
@@ -49,7 +46,10 @@ for (const file of changedFiles) {
   const diff = usingExplicitChangedFiles ? fileContentAsAddedLines(normalized) : runGitDiff(diffBase(), "HEAD", ["--unified=0", "--", normalized]);
   for (const line of diff.split(/\r?\n/).filter((entry) => entry.startsWith("+") && !entry.startsWith("+++"))) {
     const sourceLine = line.replace(/^\+\s*/, "");
-    if (!allowedEndpointFiles.has(normalized) && !isGovernanceFile(normalized) && containsEndpointString(sourceLine)) {
+    if (!allowedEndpointFiles.has(normalized)
+        && !isOwnedApiClientContractTest(normalized)
+        && !isGovernanceFile(normalized)
+        && containsEndpointString(sourceLine)) {
       violations.push(`${normalized}: new endpoint strings must stay behind the API client boundary.`);
     }
     if (!isScopeGuardScript(normalized)
@@ -72,7 +72,7 @@ function introducesForbiddenScope(sourceLine) {
     return false;
   }
   return outOfScopePattern.test(sourceLine)
-    || claimWorkflowPattern.test(sourceLine)
+    || containsAnalystWorkflowClaim(sourceLine)
     || exportWorkflowPattern.test(sourceLine)
     || /\b(export|download)\s+(csv|file|report|data|results)\b/i.test(sourceLine)
     || /\b(onExport|handleExport|export[A-Z][A-Za-z]*)\b/.test(sourceLine);

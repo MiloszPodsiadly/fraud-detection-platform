@@ -2,6 +2,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  containsAnalystWorkflowClaim,
+  isOwnedApiClientContractTest
+} from "./scope-guards/scopeGuardHelpers.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const safeRepoRoot = repoRoot.replaceAll("\\", "/");
@@ -23,16 +27,13 @@ const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
 ]);
 const allowedEndpointFiles = new Set([
-  "analyst-console-ui/src/api/alertsApi.js",
-  // API client tests assert exact API-client-owned paths; keep this exception exact.
-  "analyst-console-ui/src/api/alertsApi.test.js",
-  "analyst-console-ui/src/api/modelCardApi.test.js"
+  "analyst-console-ui/src/api/alertsApi.js"
 ]);
 const workspaceRuntimePrefixes = [
   "analyst-console-ui/src/workspace/"
 ];
 const scriptPath = "scripts/check-workspace-runtime-ownership-scope.mjs";
-const forbiddenWorkflowPattern = /\b(assign(?:ment)?|claim|bulk|mass[ -]?action|optimistic|Kafka|outbox|finality|idempotency)\b/i;
+const forbiddenWorkflowPattern = /\b(assign(?:ment)?|bulk|mass[ -]?action|optimistic|Kafka|outbox|finality|idempotency)\b/i;
 const forbiddenExportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i;
 const prefetchPattern = /\b(prefetch|pre-load|preload|warm[ -]?up)\b/i;
 const newAuthModePattern = /\b(new auth mode|auth mode|oidc mode|bearer mode|session mode)\b/i;
@@ -58,7 +59,10 @@ for (const file of changedFiles) {
   const diff = usingExplicitChangedFiles ? fileContentAsAddedLines(normalized) : git(["diff", "--unified=0", `${diffBase()}...HEAD`, "--", normalized]);
   for (const line of diff.split(/\r?\n/).filter((entry) => entry.startsWith("+") && !entry.startsWith("+++"))) {
     const sourceLine = line.replace(/^\+\s*/, "");
-    if (!allowedEndpointFiles.has(normalized) && !normalized.startsWith(".github/workflows/") && /["']\/(?:api|governance|system|bff)\//.test(sourceLine)) {
+    if (!allowedEndpointFiles.has(normalized)
+        && !isOwnedApiClientContractTest(normalized)
+        && !normalized.startsWith(".github/workflows/")
+        && /["']\/(?:api|governance|system|bff)\//.test(sourceLine)) {
       violations.push(`${normalized}: endpoint strings must stay behind the API client boundary.`);
     }
     if (!isAllowedNarrativeFile(normalized)
@@ -128,6 +132,7 @@ function introducesForbiddenScope(sourceLine) {
     return false;
   }
   return forbiddenWorkflowPattern.test(sourceLine)
+    || containsAnalystWorkflowClaim(sourceLine)
     || forbiddenExportWorkflowPattern.test(sourceLine)
     || /\b(export|download)\s+(csv|file|report|data|results)\b/i.test(sourceLine)
     || /\b(onExport|handleExport|export[A-Z][A-Za-z]*)\b/.test(sourceLine)
