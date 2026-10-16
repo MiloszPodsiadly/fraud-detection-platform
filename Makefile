@@ -62,12 +62,19 @@ check-compose: deployment/.env
 	$(SECURITY_HARDENED_COMPOSE) config --format json | node scripts/check-compose-security-config.mjs security-hardened
 
 exact-model-shadow-preflight: deployment/.env local-runtime-fixtures
-	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.reader_access \
-		--artifact-root ../deployment/local-generated/model-shadow-performance \
-		--authorized-parent ../deployment/local-generated --reader-uid 10001 --verify-only
 	node scripts/check-compose-security-config.mjs model-shadow-performance-source \
 		--source-file deployment/docker-compose.model-shadow-performance-generated.yml
-	$(EXACT_MODEL_SHADOW_COMPOSE) config --no-env-resolution --format json | node scripts/check-compose-security-config.mjs security-hardened-model-shadow-performance --require-existing-source
+	@resolved_config="$$(mktemp)"; resolved_source="$$(mktemp)"; \
+		trap 'rm -f -- "$$resolved_config" "$$resolved_source"' EXIT; \
+		$(EXACT_MODEL_SHADOW_COMPOSE) config --no-env-resolution --format json >"$$resolved_config"; \
+		node scripts/check-compose-security-config.mjs security-hardened-model-shadow-performance \
+			--require-existing-source --write-resolved-source "$$resolved_source" <"$$resolved_config"; \
+		artifact_root="$$(cat -- "$$resolved_source")"; \
+		authorized_parent="$$(dirname -- "$$artifact_root")"; \
+		cd ml-inference-service && PYTHONPATH=. python -m \
+			offline_evaluation.feedback_dataset_evaluation.exact_model_shadow_performance.reader_access \
+			--artifact-root "$$artifact_root" --authorized-parent "$$authorized_parent" \
+			--reader-uid 10001 --verify-only
 
 check-compose-exact-model-shadow: exact-model-shadow-preflight
 	node --test scripts/check-compose-security-config.test.mjs

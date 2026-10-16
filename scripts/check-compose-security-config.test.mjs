@@ -36,8 +36,8 @@ test("uses Compose interpolation as the authority for default, env-file, and she
   const temporary = fs.mkdtempSync(path.join(repositoryRoot, "deployment", ".compose-env-test-"));
   try {
     const envFile = path.join(temporary, "custom.env");
-    const envRoot = path.join(temporary, "env root");
-    const shellRoot = path.join(temporary, "shell root");
+    const envRoot = path.join(temporary, "env parent with spaces", "model-shadow-performance");
+    const shellRoot = path.join(temporary, "shell parent with spaces", "model-shadow-performance");
     writeArtifactRootSentinel(envRoot);
     writeArtifactRootSentinel(shellRoot);
     fs.writeFileSync(envFile, `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT=${envRoot}\n`, "utf8");
@@ -47,6 +47,10 @@ test("uses Compose interpolation as the authority for default, env-file, and she
     const envConfig = JSON.parse(fromEnvFile.stdout);
     assert.equal(exactModelMount(envConfig).source, envRoot);
     assertResolvedPasses(envConfig);
+    const resolvedSourceFile = path.join(temporary, "resolved-source.txt");
+    const exported = runResolved(envConfig, true, resolvedSourceFile);
+    assert.equal(exported.status, 0, exported.stderr || exported.stdout);
+    assert.equal(fs.readFileSync(resolvedSourceFile, "utf8"), path.resolve(envRoot));
 
     const fromShell = resolveActualCompose(envFile, {
       MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT: shellRoot
@@ -297,9 +301,10 @@ function assertResolvedFails(config, requireExisting, label) {
   assert.notEqual(result.status, 0, `${label} unexpectedly passed`);
 }
 
-function runResolved(config, requireExisting) {
+function runResolved(config, requireExisting, resolvedSourceFile) {
   const args = [checker, "model-shadow-performance"];
   if (requireExisting) args.push("--require-existing-source");
+  if (resolvedSourceFile) args.push("--write-resolved-source", resolvedSourceFile);
   return spawnSync(process.execPath, args, {
     cwd: repositoryRoot,
     input: JSON.stringify(config),

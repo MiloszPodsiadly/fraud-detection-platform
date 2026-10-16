@@ -4,6 +4,7 @@ import path from "node:path";
 const variant = process.argv[2];
 const requireExistingSource = process.argv.includes("--require-existing-source");
 const sourceFile = optionValue("--source-file");
+const resolvedSourceFile = optionValue("--write-resolved-source");
 const exactModelTarget = "/run/model-shadow-performance";
 const exactModelSource = "${MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT:-./local-generated/model-shadow-performance}";
 const protectedGovernanceRoots = [
@@ -26,6 +27,7 @@ if (!supportedVariants.has(variant)) {
   console.error(
     "Usage: node scripts/check-compose-security-config.mjs <variant> "
       + "[--source-file <compose.yml>] [--require-existing-source]"
+      + " [--write-resolved-source <file>]"
   );
   process.exit(2);
 }
@@ -47,6 +49,7 @@ if (variant !== "model-shadow-performance-source") {
 
 const services = config.services ?? {};
 const failures = [];
+let resolvedExactModelSource;
 
 function optionValue(name) {
   const index = process.argv.indexOf(name);
@@ -493,6 +496,9 @@ function assertExactModelReaderResolved() {
   if (requireExistingSource) {
     assertPreProvisionedSource(mount);
   }
+  if (mount?.source) {
+    resolvedExactModelSource = path.resolve(mount.source);
+  }
 }
 
 function assertPreProvisionedSource(mount) {
@@ -601,6 +607,14 @@ function finish() {
       console.error(`- ${failure}`);
     }
     process.exit(1);
+  }
+
+  if (resolvedSourceFile) {
+    if (!resolvedExactModelSource) {
+      console.error("Resolved exact-model source is unavailable for export.");
+      process.exit(1);
+    }
+    fs.writeFileSync(resolvedSourceFile, resolvedExactModelSource, { encoding: "utf8", mode: 0o600 });
   }
 
   console.log(`Compose security assertions passed for ${variant}.`);
