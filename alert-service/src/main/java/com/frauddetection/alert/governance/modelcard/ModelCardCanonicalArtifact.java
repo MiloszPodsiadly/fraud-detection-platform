@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
+
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -197,7 +199,7 @@ final class ModelCardCanonicalArtifact {
 
     private static String code(String value) {
         if (value.indexOf('`') >= 0 || value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0) {
-            throw new ModelCardValidationException("model card markdown value contains unsupported control characters");
+            throw new ModelEvaluationValidationException("model card markdown value contains unsupported control characters");
         }
         return "`" + value + "`";
     }

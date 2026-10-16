@@ -2,7 +2,7 @@ package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
-import com.frauddetection.alert.governance.modelcard.ModelCardValidator;
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -259,7 +259,7 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
                 new ArtifactBackedExactModelShadowPerformanceProvider(
                         new ExactModelShadowPerformanceProperties(true, missingRoot.toString(), 524_288L),
                         new ObjectMapper(), new ExactModelShadowPerformanceValidator(
-                                new ModelCardValidator()));
+                                new ModelEvaluationGovernanceValidator()));
 
         assertThatThrownBy(() -> provider.find(selector("a".repeat(64))))
                 .isInstanceOf(ExactModelShadowPerformanceUnavailableException.class);
@@ -282,7 +282,7 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
                 new ExactModelShadowPerformanceProperties(true, artifactRoot.toString(), maxSummarySizeBytes),
                 new ObjectMapper(),
                 new ExactModelShadowPerformanceValidator(
-                        new ModelCardValidator()),
+                        new ModelEvaluationGovernanceValidator()),
                 artifactReader
         );
     }

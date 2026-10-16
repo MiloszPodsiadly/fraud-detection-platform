@@ -1,5 +1,5 @@
 import { isCanonicalUtcTimestamp, isOrderedCanonicalUtcTimestamp } from "./canonicalUtcTimestamp.js";
-import { isValidModelEvaluationSummary } from "./modelCardValidation.js";
+import { isValidModelEvaluationSummary } from "./modelEvaluationGovernanceValidation.js";
 
 const ROOT_FIELDS = [
   "schemaVersion", "reportType", "generatedAt", "populationType", "cohortEligibility",

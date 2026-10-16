@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
+
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.JsonNode;
@@ -22,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ArtifactBackedModelCardProviderTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ModelCardValidator validator = new ModelCardValidator();
+    private final ModelEvaluationGovernanceValidator validator = new ModelEvaluationGovernanceValidator();
 
     @TempDir
     Path tempDir;

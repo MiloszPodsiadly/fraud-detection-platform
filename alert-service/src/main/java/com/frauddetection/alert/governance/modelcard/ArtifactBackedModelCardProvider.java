@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
+
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReadException;
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
 import tools.jackson.core.JacksonException;
@@ -37,13 +40,13 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
 
     private final ModelCardCurrentProperties properties;
     private final ObjectMapper objectMapper;
-    private final ModelCardValidator validator;
+    private final ModelEvaluationGovernanceValidator validator;
     private final GovernanceArtifactReader artifactReader;
 
     public ArtifactBackedModelCardProvider(
             ModelCardCurrentProperties properties,
             ObjectMapper objectMapper,
-            ModelCardValidator validator
+            ModelEvaluationGovernanceValidator validator
     ) {
         this(properties, objectMapper, validator, new GovernanceArtifactReader());
     }
@@ -51,7 +54,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
     ArtifactBackedModelCardProvider(
             ModelCardCurrentProperties properties,
             ObjectMapper objectMapper,
-            ModelCardValidator validator,
+            ModelEvaluationGovernanceValidator validator,
             GovernanceArtifactReader artifactReader
     ) {
         this.properties = properties;
@@ -98,7 +101,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
                 throw unavailable();
             }
             return Optional.of(card);
-        } catch (GovernanceArtifactReadException | ModelCardValidationException exception) {
+        } catch (GovernanceArtifactReadException | ModelEvaluationValidationException exception) {
             throw unavailable();
         }
     }
@@ -195,7 +198,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
 
     private void require(boolean condition, String message) {
         if (!condition) {
-            throw new ModelCardValidationException(message);
+            throw new ModelEvaluationValidationException(message);
         }
     }
 

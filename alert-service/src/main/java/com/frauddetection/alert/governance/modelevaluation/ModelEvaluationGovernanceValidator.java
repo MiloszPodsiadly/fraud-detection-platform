@@ -1,6 +1,7 @@
-package com.frauddetection.alert.governance.modelcard;
+package com.frauddetection.alert.governance.modelevaluation;
 
 import com.frauddetection.alert.governance.GovernanceTimestampContract;
+import com.frauddetection.alert.governance.modelcard.ModelCard;
 import tools.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +16,7 @@ import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 @Component
-public class ModelCardValidator {
+public class ModelEvaluationGovernanceValidator {
 
     private static final String CARD_SCHEMA = "ml-model-card-v1";
     private static final String CARD_TYPE = "ML_MODEL_CARD_V1";
@@ -225,7 +226,7 @@ public class ModelCardValidator {
         require(rawRows == accounted + (truncated.booleanValue() ? 1 : 0), "source dataset counts do not reconcile");
     }
 
-    void validateWindow(JsonNode window) {
+    public void validateWindow(JsonNode window) {
         exactFields(window, Set.of("timeBasis", "fromInclusive", "toInclusive"), "evaluationWindow");
         require("FEEDBACK_CREATED_AT".equals(text(window, "timeBasis")), "evaluationWindow.timeBasis unsupported");
         optionalTimestamp(window.get("fromInclusive"), "evaluationWindow.fromInclusive");
@@ -486,7 +487,7 @@ public class ModelCardValidator {
     ) {
         try {
             validateMetricShape(metric);
-        } catch (ModelCardValidationException exception) {
+        } catch (ModelEvaluationValidationException exception) {
             return false;
         }
         if (denominator == 0) {
@@ -506,7 +507,7 @@ public class ModelCardValidator {
         return value.decimalValue().compareTo(expected) == 0;
     }
 
-    static BigDecimal roundedMetricValue(int numerator, int denominator) {
+    public static BigDecimal roundedMetricValue(int numerator, int denominator) {
         return new BigDecimal((double) numerator / denominator)
                 .setScale(6, RoundingMode.HALF_EVEN)
                 .stripTrailingZeros();
@@ -554,7 +555,7 @@ public class ModelCardValidator {
                 "verifiedUsageBoundary.workflowAuthority must be NONE");
     }
 
-    void validateExpectedWarnings(
+    public void validateExpectedWarnings(
             JsonNode warnings,
             JsonNode sourceDataset,
             Map<String, Integer> population,
@@ -645,7 +646,7 @@ public class ModelCardValidator {
         try {
             GovernanceTimestampContract.parse(value, field);
         } catch (IllegalArgumentException exception) {
-            throw new ModelCardValidationException(exception.getMessage());
+            throw new ModelEvaluationValidationException(exception.getMessage());
         }
     }
 
@@ -658,7 +659,7 @@ public class ModelCardValidator {
 
     private void require(boolean condition, String message) {
         if (!condition) {
-            throw new ModelCardValidationException(message);
+            throw new ModelEvaluationValidationException(message);
         }
     }
 }

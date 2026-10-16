@@ -1,7 +1,7 @@
 package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
 import org.junit.jupiter.api.Test;
-import com.frauddetection.alert.governance.modelcard.ModelCardValidator;
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -14,7 +14,7 @@ class ExactModelShadowPerformanceValidatorTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExactModelShadowPerformanceValidator validator =
-            new ExactModelShadowPerformanceValidator(new ModelCardValidator());
+            new ExactModelShadowPerformanceValidator(new ModelEvaluationGovernanceValidator());
 
     @Test
     void acceptsCanonicalPythonGeneratedContractsForBothSourceVerificationLevels() throws Exception {

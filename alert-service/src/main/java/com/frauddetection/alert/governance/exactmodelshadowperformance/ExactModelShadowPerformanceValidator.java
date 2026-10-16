@@ -1,8 +1,8 @@
 package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
 import com.frauddetection.alert.governance.GovernanceTimestampContract;
-import com.frauddetection.alert.governance.modelcard.ModelCardValidationException;
-import com.frauddetection.alert.governance.modelcard.ModelCardValidator;
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
+import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
@@ -12,9 +12,9 @@ import java.util.Set;
 @Component
 public class ExactModelShadowPerformanceValidator {
 
-    private final ModelCardValidator modelEvaluationValidator;
+    private final ModelEvaluationGovernanceValidator modelEvaluationValidator;
 
-    public ExactModelShadowPerformanceValidator(ModelCardValidator modelEvaluationValidator) {
+    public ExactModelShadowPerformanceValidator(ModelEvaluationGovernanceValidator modelEvaluationValidator) {
         this.modelEvaluationValidator = Objects.requireNonNull(modelEvaluationValidator);
     }
 
@@ -110,7 +110,7 @@ public class ExactModelShadowPerformanceValidator {
         try {
             modelEvaluationValidator.validateEvaluationSummary(
                     evaluation,
-                    new ModelCardValidator.ExpectedSubject(
+                    new ModelEvaluationGovernanceValidator.ExpectedSubject(
                             "ML_MODEL",
                             selector.modelName(),
                             selector.modelVersion(),
@@ -121,7 +121,7 @@ public class ExactModelShadowPerformanceValidator {
                     text(source, "reportGeneratedAt"),
                     text(summary, "generatedAt")
             );
-        } catch (ModelCardValidationException exception) {
+        } catch (ModelEvaluationValidationException exception) {
             throw new ExactModelShadowPerformanceValidationException(
                     "evaluationSummary invalid: " + exception.getMessage());
         }
