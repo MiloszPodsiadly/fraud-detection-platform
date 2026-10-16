@@ -17,21 +17,27 @@ export function ExactModelShadowPerformancePanel({
 }) {
   const [draft, setDraft] = useState(EMPTY_SELECTOR);
   const lastPrefill = useRef(null);
+  const subject = modelCard?.subject;
+  const hasSubject = subject !== null && subject !== undefined;
+  const window = modelCard?.evaluationSummary?.evaluationWindow;
+  const modelName = subject?.modelName || "";
+  const modelVersion = subject?.modelVersion || "";
+  const featureContractVersion = subject?.featureContractVersion || "";
+  const modelArtifactSha256 = subject?.modelArtifactSha256 || "";
+  const fromInclusive = window?.fromInclusive || "";
+  const toInclusive = window?.toInclusive || "";
 
   useEffect(() => {
-    const subject = modelCard?.subject;
-    const window = modelCard?.evaluationSummary?.evaluationWindow;
-    if (!subject) {
-      state.clear?.();
+    if (!hasSubject) {
       return;
     }
     const nextPrefill = {
-      modelName: subject.modelName || "",
-      modelVersion: subject.modelVersion || "",
-      featureContractVersion: subject.featureContractVersion || "",
-      modelArtifactSha256: subject.modelArtifactSha256 || "",
-      fromInclusive: window?.fromInclusive || "",
-      toInclusive: window?.toInclusive || ""
+      modelName,
+      modelVersion,
+      featureContractVersion,
+      modelArtifactSha256,
+      fromInclusive,
+      toInclusive
     };
     state.clear?.();
     setDraft((current) => {
@@ -39,9 +45,24 @@ export function ExactModelShadowPerformancePanel({
       lastPrefill.current = nextPrefill;
       return mayReplace ? nextPrefill : current;
     });
-  }, [modelCard, state.clear]);
+  }, [
+    featureContractVersion,
+    fromInclusive,
+    hasSubject,
+    modelArtifactSha256,
+    modelName,
+    modelVersion,
+    state.clear,
+    toInclusive
+  ]);
+
+  useEffect(() => {
+    if (canRead === false) state.clear?.();
+  }, [canRead, state.clear]);
 
   function update(field, value) {
+    if (draft[field] === value) return;
+    state.clear?.();
     setDraft((current) => ({ ...current, [field]: value }));
   }
 

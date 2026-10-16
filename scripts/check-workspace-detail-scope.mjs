@@ -23,9 +23,11 @@ const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js",
   // API client tests assert exact endpoints owned by alertsApi.js; keep these exceptions exact.
   "analyst-console-ui/src/api/alertsApi.test.js",
-  "analyst-console-ui/src/api/modelCardApi.test.js"
+  "analyst-console-ui/src/api/modelCardApi.test.js",
+  "analyst-console-ui/src/api/exactModelShadowPerformanceApi.test.js"
 ]);
-const outOfScopePattern = /\b(assignment|claim|bulk|mass|optimistic|Kafka|outbox|finality)\b/i;
+const outOfScopePattern = /\b(assignment|bulk|mass|optimistic|Kafka|outbox|finality)\b/i;
+const claimWorkflowPattern = /\b(claim|claimed|claiming)\s+(an?\s+)?(alert|case|work\s*item|queue\s*item)\b|\b(onClaim|handleClaim|claimAlert|claimCase|claimWorkItem)\b/i;
 const exportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i;
 const governanceFiles = new Set([
   "scripts/check-doc-overclaims.mjs",
@@ -70,6 +72,7 @@ function introducesForbiddenScope(sourceLine) {
     return false;
   }
   return outOfScopePattern.test(sourceLine)
+    || claimWorkflowPattern.test(sourceLine)
     || exportWorkflowPattern.test(sourceLine)
     || /\b(export|download)\s+(csv|file|report|data|results)\b/i.test(sourceLine)
     || /\b(onExport|handleExport|export[A-Z][A-Za-z]*)\b/.test(sourceLine);

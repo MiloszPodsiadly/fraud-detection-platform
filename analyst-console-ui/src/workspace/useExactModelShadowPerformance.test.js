@@ -35,6 +35,42 @@ describe("useExactModelShadowPerformance", () => {
     await waitFor(() => expect(result.current.summary).toBeNull());
     expect(result.current.selector).toBeNull();
   });
+
+  it("aborts an in-flight request and rejects its late result when cleared", async () => {
+    const pending = deferred();
+    const apiClient = { getExactModelShadowPerformance: vi.fn().mockReturnValue(pending.promise) };
+    const { result } = renderHook(() => useExactModelShadowPerformance({ enabled: true, apiClient }));
+    act(() => { result.current.load(selector("a")); });
+    await waitFor(() => expect(apiClient.getExactModelShadowPerformance).toHaveBeenCalledOnce());
+    const signal = apiClient.getExactModelShadowPerformance.mock.calls[0][1].signal;
+
+    act(() => { result.current.clear(); });
+
+    expect(signal.aborted).toBe(true);
+    expect(result.current.isLoading).toBe(false);
+    await act(async () => { pending.resolve({ schemaVersion: "stale" }); });
+    expect(result.current.summary).toBeNull();
+    expect(result.current.selector).toBeNull();
+  });
+
+  it("aborts an in-flight request when authority is removed", async () => {
+    const pending = deferred();
+    const apiClient = { getExactModelShadowPerformance: vi.fn().mockReturnValue(pending.promise) };
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useExactModelShadowPerformance({ enabled, apiClient }),
+      { initialProps: { enabled: true } }
+    );
+    act(() => { result.current.load(selector("a")); });
+    await waitFor(() => expect(apiClient.getExactModelShadowPerformance).toHaveBeenCalledOnce());
+    const signal = apiClient.getExactModelShadowPerformance.mock.calls[0][1].signal;
+
+    rerender({ enabled: false });
+
+    await waitFor(() => expect(signal.aborted).toBe(true));
+    await act(async () => { pending.resolve({ schemaVersion: "stale" }); });
+    expect(result.current.summary).toBeNull();
+    expect(result.current.selector).toBeNull();
+  });
 });
 
 function selector(suffix) {

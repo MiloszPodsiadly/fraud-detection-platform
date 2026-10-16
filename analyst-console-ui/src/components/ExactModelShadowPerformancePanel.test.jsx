@@ -79,9 +79,79 @@ describe("ExactModelShadowPerformancePanel", () => {
   });
 
   it("does not expose the selector without authority", () => {
-    render(<ExactModelShadowPerformancePanel state={state()} canRead={false} />);
+    const clear = vi.fn();
+    render(<ExactModelShadowPerformancePanel state={state({ clear })} canRead={false} />);
     expect(screen.getByText("Required permission: model-shadow-performance:read.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load exact artifact" })).not.toBeInTheDocument();
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["Model name", "manual-model"],
+    ["Model version", "manual-version"],
+    ["Feature contract", "manual-contract"],
+    ["Artifact SHA-256", "b".repeat(64)],
+    ["Window from (UTC)", "2026-06-02T00:00:00Z"],
+    ["Window to (UTC)", "2026-06-10T23:59:59Z"]
+  ])("clears loaded evidence when %s changes", (label, value) => {
+    const clear = vi.fn();
+    const summary = fixture();
+    render(<ExactModelShadowPerformancePanel
+      state={state({ clear, summary })}
+      canRead
+      modelCard={modelCard(summary)}
+    />);
+
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+
+    expect(clear).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not invalidate evidence for a semantically equivalent Model Card rerender", () => {
+    const clear = vi.fn();
+    const summary = fixture();
+    const view = render(<ExactModelShadowPerformancePanel
+      state={state({ clear })}
+      canRead
+      modelCard={modelCard(summary)}
+    />);
+
+    view.rerender(<ExactModelShadowPerformancePanel
+      state={state({ clear })}
+      canRead
+      modelCard={structuredClone(modelCard(summary))}
+    />);
+
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
+  it("supports a complete manually entered selector without Model Card evidence", () => {
+    const load = vi.fn();
+    const clear = vi.fn();
+    render(<ExactModelShadowPerformancePanel state={state({ clear, load })} canRead />);
+    const values = {
+      "Model name": "manual-model",
+      "Model version": "manual-version",
+      "Feature contract": "manual-contract",
+      "Artifact SHA-256": "b".repeat(64),
+      "Window from (UTC)": "2026-06-02T00:00:00Z",
+      "Window to (UTC)": "2026-06-10T23:59:59Z"
+    };
+    for (const [label, value] of Object.entries(values)) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Load exact artifact" }));
+
+    expect(clear).toHaveBeenCalledTimes(6);
+    expect(load).toHaveBeenCalledWith({
+      modelName: "manual-model",
+      modelVersion: "manual-version",
+      featureContractVersion: "manual-contract",
+      modelArtifactSha256: "b".repeat(64),
+      fromInclusive: "2026-06-02T00:00:00Z",
+      toInclusive: "2026-06-10T23:59:59Z"
+    });
   });
 
   it("invalidates stale evidence and refreshes an untouched Model Card selector", () => {
@@ -124,7 +194,7 @@ describe("ExactModelShadowPerformancePanel", () => {
     />);
 
     expect(screen.getByLabelText("Model version")).toHaveValue("manual-version");
-    expect(clear).toHaveBeenCalledTimes(2);
+    expect(clear).toHaveBeenCalledTimes(3);
   });
 });
 
