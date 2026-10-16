@@ -1,7 +1,5 @@
 package com.frauddetection.alert.governance.modelcard;
 
-import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
-
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -18,7 +16,7 @@ class ModelCardProviderConfiguration {
     ModelCardProvider artifactBackedModelCardProvider(
             ModelCardCurrentProperties properties,
             ObjectMapper objectMapper,
-            ModelEvaluationGovernanceValidator validator
+            ModelCardValidator validator
     ) {
         return new ArtifactBackedModelCardProvider(properties, objectMapper, validator);
     }

@@ -61,6 +61,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ModelCardProviderConfiguration.class,
         ModelCardReadService.class,
         ModelEvaluationGovernanceValidator.class,
+        ModelCardValidator.class,
         ModelCardReadMetrics.class
 })
 @ActiveProfiles("test")

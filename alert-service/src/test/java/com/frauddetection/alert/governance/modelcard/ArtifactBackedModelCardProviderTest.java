@@ -24,7 +24,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ArtifactBackedModelCardProviderTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ModelEvaluationGovernanceValidator validator = new ModelEvaluationGovernanceValidator();
+    private final ModelCardValidator validator =
+            new ModelCardValidator(new ModelEvaluationGovernanceValidator());
 
     @TempDir
     Path tempDir;

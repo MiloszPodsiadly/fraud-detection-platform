@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { modelCard, modelCardWithoutEvaluation } from "../test-utils/modelCardFixtures.js";
-import { isValidModelCard } from "./modelEvaluationGovernanceValidation.js";
+import { isValidModelCard } from "./modelCardValidation.js";
 
 describe("isValidModelCard", () => {
   it("accepts exact artifact cards with and without configured evaluation", () => {

@@ -30,11 +30,11 @@ PYTHONPATH=. python -m offline_evaluation.feedback_dataset_evaluation.exact_mode
   --generated-at 2026-10-15T12:00:00Z
 ```
 
-The artifact root must already exist. Publication is atomic and no-replace. Success is returned only after the artifact files, destination directory, and parent directory have been durably synchronized. An identical retry revalidates the complete artifact set and reconfirms parent-directory durability before returning success; a different payload for the same selector fails closed. Directory durability is not silently weakened on unsupported filesystems. One immutable artifact set is permitted for each exact selector; revisions for an unchanged selector are not part of this contract. The committed JSON contract is [exact_model_shadow_performance.schema.json](../schemas/exact_model_shadow_performance.schema.json).
+The artifact root is provisioned on a Linux filesystem with POSIX ACL support before publication. Publication is atomic and no-replace. Before the selection directory becomes visible, the publisher grants reader UID `10001` read access to the two artifact files and read/traverse access to the exact selection directory. The root grants that UID traverse-only access. Group and other access remain empty, and a filesystem that cannot enforce the exact ACL fails closed. Success is returned only after access checks, artifact files, destination directory, and parent directory have been durably synchronized. An identical retry revalidates the complete artifact set, ACL, and parent-directory durability before returning success; a different payload for the same selector fails closed. One immutable artifact set is permitted for each exact selector; revisions for an unchanged selector are not part of this contract. The committed JSON contract is [exact_model_shadow_performance.schema.json](../schemas/exact_model_shadow_performance.schema.json).
 
 ## Runtime
 
-The base application keeps the reader disabled. On Linux, WSL, or Git Bash, the repository Makefile is the canonical local entry point:
+The base application keeps the reader disabled. The repository Makefile is the canonical local entry point:
 
 ```bash
 make up
@@ -44,14 +44,13 @@ make down
 
 `make up` starts the standard hardened local stack and prepares the required runtime fixtures before generating the ordinary Shadow Performance Summary. Tests remain separate under the `check-*` targets. `make down` stops the stack without deleting volumes.
 
-Enable the exact-model reader after provisioning its artifact root:
+Enable the exact-model reader on Linux or WSL backed by a Linux filesystem with POSIX ACL support:
 
 ```bash
-mkdir -p deployment/local-generated/model-shadow-performance
 make up-exact-model-shadow
 ```
 
-The exact-model overlay declares the pre-provisioned artifact root as a read-only bind with host-path creation disabled. The launcher also rejects a missing or symlink-traversing source before invoking Docker, preserving fail-closed startup on supported Compose versions. Set `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT` when the host artifact root differs from `deployment/local-generated/model-shadow-performance`. The publishing process has separate credentials and runs outside `alert-service`; artifact publication is independent from application startup. The Makefile execution environments are Linux, WSL, and Git Bash.
+Fixture bootstrap creates the root without following path-component symlinks, writes the readiness marker atomically, and applies the exact UID `10001` ACL. Git Bash on a Windows filesystem can run the ordinary stack but cannot provision this optional reader boundary. The exact-model overlay declares the pre-provisioned artifact root as a read-only bind with host-path creation disabled. The launcher rejects a missing, symlink-traversing, incorrectly marked, or incorrectly permissioned source before invoking Docker. Set `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT` when the host artifact root differs from `deployment/local-generated/model-shadow-performance`. The publishing process has separate credentials and runs outside `alert-service`; artifact publication is independent from application startup.
 
 Before starting the service, validate the resolved reader boundary:
 
@@ -60,10 +59,10 @@ make check-compose
 make check-compose-exact-model-shadow
 ```
 
-These separate checks require the reader to be explicitly enabled, the canonical container path to be selected, the host artifact root to be bind-mounted read-only, and implicit host-path creation to remain disabled. They also exercise the fail-closed startup preflight before Docker can create a missing source and Docker's enforcement of the read-only mount. They are not dependencies of `make up`.
+These separate checks require the reader to be explicitly enabled, the canonical container path to be selected, the host artifact root to be bind-mounted read-only, and implicit host-path creation to remain disabled. The application preflight and sentinel check are tested separately from a minimal Docker Compose proof that contains no application checker or `label_file`: a missing bind source must be refused, while an existing source is readable and not writable. They are not dependencies of `make up`.
 
-The recursive evaluation validator is currently implemented by `ModelCardValidator` and reused by the exact-model validator, so there is one semantic implementation. Extracting that substantial implementation into a neutrally named component is deferred to avoid creating a second validator or changing the active contract during this focused hardening work.
+`ModelEvaluationGovernanceValidator` owns the shared recursive evaluation contract and metric arithmetic. `ModelCardValidator` owns Model Card structure, evidence linkage, artifact verification, and usage boundaries. `ExactModelShadowPerformanceValidator` owns its selector, provenance, coverage, diagnostics, and governance boundary while delegating only the embedded evaluation summary. The browser mirrors the same split between `modelEvaluationGovernanceValidation.js`, `modelCardValidation.js`, and `exactModelShadowPerformanceValidation.js`.
 
 ## Security And Governance
 
-The endpoint requires `model-shadow-performance:read`. Sensitive-read audit records the selected artifact SHA and a bounded hash of the complete query. `coverage.returnedCohortStatus` describes only whether the bounded returned cohort was fully evaluated; `coverage.sourcePopulationStatus` independently reports source truncation and never claims global source completeness. The response is diagnostic evidence only: it grants no production decision, promotion, threshold, payment, workflow, or registry authority. Existing Model Card and Platform Recommendation Shadow Performance contracts remain separate and unchanged.
+The endpoint requires `model-shadow-performance:read`. Sensitive-read audit records the selected artifact SHA and a bounded hash of the complete query. The repository mTLS and JWT credentials are local demonstration identities, not production PKI or managed secrets. `coverage.returnedCohortStatus` describes only whether the bounded returned cohort was fully evaluated; `coverage.sourcePopulationStatus` independently reports source truncation and never claims global source completeness. Exact-model evidence identifies one model artifact; Platform Recommendation Shadow Performance describes platform-level recommendation behavior and is not a substitute for exact-model evidence. The response is diagnostic evidence only: it grants no production decision, promotion, threshold, payment, workflow, or registry authority.

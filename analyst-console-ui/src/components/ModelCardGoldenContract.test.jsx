@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAlertsApiClient } from "../api/alertsApi.js";
 import { createDemoAuthProvider } from "../auth/authProvider.js";
-import { isValidModelCard } from "../governance/modelEvaluationGovernanceValidation.js";
+import { isValidModelCard } from "../governance/modelCardValidation.js";
 import { ModelCardPanel } from "./ModelCardPanel.jsx";
 
 const MODEL_SHA = "55499538d93a634bb5c5fc2326380d013efaea8b0045320f838cad7405df15b6";

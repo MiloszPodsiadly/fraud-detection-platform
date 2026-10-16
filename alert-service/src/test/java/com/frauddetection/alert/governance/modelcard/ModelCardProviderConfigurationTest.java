@@ -13,7 +13,9 @@ class ModelCardProviderConfigurationTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withUserConfiguration(ModelCardProviderConfiguration.class)
             .withBean(ObjectMapper.class, ObjectMapper::new)
-            .withBean(ModelEvaluationGovernanceValidator.class, ModelEvaluationGovernanceValidator::new);
+            .withBean(ModelEvaluationGovernanceValidator.class, ModelEvaluationGovernanceValidator::new)
+            .withBean(ModelCardValidator.class,
+                    () -> new ModelCardValidator(new ModelEvaluationGovernanceValidator()));
 
     @Test
     void defaultConfigurationUsesEmptyProvider() {

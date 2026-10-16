@@ -1,6 +1,5 @@
 package com.frauddetection.alert.governance.modelcard;
 
-import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
 import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
 
 import org.springframework.http.HttpStatus;
@@ -11,12 +10,12 @@ import org.springframework.web.server.ResponseStatusException;
 public class ModelCardReadService {
 
     private final ModelCardProvider provider;
-    private final ModelEvaluationGovernanceValidator validator;
+    private final ModelCardValidator validator;
     private final ModelCardReadMetrics metrics;
 
     public ModelCardReadService(
             ModelCardProvider provider,
-            ModelEvaluationGovernanceValidator validator,
+            ModelCardValidator validator,
             ModelCardReadMetrics metrics
     ) {
         this.provider = provider;

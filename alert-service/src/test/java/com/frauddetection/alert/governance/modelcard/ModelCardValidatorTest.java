@@ -15,10 +15,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class ModelEvaluationGovernanceValidatorTest {
+class ModelCardValidatorTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ModelEvaluationGovernanceValidator validator = new ModelEvaluationGovernanceValidator();
+    private final ModelEvaluationGovernanceValidator evaluationValidator =
+            new ModelEvaluationGovernanceValidator();
+    private final ModelCardValidator validator = new ModelCardValidator(evaluationValidator);
 
     @Test
     void acceptsExactArtifactCardWithoutGrantingDecisionAuthority() {
@@ -95,7 +97,7 @@ class ModelEvaluationGovernanceValidatorTest {
                 .put("fromInclusive", "2026-10-14T10:00:00Z")
                 .put("toInclusive", "2026-10-13T10:00:00Z");
 
-        assertThatThrownBy(() -> validator.validateWindow(window))
+        assertThatThrownBy(() -> evaluationValidator.validateWindow(window))
                 .isInstanceOf(ModelEvaluationValidationException.class)
                 .hasMessageContaining("fromInclusive must not be later than");
     }
@@ -224,18 +226,18 @@ class ModelEvaluationGovernanceValidatorTest {
         ObjectNode source = warningSource(false, 0, 0);
         Map<String, Integer> population = population(3, 2, 1, 0);
         Map<String, Integer> balance = balance(1, 1);
-        assertThatThrownBy(() -> validator.validateExpectedWarnings(
+        assertThatThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings("MODEL_EVALUATION_PARTIAL_COVERAGE"), source, population, balance
         )).isInstanceOf(ModelEvaluationValidationException.class);
-        assertThatThrownBy(() -> validator.validateExpectedWarnings(
+        assertThatThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings("MODEL_EVALUATION_PARTIAL_COVERAGE", "UNEXPECTED_ML_EVIDENCE_LOSS", "EXTRA"),
                 source, population, balance
         )).isInstanceOf(ModelEvaluationValidationException.class);
-        assertThatThrownBy(() -> validator.validateExpectedWarnings(
+        assertThatThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings("UNEXPECTED_ML_EVIDENCE_LOSS", "MODEL_EVALUATION_PARTIAL_COVERAGE"),
                 source, population, balance
         )).isInstanceOf(ModelEvaluationValidationException.class);
-        assertThatThrownBy(() -> validator.validateExpectedWarnings(
+        assertThatThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings("MODEL_EVALUATION_PARTIAL_COVERAGE", "MODEL_EVALUATION_PARTIAL_COVERAGE"),
                 source, population, balance
         )).isInstanceOf(ModelEvaluationValidationException.class);
@@ -323,7 +325,7 @@ class ModelEvaluationGovernanceValidatorTest {
             Map<String, Integer> population,
             Map<String, Integer> balance
     ) {
-        assertThatNoException().isThrownBy(() -> validator.validateExpectedWarnings(
+        assertThatNoException().isThrownBy(() -> evaluationValidator.validateExpectedWarnings(
                 warnings(expected.toArray(String[]::new)), source, population, balance
         ));
     }

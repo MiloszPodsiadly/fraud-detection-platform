@@ -1,6 +1,5 @@
 package com.frauddetection.alert.governance.modelcard;
 
-import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
 import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
 
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReadException;
@@ -40,13 +39,13 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
 
     private final ModelCardCurrentProperties properties;
     private final ObjectMapper objectMapper;
-    private final ModelEvaluationGovernanceValidator validator;
+    private final ModelCardValidator validator;
     private final GovernanceArtifactReader artifactReader;
 
     public ArtifactBackedModelCardProvider(
             ModelCardCurrentProperties properties,
             ObjectMapper objectMapper,
-            ModelEvaluationGovernanceValidator validator
+            ModelCardValidator validator
     ) {
         this(properties, objectMapper, validator, new GovernanceArtifactReader());
     }
@@ -54,7 +53,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
     ArtifactBackedModelCardProvider(
             ModelCardCurrentProperties properties,
             ObjectMapper objectMapper,
-            ModelEvaluationGovernanceValidator validator,
+            ModelCardValidator validator,
             GovernanceArtifactReader artifactReader
     ) {
         this.properties = properties;

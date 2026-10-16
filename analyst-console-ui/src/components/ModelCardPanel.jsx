@@ -1,4 +1,4 @@
-import { isValidModelCard } from "../governance/modelEvaluationGovernanceValidation.js";
+import { isValidModelCard } from "../governance/modelCardValidation.js";
 import { LoadingPanel } from "./LoadingPanel.jsx";
 
 const REQUIRED_PERMISSION = "model-card:read";

@@ -1,16 +1,5 @@
 import { isCanonicalUtcTimestamp, isOrderedCanonicalUtcTimestamp } from "./canonicalUtcTimestamp.js";
 
-const ROOT_FIELDS = [
-  "schemaVersion",
-  "cardType",
-  "generatedAt",
-  "subject",
-  "promotionState",
-  "modelArtifactVerification",
-  "evaluationEvidence",
-  "evaluationSummary",
-  "verifiedUsageBoundary"
-];
 const SUBJECT_FIELDS = [
   "subjectType",
   "modelName",
@@ -18,15 +7,6 @@ const SUBJECT_FIELDS = [
   "featureContractVersion",
   "modelArtifactSha256",
   "identityCompleteness"
-];
-const AVAILABLE_EVIDENCE_FIELDS = [
-  "status",
-  "reportType",
-  "artifactSetVersion",
-  "reportGeneratedAt",
-  "manifestSha256",
-  "integrityVerification",
-  "sourceDatasetVerificationLevel"
 ];
 const SUMMARY_FIELDS = [
   "reportType",
@@ -72,34 +52,12 @@ const ML_METRIC_FIELDS = [
 ];
 const SHA256 = /^[a-f0-9]{64}$/;
 const SAFE_IDENTITY = /^[A-Za-z0-9._-]+$/;
-const ALLOWED_MODES = ["COMPARE", "OFFLINE_EVALUATION", "SHADOW"];
 const REQUIRED_LIMITATIONS = [
   "ANALYST_FEEDBACK_LABELS_ARE_REVIEW_SIGNALS",
   "ML_PREDICTION_METRICS_REQUIRE_DIRECT_ML_OUTPUT_SIGNALS",
   "MODEL_SPECIFIC_EVALUATION_DOES_NOT_APPROVE_PROMOTION",
   "MODEL_SPECIFIC_EVALUATION_DOES_NOT_AUTHORIZE_PAYMENTS",
   "MODEL_SPECIFIC_EVALUATION_DOES_NOT_CHANGE_SCORING"
-];
-const INTENDED_USE = [
-  "EXACT_MODEL_OFFLINE_EVALUATION",
-  "RULES_VS_ML_DIAGNOSTIC_COMPARISON",
-  "SHADOW_MODEL_MONITORING"
-];
-const NOT_INTENDED_USE = [
-  "AUTOMATIC_APPROVE_DECLINE_OR_BLOCK",
-  "MODEL_PROMOTION_APPROVAL",
-  "PAYMENT_AUTHORIZATION",
-  "PRIMARY_PRODUCTION_FRAUD_DECISIONING",
-  "SCORING_THRESHOLD_CHANGE",
-  "WORKFLOW_OR_ANALYST_RECOMMENDATION"
-];
-const USE_LIMITATIONS = [
-  "ANALYST_FEEDBACK_IS_REVIEW_SIGNAL_NOT_GROUND_TRUTH",
-  "BOUNDED_RETURNED_POPULATION_ONLY",
-  "DOES_NOT_ESTABLISH_GLOBAL_DATASET_COMPLETENESS",
-  "DOES_NOT_ESTABLISH_MODEL_CALIBRATION",
-  "DOES_NOT_ESTABLISH_PRODUCTION_READINESS",
-  "SOURCE_VERIFICATION_LEVEL_MUST_BE_INTERPRETED_EXPLICITLY"
 ];
 const RISK_CLASSIFICATION_POLICY = "RISK_HIGH_OR_CRITICAL_POSITIVE_V1";
 const FLOAT_BUFFER = new ArrayBuffer(8);
@@ -112,43 +70,6 @@ const FORBIDDEN_IDENTITY_TERMS = [
   "rawrequest", "rawresponse", "requestpayloadhash", "secret", "stacktrace", "submittedby",
   "token", "traininglabel", "transactionid"
 ];
-
-export function isValidModelCard(card) {
-  if (!isPlainObject(card)
-      || !hasExactKeys(card, ROOT_FIELDS)
-      || card.schemaVersion !== "ml-model-card-v1"
-      || card.cardType !== "ML_MODEL_CARD_V1"
-      || !isCanonicalUtcTimestamp(card.generatedAt)
-      || card.promotionState !== "NOT_EVALUATED_FOR_PROMOTION"
-      || !isValidSubject(card.subject)
-      || !isValidArtifactVerification(card.modelArtifactVerification, card.subject)
-      || !isValidUsageBoundary(card.verifiedUsageBoundary)) {
-    return false;
-  }
-  return isValidEvaluation(card.evaluationEvidence, card.evaluationSummary, card.subject, card.generatedAt);
-}
-
-function isValidEvaluation(evidence, summary, subject, cardGeneratedAt) {
-  if (!isPlainObject(evidence)) {
-    return false;
-  }
-  if (evidence.status === "NOT_AVAILABLE") {
-    return hasExactKeys(evidence, ["status", "reason"])
-      && evidence.reason === "MODEL_EVALUATION_NOT_CONFIGURED"
-      && summary === null;
-  }
-  if (evidence.status !== "AVAILABLE"
-      || !hasExactKeys(evidence, AVAILABLE_EVIDENCE_FIELDS)
-      || evidence.reportType !== "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1"
-      || evidence.artifactSetVersion !== "ml-model-feedback-dataset-evaluation-artifact-set-v1"
-      || !isCanonicalUtcTimestamp(evidence.reportGeneratedAt)
-      || !SHA256.test(evidence.manifestSha256)
-      || evidence.integrityVerification !== "VERIFIED_REPORT_AND_MANIFEST"
-      || !["CLAIM_ONLY", "VERIFIED_AGAINST_SOURCE_BYTES"].includes(evidence.sourceDatasetVerificationLevel)) {
-    return false;
-  }
-  return isValidModelEvaluationSummary(summary, subject, evidence.reportGeneratedAt, cardGeneratedAt);
-}
 
 export function isValidModelEvaluationSummary(summary, subject, reportGeneratedAt, cardGeneratedAt) {
   const population = summary?.population;
@@ -187,7 +108,7 @@ export function isValidModelEvaluationSummary(summary, subject, reportGeneratedA
       + population.recordsExcludedIdentityMismatch;
 }
 
-function isValidSubject(subject) {
+export function isValidModelEvaluationSubject(subject) {
   return isPlainObject(subject)
     && hasExactKeys(subject, SUBJECT_FIELDS)
     && subject.subjectType === "ML_MODEL"
@@ -196,41 +117,6 @@ function isValidSubject(subject) {
     && isValidIdentity(subject.featureContractVersion, 96)
     && SHA256.test(subject.modelArtifactSha256)
     && subject.identityCompleteness === "COMPLETE";
-}
-
-function isValidArtifactVerification(verification, subject) {
-  return isPlainObject(verification)
-    && hasExactKeys(verification, ["status", "sha256"])
-    && verification.status === "VERIFIED_AGAINST_ARTIFACT_BYTES"
-    && verification.sha256 === subject.modelArtifactSha256;
-}
-
-function isValidUsageBoundary(boundary) {
-  return isPlainObject(boundary)
-    && hasExactKeys(boundary, [
-      "allowedModes",
-      "intendedUse",
-      "notIntendedUse",
-      "useLimitations",
-      "runtimeDecisionAuthority",
-      "promotionAuthority",
-      "thresholdChangeAuthority",
-      "paymentAuthorizationAuthority",
-      "workflowAuthority"
-    ])
-    && Array.isArray(boundary.allowedModes)
-    && boundary.allowedModes.length === ALLOWED_MODES.length
-    && boundary.allowedModes.every((mode, index) => mode === ALLOWED_MODES[index])
-    && sameOrderedValues(boundary.intendedUse, INTENDED_USE)
-    && sameOrderedValues(boundary.notIntendedUse, NOT_INTENDED_USE)
-    && sameOrderedValues(boundary.useLimitations, USE_LIMITATIONS)
-    && [
-      boundary.runtimeDecisionAuthority,
-      boundary.promotionAuthority,
-      boundary.thresholdChangeAuthority,
-      boundary.paymentAuthorizationAuthority,
-      boundary.workflowAuthority
-    ].every((authority) => authority === "NONE");
 }
 
 function sameOrderedValues(actual, expected) {
@@ -532,7 +418,8 @@ function isValidIdentity(value, maximumLength) {
 }
 
 function sameSubject(actual, expected) {
-  return isValidSubject(actual) && SUBJECT_FIELDS.every((field) => actual[field] === expected[field]);
+  return isValidModelEvaluationSubject(actual)
+    && SUBJECT_FIELDS.every((field) => actual[field] === expected[field]);
 }
 
 function isCount(value, maximum = 1000) {

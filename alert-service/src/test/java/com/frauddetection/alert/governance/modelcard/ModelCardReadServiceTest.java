@@ -17,7 +17,8 @@ import static org.mockito.Mockito.when;
 class ModelCardReadServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ModelEvaluationGovernanceValidator validator = new ModelEvaluationGovernanceValidator();
+    private final ModelCardValidator validator =
+            new ModelCardValidator(new ModelEvaluationGovernanceValidator());
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final ModelCardReadMetrics metrics = new ModelCardReadMetrics(meterRegistry);
     private final ModelCardProvider provider = mock(ModelCardProvider.class);

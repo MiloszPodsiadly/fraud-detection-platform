@@ -176,16 +176,13 @@ The generated runtime mounts `deployment/local-generated/shadow-performance` rea
 The separate demo override `deployment/docker-compose.shadow-performance-demo.yml` remains available only for the
 canonical demo artifact-set path and is scoped to local visualization with no governance authority.
 
-Exact-model evidence is an explicit opt-in. Pre-provision its artifact root, then start the same stack with the additional read-only reader overlay:
+Exact-model evidence is an explicit opt-in. On Linux or WSL backed by a Linux filesystem with POSIX ACL support, start the same stack with the additional read-only reader overlay:
 
 ```bash
-mkdir -p deployment/local-generated/model-shadow-performance
-printf 'com.frauddetection.artifact-root-ready=true\n' \
-  > deployment/local-generated/model-shadow-performance/.artifact-root-ready.labels
 make up-exact-model-shadow
 ```
 
-The exact-model reader selects one immutable M/V/F/SHA/window tuple: model name, model version, feature-contract version, model artifact SHA-256, and optional evaluation window. Runtime verifies the selected artifact and manifest bytes. `VERIFIED_AGAINST_SOURCE_BYTES` means the upstream publication boundary verified the source dataset bytes; `CLAIM_ONLY` carries only the source identity claim and does not make that assertion. The response contains aggregate evaluation evidence and at most a bounded labeled-feedback cohort, never raw feedback. It makes no scoring-wide latency, fallback-rate, reason-distribution, automatic-promotion, threshold, payment, or decision-authority claim. The Makefile path performs the source-declaration, resolved-configuration, existing non-symlink root, and read-only mount preflight before Compose starts.
+Fixture bootstrap provisions the root and its exact read-only ACL for container UID `10001`; unsupported filesystems fail closed. The exact-model reader selects one immutable M/V/F/SHA/window tuple: model name, model version, feature-contract version, model artifact SHA-256, and optional evaluation window. Runtime verifies the selected artifact and manifest bytes. `VERIFIED_AGAINST_SOURCE_BYTES` means the upstream publication boundary verified the source dataset bytes; `CLAIM_ONLY` carries only the source identity claim and does not make that assertion. The response contains aggregate evaluation evidence and at most a bounded labeled-feedback cohort, never raw feedback. It makes no scoring-wide latency, fallback-rate, reason-distribution, automatic-promotion, threshold, payment, or decision-authority claim. The Makefile path performs the ACL, source-declaration, resolved-configuration, existing non-symlink root, and read-only mount preflight before Compose starts.
 
 All supported Make targets use the Compose project name `fraud-detection-platform`. `make down` stops that
 project without deleting named volumes; `make app-clean` is the explicit destructive local-volume cleanup.
