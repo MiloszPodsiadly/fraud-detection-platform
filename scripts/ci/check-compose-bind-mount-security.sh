@@ -16,10 +16,33 @@ malformed_sentinel_root="$workspace/malformed-sentinel-artifacts"
 resolved_config="$workspace/resolved.json"
 probe_image="alpine:3.21"
 
+main_compose() {
+  ARTIFACT_ROOT="$artifact_root" docker compose --project-name "$project" -f "$compose_file" "$@"
+}
+
+mutation_compose() {
+  ARTIFACT_ROOT="$mutation_root" docker compose --project-name "$project-mutation" \
+    -f "$create_path_compose_file" "$@"
+}
+
 cleanup() {
-  docker compose --project-name "$project" -f "$compose_file" down --remove-orphans >/dev/null 2>&1 || true
-  docker compose --project-name "$project-mutation" -f "$create_path_compose_file" down --remove-orphans >/dev/null 2>&1 || true
-  rm -rf "$workspace"
+  local original_status=$?
+  local cleanup_status=0
+  trap - EXIT
+  set +e
+  main_compose down --remove-orphans >/dev/null 2>&1
+  [[ $? -eq 0 ]] || cleanup_status=1
+  mutation_compose down --remove-orphans >/dev/null 2>&1
+  [[ $? -eq 0 ]] || cleanup_status=1
+  rm -rf -- "$workspace"
+  [[ $? -eq 0 ]] || cleanup_status=1
+  if [[ $original_status -ne 0 ]]; then
+    exit "$original_status"
+  fi
+  if [[ $cleanup_status -ne 0 ]]; then
+    echo "Compose bind security probe cleanup failed." >&2
+    exit "$cleanup_status"
+  fi
 }
 trap cleanup EXIT
 
@@ -114,8 +137,7 @@ rm -rf "$preflight_artifact_root"
 
 # Proof B: no label_file or application checker participates in this Docker bind-source probe.
 set +e
-missing_source_output="$(ARTIFACT_ROOT="$artifact_root" docker compose \
-  --project-name "$project" -f "$compose_file" create reader 2>&1)"
+missing_source_output="$(main_compose create reader 2>&1)"
 missing_source_status=$?
 set -e
 if [[ $missing_source_status -eq 0 ]]; then
@@ -132,28 +154,30 @@ if ! printf '%s' "$missing_source_output" | grep -Eiq 'bind[^[:cntrl:]]*(source|
   printf '%s\n' "$missing_source_output" >&2
   exit 1
 fi
-if [[ -n "$(docker compose --project-name "$project" -f "$compose_file" ps --status running -q reader)" ]]; then
+if [[ -n "$(main_compose ps --status running -q reader)" ]]; then
   echo "missing-source probe unexpectedly left a running container" >&2
   exit 1
 fi
 echo "Docker missing-bind refusal exit status: $missing_source_status"
 printf 'Docker missing-bind diagnostic: %s\n' "$(printf '%s' "$missing_source_output" | tail -n 1)"
 
-ARTIFACT_ROOT="$mutation_root" docker compose --project-name "$project-mutation" \
-  -f "$create_path_compose_file" up --abort-on-container-exit --exit-code-from reader reader
+mutation_compose up --abort-on-container-exit --exit-code-from reader reader
 [[ -d "$mutation_root" ]] || {
   echo "create_host_path:true control did not create its disposable source" >&2
   exit 1
 }
-docker compose --project-name "$project-mutation" -f "$create_path_compose_file" down --remove-orphans
+if [[ "${COMPOSE_BIND_SECURITY_INJECT_FAILURE:-false}" == "true" ]]; then
+  echo "Injected bind-security probe failure." >&2
+  exit 97
+fi
+mutation_compose down --remove-orphans
 rm -rf "$mutation_root"
 
 # Proof C: an existing bind is readable but cannot be modified by the container.
 mkdir "$artifact_root"
 printf 'verified\n' >"$artifact_root/probe"
 probe_sha256="$(sha256sum "$artifact_root/probe" | awk '{print $1}')"
-ARTIFACT_ROOT="$artifact_root" docker compose --project-name "$project" -f "$compose_file" \
-  up --abort-on-container-exit --exit-code-from reader reader
+main_compose up --abort-on-container-exit --exit-code-from reader reader
 
 [[ ! -e "$artifact_root/must-not-write" ]] || {
   echo "read-only artifact mount changed the host artifact root" >&2
