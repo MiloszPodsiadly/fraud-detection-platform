@@ -5,6 +5,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -15,7 +16,9 @@ class ModelPromotionDecisionValidatorTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ModelPromotionPolicyValidator policyValidator = new ModelPromotionPolicyValidator(objectMapper);
     private final ModelPromotionDecisionValidator validator = new ModelPromotionDecisionValidator(
-            objectMapper, policyValidator
+            objectMapper,
+            policyValidator,
+            policy -> ModelPromotionPolicyAuthorityVerification.verified()
     );
 
     @Test
@@ -46,6 +49,56 @@ class ModelPromotionDecisionValidatorTest {
                 .hasMessageContaining("stale");
     }
 
+    @Test
+    void testPolicyCannotAuthorizeProductionChampion() {
+        ModelPromotionPolicy testPolicy = ModelPromotionAssessmentTestFixtures.policy();
+        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionAssessment assessment = assessment(testPolicy, evidence);
+
+        assertThatThrownBy(() -> validator.validate(command(
+                testPolicy,
+                assessment,
+                evidence,
+                Instant.parse("2026-06-11T12:00:00Z"),
+                ModelPromotionLifecycleState.PROMOTION_RECOMMENDED,
+                3,
+                ModelPromotionLifecycleState.CHAMPION
+        ))).isInstanceOf(ModelPromotionPersistenceConflictException.class);
+    }
+
+    @Test
+    void validInstitutionalPolicyDoesNotBypassUnavailableMandatoryEvidence() {
+        ModelPromotionPolicy policy = institutionalPolicy("2027-01-01T00:00:00Z");
+        ModelPromotionAssessment assessment = assessment(
+                policy,
+                ModelPromotionAssessmentTestFixtures.currentLimitedEvidence()
+        );
+
+        assertThat(assessment.content().formalRecommendationEligible()).isFalse();
+        assertThat(assessment.content().blockers())
+                .contains("PRECISION_AT_ALERT_REVIEW_BUDGET:MATCHED_RULES_PRECISION_AT_REVIEW_BUDGET_UNAVAILABLE");
+    }
+
+    @Test
+    void durableDecisionRevalidatesInstitutionalPolicyAuthority() {
+        ModelPromotionPolicy policy = institutionalPolicy("2027-01-01T00:00:00Z");
+        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionAssessment assessment = assessment(policy, evidence);
+        ModelPromotionDecisionValidator unavailableAuthorityValidator = new ModelPromotionDecisionValidator(
+                objectMapper,
+                policyValidator,
+                ignored -> ModelPromotionPolicyAuthorityVerification.unavailable()
+        );
+
+        assertThatThrownBy(() -> unavailableAuthorityValidator.validate(command(
+                policy,
+                assessment,
+                evidence,
+                Instant.parse("2026-06-11T12:00:00Z")
+        ))).isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("authority could not be verified");
+    }
+
     private ModelPromotionPolicy institutionalPolicy(String effectiveTo) {
         ModelPromotionPolicy.Content content = new ModelPromotionPolicy.Content(
                 ModelPromotionPolicy.CURRENT_VERSION,
@@ -64,7 +117,18 @@ class ModelPromotionDecisionValidatorTest {
                 effectiveTo,
                 ModelPromotionAssessmentTestFixtures.defaultRules()
         );
-        return new ModelPromotionPolicy(content, policyValidator.canonicalSha256(content));
+        String digest = policyValidator.canonicalSha256(content);
+        return new ModelPromotionPolicy(
+                content,
+                digest,
+                new ModelPromotionPolicy.PolicyAuthorizationEvidence(
+                        "institutional-policy-authority",
+                        "test-key",
+                        "test-signature",
+                        digest,
+                        "2025-12-31T00:00:00Z"
+                )
+        );
     }
 
     private ModelPromotionAssessment assessment(
@@ -72,7 +136,7 @@ class ModelPromotionDecisionValidatorTest {
             ModelPromotionEvidenceBundle evidence
     ) {
         ModelPromotionAssessmentService service = ModelPromotionAssessmentTestFixtures.service(
-                (scope, use) -> java.util.Optional.of(policy)
+                (scope, use, assessmentTime) -> java.util.Optional.of(policy)
         );
         return service.assess(evidence, ModelPromotionAssessmentTestFixtures.ASSESSMENT_TIME);
     }
@@ -82,6 +146,26 @@ class ModelPromotionDecisionValidatorTest {
             ModelPromotionAssessment assessment,
             ModelPromotionEvidenceBundle evidence,
             Instant requestedAt
+    ) {
+        return command(
+                policy,
+                assessment,
+                evidence,
+                requestedAt,
+                ModelPromotionLifecycleState.CHALLENGER,
+                1,
+                ModelPromotionLifecycleState.SHADOW_APPROVED
+        );
+    }
+
+    private DurableModelPromotionTransitionCommand command(
+            ModelPromotionPolicy policy,
+            ModelPromotionAssessment assessment,
+            ModelPromotionEvidenceBundle evidence,
+            Instant requestedAt,
+            ModelPromotionLifecycleState sourceState,
+            long expectedRevision,
+            ModelPromotionLifecycleState targetState
     ) {
         ModelPromotionDecisionReference reference = new ModelPromotionDecisionReference(
                 "decision-shadow",
@@ -98,9 +182,9 @@ class ModelPromotionDecisionValidatorTest {
                 evidence.content().artifactIdentity(),
                 evidence.content().governanceScope(),
                 evidence.content().intendedUse(),
-                ModelPromotionLifecycleState.CHALLENGER,
-                1,
-                ModelPromotionLifecycleState.SHADOW_APPROVED,
+                sourceState,
+                expectedRevision,
+                targetState,
                 "shadow-operation",
                 reference
         );
@@ -114,10 +198,10 @@ class ModelPromotionDecisionValidatorTest {
                 assessment,
                 new ModelPromotionProposal(
                         reference.proposal().proposalId(),
-                        transition.requestedTargetState(),
+                        targetState,
                         "proposer",
                         requestedAt.minusSeconds(120),
-                        RATIONALE
+                        proposalRationale(reference.proposal().proposalId())
                 ),
                 new ModelPromotionApproval(
                         reference.approval().approvalId(),
@@ -125,8 +209,22 @@ class ModelPromotionDecisionValidatorTest {
                         ModelPromotionApproval.Outcome.APPROVED,
                         "approver",
                         requestedAt.minusSeconds(60),
-                        RATIONALE
+                        approvalRationale(reference.proposal().proposalId(), reference.approval().approvalId())
                 )
+        );
+    }
+
+    private ModelPromotionDecisionRationale proposalRationale(String proposalId) {
+        return new ModelPromotionDecisionRationale(
+                ModelPromotionDecisionRationale.proposalReference(proposalId), RATIONALE,
+                ModelPromotionDecisionRationale.sha256(RATIONALE)
+        );
+    }
+
+    private ModelPromotionDecisionRationale approvalRationale(String proposalId, String approvalId) {
+        return new ModelPromotionDecisionRationale(
+                ModelPromotionDecisionRationale.approvalReference(proposalId, approvalId), RATIONALE,
+                ModelPromotionDecisionRationale.sha256(RATIONALE)
         );
     }
 }

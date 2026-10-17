@@ -6,11 +6,8 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.EnumSet;
-import java.util.HexFormat;
 import java.util.Set;
 
 import static com.frauddetection.alert.governance.modelpromotion.ModelPromotionPolicyResolution.Reason;
@@ -25,6 +22,11 @@ public class ModelPromotionPolicyValidator {
             "minimumEvaluatedRecords", "minimumPositiveLabels", "minimumNegativeLabels",
             "alertReviewBudget", "maximumCriticalRegressions", "minimumSegmentsEvaluated",
             "minimumSampleSize", "minimumDenominator", "maximumCriticalLineageGaps"
+    );
+    private static final Set<ModelPromotionCriterion> NON_WAIVABLE_CRITERIA = EnumSet.of(
+            ModelPromotionCriterion.COMPLETE_EVALUATION_PROVENANCE,
+            ModelPromotionCriterion.EXACT_SHA_MODEL_CARD,
+            ModelPromotionCriterion.IDENTITY_AND_LINEAGE_INTEGRITY
     );
 
     private final ObjectMapper objectMapper;
@@ -53,9 +55,17 @@ public class ModelPromotionPolicyValidator {
                 || assessmentTime.isBefore(effectiveFrom) || !assessmentTime.isBefore(effectiveTo)) {
             throw invalid(Reason.POLICY_NOT_EFFECTIVE);
         }
+        if (content.provenance().authority() == ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED
+                && timestamp(policy.authorizationEvidence().issuedAt()).isAfter(effectiveFrom)) {
+            throw invalid(Reason.POLICY_CONTRACT_INVALID);
+        }
         EnumSet<ModelPromotionCriterion> observed = EnumSet.noneOf(ModelPromotionCriterion.class);
         for (ModelPromotionPolicy.CriterionRule rule : content.criteria()) {
             if (!observed.add(rule.criterion())) {
+                throw invalid(Reason.POLICY_CONTRACT_INVALID);
+            }
+            if (rule.applicability() == ModelPromotionPolicy.CriterionApplicability.NOT_APPLICABLE_AUTHORIZED
+                    && isNonWaivable(rule.criterion())) {
                 throw invalid(Reason.POLICY_CONTRACT_INVALID);
             }
             validateThresholds(rule);
@@ -66,12 +76,11 @@ public class ModelPromotionPolicyValidator {
     }
 
     public String canonicalSha256(ModelPromotionPolicy.Content content) {
-        byte[] canonical = GovernanceCanonicalJson.serialize(objectMapper, objectMapper.valueToTree(content));
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 unavailable", exception);
-        }
+        return GovernanceCanonicalJson.sha256(objectMapper, content);
+    }
+
+    static boolean isNonWaivable(ModelPromotionCriterion criterion) {
+        return NON_WAIVABLE_CRITERIA.contains(criterion);
     }
 
     private void validateThresholds(ModelPromotionPolicy.CriterionRule rule) {

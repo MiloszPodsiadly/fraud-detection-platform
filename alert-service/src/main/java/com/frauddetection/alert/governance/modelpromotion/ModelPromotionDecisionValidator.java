@@ -5,29 +5,27 @@ import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.HexFormat;
 
 @Component
 class ModelPromotionDecisionValidator {
 
     private final ObjectMapper objectMapper;
     private final ModelPromotionPolicyValidator policyValidator;
+    private final ModelPromotionPolicyAuthorityVerifier authorityVerifier;
 
-    ModelPromotionDecisionValidator(ObjectMapper objectMapper, ModelPromotionPolicyValidator policyValidator) {
+    ModelPromotionDecisionValidator(
+            ObjectMapper objectMapper,
+            ModelPromotionPolicyValidator policyValidator,
+            ModelPromotionPolicyAuthorityVerifier authorityVerifier
+    ) {
         this.objectMapper = objectMapper;
         this.policyValidator = policyValidator;
+        this.authorityVerifier = authorityVerifier;
     }
 
     String canonicalSha256(Object value) {
-        byte[] canonical = GovernanceCanonicalJson.serialize(objectMapper, objectMapper.valueToTree(value));
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 unavailable", exception);
-        }
+        return GovernanceCanonicalJson.sha256(objectMapper, value);
     }
 
     String registrationCommandSha256(ModelPromotionRegistrationCommand command) {
@@ -56,7 +54,7 @@ class ModelPromotionDecisionValidator {
                         proposal.proposalId(),
                         proposal.requestedState(),
                         proposal.proposedBy(),
-                        proposal.rationaleSha256()
+                        proposal.rationale().sha256()
                 )
         ));
     }
@@ -68,17 +66,18 @@ class ModelPromotionDecisionValidator {
                 approval.approvalId(),
                 approval.outcome(),
                 approval.approvedBy(),
-                approval.rationaleSha256()
+                approval.rationale().sha256()
         ));
     }
 
     void validateProposal(ModelPromotionProposalSubmission submission) {
         ModelPromotionTransitionProposal transition = submission.transition();
         Instant requestedAt = submission.operationContext().requestedAt();
-        policyValidator.validate(
+        validatePolicySnapshot(
                 submission.policySnapshot(),
                 transition.governanceScope(),
                 transition.intendedUse(),
+                transition.requestedTargetState(),
                 requestedAt
         );
         if (submission.proposal().requestedState() != transition.requestedTargetState()
@@ -99,10 +98,11 @@ class ModelPromotionDecisionValidator {
     void validate(DurableModelPromotionTransitionCommand request) {
         ModelPromotionTransitionCommand transition = request.transition();
         Instant requestedAt = request.operationContext().requestedAt();
-        policyValidator.validate(
+        validatePolicySnapshot(
                 request.policySnapshot(),
                 transition.governanceScope(),
                 transition.intendedUse(),
+                transition.requestedTargetState(),
                 requestedAt
         );
         validateProposalAndApproval(request, requestedAt);
@@ -179,6 +179,9 @@ class ModelPromotionDecisionValidator {
             }
             return;
         }
+        if (policy == null) {
+            throw new ModelPromotionPersistenceConflictException("Assessment requires a policy snapshot");
+        }
         if (!canonicalSha256(assessment.content()).equals(assessment.canonicalSha256())) {
             throw new ModelPromotionPersistenceConflictException("Assessment snapshot digest is invalid");
         }
@@ -197,6 +200,9 @@ class ModelPromotionDecisionValidator {
         }
         if (requiresAssessment(target) && !content.humanReviewable()) {
             throw new ModelPromotionPersistenceConflictException("Assessment is not human-reviewable");
+        }
+        if (requiresAssessment(target) && !completeMandatoryAssessment(content)) {
+            throw new ModelPromotionPersistenceConflictException("Assessment is missing mandatory promotion criteria");
         }
         if ((target == ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
                 || target == ModelPromotionLifecycleState.CHAMPION)
@@ -218,6 +224,47 @@ class ModelPromotionDecisionValidator {
         return content.criteria().stream()
                 .filter(criterion -> criterion.maximumEvidenceAgeSeconds() != null)
                 .anyMatch(criterion -> evidenceEnd.plusSeconds(criterion.maximumEvidenceAgeSeconds()).isBefore(requestedAt));
+    }
+
+    private void validatePolicySnapshot(
+            ModelPromotionPolicy policy,
+            ModelGovernanceScope governanceScope,
+            ModelPromotionIntendedUse intendedUse,
+            ModelPromotionLifecycleState target,
+            Instant requestedAt
+    ) {
+        if (policy == null) {
+            if (requiresAssessment(target)) {
+                throw new ModelPromotionPersistenceConflictException("Quality-gated transition requires a policy snapshot");
+            }
+            return;
+        }
+        policyValidator.validate(policy, governanceScope, intendedUse, requestedAt);
+        if (policy.content().provenance().authority()
+                == ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED
+                && authorityVerifier.verify(policy).status()
+                != ModelPromotionPolicyAuthorityVerification.Status.VERIFIED) {
+            throw new ModelPromotionPersistenceConflictException(
+                    "Institutional policy authority could not be verified"
+            );
+        }
+    }
+
+    private boolean completeMandatoryAssessment(ModelPromotionAssessment.Content content) {
+        java.util.EnumMap<ModelPromotionCriterion, ModelPromotionAssessment.CriterionAssessment> criteria =
+                new java.util.EnumMap<>(ModelPromotionCriterion.class);
+        for (ModelPromotionAssessment.CriterionAssessment criterion : content.criteria()) {
+            if (criteria.put(criterion.criterion(), criterion) != null) {
+                return false;
+            }
+        }
+        if (criteria.size() != ModelPromotionCriterion.values().length) {
+            return false;
+        }
+        return java.util.Arrays.stream(ModelPromotionCriterion.values())
+                .filter(ModelPromotionPolicyValidator::isNonWaivable)
+                .allMatch(criterion -> criteria.get(criterion).outcome()
+                        == ModelPromotionAssessment.CriterionOutcome.PASS);
     }
 
     private boolean requiresAssessment(ModelPromotionLifecycleState state) {

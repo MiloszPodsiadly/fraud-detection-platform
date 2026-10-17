@@ -61,6 +61,9 @@ public record ModelPromotionAssessment(Content content, String canonicalSha256) 
             if (formalRecommendationEligible != (assessmentStatus == AssessmentStatus.ELIGIBLE_FOR_FORMAL_RECOMMENDATION)) {
                 throw new IllegalArgumentException("formal recommendation status is inconsistent");
             }
+            if (humanReviewable != (assessmentStatus != AssessmentStatus.NOT_REVIEWABLE)) {
+                throw new IllegalArgumentException("human reviewability status is inconsistent");
+            }
         }
     }
 

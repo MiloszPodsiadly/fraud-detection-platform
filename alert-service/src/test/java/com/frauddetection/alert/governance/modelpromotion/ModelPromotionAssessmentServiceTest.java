@@ -19,7 +19,7 @@ class ModelPromotionAssessmentServiceTest {
     @Test
     void missingApprovedPolicyLeavesEvidenceReviewableButBlocksRecommendationAndAuthority() {
         ModelPromotionAssessment assessment = ModelPromotionAssessmentTestFixtures
-                .service((scope, use) -> Optional.empty())
+                .service((scope, use, assessmentTime) -> Optional.empty())
                 .assess(ModelPromotionAssessmentTestFixtures.completeEvidence(), ASSESSMENT_TIME);
 
         assertThat(assessment.content().diagnosticEvidenceAvailable()).isTrue();
@@ -47,7 +47,71 @@ class ModelPromotionAssessmentServiceTest {
                 CriterionOutcome.UNAVAILABLE);
         assertOutcome(assessment, ModelPromotionCriterion.EXACT_MODEL_FALLBACK_RATE,
                 CriterionOutcome.UNAVAILABLE);
+        assertThat(assessment.content().assessmentStatus())
+                .isEqualTo(ModelPromotionAssessment.AssessmentStatus.REVIEWABLE_BLOCKED);
+        assertThat(assessment.content().humanReviewable()).isTrue();
         assertThat(assessment.content().formalRecommendationEligible()).isFalse();
+    }
+
+    @Test
+    void incompletePopulationIsNotReviewableEvenWhenDiagnosticArtifactsExist() {
+        ModelPromotionEvidenceBundle source = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionEvidenceBundle.PopulationEvidence incompletePopulation =
+                new ModelPromotionEvidenceBundle.PopulationEvidence(
+                        100, 100, 50, 50, true, "COMPLETE", "BOUNDED_SOURCE_TRUNCATED"
+                );
+
+        ModelPromotionAssessment assessment = serviceWithPolicy(ModelPromotionAssessmentTestFixtures.policy())
+                .assess(withPopulation(source, incompletePopulation), ASSESSMENT_TIME);
+
+        assertThat(assessment.content().diagnosticEvidenceAvailable()).isTrue();
+        assertThat(assessment.content().humanReviewable()).isFalse();
+        assertThat(assessment.content().assessmentStatus())
+                .isEqualTo(ModelPromotionAssessment.AssessmentStatus.NOT_REVIEWABLE);
+        assertThat(assessment.content().blockers()).contains("EVIDENCE_NOT_REVIEWABLE");
+        assertThat(assessment.content().formalRecommendationEligible()).isFalse();
+    }
+
+    @Test
+    void unverifiedExternalAttestationClaimsRemainUnavailable() {
+        List<ModelPromotionPolicy.CriterionRule> rules = new ArrayList<>(
+                ModelPromotionAssessmentTestFixtures.defaultRules()
+        );
+        ModelPromotionPolicy.CriterionRule provenance = ModelPromotionAssessmentTestFixtures.rule(
+                ModelPromotionCriterion.COMPLETE_EVALUATION_PROVENANCE,
+                ModelPromotionPolicy.CriterionApplicability.MANDATORY
+        );
+        replaceRule(rules, new ModelPromotionPolicy.CriterionRule(
+                provenance.criterion(),
+                provenance.applicability(),
+                provenance.thresholds(),
+                provenance.maximumEvidenceAgeSeconds(),
+                "EXTERNALLY_ATTESTED",
+                provenance.evidenceSource(),
+                provenance.metricSemantics(),
+                provenance.populationDefinition(),
+                provenance.denominatorDefinition()
+        ));
+        ModelPromotionEvidenceBundle source = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.evidence(
+                source.content().evaluation(),
+                new ModelPromotionEvidenceBundle.EvidenceTrust(
+                        "VERIFIED_REPORTS_AND_MANIFESTS",
+                        "VERIFIED_AGAINST_SOURCE_BYTES",
+                        "PROVIDED",
+                        "VERIFIED"
+                )
+        );
+
+        ModelPromotionAssessment assessment = serviceWithPolicy(ModelPromotionAssessmentTestFixtures.policy(
+                rules, "2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z"
+        )).assess(evidence, ASSESSMENT_TIME);
+
+        assertOutcome(assessment, ModelPromotionCriterion.COMPLETE_EVALUATION_PROVENANCE,
+                CriterionOutcome.UNAVAILABLE);
+        assertThat(assessment.content().humanReviewable()).isTrue();
+        assertThat(assessment.content().assessmentStatus())
+                .isEqualTo(ModelPromotionAssessment.AssessmentStatus.REVIEWABLE_BLOCKED);
     }
 
     @Test
@@ -144,6 +208,8 @@ class ModelPromotionAssessmentServiceTest {
 
         assertOutcome(assessment, ModelPromotionCriterion.CRITICAL_SEGMENT_REGRESSIONS,
                 CriterionOutcome.NOT_APPLICABLE);
+        assertThat(assessment.content().assessmentStatus())
+                .isEqualTo(ModelPromotionAssessment.AssessmentStatus.REVIEWABLE_BLOCKED);
         assertThat(assessment.content().criteria().stream()
                 .filter(result -> result.criterion() != ModelPromotionCriterion.CRITICAL_SEGMENT_REGRESSIONS)
                 .allMatch(result -> result.outcome() == CriterionOutcome.INCONCLUSIVE)).isTrue();
@@ -198,7 +264,7 @@ class ModelPromotionAssessmentServiceTest {
     }
 
     private ModelPromotionAssessmentService serviceWithPolicy(ModelPromotionPolicy policy) {
-        return ModelPromotionAssessmentTestFixtures.service((scope, use) -> Optional.of(policy));
+        return ModelPromotionAssessmentTestFixtures.service((scope, use, assessmentTime) -> Optional.of(policy));
     }
 
     private ModelPromotionEvidenceBundle withPopulation(

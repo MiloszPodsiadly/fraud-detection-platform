@@ -6,7 +6,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-public record ModelPromotionPolicy(Content content, String canonicalSha256) {
+public record ModelPromotionPolicy(
+        Content content,
+        String canonicalSha256,
+        PolicyAuthorizationEvidence authorizationEvidence
+) {
 
     public static final String CURRENT_VERSION = "model-promotion-policy-v1";
     private static final Pattern IDENTIFIER = Pattern.compile("^[A-Za-z0-9._:-]{1,128}$");
@@ -14,6 +18,18 @@ public record ModelPromotionPolicy(Content content, String canonicalSha256) {
     public ModelPromotionPolicy {
         Objects.requireNonNull(content, "content is required");
         sha256(canonicalSha256, "canonicalSha256");
+        if (content.provenance().authority() == PolicyAuthority.INSTITUTIONAL_APPROVED) {
+            Objects.requireNonNull(authorizationEvidence, "authorizationEvidence is required for institutional policy");
+            if (!canonicalSha256.equals(authorizationEvidence.policyCanonicalSha256())) {
+                throw new IllegalArgumentException("authorization evidence must bind the policy digest");
+            }
+        } else if (authorizationEvidence != null) {
+            throw new IllegalArgumentException("non-institutional policy must not claim institutional authorization evidence");
+        }
+    }
+
+    public ModelPromotionPolicy(Content content, String canonicalSha256) {
+        this(content, canonicalSha256, null);
     }
 
     public record Content(
@@ -60,6 +76,22 @@ public record ModelPromotionPolicy(Content content, String canonicalSha256) {
         }
     }
 
+    public record PolicyAuthorizationEvidence(
+            String authorityIdentity,
+            String keyId,
+            String signature,
+            String policyCanonicalSha256,
+            String issuedAt
+    ) {
+        public PolicyAuthorizationEvidence {
+            identifier(authorityIdentity, "authorityIdentity");
+            identifier(keyId, "keyId");
+            required(signature, "signature");
+            sha256(policyCanonicalSha256, "policyCanonicalSha256");
+            required(issuedAt, "issuedAt");
+        }
+    }
+
     public record CriterionRule(
             ModelPromotionCriterion criterion,
             CriterionApplicability applicability,
@@ -69,7 +101,8 @@ public record ModelPromotionPolicy(Content content, String canonicalSha256) {
             String evidenceSource,
             String metricSemantics,
             String populationDefinition,
-            String denominatorDefinition
+            String denominatorDefinition,
+            String applicabilityJustification
     ) {
         public CriterionRule {
             Objects.requireNonNull(criterion, "criterion is required");
@@ -92,10 +125,42 @@ public record ModelPromotionPolicy(Content content, String canonicalSha256) {
             if (applicability == CriterionApplicability.NOT_APPLICABLE_AUTHORIZED && !thresholds.isEmpty()) {
                 throw new IllegalArgumentException("not-applicable criterion must not define thresholds");
             }
+            if (applicability == CriterionApplicability.NOT_APPLICABLE_AUTHORIZED) {
+                required(applicabilityJustification, "applicabilityJustification");
+            } else if (applicabilityJustification != null && !applicabilityJustification.isBlank()) {
+                throw new IllegalArgumentException("mandatory criterion must not define applicabilityJustification");
+            }
             thresholds.forEach((name, value) -> {
                 required(name, "threshold name");
                 Objects.requireNonNull(value, "threshold value is required");
             });
+        }
+
+        public CriterionRule(
+                ModelPromotionCriterion criterion,
+                CriterionApplicability applicability,
+                Map<String, BigDecimal> thresholds,
+                long maximumEvidenceAgeSeconds,
+                String requiredVerificationLevel,
+                String evidenceSource,
+                String metricSemantics,
+                String populationDefinition,
+                String denominatorDefinition
+        ) {
+            this(
+                    criterion,
+                    applicability,
+                    thresholds,
+                    maximumEvidenceAgeSeconds,
+                    requiredVerificationLevel,
+                    evidenceSource,
+                    metricSemantics,
+                    populationDefinition,
+                    denominatorDefinition,
+                    applicability == CriterionApplicability.NOT_APPLICABLE_AUTHORIZED
+                            ? "policy-authorized-not-applicable"
+                            : null
+            );
         }
     }
 

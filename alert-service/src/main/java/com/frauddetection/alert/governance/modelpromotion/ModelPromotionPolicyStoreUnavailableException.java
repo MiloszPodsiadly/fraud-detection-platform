@@ -5,4 +5,8 @@ public class ModelPromotionPolicyStoreUnavailableException extends RuntimeExcept
     public ModelPromotionPolicyStoreUnavailableException(String message) {
         super(message);
     }
+
+    public ModelPromotionPolicyStoreUnavailableException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }

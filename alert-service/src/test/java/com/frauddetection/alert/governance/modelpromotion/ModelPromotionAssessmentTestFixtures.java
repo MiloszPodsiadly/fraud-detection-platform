@@ -57,6 +57,18 @@ final class ModelPromotionAssessmentTestFixtures {
     }
 
     static ModelPromotionEvidenceBundle evidence(ModelPromotionEvidenceBundle.EvaluationEvidence evaluation) {
+        return evidence(evaluation, new ModelPromotionEvidenceBundle.EvidenceTrust(
+                "VERIFIED_REPORTS_AND_MANIFESTS",
+                "VERIFIED_AGAINST_SOURCE_BYTES",
+                "NOT_PROVIDED",
+                "NOT_CLAIMED"
+        ));
+    }
+
+    static ModelPromotionEvidenceBundle evidence(
+            ModelPromotionEvidenceBundle.EvaluationEvidence evaluation,
+            ModelPromotionEvidenceBundle.EvidenceTrust trust
+    ) {
         ModelPromotionEvidenceBundle.Content content = new ModelPromotionEvidenceBundle.Content(
                 ModelPromotionEvidenceBundle.CURRENT_VERSION,
                 identity(),
@@ -80,12 +92,7 @@ final class ModelPromotionAssessmentTestFixtures {
                                 && evaluation.exactModelFallbackRate().available()
                 ),
                 evaluation,
-                new ModelPromotionEvidenceBundle.EvidenceTrust(
-                        "VERIFIED_REPORTS_AND_MANIFESTS",
-                        "VERIFIED_AGAINST_SOURCE_BYTES",
-                        "NOT_PROVIDED",
-                        "NOT_CLAIMED"
-                ),
+                trust,
                 List.of(
                         "ANALYST_FEEDBACK_IS_REVIEW_SIGNAL_NOT_CERTIFIED_GROUND_TRUTH",
                         "BOUNDED_FEEDBACK_POPULATION_DOES_NOT_PROVE_GLOBAL_REPRESENTATIVENESS"
@@ -182,7 +189,11 @@ final class ModelPromotionAssessmentTestFixtures {
 
     static ModelPromotionAssessmentService service(ModelPromotionPolicyStore store) {
         return new ModelPromotionAssessmentService(
-                new ModelPromotionPolicyResolver(store, policyValidator()),
+                new ModelPromotionPolicyResolver(
+                        store,
+                        policyValidator(),
+                        policy -> ModelPromotionPolicyAuthorityVerification.verified()
+                ),
                 OBJECT_MAPPER
         );
     }

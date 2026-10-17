@@ -6,14 +6,11 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,14 +52,20 @@ public class ModelPromotionAssessmentService {
         List<ModelPromotionAssessment.CriterionAssessment> criteria = policyResolution.policy() == null
                 ? unavailableCriteria(policyResolution)
                 : assessCriteria(evidence, policyResolution.policy(), assessmentTime);
-        List<String> blockers = blockers(policyResolution, criteria);
+        boolean humanReviewable = humanReviewable(evidence);
+        List<String> blockers = new ArrayList<>(blockers(policyResolution, criteria));
+        if (!humanReviewable) {
+            blockers.add(0, "EVIDENCE_NOT_REVIEWABLE");
+        }
         boolean institutionallyApprovedPolicy = policyResolution.policy() != null
                 && policyResolution.policy().content().provenance().authority()
                 == ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED;
-        boolean eligible = institutionallyApprovedPolicy && blockers.isEmpty();
-        AssessmentStatus status = eligible
-                ? AssessmentStatus.ELIGIBLE_FOR_FORMAL_RECOMMENDATION
-                : AssessmentStatus.REVIEWABLE_BLOCKED;
+        boolean eligible = humanReviewable && institutionallyApprovedPolicy && blockers.isEmpty();
+        AssessmentStatus status = !humanReviewable
+                ? AssessmentStatus.NOT_REVIEWABLE
+                : eligible
+                        ? AssessmentStatus.ELIGIBLE_FOR_FORMAL_RECOMMENDATION
+                        : AssessmentStatus.REVIEWABLE_BLOCKED;
         ModelPromotionEvidenceBundle.PopulationEvidence population = evidence.evaluation().population();
         ModelPromotionAssessment.Content content = new ModelPromotionAssessment.Content(
                 ModelPromotionAssessment.CURRENT_VERSION,
@@ -92,7 +95,7 @@ public class ModelPromotionAssessmentService {
                 criteria,
                 status,
                 true,
-                true,
+                humanReviewable,
                 eligible,
                 false,
                 false,
@@ -297,6 +300,10 @@ public class ModelPromotionAssessmentService {
                 "externalAttestation", trust.externalAttestation(),
                 "immutableStorageGuarantee", trust.immutableStorageGuarantee()
         );
+        if ("EXTERNALLY_ATTESTED".equals(rule.requiredVerificationLevel())) {
+            return criterion(rule, CriterionOutcome.UNAVAILABLE,
+                    "TRUSTED_EXTERNAL_ATTESTATION_UNAVAILABLE", values);
+        }
         boolean baseComplete = !population.sourceDatasetTruncated()
                 && "COMPLETE".equals(population.returnedCohortStatus())
                 && "BOUNDED_SOURCE_NOT_TRUNCATED".equals(population.sourcePopulationStatus())
@@ -306,6 +313,18 @@ public class ModelPromotionAssessmentService {
         boolean pass = baseComplete && requiredLevel;
         return criterion(rule, pass ? CriterionOutcome.PASS : CriterionOutcome.INCONCLUSIVE,
                 pass ? "REQUIRED_PROVENANCE_VERIFIED" : "REQUIRED_PROVENANCE_NOT_ESTABLISHED", values);
+    }
+
+    private boolean humanReviewable(ModelPromotionEvidenceBundle.Content evidence) {
+        ModelPromotionEvidenceBundle.PopulationEvidence population = evidence.evaluation().population();
+        return population.recordsConsidered() > 0
+                && population.recordsEvaluated() > 0
+                && !population.sourceDatasetTruncated()
+                && "COMPLETE".equals(population.returnedCohortStatus())
+                && "BOUNDED_SOURCE_NOT_TRUNCATED".equals(population.sourcePopulationStatus())
+                && evidence.trust().artifactIntegrityVerification().startsWith("VERIFIED_REPORT")
+                && evidence.modelCard().modelArtifactSha256()
+                .equals(evidence.artifactIdentity().modelArtifactSha256());
     }
 
     private ModelPromotionAssessment.CriterionAssessment exactModelCard(
@@ -360,8 +379,7 @@ public class ModelPromotionAssessmentService {
         return switch (requiredLevel) {
             case "VERIFIED_REPORTS_AND_MANIFESTS" -> trust.artifactIntegrityVerification().startsWith("VERIFIED")
                     && trust.sourceDatasetVerificationLevel().startsWith("VERIFIED");
-            case "EXTERNALLY_ATTESTED" -> "PROVIDED".equals(trust.externalAttestation())
-                    && "VERIFIED".equals(trust.immutableStorageGuarantee());
+            case "EXTERNALLY_ATTESTED" -> false;
             default -> false;
         };
     }
@@ -378,8 +396,9 @@ public class ModelPromotionAssessmentService {
             blockers.add("POLICY_NOT_INSTITUTIONALLY_APPROVED");
         }
         criteria.stream()
-                .filter(result -> result.outcome() != CriterionOutcome.PASS
-                        && result.outcome() != CriterionOutcome.NOT_APPLICABLE)
+                .filter(result -> result.outcome() != CriterionOutcome.PASS)
+                .filter(result -> result.outcome() != CriterionOutcome.NOT_APPLICABLE
+                        || ModelPromotionPolicyValidator.isNonWaivable(result.criterion()))
                 .map(result -> result.criterion().name() + ":" + result.reason())
                 .forEach(blockers::add);
         return List.copyOf(blockers);
@@ -459,20 +478,10 @@ public class ModelPromotionAssessmentService {
     }
 
     private String canonicalSha256(ModelPromotionAssessment.Content content) {
-        byte[] canonical = GovernanceCanonicalJson.serialize(objectMapper, objectMapper.valueToTree(content));
-        return sha256(canonical);
+        return GovernanceCanonicalJson.sha256(objectMapper, content);
     }
 
     private String canonicalSha256(ModelPromotionEvidenceBundle.Content content) {
-        byte[] canonical = GovernanceCanonicalJson.serialize(objectMapper, objectMapper.valueToTree(content));
-        return sha256(canonical);
-    }
-
-    private String sha256(byte[] canonical) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 unavailable", exception);
-        }
+        return GovernanceCanonicalJson.sha256(objectMapper, content);
     }
 }
