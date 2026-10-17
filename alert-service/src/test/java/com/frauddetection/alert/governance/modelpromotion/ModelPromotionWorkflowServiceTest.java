@@ -26,7 +26,8 @@ import static org.mockito.Mockito.when;
 class ModelPromotionWorkflowServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-11T12:00:00Z");
-    private static final String RATIONALE = "a".repeat(64);
+    private static final String RATIONALE = "The transition is justified by the reviewed operational evidence.";
+    private static final String RATIONALE_SHA256 = ModelPromotionDecisionRationale.sha256(RATIONALE);
     private static final String AUTHORIZATION = "b".repeat(64);
 
     private final MongoModelPromotionStore store = mock(MongoModelPromotionStore.class);
@@ -65,7 +66,7 @@ class ModelPromotionWorkflowServiceTest {
 
     @Test
     void bindsSubmittedProposalToTheAuthenticatedPrincipalInsteadOfRequestPayload() {
-        authenticate("proposer", AnalystRole.ANALYST.authorities(), Set.of(AnalystRole.ANALYST));
+        authenticate("proposer", withProductionScope(AnalystRole.ANALYST.authorities()), Set.of(AnalystRole.ANALYST));
         ModelPromotionPolicy policy = ModelPromotionAssessmentTestFixtures.policy();
         when(policyResolver.resolve(scope(ModelGovernanceEnvironment.PRODUCTION), use(), NOW))
                 .thenReturn(ModelPromotionPolicyResolution.available(policy));
@@ -76,7 +77,7 @@ class ModelPromotionWorkflowServiceTest {
                     ModelPromotionProposalDocument.ReviewStatus.PENDING,
                     submission.proposal(),
                     null,
-                    submission.policySnapshot().canonicalSha256(),
+                    submission.policySnapshot() == null ? null : submission.policySnapshot().canonicalSha256(),
                     submission.assessmentSnapshot() == null ? null : submission.assessmentSnapshot().canonicalSha256(),
                     NOW,
                     null,
@@ -95,7 +96,8 @@ class ModelPromotionWorkflowServiceTest {
                         window(),
                         "proposal-operation",
                         "proposal-1",
-                        RATIONALE
+                        RATIONALE,
+                        RATIONALE_SHA256
                 )
         );
 
@@ -104,6 +106,8 @@ class ModelPromotionWorkflowServiceTest {
                 org.mockito.ArgumentCaptor.forClass(ModelPromotionProposalSubmission.class);
         org.mockito.Mockito.verify(store).submitProposal(submitted.capture());
         assertThat(submitted.getValue().operationContext().actorId()).isEqualTo("proposer");
+        assertThat(submitted.getValue().policySnapshot()).isNull();
+        assertThat(submitted.getValue().assessmentSnapshot()).isNull();
     }
 
     @Test
@@ -112,11 +116,83 @@ class ModelPromotionWorkflowServiceTest {
                 "admin-user", ModelGovernanceEnvironment.PRODUCTION
         );
         when(store.findProposal(proposal.proposalId())).thenReturn(Optional.of(proposal));
-        authenticate("admin-user", AnalystRole.FRAUD_OPS_ADMIN.authorities(), Set.of(AnalystRole.FRAUD_OPS_ADMIN));
+        authenticate(
+                "admin-user", withProductionScope(AnalystRole.FRAUD_OPS_ADMIN.authorities()),
+                Set.of(AnalystRole.FRAUD_OPS_ADMIN)
+        );
 
         assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId())))
                 .isInstanceOf(ModelPromotionPersistenceConflictException.class)
                 .hasMessageContaining("cannot review their own proposal");
+    }
+
+    @Test
+    void rejectsProductionProposalForOrdinaryAnalystRole() {
+        authenticate("proposer", AnalystRole.ANALYST.authorities(), Set.of(AnalystRole.ANALYST));
+
+        assertThatThrownBy(() -> service.proposeTransition(new ModelPromotionWorkflowService.TransitionProposalRequest(
+                identity(),
+                scope(ModelGovernanceEnvironment.PRODUCTION),
+                use(),
+                ModelPromotionLifecycleState.CANDIDATE,
+                0,
+                ModelPromotionLifecycleState.REJECTED,
+                window(),
+                "production-operation",
+                "production-proposal",
+                RATIONALE,
+                RATIONALE_SHA256
+        )))
+                .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
+                .satisfies(exception -> assertThat(((ModelPromotionWorkflowBlockedException) exception).reason())
+                        .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.UNAUTHORIZED));
+    }
+
+    @Test
+    void submitsEmergencyRetirementWithoutPolicyOrEvidence() {
+        authenticate(
+                "retirement-proposer",
+                Set.of(AnalystAuthority.MODEL_PROMOTION_RETIRE, AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION),
+                Set.of()
+        );
+        when(store.submitProposal(any())).thenAnswer(invocation -> {
+            ModelPromotionProposalSubmission submission = invocation.getArgument(0);
+            return new ModelPromotionProposalResult(
+                    submission.proposal().proposalId(),
+                    ModelPromotionProposalDocument.ReviewStatus.PENDING,
+                    submission.proposal(),
+                    null,
+                    null,
+                    null,
+                    NOW,
+                    null,
+                    false
+            );
+        });
+
+        ModelPromotionProposalResult result = service.proposeTransition(
+                new ModelPromotionWorkflowService.TransitionProposalRequest(
+                        identity(),
+                        scope(ModelGovernanceEnvironment.PRODUCTION),
+                        use(),
+                        ModelPromotionLifecycleState.CHAMPION,
+                        4,
+                        ModelPromotionLifecycleState.RETIRED,
+                        window(),
+                        "retirement-operation",
+                        "retirement-proposal",
+                        RATIONALE,
+                        RATIONALE_SHA256
+                )
+        );
+
+        assertThat(result.proposal().rationale().content()).isEqualTo(RATIONALE);
+        org.mockito.ArgumentCaptor<ModelPromotionProposalSubmission> submitted =
+                org.mockito.ArgumentCaptor.forClass(ModelPromotionProposalSubmission.class);
+        org.mockito.Mockito.verify(store).submitProposal(submitted.capture());
+        assertThat(submitted.getValue().policySnapshot()).isNull();
+        assertThat(submitted.getValue().assessmentSnapshot()).isNull();
+        org.mockito.Mockito.verifyNoInteractions(policyResolver, evidenceResolver, assessmentService);
     }
 
     @Test
@@ -167,6 +243,57 @@ class ModelPromotionWorkflowServiceTest {
     }
 
     @Test
+    void rejectsApprovalWhenThePolicyChangedAfterTheQualityGatedProposalWasSubmitted() {
+        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionPolicy submittedPolicy = ModelPromotionAssessmentTestFixtures.policy();
+        ModelPromotionProposalDocument proposal = pendingQualityGatedProposal("proposer", submittedPolicy, evidence);
+        ModelPromotionPolicy changedPolicy = ModelPromotionAssessmentTestFixtures.policy(
+                ModelPromotionAssessmentTestFixtures.defaultRules(),
+                "2026-02-01T00:00:00Z",
+                "2027-01-01T00:00:00Z"
+        );
+        when(store.findProposal(proposal.proposalId())).thenReturn(Optional.of(proposal));
+        when(policyResolver.resolve(scope(ModelGovernanceEnvironment.PRODUCTION), use(), NOW))
+                .thenReturn(ModelPromotionPolicyResolution.available(changedPolicy));
+        reviewProposalRunsPreconditions(proposal);
+        authenticate(
+                "reviewer",
+                Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION),
+                Set.of()
+        );
+
+        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId())))
+                .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
+                .satisfies(exception -> assertThat(((ModelPromotionWorkflowBlockedException) exception).reason())
+                        .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.POLICY_CHANGED));
+    }
+
+    @Test
+    void rejectsApprovalWhenTheExactAssessmentEvidenceChangedAfterProposalSubmission() {
+        ModelPromotionEvidenceBundle submittedEvidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionPolicy policy = ModelPromotionAssessmentTestFixtures.policy();
+        ModelPromotionProposalDocument proposal = pendingQualityGatedProposal("proposer", policy, submittedEvidence);
+        when(store.findProposal(proposal.proposalId())).thenReturn(Optional.of(proposal));
+        when(policyResolver.resolve(scope(ModelGovernanceEnvironment.PRODUCTION), use(), NOW))
+                .thenReturn(ModelPromotionPolicyResolution.available(policy));
+        when(evidenceResolver.resolve(any(), any(), any(), any()))
+                .thenReturn(ModelPromotionEvidenceResolution.available(
+                        ModelPromotionAssessmentTestFixtures.currentLimitedEvidence()
+                ));
+        reviewProposalRunsPreconditions(proposal);
+        authenticate(
+                "reviewer",
+                Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION),
+                Set.of()
+        );
+
+        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId())))
+                .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
+                .satisfies(exception -> assertThat(((ModelPromotionWorkflowBlockedException) exception).reason())
+                        .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.EVIDENCE_CHANGED));
+    }
+
+    @Test
     void permitsIndependentProposalRejectionWhenCurrentPolicyIsUnavailable() {
         ModelPromotionProposalDocument proposal = pendingProposal(
                 "proposer", ModelGovernanceEnvironment.PRODUCTION
@@ -187,10 +314,51 @@ class ModelPromotionWorkflowServiceTest {
                 "rejection-1",
                 ModelPromotionApproval.Outcome.REJECTED,
                 "reject-operation",
-                RATIONALE
+                RATIONALE,
+                RATIONALE_SHA256
         ));
 
         assertThat(result.proposalId()).isEqualTo(proposal.proposalId());
+    }
+
+    @Test
+    void submitsAdministrativeRejectionWithoutPolicyOrEvidence() {
+        authenticate("proposer", withProductionScope(AnalystRole.ANALYST.authorities()), Set.of(AnalystRole.ANALYST));
+        when(store.submitProposal(any())).thenAnswer(invocation -> {
+            ModelPromotionProposalSubmission submission = invocation.getArgument(0);
+            return new ModelPromotionProposalResult(
+                    submission.proposal().proposalId(),
+                    ModelPromotionProposalDocument.ReviewStatus.PENDING,
+                    submission.proposal(),
+                    null,
+                    null,
+                    null,
+                    NOW,
+                    null,
+                    false
+            );
+        });
+
+        service.proposeTransition(new ModelPromotionWorkflowService.TransitionProposalRequest(
+                identity(),
+                scope(ModelGovernanceEnvironment.PRODUCTION),
+                use(),
+                ModelPromotionLifecycleState.CANDIDATE,
+                0,
+                ModelPromotionLifecycleState.REJECTED,
+                window(),
+                "reject-operation",
+                "reject-proposal",
+                RATIONALE,
+                RATIONALE_SHA256
+        ));
+
+        org.mockito.ArgumentCaptor<ModelPromotionProposalSubmission> submitted =
+                org.mockito.ArgumentCaptor.forClass(ModelPromotionProposalSubmission.class);
+        org.mockito.Mockito.verify(store).submitProposal(submitted.capture());
+        assertThat(submitted.getValue().policySnapshot()).isNull();
+        assertThat(submitted.getValue().assessmentSnapshot()).isNull();
+        org.mockito.Mockito.verifyNoInteractions(policyResolver, evidenceResolver, assessmentService);
     }
 
     private ModelPromotionProposalDocument pendingProposal(
@@ -219,7 +387,7 @@ class ModelPromotionWorkflowServiceTest {
                         ModelPromotionLifecycleState.CHALLENGER,
                         proposer,
                         NOW,
-                        RATIONALE
+                        proposalRationale("proposal-1")
                 )
         );
         return ModelPromotionProposalDocument.pending(
@@ -239,13 +407,81 @@ class ModelPromotionWorkflowServiceTest {
                 "approval-1",
                 ModelPromotionApproval.Outcome.APPROVED,
                 "review-operation",
-                RATIONALE
+                RATIONALE,
+                RATIONALE_SHA256
+        );
+    }
+
+    private void reviewProposalRunsPreconditions(ModelPromotionProposalDocument proposal) {
+        when(store.reviewProposal(any(), any())).thenAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return proposal.toResult(false);
+        });
+    }
+
+    private ModelPromotionProposalDocument pendingQualityGatedProposal(
+            String proposer,
+            ModelPromotionPolicy policy,
+            ModelPromotionEvidenceBundle evidence
+    ) {
+        ModelPromotionAssessment assessment = ModelPromotionAssessmentTestFixtures.service(
+                (governanceScope, intendedUse, assessmentTime) -> Optional.of(policy)
+        ).assess(evidence, NOW);
+        ModelPromotionTransitionProposal transition = new ModelPromotionTransitionProposal(
+                evidence.content().artifactIdentity(),
+                scope(ModelGovernanceEnvironment.PRODUCTION),
+                use(),
+                ModelPromotionLifecycleState.CHALLENGER,
+                1,
+                ModelPromotionLifecycleState.SHADOW_APPROVED,
+                "quality-gated-proposal-operation"
+        );
+        ModelPromotionProposalSubmission submission = new ModelPromotionProposalSubmission(
+                transition,
+                new ModelPromotionOperationContext(
+                        "quality-gated-proposal-operation", proposer, AUTHORIZATION, NOW
+                ),
+                policy,
+                assessment,
+                new ModelPromotionProposal(
+                        "quality-gated-proposal",
+                        ModelPromotionLifecycleState.SHADOW_APPROVED,
+                        proposer,
+                        NOW,
+                        proposalRationale("quality-gated-proposal")
+                )
+        );
+        return ModelPromotionProposalDocument.pending(
+                "quality-gated-aggregate-key",
+                "c".repeat(64),
+                submission,
+                new ModelPromotionDecisionDocument.LocalAuditEvidence(
+                        "quality-gated-audit",
+                        "SUBMIT_MODEL_PROMOTION_PROPOSAL",
+                        "SUCCEEDED",
+                        proposer,
+                        AUTHORIZATION,
+                        NOW
+                ),
+                NOW
         );
     }
 
     private void authenticate(String userId, Set<String> authorities, Set<AnalystRole> roles) {
         AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities);
         SecurityContextHolder.getContext().setAuthentication(new AnalystAuthenticationFactory().authenticated(principal));
+    }
+
+    private Set<String> withProductionScope(Set<String> authorities) {
+        java.util.LinkedHashSet<String> scopedAuthorities = new java.util.LinkedHashSet<>(authorities);
+        scopedAuthorities.add(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+        return scopedAuthorities;
+    }
+
+    private ModelPromotionDecisionRationale proposalRationale(String proposalId) {
+        return new ModelPromotionDecisionRationale(
+                ModelPromotionDecisionRationale.proposalReference(proposalId), RATIONALE, RATIONALE_SHA256
+        );
     }
 
     private ExactModelArtifactIdentity identity() {

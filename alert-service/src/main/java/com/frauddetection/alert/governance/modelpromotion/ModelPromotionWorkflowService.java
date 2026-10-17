@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -20,6 +21,7 @@ public class ModelPromotionWorkflowService {
     private final ModelPromotionAuthorization authorization;
     private final Clock clock;
 
+    @Autowired
     public ModelPromotionWorkflowService(
             MongoModelPromotionStore store,
             ModelPromotionEvidenceResolver evidenceResolver,
@@ -94,10 +96,11 @@ public class ModelPromotionWorkflowService {
                 request.operationId(),
                 requestedAt
         );
-        ModelPromotionPolicy policy = currentPolicy(
-                request.governanceScope(), request.intendedUse(), requestedAt
-        );
-        ModelPromotionAssessment assessment = requiresAssessment(request.requestedTargetState())
+        boolean qualityGated = requiresAssessment(request.requestedTargetState());
+        ModelPromotionPolicy policy = qualityGated
+                ? currentPolicy(request.governanceScope(), request.intendedUse(), requestedAt)
+                : null;
+        ModelPromotionAssessment assessment = qualityGated
                 ? assessExact(
                 request.artifactIdentity(),
                 request.governanceScope(),
@@ -106,7 +109,7 @@ public class ModelPromotionWorkflowService {
                 requestedAt
         )
                 : null;
-        if (assessment != null && !matchesPolicy(assessment, policy)) {
+        if (assessment != null && !matchesPolicy(assessment, Objects.requireNonNull(policy))) {
             throw new ModelPromotionWorkflowBlockedException(
                     ModelPromotionWorkflowBlockedException.Reason.POLICY_CHANGED,
                     "The promotion policy changed while the assessment was being created"
@@ -126,7 +129,11 @@ public class ModelPromotionWorkflowService {
                 request.requestedTargetState(),
                 actor.actorId(),
                 requestedAt,
-                request.rationaleSha256()
+                new ModelPromotionDecisionRationale(
+                        ModelPromotionDecisionRationale.proposalReference(request.proposalId()),
+                        request.rationale(),
+                        request.rationaleSha256()
+                )
         );
         return store.submitProposal(new ModelPromotionProposalSubmission(
                 transition,
@@ -167,7 +174,13 @@ public class ModelPromotionWorkflowService {
                         request.outcome(),
                         actor.actorId(),
                         requestedAt,
-                        request.rationaleSha256()
+                        new ModelPromotionDecisionRationale(
+                                ModelPromotionDecisionRationale.approvalReference(
+                                        proposal.proposalId(), request.approvalId()
+                                ),
+                                request.rationale(),
+                                request.rationaleSha256()
+                        )
                 ),
                 actor.operationContext()
         );
@@ -211,19 +224,20 @@ public class ModelPromotionWorkflowService {
         if (outcome != ModelPromotionApproval.Outcome.APPROVED) {
             return;
         }
+        if (!requiresAssessment(proposal.transition().requestedTargetState())) {
+            return;
+        }
         ModelPromotionPolicy currentPolicy = currentPolicy(
                 proposal.transition().governanceScope(),
                 proposal.transition().intendedUse(),
                 clock.instant()
         );
-        if (!currentPolicy.canonicalSha256().equals(proposal.policySnapshot().canonicalSha256())) {
+        if (proposal.policySnapshot() == null
+                || !currentPolicy.canonicalSha256().equals(proposal.policySnapshot().canonicalSha256())) {
             throw new ModelPromotionWorkflowBlockedException(
                     ModelPromotionWorkflowBlockedException.Reason.POLICY_CHANGED,
                     "The promotion policy changed after the proposal was submitted"
             );
-        }
-        if (!requiresAssessment(proposal.transition().requestedTargetState())) {
-            return;
         }
         ModelPromotionAssessment assessment = Objects.requireNonNull(
                 proposal.assessmentSnapshot(), "assessment snapshot is required for this proposal"
@@ -349,6 +363,7 @@ public class ModelPromotionWorkflowService {
             ModelPromotionEvaluationWindow evaluationWindow,
             String operationId,
             String proposalId,
+            String rationale,
             String rationaleSha256
     ) {
         public TransitionProposalRequest {
@@ -366,6 +381,7 @@ public class ModelPromotionWorkflowService {
             String approvalId,
             ModelPromotionApproval.Outcome outcome,
             String operationId,
+            String rationale,
             String rationaleSha256
     ) {
         public ReviewRequest {

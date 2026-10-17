@@ -16,9 +16,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -102,7 +99,7 @@ public class ModelPromotionEvidenceResolver {
             return ModelPromotionEvidenceResolution.available(bundle(
                     identity, governanceScope, intendedUse, window, modelCardArtifact, shadowArtifact
             ));
-        } catch (EvidenceMismatchException exception) {
+        } catch (EvidenceMismatchException | IllegalArgumentException exception) {
             return ModelPromotionEvidenceResolution.unavailable(Reason.EVIDENCE_IDENTITY_OR_WINDOW_MISMATCH);
         } catch (GovernanceArtifactReadException exception) {
             return ModelPromotionEvidenceResolution.unavailable(Reason.EVIDENCE_CANONICALIZATION_UNAVAILABLE);
@@ -289,12 +286,7 @@ public class ModelPromotionEvidenceResolver {
     }
 
     private String canonicalSha256(ModelPromotionEvidenceBundle.Content content) {
-        byte[] canonical = GovernanceCanonicalJson.serialize(objectMapper, objectMapper.valueToTree(content));
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new GovernanceArtifactReadException("governance evidence digest unavailable", exception);
-        }
+        return GovernanceCanonicalJson.sha256(objectMapper, content);
     }
 
     private JsonNode object(JsonNode parent, String field) {

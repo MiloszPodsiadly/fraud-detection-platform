@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
 import java.util.List;
@@ -66,6 +67,7 @@ public final class ModelPromotionApiContracts {
             @NotBlank String toInclusive,
             @NotBlank @Pattern(regexp = OPERATION_ID) String operationId,
             @NotBlank @Pattern(regexp = OPERATION_ID) String proposalId,
+            @NotBlank @Size(max = 4096) String rationale,
             @NotBlank @Pattern(regexp = SHA256) String rationaleSha256
     ) {
         public ModelPromotionEvaluationWindow evaluationWindow() {
@@ -81,6 +83,7 @@ public final class ModelPromotionApiContracts {
             @NotBlank String toInclusive,
             @NotBlank @Pattern(regexp = OPERATION_ID) String operationId,
             @NotBlank @Pattern(regexp = OPERATION_ID) String proposalId,
+            @NotBlank @Size(max = 4096) String rationale,
             @NotBlank @Pattern(regexp = SHA256) String rationaleSha256
     ) {
         public ModelPromotionEvaluationWindow evaluationWindow() {
@@ -92,6 +95,7 @@ public final class ModelPromotionApiContracts {
             @NotBlank @Pattern(regexp = OPERATION_ID) String approvalId,
             @NotNull ModelPromotionApproval.Outcome outcome,
             @NotBlank @Pattern(regexp = OPERATION_ID) String operationId,
+            @NotBlank @Size(max = 4096) String rationale,
             @NotBlank @Pattern(regexp = SHA256) String rationaleSha256
     ) {
     }
@@ -132,6 +136,8 @@ public final class ModelPromotionApiContracts {
             String assessmentSha256,
             String proposalId,
             String reviewOutcome,
+            DecisionRationaleResponse proposalRationale,
+            DecisionRationaleResponse approvalRationale,
             Instant committedAt
     ) {
     }
@@ -145,6 +151,8 @@ public final class ModelPromotionApiContracts {
             String assessmentSha256,
             Instant submittedAt,
             Instant reviewedAt,
+            DecisionRationaleResponse proposalRationale,
+            DecisionRationaleResponse approvalRationale,
             boolean idempotentReplay
     ) {
     }
@@ -161,6 +169,9 @@ public final class ModelPromotionApiContracts {
             boolean idempotentReplay,
             String deploymentStatus
     ) {
+    }
+
+    public record DecisionRationaleResponse(String referenceId, String sha256, String content) {
     }
 
     public record AssessmentResponse(

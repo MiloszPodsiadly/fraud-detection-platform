@@ -53,7 +53,6 @@ public record ModelPromotionProposalDocument(
         require(actorId, "actorId");
         require(authorizationFingerprint, "authorizationFingerprint");
         Objects.requireNonNull(transition, "transition is required");
-        Objects.requireNonNull(policySnapshot, "policySnapshot is required");
         Objects.requireNonNull(proposal, "proposal is required");
         Objects.requireNonNull(reviewStatus, "reviewStatus is required");
         Objects.requireNonNull(submissionAudit, "submissionAudit is required");
@@ -117,7 +116,7 @@ public record ModelPromotionProposalDocument(
                 reviewStatus,
                 proposal,
                 approval,
-                policySnapshot.canonicalSha256(),
+                policySnapshot == null ? null : policySnapshot.canonicalSha256(),
                 assessmentSnapshot == null ? null : assessmentSnapshot.canonicalSha256(),
                 submittedAt,
                 reviewedAt,

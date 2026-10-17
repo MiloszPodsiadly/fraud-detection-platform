@@ -107,6 +107,7 @@ class ModelPromotionApiControllerTest {
                                   "toInclusive": "2026-01-02T00:00:00Z",
                                   "operationId": "proposal-op-1",
                                   "proposalId": "proposal-1",
+                                  "rationale": "The evidence requires independent review.",
                                   "rationaleSha256": "not-a-sha"
                                 }
                                 """.formatted(SHA256)))
@@ -154,6 +155,7 @@ class ModelPromotionApiControllerTest {
                                   "toInclusive": "2026-01-02T00:00:00Z",
                                   "operationId": "proposal-op-1",
                                   "proposalId": "proposal-1",
+                                  "rationale": "The evidence requires independent review.",
                                   "rationaleSha256": "%s"
                                 }
                                 """.formatted(SHA256, SHA256)))

@@ -46,6 +46,26 @@ public class ModelPromotionPersistenceStartupGuard implements ApplicationRunner 
         }
         transactionCapabilityProbe.verify();
         verifyIndex(
+                ModelPromotionPolicyDocument.COLLECTION,
+                ModelPromotionPolicyDocument.REVISION_INDEX,
+                true,
+                new Document("institutional_scope", 1)
+                        .append("environment", 1)
+                        .append("intended_use", 1)
+                        .append("policy_id", 1)
+                        .append("policy_revision", 1)
+        );
+        verifyIndex(
+                ModelPromotionPolicyDocument.COLLECTION,
+                ModelPromotionPolicyDocument.EFFECTIVE_LOOKUP_INDEX,
+                false,
+                new Document("institutional_scope", 1)
+                        .append("environment", 1)
+                        .append("intended_use", 1)
+                        .append("effective_from", -1)
+                        .append("effective_to", 1)
+        );
+        verifyIndex(
                 ModelPromotionStateDocument.COLLECTION,
                 ModelPromotionStateDocument.IDENTITY_INDEX,
                 true,

@@ -79,6 +79,47 @@ class ModelPromotionEvidenceResolverTest {
     }
 
     @Test
+    void wrongRequestedArtifactShaCannotProduceBundle() throws Exception {
+        JsonNode shadow = fixture();
+        ExactModelArtifactIdentity expectedIdentity = identity(shadow);
+        ExactModelArtifactIdentity wrongIdentity = new ExactModelArtifactIdentity(
+                expectedIdentity.modelName(),
+                expectedIdentity.modelVersion(),
+                expectedIdentity.featureContractVersion(),
+                "b".repeat(64)
+        );
+        when(modelCardProvider.findExact(wrongIdentity)).thenReturn(Optional.of(modelCardArtifact(shadow)));
+        when(shadowProvider.findArtifact(any())).thenReturn(Optional.of(shadowArtifact(shadow)));
+
+        ModelPromotionEvidenceResolution result = resolver.resolve(
+                wrongIdentity, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING, window(shadow)
+        );
+
+        assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(Reason.EVIDENCE_IDENTITY_OR_WINDOW_MISMATCH);
+        assertThat(result.evidenceBundle()).isNull();
+    }
+
+    @Test
+    void zeroRateDenominatorCannotProduceBundle() throws Exception {
+        JsonNode shadow = fixture();
+        ObjectNode invalid = (ObjectNode) shadow.deepCopy();
+        ObjectNode mlMetrics = (ObjectNode) invalid.at("/evaluationSummary/supportedMetrics/mlPredictionMetrics");
+        mlMetrics.put("falsePositive", 0);
+        mlMetrics.put("trueNegative", 0);
+        ExactModelArtifactIdentity identity = identity(invalid);
+        when(modelCardProvider.findExact(identity)).thenReturn(Optional.of(modelCardArtifact(invalid)));
+        when(shadowProvider.findArtifact(any())).thenReturn(Optional.of(shadowArtifact(invalid)));
+
+        ModelPromotionEvidenceResolution result = resolver.resolve(
+                identity, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING, window(invalid)
+        );
+
+        assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(Reason.EVIDENCE_IDENTITY_OR_WINDOW_MISMATCH);
+    }
+
+    @Test
     void missingAndUnavailableProvidersRemainDistinct() throws Exception {
         JsonNode shadow = fixture();
         ExactModelArtifactIdentity identity = identity(shadow);

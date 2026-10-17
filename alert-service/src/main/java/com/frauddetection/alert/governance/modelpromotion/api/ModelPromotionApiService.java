@@ -5,6 +5,7 @@ import com.frauddetection.alert.governance.modelpromotion.ModelGovernanceScope;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionAggregate;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionAssessment;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionDecisionDocument;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionDecisionRationale;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionLifecycleState;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionMutationResult;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionPolicyStoreUnavailableException;
@@ -26,6 +27,7 @@ import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromot
 import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.CandidateRequest;
 import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.CriterionResponse;
 import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.DecisionResponse;
+import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.DecisionRationaleResponse;
 import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.EvidenceResponse;
 import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.IdentityResponse;
 import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.MutationResponse;
@@ -116,6 +118,7 @@ public class ModelPromotionApiService {
                         request.evaluationWindow(),
                         request.operationId(),
                         request.proposalId(),
+                        request.rationale(),
                         request.rationaleSha256()
                 )
         )));
@@ -133,6 +136,7 @@ public class ModelPromotionApiService {
                         request.evaluationWindow(),
                         request.operationId(),
                         request.proposalId(),
+                        request.rationale(),
                         request.rationaleSha256()
                 )
         )));
@@ -145,6 +149,7 @@ public class ModelPromotionApiService {
                         request.approvalId(),
                         request.outcome(),
                         request.operationId(),
+                        request.rationale(),
                         request.rationaleSha256()
                 )
         )));
@@ -237,6 +242,8 @@ public class ModelPromotionApiService {
                 decision.assessmentSnapshot() == null ? null : decision.assessmentSnapshot().canonicalSha256(),
                 decision.proposal() == null ? null : decision.proposal().proposalId(),
                 decision.approval() == null ? null : decision.approval().outcome().name(),
+                decision.proposal() == null ? null : rationale(decision.proposal().rationale()),
+                decision.approval() == null ? null : rationale(decision.approval().rationale()),
                 decision.committedAt()
         );
     }
@@ -251,6 +258,8 @@ public class ModelPromotionApiService {
                 proposal.assessmentSha256(),
                 proposal.submittedAt(),
                 proposal.reviewedAt(),
+                rationale(proposal.proposal().rationale()),
+                proposal.approval() == null ? null : rationale(proposal.approval().rationale()),
                 proposal.idempotentReplay()
         );
     }
@@ -261,12 +270,18 @@ public class ModelPromotionApiService {
                 proposal.proposal().requestedState(),
                 proposal.reviewStatus().name(),
                 proposal.approval() == null ? null : proposal.approval().outcome().name(),
-                proposal.policySnapshot().canonicalSha256(),
+                proposal.policySnapshot() == null ? null : proposal.policySnapshot().canonicalSha256(),
                 proposal.assessmentSnapshot() == null ? null : proposal.assessmentSnapshot().canonicalSha256(),
                 proposal.submittedAt(),
                 proposal.reviewedAt(),
+                rationale(proposal.proposal().rationale()),
+                proposal.approval() == null ? null : rationale(proposal.approval().rationale()),
                 idempotentReplay
         );
+    }
+
+    private DecisionRationaleResponse rationale(ModelPromotionDecisionRationale rationale) {
+        return new DecisionRationaleResponse(rationale.referenceId(), rationale.sha256(), rationale.content());
     }
 
     private IdentityResponse identity(ExactModelArtifactIdentity identity) {

@@ -11,11 +11,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
-import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -299,6 +297,50 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                 .isEqualTo(ModelPromotionLifecycleState.CHALLENGER);
         assertThat(store.findProposal("proposal-1").orElseThrow().reviewStatus())
                 .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.APPROVED);
+        ModelPromotionDecisionDocument acceptedDecision = store.history(identity, scope, use(), 10).stream()
+                .filter(decision -> decision.eventType()
+                        == ModelPromotionDecisionDocument.EventType.LIFECYCLE_TRANSITION_ACCEPTED)
+                .findFirst()
+                .orElseThrow();
+        assertThat(acceptedDecision.proposal().rationale().content())
+                .isEqualTo(RATIONALE);
+        assertThat(acceptedDecision.approval().rationale().referenceId())
+                .isEqualTo(ModelPromotionDecisionRationale.approvalReference("proposal-1", "approval-independent-review"));
+    }
+
+    @Test
+    void emergencyRetirementByIndependentReviewerReleasesChampionWithoutPolicyEvidence() {
+        ExactModelArtifactIdentity identity = identity("a");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        advanceToPromotionRecommended(identity, scope, "retire");
+        store.transition(transition(
+                identity, scope, ModelPromotionLifecycleState.PROMOTION_RECOMMENDED, 3,
+                ModelPromotionLifecycleState.CHAMPION, "champion-retire", true
+        ));
+        ModelPromotionProposalSubmission retirement = retirementProposal(
+                identity, scope, "retirement-operation", "retirement-proposal", "retirement-proposer"
+        );
+
+        ModelPromotionProposalResult pending = store.submitProposal(retirement);
+        ModelPromotionProposalResult approved = store.reviewProposal(
+                review("retirement-proposal", "retirement-review", "retirement-reviewer"), () -> {
+                }
+        );
+
+        assertThat(pending.policySha256()).isNull();
+        assertThat(pending.assessmentSha256()).isNull();
+        assertThat(approved.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.APPROVED);
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().lifecycleState())
+                .isEqualTo(ModelPromotionLifecycleState.RETIRED);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionChampionClaimDocument.class)).isZero();
+        ModelPromotionDecisionDocument decision = store.history(identity, scope, use(), 10).stream()
+                .filter(candidate -> candidate.resultingState() == ModelPromotionLifecycleState.RETIRED)
+                .findFirst()
+                .orElseThrow();
+        assertThat(decision.policySnapshot()).isNull();
+        assertThat(decision.assessmentSnapshot()).isNull();
+        assertThat(decision.proposal().rationale().content()).isEqualTo(RATIONALE);
+        assertThat(decision.approval().approvedBy()).isEqualTo("retirement-reviewer");
     }
 
     @Test
@@ -356,6 +398,39 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                         ModelPromotionDecisionDocument.EventType.CANDIDATE_REGISTERED,
                         ModelPromotionDecisionDocument.EventType.TRANSITION_PROPOSAL_REJECTED
                 );
+    }
+
+    @Test
+    void reviewAuditFailureRollsBackApprovalRationaleAndLifecycleTransition() {
+        ExactModelArtifactIdentity identity = identity("b");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-review-audit-failure"));
+        store.submitProposal(proposal(
+                identity, scope, "proposal-review-audit-failure", "proposal-review-audit-failure", "proposer"
+        ));
+        MongoModelPromotionStore failing = store(new ModelPromotionLocalAuditFactory() {
+            @Override
+            public ModelPromotionDecisionDocument.LocalAuditEvidence accepted(
+                    String action, ModelPromotionOperationContext context, Instant committedAt
+            ) {
+                if (action.equals("APPROVE_MODEL_PROMOTION_PROPOSAL")) {
+                    throw new IllegalStateException("local review audit unavailable");
+                }
+                return super.accepted(action, context, committedAt);
+            }
+        }, validator);
+
+        assertThatThrownBy(() -> failing.reviewProposal(
+                review("proposal-review-audit-failure", "review-audit-failure", "independent-reviewer"), () -> {
+                }
+        )).hasMessageContaining("local review audit unavailable");
+
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().lifecycleState())
+                .isEqualTo(ModelPromotionLifecycleState.CANDIDATE);
+        ModelPromotionProposalDocument pending = store.findProposal("proposal-review-audit-failure").orElseThrow();
+        assertThat(pending.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
+        assertThat(pending.approval()).isNull();
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(1);
     }
 
     @Test
@@ -438,50 +513,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
     }
 
     private void createRequiredIndexes() {
-        mongoTemplate.indexOps(ModelPromotionStateDocument.class).ensureIndex(
-                new Index()
-                        .on("model_name", Sort.Direction.ASC)
-                        .on("model_version", Sort.Direction.ASC)
-                        .on("feature_contract_version", Sort.Direction.ASC)
-                        .on("model_artifact_sha256", Sort.Direction.ASC)
-                        .on("institutional_scope", Sort.Direction.ASC)
-                        .on("environment", Sort.Direction.ASC)
-                        .on("intended_use", Sort.Direction.ASC)
-                        .unique().named(ModelPromotionStateDocument.IDENTITY_INDEX)
-        );
-        mongoTemplate.indexOps(ModelPromotionDecisionDocument.class).ensureIndex(
-                new Index().on("aggregate_key", Sort.Direction.ASC).on("operation_id", Sort.Direction.ASC)
-                        .unique().named(ModelPromotionDecisionDocument.OPERATION_INDEX)
-        );
-        mongoTemplate.indexOps(ModelPromotionDecisionDocument.class).ensureIndex(
-                new Index().on("decision_id", Sort.Direction.ASC).unique().sparse()
-                        .named(ModelPromotionDecisionDocument.DECISION_INDEX)
-        );
-        mongoTemplate.indexOps(ModelPromotionDecisionDocument.class).ensureIndex(
-                new Index().on("aggregate_key", Sort.Direction.ASC)
-                        .on("committed_at", Sort.Direction.DESC)
-                        .on("operation_id", Sort.Direction.ASC)
-                        .named(ModelPromotionDecisionDocument.HISTORY_INDEX)
-        );
-        mongoTemplate.indexOps(ModelPromotionProposalDocument.class).ensureIndex(
-                new Index().on("aggregate_key", Sort.Direction.ASC).on("operation_id", Sort.Direction.ASC)
-                        .unique().named(ModelPromotionProposalDocument.OPERATION_INDEX)
-        );
-        mongoTemplate.indexOps(ModelPromotionProposalDocument.class).ensureIndex(
-                new Index().on("aggregate_key", Sort.Direction.ASC)
-                        .on("review_status", Sort.Direction.ASC)
-                        .on("submitted_at", Sort.Direction.DESC)
-                        .named(ModelPromotionProposalDocument.PENDING_REVIEW_INDEX)
-        );
-        mongoTemplate.indexOps(ModelPromotionProposalDocument.class).ensureIndex(
-                new Index().on("aggregate_key", Sort.Direction.ASC)
-                        .on("submitted_at", Sort.Direction.DESC)
-                        .on("_id", Sort.Direction.ASC)
-                        .named(ModelPromotionProposalDocument.HISTORY_INDEX)
-        );
-        if (!mongoTemplate.collectionExists(ModelPromotionChampionClaimDocument.COLLECTION)) {
-            mongoTemplate.createCollection(ModelPromotionChampionClaimDocument.COLLECTION);
-        }
+        new ModelPromotionPersistenceIndexInitializer(mongoTemplate).ensureIndexes();
     }
 
     private ModelPromotionRegistrationCommand registration(
@@ -517,13 +549,45 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                         ModelPromotionLifecycleState.CHALLENGER,
                         proposer,
                         NOW.minusSeconds(30),
-                        RATIONALE
+                        proposalRationale(proposalId)
                 )
         );
     }
 
     private ModelPromotionProposalReview review(String proposalId, String operationId, String reviewer) {
         return review(proposalId, operationId, reviewer, ModelPromotionApproval.Outcome.APPROVED);
+    }
+
+    private ModelPromotionProposalSubmission retirementProposal(
+            ExactModelArtifactIdentity identity,
+            ModelGovernanceScope scope,
+            String operationId,
+            String proposalId,
+            String proposer
+    ) {
+        ModelPromotionTransitionProposal transition = new ModelPromotionTransitionProposal(
+                identity,
+                scope,
+                use(),
+                ModelPromotionLifecycleState.CHAMPION,
+                4,
+                ModelPromotionLifecycleState.RETIRED,
+                operationId
+        );
+        ModelPromotionOperationContext context = context(operationId, proposer);
+        return new ModelPromotionProposalSubmission(
+                transition,
+                context,
+                null,
+                null,
+                new ModelPromotionProposal(
+                        proposalId,
+                        ModelPromotionLifecycleState.RETIRED,
+                        proposer,
+                        NOW.minusSeconds(30),
+                        proposalRationale(proposalId)
+                )
+        );
     }
 
     private ModelPromotionProposalReview review(
@@ -541,7 +605,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                         outcome,
                         reviewer,
                         NOW.minusSeconds(10),
-                        RATIONALE
+                        approvalRationale(proposalId, "approval-" + operationId)
                 ),
                 context
         );
@@ -572,11 +636,13 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                 identity, scope, use(), source, revision, target, operationId, reference
         );
         ModelPromotionProposal proposal = new ModelPromotionProposal(
-                reference.proposal().proposalId(), target, "proposer", NOW.minusSeconds(120), RATIONALE
+                reference.proposal().proposalId(), target, "proposer", NOW.minusSeconds(120),
+                proposalRationale(reference.proposal().proposalId())
         );
         ModelPromotionApproval approval = new ModelPromotionApproval(
                 reference.approval().approvalId(), proposal.proposalId(), ModelPromotionApproval.Outcome.APPROVED,
-                "approver", NOW.minusSeconds(60), RATIONALE
+                "approver", NOW.minusSeconds(60),
+                approvalRationale(proposal.proposalId(), reference.approval().approvalId())
         );
         return new DurableModelPromotionTransitionCommand(
                 transition, context(operationId), ModelPromotionAssessmentTestFixtures.policy(), null, proposal, approval
@@ -585,6 +651,20 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
 
     private ModelPromotionOperationContext context(String operationId) {
         return context(operationId, "governance-actor");
+    }
+
+    private ModelPromotionDecisionRationale proposalRationale(String proposalId) {
+        return new ModelPromotionDecisionRationale(
+                ModelPromotionDecisionRationale.proposalReference(proposalId), RATIONALE,
+                ModelPromotionDecisionRationale.sha256(RATIONALE)
+        );
+    }
+
+    private ModelPromotionDecisionRationale approvalRationale(String proposalId, String approvalId) {
+        return new ModelPromotionDecisionRationale(
+                ModelPromotionDecisionRationale.approvalReference(proposalId, approvalId), RATIONALE,
+                ModelPromotionDecisionRationale.sha256(RATIONALE)
+        );
     }
 
     private ModelPromotionOperationContext context(String operationId, String actorId) {
@@ -610,7 +690,11 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
 
     private static final class PersistenceFocusedValidator extends ModelPromotionDecisionValidator {
         private PersistenceFocusedValidator(ObjectMapper objectMapper) {
-            super(objectMapper, new ModelPromotionPolicyValidator(objectMapper));
+            super(
+                    objectMapper,
+                    new ModelPromotionPolicyValidator(objectMapper),
+                    policy -> ModelPromotionPolicyAuthorityVerification.verified()
+            );
         }
 
         @Override

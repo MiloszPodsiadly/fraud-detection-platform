@@ -5,6 +5,7 @@ import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -34,6 +35,7 @@ public class MongoModelPromotionStore {
     private final ModelPromotionLocalAuditFactory auditFactory;
     private final Clock clock;
 
+    @Autowired
     public MongoModelPromotionStore(
             MongoTemplate mongoTemplate,
             RegulatedMutationTransactionRunner transactionRunner,
@@ -58,7 +60,7 @@ public class MongoModelPromotionStore {
         this.clock = clock;
     }
 
-    public ModelPromotionMutationResult registerCandidate(ModelPromotionRegistrationCommand command) {
+    ModelPromotionMutationResult registerCandidate(ModelPromotionRegistrationCommand command) {
         requireTransactions();
         String aggregateKey = ModelPromotionPersistenceKey.aggregate(
                 command.artifactIdentity(), command.governanceScope(), command.intendedUse()
@@ -76,7 +78,7 @@ public class MongoModelPromotionStore {
         );
     }
 
-    public ModelPromotionMutationResult transition(DurableModelPromotionTransitionCommand request) {
+    ModelPromotionMutationResult transition(DurableModelPromotionTransitionCommand request) {
         requireTransactions();
         ModelPromotionTransitionCommand command = request.transition();
         String aggregateKey = ModelPromotionPersistenceKey.aggregate(
@@ -102,7 +104,7 @@ public class MongoModelPromotionStore {
         );
     }
 
-    public ModelPromotionProposalResult submitProposal(ModelPromotionProposalSubmission submission) {
+    ModelPromotionProposalResult submitProposal(ModelPromotionProposalSubmission submission) {
         requireTransactions();
         ModelPromotionTransitionProposal transition = submission.transition();
         String aggregateKey = ModelPromotionPersistenceKey.aggregate(
@@ -124,14 +126,14 @@ public class MongoModelPromotionStore {
         );
     }
 
-    public Optional<ModelPromotionProposalDocument> findProposal(String proposalId) {
+    Optional<ModelPromotionProposalDocument> findProposal(String proposalId) {
         if (proposalId == null || proposalId.isBlank()) {
             throw new IllegalArgumentException("proposalId is required");
         }
         return Optional.ofNullable(mongoTemplate.findById(proposalId, ModelPromotionProposalDocument.class));
     }
 
-    public ModelPromotionProposalResult reviewProposal(
+    ModelPromotionProposalResult reviewProposal(
             ModelPromotionProposalReview review,
             Runnable preconditionRevalidation
     ) {
@@ -152,7 +154,7 @@ public class MongoModelPromotionStore {
         );
     }
 
-    public Optional<ModelPromotionAggregate> currentState(
+    Optional<ModelPromotionAggregate> currentState(
             com.frauddetection.alert.governance.ExactModelArtifactIdentity artifactIdentity,
             ModelGovernanceScope governanceScope,
             ModelPromotionIntendedUse intendedUse
@@ -162,7 +164,7 @@ public class MongoModelPromotionStore {
                 .map(ModelPromotionStateDocument::toAggregate);
     }
 
-    public List<ModelPromotionDecisionDocument> history(
+    List<ModelPromotionDecisionDocument> history(
             com.frauddetection.alert.governance.ExactModelArtifactIdentity artifactIdentity,
             ModelGovernanceScope governanceScope,
             ModelPromotionIntendedUse intendedUse,
@@ -179,7 +181,7 @@ public class MongoModelPromotionStore {
         return List.copyOf(mongoTemplate.find(query, ModelPromotionDecisionDocument.class));
     }
 
-    public List<ModelPromotionProposalDocument> proposals(
+    List<ModelPromotionProposalDocument> proposals(
             com.frauddetection.alert.governance.ExactModelArtifactIdentity artifactIdentity,
             ModelGovernanceScope governanceScope,
             ModelPromotionIntendedUse intendedUse,

@@ -103,6 +103,11 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
                         .put("BOTH_LOW", 2),
                 summary -> ((ObjectNode) summary.get("governance"))
                         .put("runtimeDecisionAuthority", "ML"),
+                summary -> {
+                    ObjectNode source = (ObjectNode) summary.get("sourceEvaluation");
+                    source.put("externalAttestation", "PROVIDED");
+                    source.put("immutableStorageGuarantee", "VERIFIED");
+                },
                 summary -> summary.putArray("rawRecords").addObject().put("transactionReference", "forbidden")
         );
         for (int index = 0; index < mutations.size(); index++) {
