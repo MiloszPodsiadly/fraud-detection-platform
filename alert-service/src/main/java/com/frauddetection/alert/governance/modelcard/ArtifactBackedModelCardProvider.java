@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
 import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
 
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReadException;
@@ -11,6 +12,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -18,6 +22,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -37,7 +42,8 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
             CARD_FILENAME, MARKDOWN_FILENAME, MANIFEST_FILENAME
     );
 
-    private final ModelCardCurrentProperties properties;
+    private final ModelCardCurrentProperties currentProperties;
+    private final ModelCardArtifactProperties artifactProperties;
     private final ObjectMapper objectMapper;
     private final ModelCardValidator validator;
     private final GovernanceArtifactReader artifactReader;
@@ -47,7 +53,22 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
             ObjectMapper objectMapper,
             ModelCardValidator validator
     ) {
-        this(properties, objectMapper, validator, new GovernanceArtifactReader());
+        this(
+                properties,
+                new ModelCardArtifactProperties(false, null, null, null),
+                objectMapper,
+                validator,
+                new GovernanceArtifactReader()
+        );
+    }
+
+    public ArtifactBackedModelCardProvider(
+            ModelCardCurrentProperties currentProperties,
+            ModelCardArtifactProperties artifactProperties,
+            ObjectMapper objectMapper,
+            ModelCardValidator validator
+    ) {
+        this(currentProperties, artifactProperties, objectMapper, validator, new GovernanceArtifactReader());
     }
 
     ArtifactBackedModelCardProvider(
@@ -56,7 +77,24 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
             ModelCardValidator validator,
             GovernanceArtifactReader artifactReader
     ) {
-        this.properties = properties;
+        this(
+                properties,
+                new ModelCardArtifactProperties(false, null, null, null),
+                objectMapper,
+                validator,
+                artifactReader
+        );
+    }
+
+    ArtifactBackedModelCardProvider(
+            ModelCardCurrentProperties currentProperties,
+            ModelCardArtifactProperties artifactProperties,
+            ObjectMapper objectMapper,
+            ModelCardValidator validator,
+            GovernanceArtifactReader artifactReader
+    ) {
+        this.currentProperties = currentProperties;
+        this.artifactProperties = artifactProperties;
         this.objectMapper = objectMapper.rebuild()
                 .configure(MapperFeature.ALLOW_COERCION_OF_SCALARS, false)
                 .configure(StreamReadFeature.STRICT_DUPLICATE_DETECTION, true)
@@ -70,38 +108,98 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
 
     @Override
     public Optional<VerifiedModelCardArtifact> currentArtifact() {
-        if (!properties.enabled()) {
+        if (!currentProperties.enabled()) {
             return Optional.empty();
         }
+        return Optional.of(readArtifactSet(
+                currentProperties.baseDir(),
+                currentProperties.path(),
+                currentProperties.maxCardSizeBytes(),
+                currentProperties.maxMarkdownSizeBytes(),
+                "Current Model Card artifact unavailable."
+        ));
+    }
+
+    @Override
+    public Optional<VerifiedModelCardArtifact> findExact(ExactModelArtifactIdentity identity) {
+        Objects.requireNonNull(identity, "identity is required");
+        if (currentProperties.enabled()) {
+            try {
+                Optional<VerifiedModelCardArtifact> current = currentArtifact();
+                if (current.isPresent() && identity.equals(identityOf(current.orElseThrow().card()))) {
+                    return current;
+                }
+            } catch (ModelCardProviderUnavailableException exception) {
+                if (!artifactProperties.enabled()) {
+                    throw exception;
+                }
+            }
+        }
+        if (!artifactProperties.enabled()) {
+            throw exactUnavailable();
+        }
+        try {
+            String selectionKey = new ExactModelCardSelector(identity).selectionKey();
+            Path root = Path.of(artifactProperties.baseDir()).toAbsolutePath().normalize();
+            if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
+                throw exactUnavailable();
+            }
+            Path directory = root.resolve(selectionKey);
+            if (Files.notExists(directory, LinkOption.NOFOLLOW_LINKS)) {
+                return Optional.empty();
+            }
+            VerifiedModelCardArtifact artifact = readArtifactSet(
+                    artifactProperties.baseDir(),
+                    selectionKey + "/" + CARD_FILENAME,
+                    artifactProperties.maxCardSizeBytes(),
+                    artifactProperties.maxMarkdownSizeBytes(),
+                    "Exact Model Card artifact unavailable."
+            );
+            require(identity.equals(identityOf(artifact.card())), "exact Model Card identity mismatch");
+            return Optional.of(artifact);
+        } catch (GovernanceArtifactReadException | ModelEvaluationValidationException
+                 | InvalidPathException | SecurityException exception) {
+            throw exactUnavailable();
+        }
+    }
+
+    private VerifiedModelCardArtifact readArtifactSet(
+            String baseDir,
+            String path,
+            long maxCardSizeBytes,
+            long maxMarkdownSizeBytes,
+            String unavailableMessage
+    ) {
         try {
             Path cardPath = artifactReader.resolveConfiguredFile(
-                    properties.baseDir(),
-                    properties.path(),
+                    baseDir,
+                    path,
                     CARD_FILENAME
             );
             Path markdownPath = artifactReader.resolveSibling(cardPath, MARKDOWN_FILENAME);
             Path manifestPath = artifactReader.resolveSibling(cardPath, MANIFEST_FILENAME);
             artifactReader.requireExactDirectoryEntries(cardPath.getParent(), ARTIFACT_FILENAMES);
             byte[] firstManifest = artifactReader.read(manifestPath, MAX_MANIFEST_SIZE_BYTES);
-            byte[] cardPayload = artifactReader.read(cardPath, properties.maxCardSizeBytes());
-            byte[] markdownPayload = artifactReader.read(markdownPath, properties.maxMarkdownSizeBytes());
+            byte[] cardPayload = artifactReader.read(cardPath, maxCardSizeBytes);
+            byte[] markdownPayload = artifactReader.read(markdownPath, maxMarkdownSizeBytes);
             JsonNode cardTree = readTree(cardPayload);
             ModelCard card = readCard(cardPayload);
             validator.validate(card);
             validateCanonicalArtifacts(firstManifest, cardPayload, markdownPayload, cardTree);
             validateManifest(firstManifest, cardPayload, markdownPayload, card);
             byte[] secondManifest = artifactReader.read(manifestPath, MAX_MANIFEST_SIZE_BYTES);
-            byte[] secondCard = artifactReader.read(cardPath, properties.maxCardSizeBytes());
-            byte[] secondMarkdown = artifactReader.read(markdownPath, properties.maxMarkdownSizeBytes());
+            byte[] secondCard = artifactReader.read(cardPath, maxCardSizeBytes);
+            byte[] secondMarkdown = artifactReader.read(markdownPath, maxMarkdownSizeBytes);
             artifactReader.requireExactDirectoryEntries(cardPath.getParent(), ARTIFACT_FILENAMES);
             if (!Arrays.equals(firstManifest, secondManifest)
                     || !Arrays.equals(cardPayload, secondCard)
                     || !Arrays.equals(markdownPayload, secondMarkdown)) {
-                throw unavailable();
+                throw unavailable(unavailableMessage);
             }
-            return Optional.of(new VerifiedModelCardArtifact(card, sha256(firstManifest)));
-        } catch (GovernanceArtifactReadException | ModelEvaluationValidationException exception) {
-            throw unavailable();
+            return new VerifiedModelCardArtifact(card, sha256(firstManifest));
+        } catch (GovernanceArtifactReadException | ModelEvaluationValidationException
+                 | ModelCardProviderUnavailableException exception) {
+            throw unavailable(unavailableMessage);
         }
     }
 
@@ -201,7 +299,25 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
         }
     }
 
+    private ExactModelArtifactIdentity identityOf(ModelCard card) {
+        ModelCard.Subject subject = card.subject();
+        return new ExactModelArtifactIdentity(
+                subject.modelName(),
+                subject.modelVersion(),
+                subject.featureContractVersion(),
+                subject.modelArtifactSha256()
+        );
+    }
+
+    private ModelCardProviderUnavailableException exactUnavailable() {
+        return unavailable("Exact Model Card artifact unavailable.");
+    }
+
+    private ModelCardProviderUnavailableException unavailable(String message) {
+        return new ModelCardProviderUnavailableException(message);
+    }
+
     private ModelCardProviderUnavailableException unavailable() {
-        return new ModelCardProviderUnavailableException("Current Model Card artifact unavailable.");
+        return unavailable("Current Model Card artifact unavailable.");
     }
 }

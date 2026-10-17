@@ -38,6 +38,17 @@ class ModelCardProviderConfigurationTest {
     }
 
     @Test
+    void exactArtifactCatalogRequiresExplicitEnablement() {
+        contextRunner.withPropertyValues(
+                "model-card.artifacts.enabled=true",
+                "model-card.artifacts.base-dir=/tmp"
+        ).run(context -> {
+            assertThat(context).hasSingleBean(ModelCardProvider.class);
+            assertThat(context.getBean(ModelCardProvider.class)).isInstanceOf(ArtifactBackedModelCardProvider.class);
+        });
+    }
+
+    @Test
     void enabledProviderRejectsMissingOrBlankCurrentPath() {
         assertStartupFailure(
                 new String[]{"model-card.current.enabled=true"},

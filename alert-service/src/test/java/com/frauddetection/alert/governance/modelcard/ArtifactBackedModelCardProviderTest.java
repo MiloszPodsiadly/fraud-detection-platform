@@ -56,7 +56,7 @@ class ArtifactBackedModelCardProviderTest {
     }
 
     @Test
-    void exactLookupNeverReturnsConfiguredCardForAnotherArtifact() throws Exception {
+    void exactLookupWithoutArtifactCatalogFailsClosedForAnotherArtifact() throws Exception {
         ModelCard card = ModelCardTestFixtures.validUnavailableCard(objectMapper);
         Path cardPath = writeArtifactSet(card);
         ExactModelArtifactIdentity identity = new ExactModelArtifactIdentity(
@@ -69,9 +69,35 @@ class ArtifactBackedModelCardProviderTest {
         VerifiedModelCardArtifact artifact = provider(cardPath).findExact(identity).orElseThrow();
 
         assertThat(artifact.manifestSha256()).matches("^[0-9a-f]{64}$");
-        assertThat(provider(cardPath).findExact(new ExactModelArtifactIdentity(
+        assertThatThrownBy(() -> provider(cardPath).findExact(new ExactModelArtifactIdentity(
+                identity.modelName(), identity.modelVersion(), identity.featureContractVersion(), "b".repeat(64)
+        ))).isInstanceOf(ModelCardProviderUnavailableException.class)
+                .hasMessage("Exact Model Card artifact unavailable.");
+    }
+
+    @Test
+    void exactArtifactCatalogResolvesOnlyTheRequestedIdentity() throws Exception {
+        ModelCard card = ModelCardTestFixtures.validUnavailableCard(objectMapper);
+        ExactModelArtifactIdentity identity = new ExactModelArtifactIdentity(
+                card.subject().modelName(),
+                card.subject().modelVersion(),
+                card.subject().featureContractVersion(),
+                card.subject().modelArtifactSha256()
+        );
+        Path root = tempDir.resolve("exact-artifacts");
+        Path cardPath = writeArtifactSet(root.resolve(new ExactModelCardSelector(identity).selectionKey()), card);
+        ArtifactBackedModelCardProvider provider = exactProvider(root);
+
+        VerifiedModelCardArtifact resolved = provider.findExact(identity).orElseThrow();
+        assertThat(resolved.manifestSha256()).matches("^[0-9a-f]{64}$");
+        assertThat(provider.findExact(new ExactModelArtifactIdentity(
                 identity.modelName(), identity.modelVersion(), identity.featureContractVersion(), "b".repeat(64)
         ))).isEmpty();
+
+        Files.writeString(cardPath.resolveSibling("manifest.json"), "tampered", StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> provider.findExact(identity))
+                .isInstanceOf(ModelCardProviderUnavailableException.class)
+                .hasMessage("Exact Model Card artifact unavailable.");
     }
 
     @Test
@@ -207,14 +233,19 @@ class ArtifactBackedModelCardProviderTest {
     }
 
     private Path writeArtifactSet(ModelCard card) throws Exception {
-        Path cardPath = tempDir.resolve("ml_model_card.json");
-        Path markdownPath = tempDir.resolve("ml_model_card.md");
+        return writeArtifactSet(tempDir, card);
+    }
+
+    private Path writeArtifactSet(Path directory, ModelCard card) throws Exception {
+        Files.createDirectories(directory);
+        Path cardPath = directory.resolve("ml_model_card.json");
+        Path markdownPath = directory.resolve("ml_model_card.md");
         JsonNode cardTree = objectMapper.valueToTree(card);
         byte[] cardPayload = ModelCardCanonicalArtifact.json(objectMapper, cardTree);
         byte[] markdownPayload = ModelCardCanonicalArtifact.markdown(cardTree);
         Files.write(cardPath, cardPayload);
         Files.write(markdownPath, markdownPayload);
-        writeManifest(cardPayload, markdownPayload);
+        writeManifest(directory, cardPayload, markdownPayload);
         return cardPath;
     }
 
@@ -226,6 +257,10 @@ class ArtifactBackedModelCardProviderTest {
     }
 
     private void writeManifest(byte[] cardPayload, byte[] markdownPayload) throws Exception {
+        writeManifest(tempDir, cardPayload, markdownPayload);
+    }
+
+    private void writeManifest(Path directory, byte[] cardPayload, byte[] markdownPayload) throws Exception {
         ObjectNode manifest = objectMapper.createObjectNode();
         manifest.put("artifactSetVersion", "ml-model-card-artifact-set-v1");
         ArrayNode files = manifest.putArray("files");
@@ -239,7 +274,7 @@ class ArtifactBackedModelCardProviderTest {
                 .put("sizeBytes", markdownPayload.length);
         manifest.put("generatedAt", ModelCardTestFixtures.GENERATED_AT);
         manifest.put("reportType", "ML_MODEL_CARD_V1");
-        Files.write(tempDir.resolve("manifest.json"), ModelCardCanonicalArtifact.json(objectMapper, manifest));
+        Files.write(directory.resolve("manifest.json"), ModelCardCanonicalArtifact.json(objectMapper, manifest));
     }
 
     private void assertUnavailable(Path cardPath) {
@@ -272,6 +307,15 @@ class ArtifactBackedModelCardProviderTest {
     private ArtifactBackedModelCardProvider provider(boolean enabled, String path) {
         return new ArtifactBackedModelCardProvider(
                 new ModelCardCurrentProperties(enabled, tempDir.toString(), path, 524_288L, 262_144L),
+                objectMapper,
+                validator
+        );
+    }
+
+    private ArtifactBackedModelCardProvider exactProvider(Path root) {
+        return new ArtifactBackedModelCardProvider(
+                new ModelCardCurrentProperties(false, tempDir.toString(), null, 524_288L, 262_144L),
+                new ModelCardArtifactProperties(true, root.toString(), 524_288L, 262_144L),
                 objectMapper,
                 validator
         );
