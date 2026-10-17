@@ -66,6 +66,13 @@ final class SecurityRouteOwnershipRegistry {
                 "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/model-card/current", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/model-shadow-performance", "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/model-promotion/state", "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/model-promotion/assessment", "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/candidates", "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/proposals", "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/retirement-proposals", "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews",
+                "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/audit/events", "AuditAuthorizationRules");
         route(routes, "GET", "/api/v1/audit/integrity", "AuditAuthorizationRules");
         route(routes, "GET", "/api/v1/audit/integrity/external", "AuditAuthorizationRules");

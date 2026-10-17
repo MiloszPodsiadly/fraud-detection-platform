@@ -19,6 +19,10 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnavailableException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionPersistenceConflictException;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionWorkflowBlockedException;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiNotFoundException;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiUnavailableException;
 import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
 import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
 import com.frauddetection.alert.regulated.ConflictingResourceMutationException;
@@ -63,6 +67,59 @@ public class AlertServiceExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleGovernanceAdvisoryNotFound(GovernanceAdvisoryNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
                 new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of())
+        );
+    }
+
+    @ExceptionHandler(ModelPromotionApiNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelPromotionNotFound(ModelPromotionApiNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of())
+        );
+    }
+
+    @ExceptionHandler(ModelPromotionApiUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelPromotionUnavailable(
+            ModelPromotionApiUnavailableException exception
+    ) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        503,
+                        "Service Unavailable",
+                        "Model promotion state or mandatory governance evidence is unavailable.",
+                        List.of("reason:MODEL_PROMOTION_DEPENDENCY_UNAVAILABLE")
+                )
+        );
+    }
+
+    @ExceptionHandler(ModelPromotionPersistenceConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelPromotionConflict(
+            ModelPromotionPersistenceConflictException exception
+    ) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                new ApiErrorResponse(Instant.now(), 409, "Conflict", exception.getMessage(), List.of())
+        );
+    }
+
+    @ExceptionHandler(ModelPromotionWorkflowBlockedException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelPromotionBlocked(
+            ModelPromotionWorkflowBlockedException exception
+    ) {
+        HttpStatus status = switch (exception.reason()) {
+            case UNAUTHENTICATED -> HttpStatus.UNAUTHORIZED;
+            case UNAUTHORIZED, UNSUPPORTED_PRINCIPAL -> HttpStatus.FORBIDDEN;
+            case PROPOSAL_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case POLICY_UNAVAILABLE, EVIDENCE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+            case POLICY_CHANGED, EVIDENCE_CHANGED -> HttpStatus.CONFLICT;
+        };
+        return ResponseEntity.status(status).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        status.value(),
+                        status.getReasonPhrase(),
+                        exception.getMessage(),
+                        List.of("reason:" + exception.reason().name())
+                )
         );
     }
 
