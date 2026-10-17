@@ -12,7 +12,14 @@ export function ShadowPerformanceWorkspaceContainer({
   canReadShadowPerformance,
   canReadPromotionReadiness,
   canReadModelCard,
-  canReadExactModelShadowPerformance
+  canReadExactModelShadowPerformance,
+  modelPromotionWorkflow,
+  canReadModelPromotion,
+  canRegisterModelPromotion,
+  canProposeModelPromotion,
+  canApproveModelPromotion,
+  canRejectModelPromotion,
+  canRetireModelPromotion
 }) {
   return (
     <ShadowPerformanceDashboardPage
@@ -32,6 +39,13 @@ export function ShadowPerformanceWorkspaceContainer({
       canReadPromotionReadiness={canReadPromotionReadiness}
       canReadModelCard={canReadModelCard}
       canReadExactModelShadowPerformance={canReadExactModelShadowPerformance}
+      modelPromotionWorkflow={modelPromotionWorkflow}
+      canReadModelPromotion={canReadModelPromotion}
+      canRegisterModelPromotion={canRegisterModelPromotion}
+      canProposeModelPromotion={canProposeModelPromotion}
+      canApproveModelPromotion={canApproveModelPromotion}
+      canRejectModelPromotion={canRejectModelPromotion}
+      canRetireModelPromotion={canRetireModelPromotion}
       onRetry={summaryState.refresh}
       workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />

@@ -33,6 +33,12 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadPromotionReadiness: promotionReadinessRead,
     canReadModelCard: modelCardRead,
     canReadExactModelShadowPerformance: modelShadowPerformanceRead,
+    canReadModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_READ),
+    canRegisterModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_REGISTER),
+    canProposeModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_PROPOSE),
+    canApproveModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_APPROVE),
+    canRejectModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_REJECT),
+    canRetireModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_RETIRE),
     // Governance advisory read views are backed by TRANSACTION_MONITOR_READ in the current backend authorization model.
     // Governance audit writes require GOVERNANCE_ADVISORY_AUDIT_WRITE; do not reuse read capability for write affordances.
     canReadGovernanceAdvisories: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
