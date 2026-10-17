@@ -60,6 +60,11 @@ model-card:
     path: ${MODEL_CARD_CURRENT_PATH:}
     max-card-size-bytes: ${MODEL_CARD_CURRENT_MAX_CARD_SIZE_BYTES:524288}
     max-markdown-size-bytes: ${MODEL_CARD_CURRENT_MAX_MARKDOWN_SIZE_BYTES:262144}
+  artifacts:
+    enabled: ${MODEL_CARD_ARTIFACTS_ENABLED:false}
+    base-dir: ${MODEL_CARD_ARTIFACTS_BASE_DIR:/run/model-card-artifacts}
+    max-card-size-bytes: ${MODEL_CARD_ARTIFACTS_MAX_CARD_SIZE_BYTES:524288}
+    max-markdown-size-bytes: ${MODEL_CARD_ARTIFACTS_MAX_MARKDOWN_SIZE_BYTES:262144}
 
 model-shadow-performance:
   artifacts:
@@ -71,6 +76,9 @@ app:
   model-promotion:
     persistence:
       enabled: ${MODEL_PROMOTION_PERSISTENCE_ENABLED:true}
+    api:
+      max-requests-per-minute: ${MODEL_PROMOTION_API_MAX_REQUESTS_PER_MINUTE:30}
+      max-tracked-actors: ${MODEL_PROMOTION_API_MAX_TRACKED_ACTORS:10000}
   fraud-cases:
     work-queue:
       sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}
@@ -177,6 +185,7 @@ app:
       jwk-set-uri: ${APP_SECURITY_JWT_JWK_SET_URI:}
       user-id-claim: ${APP_SECURITY_JWT_USER_ID_CLAIM:sub}
       access-claim: ${APP_SECURITY_JWT_ACCESS_CLAIM:groups}
+      production-promotion-access-values: ${APP_SECURITY_JWT_PRODUCTION_PROMOTION_ACCESS_VALUES:}
       role-mapping:
         fraud-readonly-analyst: READ_ONLY_ANALYST
         fraud-analyst: ANALYST

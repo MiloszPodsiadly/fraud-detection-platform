@@ -11,21 +11,27 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
   const [stateError, setStateError] = useState(null);
   const [assessmentError, setAssessmentError] = useState(null);
   const [mutationError, setMutationError] = useState(null);
+  const [hasRetryableMutation, setHasRetryableMutation] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const selectionRef = useRef(null);
   const sequenceRef = useRef(0);
   const controllerRef = useRef(null);
+  const mutationInFlightRef = useRef(false);
+  const mutationSequenceRef = useRef(0);
+  const retryableMutationRef = useRef(null);
 
   const clear = useCallback(() => {
     controllerRef.current?.abort();
     controllerRef.current = null;
     sequenceRef.current += 1;
+    mutationSequenceRef.current += 1;
+    retryableMutationRef.current = null;
     selectionRef.current = null;
-    setState(null); setAssessment(null); setStateError(null); setAssessmentError(null); setMutationError(null); setIsLoading(false);
+    setState(null); setAssessment(null); setStateError(null); setAssessmentError(null); setMutationError(null); setHasRetryableMutation(false); setIsLoading(false); setIsMutating(mutationInFlightRef.current);
   }, []);
 
-  const load = useCallback(async (selection = selectionRef.current) => {
+  const load = useCallback(async (selection = selectionRef.current, { preserveMutationError = false } = {}) => {
     if (!enabled || !client || !selection) return null;
     controllerRef.current?.abort();
     const controller = new AbortController();
@@ -33,7 +39,12 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
     const sequence = sequenceRef.current + 1;
     sequenceRef.current = sequence;
     selectionRef.current = selection;
-    setIsLoading(true); setState(null); setAssessment(null); setStateError(null); setAssessmentError(null); setMutationError(null);
+    setIsLoading(true); setState(null); setAssessment(null); setStateError(null); setAssessmentError(null);
+    if (!preserveMutationError) {
+      retryableMutationRef.current = null;
+      setMutationError(null);
+      setHasRetryableMutation(false);
+    }
     const [stateResult, assessmentResult] = await Promise.allSettled([
       client.getModelPromotionState(selection, { signal: controller.signal }),
       client.getModelPromotionAssessment(selection, { signal: controller.signal })
@@ -50,19 +61,44 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
     return null;
   }, [client, enabled]);
 
-  const mutate = useCallback(async (method, payload, proposalId) => {
-    if (!client || !selectionRef.current) return { ok: false };
+  const mutate = useCallback(async (method, payload, proposalId, mutationSelection = selectionRef.current) => {
+    if (!client || !mutationSelection || mutationInFlightRef.current) return { ok: false };
+    const mutationSequence = mutationSequenceRef.current;
+    mutationInFlightRef.current = true;
     setIsMutating(true); setMutationError(null);
+    retryableMutationRef.current = null;
+    setHasRetryableMutation(false);
     try {
       await method(payload, proposalId);
-      await load(selectionRef.current);
+      if (mutationSequence === mutationSequenceRef.current) {
+        if (sameSelection(mutationSelection, selectionRef.current)) await load(selectionRef.current);
+        retryableMutationRef.current = null;
+        setHasRetryableMutation(false);
+      }
       return { ok: true };
     } catch (error) {
-      setMutationError(error);
-      if (error?.status === 409) await load(selectionRef.current);
+      if (mutationSequence === mutationSequenceRef.current) {
+        setMutationError(error);
+        if (isRetryableMutationError(error)) {
+          retryableMutationRef.current = { method, payload, proposalId, mutationSelection };
+          setHasRetryableMutation(true);
+        }
+        if (error?.status === 409 && sameSelection(mutationSelection, selectionRef.current)) {
+          await load(selectionRef.current, { preserveMutationError: true });
+        }
+      }
       return { ok: false, error };
-    } finally { setIsMutating(false); }
+    } finally {
+      mutationInFlightRef.current = false;
+      setIsMutating(false);
+    }
   }, [client, load]);
+
+  const retryLastMutation = useCallback(() => {
+    const retry = retryableMutationRef.current;
+    if (!retry) return Promise.resolve({ ok: false });
+    return mutate(retry.method, retry.payload, retry.proposalId, retry.mutationSelection);
+  }, [mutate]);
 
   const register = useCallback(() => mutate(
     (payload) => client.registerModelPromotionCandidate(payload),
@@ -83,7 +119,7 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
       selection: commandSelection(selectionRef.current), sourceState: state.lifecycleState,
       expectedRevision: state.currentRevision, fromInclusive: selectionRef.current.fromInclusive,
       toInclusive: selectionRef.current.toInclusive, operationId: createIdempotencyKey(prefix),
-      proposalId: createIdempotencyKey("model-promotion-proposal"), rationaleSha256: await rationaleHash(rationale)
+      proposalId: createIdempotencyKey("model-promotion-proposal"), rationale, rationaleSha256: await rationaleHash(rationale)
     };
     if (kind === "propose") {
       return mutate((command) => client.proposeModelPromotionTransition({ ...command, requestedTargetState }), payload);
@@ -93,7 +129,7 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
 
   useEffect(() => { if (!enabled || !client) clear(); }, [clear, client, enabled]);
   useEffect(() => () => controllerRef.current?.abort(), []);
-  return { state, assessment, stateError, assessmentError, mutationError, isLoading, isMutating, load, clear, register, propose, retire, review };
+  return { state, assessment, stateError, assessmentError, mutationError, hasRetryableMutation, isLoading, isMutating, load, clear, register, propose, retire, review, retryLastMutation };
 }
 
 function commandSelection(selection) {
@@ -102,10 +138,19 @@ function commandSelection(selection) {
 }
 async function reviewPayload(outcome, rationale) {
   if (!String(rationale || "").trim()) throw new Error("A review rationale is required.");
-  return { approvalId: createIdempotencyKey("model-promotion-review"), outcome, operationId: createIdempotencyKey("model-promotion-review-operation"), rationaleSha256: await rationaleHash(rationale) };
+  return { approvalId: createIdempotencyKey("model-promotion-review"), outcome, operationId: createIdempotencyKey("model-promotion-review-operation"), rationale, rationaleSha256: await rationaleHash(rationale) };
 }
 async function rationaleHash(value) {
   if (!globalThis.crypto?.subtle) throw new Error("Cryptographic rationale hashing is unavailable.");
   const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function sameSelection(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function isRetryableMutationError(error) {
+  if (isAbortError(error)) return false;
+  return error?.status == null || error.status >= 500;
 }

@@ -48,9 +48,10 @@ export function ModelPromotionPanel({ workflow, modelCard, canRead, canRegister,
     {workflow.stateError && workflow.stateError.status !== 404 && <State title="Governance state unavailable" message={message(workflow.stateError)} />}
     {workflow.stateError?.status === 404 && <State title="Candidate not registered" message="No authoritative lifecycle state exists for this exact model and scope. Assessment diagnostics may still be available." />}
     {workflow.assessmentError && <State title="Assessment unavailable" message={message(workflow.assessmentError)} />}
-    {workflow.mutationError && <State title="Command not committed" message={message(workflow.mutationError)} />}
+    {workflow.mutationError && <State title={workflow.mutationError.status === 409 ? "Command conflict" : "Command not committed"} message={message(workflow.mutationError)} action={workflow.hasRetryableMutation ? <button className="secondaryButton" type="button" disabled={workflow.isMutating} onClick={() => workflow.retryLastMutation()}>Retry original command</button> : null} />}
     {workflow.state && <StateDetails state={workflow.state} />}
     {workflow.assessment && <AssessmentDetails assessment={workflow.assessment} />}
+    {workflow.assessment && !workflow.assessment.formalRecommendationEligible && <State title="Promotion assessment blocked" message={assessmentBlockerMessage(workflow.assessment)} />}
     {canRead !== false && <Actions workflow={workflow} state={workflow.state} pending={pending} canRegister={canRegister} canPropose={canPropose} canApprove={canApprove} canReject={canReject} canRetire={canRetire} />}
   </section>;
 }
@@ -59,13 +60,13 @@ function Actions({ workflow, state, pending, canRegister, canPropose, canApprove
   const [target, setTarget] = useState("");
   const [rationale, setRationale] = useState("");
   useEffect(() => { setTarget(state?.allowedTargetStates?.find((value) => value !== "RETIRED") || ""); }, [state]);
-  return <div className="shadowPerformanceStack"><section className="shadowPerformanceSubpanel"><h3>Authorized actions</h3>
+  return <div className="shadowPerformanceStack"><section className="shadowPerformanceSubpanel"><h3>Lifecycle action requests</h3>
     {!state && canRegister === true && <button className="primaryButton" type="button" disabled={workflow.isMutating} onClick={() => workflow.register()}>Register candidate</button>}
     {(state || pending.length > 0) && <label className="filterField"><span>Operator rationale</span><textarea value={rationale} onChange={(event) => setRationale(event.target.value)} required /></label>}
     {state && canPropose === true && target && <><label className="filterField"><span>Requested lifecycle state</span><select value={target} onChange={(event) => setTarget(event.target.value)}>{state.allowedTargetStates.filter((value) => value !== "RETIRED").map((value) => <option key={value}>{value}</option>)}</select></label><button className="primaryButton" type="button" disabled={workflow.isMutating || !rationale.trim()} onClick={() => workflow.propose(target, rationale)}>Submit independent-review proposal</button></>}
     {state?.allowedTargetStates?.includes("RETIRED") && canRetire === true && <button className="secondaryButton" type="button" disabled={workflow.isMutating || !rationale.trim()} onClick={() => workflow.retire(rationale)}>Propose retirement</button>}
     {pending.map((proposal) => <div key={proposal.proposalId}><p>Pending proposal: {proposal.requestedTargetState}</p>{canApprove === true && <button className="primaryButton" type="button" disabled={workflow.isMutating || !rationale.trim()} onClick={() => workflow.review(proposal.proposalId, "APPROVED", rationale)}>Independently approve</button>}{canReject === true && <button className="secondaryButton" type="button" disabled={workflow.isMutating || !rationale.trim()} onClick={() => workflow.review(proposal.proposalId, "REJECTED", rationale)}>Reject proposal</button>}</div>)}
-    <p className="sectionCopy">Buttons are UX affordances only. The server revalidates principal, environment scope, evidence, policy and reviewer independence immediately before commit.</p>
+    <p className="sectionCopy">Lifecycle transitions are structural possibilities, not an authorization grant. The server revalidates principal, environment scope, evidence, policy and reviewer independence immediately before commit.</p>
   </section></div>;
 }
 
@@ -74,6 +75,7 @@ function AssessmentDetails({ assessment }) { return <div className="shadowPerfor
 function Field({ label, value, onChange, pattern }) { return <label className="filterField"><span>{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} required pattern={pattern} autoComplete="off" /></label>; }
 function Section({ title, rows }) { return <section className="shadowPerformanceSubpanel"><h3>{title}</h3><dl className="shadowPerformanceDefinitionList">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}</dl></section>; }
 function List({ title, items }) { return <section className="shadowPerformanceSubpanel"><h3>{title}</h3>{items.length ? <ul className="shadowPerformanceList">{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="sectionCopy">None recorded.</p>}</section>; }
-function State({ title, message }) { return <div className="statePanel warningPanel" role="status"><h3>{title}</h3><p>{message}</p></div>; }
+function State({ title, message, action }) { return <div className="statePanel warningPanel" role="status"><h3>{title}</h3><p>{message}</p>{action}</div>; }
 function yesNo(value) { return value ? "YES" : "NO"; }
 function message(error) { return error?.message || "The authoritative model-promotion API could not complete this request."; }
+function assessmentBlockerMessage(assessment) { return assessment.blockers?.length ? assessment.blockers.join("; ") : "The evidence assessment cannot support a promotion proposal."; }
