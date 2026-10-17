@@ -2,6 +2,7 @@ package com.frauddetection.alert.security.auth;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -45,14 +46,18 @@ public class OidcAnalystAuthoritiesMapper implements GrantedAuthoritiesMapper {
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         boolean hasUnmappedAccessValue = externalAccessValues.stream()
-                .anyMatch(accessValue -> !properties.roleMapping().containsKey(accessValue));
+                .anyMatch(accessValue -> !properties.roleMapping().containsKey(accessValue)
+                        && !properties.grantsProductionPromotionAccess(accessValue));
         if (hasUnmappedAccessValue && metrics != null) {
             metrics.recordOidcAuthorityMappingMiss(properties.accessClaim());
         }
-        return Stream.concat(
-                        roles.stream().flatMap(role -> role.authorities().stream()),
-                        roles.stream().map(role -> "ROLE_" + role.name())
-                )
+        Set<String> mappedAuthorities = new LinkedHashSet<>();
+        roles.forEach(role -> mappedAuthorities.addAll(role.authorities()));
+        roles.forEach(role -> mappedAuthorities.add("ROLE_" + role.name()));
+        if (externalAccessValues.stream().anyMatch(properties::grantsProductionPromotionAccess)) {
+            mappedAuthorities.add(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+        }
+        return mappedAuthorities.stream()
                 .map(SimpleGrantedAuthority::new)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }

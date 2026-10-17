@@ -143,6 +143,7 @@ vi.mock("./auth/oidcClient.js", () => ({
 }));
 
 import App from "./App.jsx";
+import { normalizeSession } from "./auth/session.js";
 
 describe("App", () => {
   beforeEach(() => {
@@ -304,7 +305,8 @@ describe("App", () => {
     expect(authenticatedClientCreations.length).toBeGreaterThanOrEqual(2);
     expect(authenticatedClientCreations.at(-1)[0].session.userId).toBe(refreshedSession.userId);
     expect(authenticatedClientCreations.at(-1)[0].session.roles).toEqual(refreshedSession.roles);
-    expect(new Set(authenticatedClientCreations.at(-1)[0].session.authorities)).toEqual(new Set(refreshedSession.authorities));
+    expect(new Set(authenticatedClientCreations.at(-1)[0].session.authorities))
+      .toEqual(new Set(normalizeSession(refreshedSession).authorities));
   });
 
   it("marks workspace counters degraded when one counter fails without hiding successful counters", async () => {
@@ -478,7 +480,7 @@ describe("App", () => {
     expect(listSuspiciousTransactions).not.toHaveBeenCalled();
   });
 
-  it("dashboardHiddenWithoutShadowPerformanceRead", async () => {
+  it("modelGovernanceVisibleWithModelPromotionRead", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue(authenticatedSession());
     providerState.value = {
@@ -490,8 +492,7 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("link", { name: "Model Governance" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Model evidence/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Model Governance" })).toBeInTheDocument();
     expect(getCurrentShadowPerformanceSummary).not.toHaveBeenCalled();
   });
 
@@ -839,6 +840,7 @@ function authenticatedSession(overrides = {}) {
 
 function authenticatedSessionWithSuspiciousRead() {
   return authenticatedSession({
+    extraAuthorities: ["suspicious-transaction:read"],
     authorities: [
       "alert:read",
       "fraud-case:read",

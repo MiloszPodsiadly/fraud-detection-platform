@@ -31,6 +31,7 @@ class AlertServiceIntegrationTest extends AbstractIntegrationTest {
         registry.add("app.kafka.topics.fraud-alerts", () -> "fraud.alerts.test");
         registry.add("app.kafka.topics.fraud-decisions", () -> "fraud.decisions.test");
         registry.add("app.kafka.topics.transactions-dead-letter", () -> "transactions.dead-letter.alert.test");
+        registry.add("app.model-promotion.persistence.enabled", () -> "false");
     }
 
     @Test

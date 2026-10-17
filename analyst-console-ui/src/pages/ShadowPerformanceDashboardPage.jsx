@@ -2,6 +2,7 @@ import { ShadowPerformanceDashboard } from "../components/ShadowPerformanceDashb
 import { PromotionReviewReadinessPanel } from "../components/PromotionReviewReadinessPanel.jsx";
 import { ModelCardPanel } from "../components/ModelCardPanel.jsx";
 import { ExactModelShadowPerformancePanel } from "../components/ExactModelShadowPerformancePanel.jsx";
+import { ModelPromotionPanel } from "../components/ModelPromotionPanel.jsx";
 
 export function ShadowPerformanceDashboardPage({
   summary,
@@ -20,6 +21,13 @@ export function ShadowPerformanceDashboardPage({
   canReadPromotionReadiness,
   canReadModelCard,
   canReadExactModelShadowPerformance,
+  modelPromotionWorkflow,
+  canReadModelPromotion,
+  canRegisterModelPromotion,
+  canProposeModelPromotion,
+  canApproveModelPromotion,
+  canRejectModelPromotion,
+  canRetireModelPromotion,
   onRetry,
   workspaceHeadingProps = {}
 }) {
@@ -52,6 +60,16 @@ export function ShadowPerformanceDashboardPage({
         canRead={canReadExactModelShadowPerformance}
         modelCard={modelCard}
       />
+      {modelPromotionWorkflow && <ModelPromotionPanel
+        workflow={modelPromotionWorkflow}
+        modelCard={modelCard}
+        canRead={canReadModelPromotion}
+        canRegister={canRegisterModelPromotion}
+        canPropose={canProposeModelPromotion}
+        canApprove={canApproveModelPromotion}
+        canReject={canRejectModelPromotion}
+        canRetire={canRetireModelPromotion}
+      />}
     </>
   );
 }

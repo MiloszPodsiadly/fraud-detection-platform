@@ -76,4 +76,14 @@ class DemoAuthHeaderParserTest {
         assertThatThrownBy(() -> parser.parse(request))
                 .isInstanceOf(BadCredentialsException.class);
     }
+
+    @Test
+    void shouldRejectClientSuppliedProductionPromotionScope() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(DemoAuthHeaders.USER_ID, "analyst-1");
+        request.addHeader(DemoAuthHeaders.AUTHORITIES, AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+
+        assertThatThrownBy(() -> parser.parse(request))
+                .isInstanceOf(BadCredentialsException.class);
+    }
 }

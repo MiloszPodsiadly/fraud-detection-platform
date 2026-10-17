@@ -31,7 +31,7 @@ export default function App() {
     workspaceHref,
     invalidWorkspaceRoute
   } = useWorkspaceRoute();
-  const [session, setSession] = useState(() => authProvider.getInitialSession());
+  const [session, setSession] = useState(() => normalizeSession(authProvider.getInitialSession()));
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();

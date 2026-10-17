@@ -10,6 +10,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,7 +27,8 @@ class JwtResourceServerSecurityConfigTest {
                 "https://jwks.example.test/realms/fraud-detection/protocol/openid-connect/certs",
                 "sub",
                 "groups",
-                Map.of("fraud-analyst", AnalystRole.ANALYST)
+                Map.of("fraud-analyst", AnalystRole.ANALYST),
+                Set.of()
         );
 
         NimbusJwtDecoder decoder = (NimbusJwtDecoder) config.jwtDecoder(properties);

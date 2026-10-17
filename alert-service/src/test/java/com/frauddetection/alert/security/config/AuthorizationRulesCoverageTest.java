@@ -130,6 +130,19 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
         expectDenied(get("/api/v1/governance/model-shadow-performance")
                 .with(userWith(AnalystAuthority.MODEL_CARD_READ)));
         expectDenied(get("/api/v1/governance/model-shadow-performance"));
+        expectSecurityLayerDoesNotReject(get("/api/v1/governance/model-promotion/state")
+                .with(userWith(AnalystAuthority.MODEL_PROMOTION_READ)));
+        expectDenied(get("/api/v1/governance/model-promotion/state")
+                .with(userWith(AnalystAuthority.MODEL_CARD_READ)));
+        expectDenied(get("/api/v1/governance/model-promotion/state"));
+        expectSecurityLayerDoesNotReject(post("/api/v1/governance/model-promotion/candidates")
+                .with(userWith(AnalystAuthority.MODEL_PROMOTION_REGISTER)).with(csrf()));
+        expectDenied(post("/api/v1/governance/model-promotion/candidates")
+                .with(userWith(AnalystAuthority.MODEL_PROMOTION_READ)).with(csrf()));
+        expectSecurityLayerDoesNotReject(post("/api/v1/governance/model-promotion/proposals/proposal-1/reviews")
+                .with(userWith(AnalystAuthority.MODEL_PROMOTION_APPROVE)).with(csrf()));
+        expectDenied(post("/api/v1/governance/model-promotion/proposals/proposal-1/reviews")
+                .with(userWith(AnalystAuthority.MODEL_PROMOTION_PROPOSE)).with(csrf()));
         expectDenied(get("/governance/advisories").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/governance/advisories"));
         expectDenied(get("/governance/not-real")

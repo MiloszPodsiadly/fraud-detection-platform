@@ -47,6 +47,18 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
     }
 
     @Test
+    void exposesDigestOfTheVerifiedExactArtifactManifest() throws Exception {
+        ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
+        copyFixture(root.resolve(selector.selectionKey()));
+
+        VerifiedExactModelShadowPerformanceArtifact artifact = provider().findArtifact(selector).orElseThrow();
+
+        assertThat(artifact.manifestSha256()).matches("^[0-9a-f]{64}$");
+        assertThat(artifact.summary().at("/evaluationSummary/evaluationSubject/modelArtifactSha256").textValue())
+                .isEqualTo("a".repeat(64));
+    }
+
+    @Test
     void readsPythonGeneratedClaimOnlyArtifactWithoutUpgradingProvenance() throws Exception {
         ExactModelShadowPerformanceSelector selector = selector("a".repeat(64));
         copyFixture(root.resolve(selector.selectionKey()), "python-generated-claim-only-v1");
@@ -91,6 +103,11 @@ class ArtifactBackedExactModelShadowPerformanceProviderTest {
                         .put("BOTH_LOW", 2),
                 summary -> ((ObjectNode) summary.get("governance"))
                         .put("runtimeDecisionAuthority", "ML"),
+                summary -> {
+                    ObjectNode source = (ObjectNode) summary.get("sourceEvaluation");
+                    source.put("externalAttestation", "PROVIDED");
+                    source.put("immutableStorageGuarantee", "VERIFIED");
+                },
                 summary -> summary.putArray("rawRecords").addObject().put("transactionReference", "forbidden")
         );
         for (int index = 0; index < mutations.size(); index++) {

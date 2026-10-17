@@ -43,6 +43,14 @@ export function createAlertsApiClient({
     getExactModelShadowPerformance: (selector, requestOptions) => exactModelShadowPerformanceRequest(
       request, selector, requestOptions
     ),
+    getModelPromotionState: (selector, requestOptions) => modelPromotionStateRequest(request, selector, requestOptions),
+    getModelPromotionAssessment: (selector, requestOptions) => modelPromotionAssessmentRequest(request, selector, requestOptions),
+    registerModelPromotionCandidate: (command, requestOptions) => modelPromotionCommandRequest(request, "/candidates", command, requestOptions),
+    proposeModelPromotionTransition: (command, requestOptions) => modelPromotionCommandRequest(request, "/proposals", command, requestOptions),
+    proposeModelRetirement: (command, requestOptions) => modelPromotionCommandRequest(request, "/retirement-proposals", command, requestOptions),
+    reviewModelPromotionProposal: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/proposals/${encodeURIComponent(proposalId)}/reviews`, command, requestOptions
+    ),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -322,6 +330,42 @@ async function exactModelShadowPerformanceRequest(request, selector, { signal } 
     return Object.freeze({ state: "invalid-response" });
   }
   return response;
+}
+
+function modelPromotionStateRequest(request, selector, { signal, historyLimit = 20 } = {}) {
+  const params = modelPromotionParams(selector);
+  params.set("historyLimit", String(Math.min(Math.max(Number(historyLimit) || 20, 1), 100)));
+  return request(`/api/v1/governance/model-promotion/state?${params.toString()}`, { signal });
+}
+
+function modelPromotionAssessmentRequest(request, selector, { signal } = {}) {
+  const params = modelPromotionParams(selector, true);
+  return request(`/api/v1/governance/model-promotion/assessment?${params.toString()}`, { signal });
+}
+
+function modelPromotionCommandRequest(request, suffix, command, { signal } = {}) {
+  return request(`/api/v1/governance/model-promotion${suffix}`, {
+    method: "POST",
+    signal,
+    body: JSON.stringify(command)
+  });
+}
+
+function modelPromotionParams(selector, requiresWindow = false) {
+  const params = new URLSearchParams();
+  for (const field of ["modelName", "modelVersion", "featureContractVersion", "modelArtifactSha256", "environment", "intendedUse"]) {
+    const value = String(selector?.[field] || "").trim();
+    if (!value) throw new TypeError(`${field} is required`);
+    params.set(field, value);
+  }
+  if (requiresWindow) {
+    for (const field of ["fromInclusive", "toInclusive"]) {
+      const value = String(selector?.[field] || "").trim();
+      if (!value) throw new TypeError(`${field} is required`);
+      params.set(field, value);
+    }
+  }
+  return params;
 }
 
 const ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
