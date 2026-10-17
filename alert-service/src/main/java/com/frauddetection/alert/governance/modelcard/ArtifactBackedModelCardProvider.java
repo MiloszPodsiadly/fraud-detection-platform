@@ -69,7 +69,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
     }
 
     @Override
-    public Optional<ModelCard> currentCard() {
+    public Optional<VerifiedModelCardArtifact> currentArtifact() {
         if (!properties.enabled()) {
             return Optional.empty();
         }
@@ -99,7 +99,7 @@ public class ArtifactBackedModelCardProvider implements ModelCardProvider {
                     || !Arrays.equals(markdownPayload, secondMarkdown)) {
                 throw unavailable();
             }
-            return Optional.of(card);
+            return Optional.of(new VerifiedModelCardArtifact(card, sha256(firstManifest)));
         } catch (GovernanceArtifactReadException | ModelEvaluationValidationException exception) {
             throw unavailable();
         }

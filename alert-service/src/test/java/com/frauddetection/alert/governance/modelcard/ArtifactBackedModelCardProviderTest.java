@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
 import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
 
 import com.frauddetection.alert.governance.artifact.GovernanceArtifactReader;
@@ -52,6 +53,25 @@ class ArtifactBackedModelCardProviderTest {
         assertThat(result.evaluationSummary().at("/population/recordsEvaluated").intValue()).isPositive();
         assertThat(result.subject().modelArtifactSha256())
                 .isEqualTo("55499538d93a634bb5c5fc2326380d013efaea8b0045320f838cad7405df15b6");
+    }
+
+    @Test
+    void exactLookupNeverReturnsConfiguredCardForAnotherArtifact() throws Exception {
+        ModelCard card = ModelCardTestFixtures.validUnavailableCard(objectMapper);
+        Path cardPath = writeArtifactSet(card);
+        ExactModelArtifactIdentity identity = new ExactModelArtifactIdentity(
+                card.subject().modelName(),
+                card.subject().modelVersion(),
+                card.subject().featureContractVersion(),
+                card.subject().modelArtifactSha256()
+        );
+
+        VerifiedModelCardArtifact artifact = provider(cardPath).findExact(identity).orElseThrow();
+
+        assertThat(artifact.manifestSha256()).matches("^[0-9a-f]{64}$");
+        assertThat(provider(cardPath).findExact(new ExactModelArtifactIdentity(
+                identity.modelName(), identity.modelVersion(), identity.featureContractVersion(), "b".repeat(64)
+        ))).isEmpty();
     }
 
     @Test

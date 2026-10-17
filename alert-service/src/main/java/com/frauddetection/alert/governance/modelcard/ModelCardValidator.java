@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.modelcard;
 
+import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
 import com.frauddetection.alert.governance.GovernanceTimestampContract;
 import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationGovernanceValidator;
 import com.frauddetection.alert.governance.modelevaluation.ModelEvaluationValidationException;
@@ -7,7 +8,6 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -20,15 +20,6 @@ public class ModelCardValidator {
     private static final String EVALUATION_ARTIFACT_SET =
             "ml-model-feedback-dataset-evaluation-artifact-set-v1";
     private static final Pattern SHA256 = Pattern.compile("^[0-9a-f]{64}$");
-    private static final Pattern IDENTITY = Pattern.compile("^[A-Za-z0-9._-]+$");
-    private static final Set<String> FORBIDDEN_IDENTITY_TERMS = Set.of(
-            "accountid", "apikey", "authorization", "bearer", "cardid", "correlationid", "customerid",
-            "deviceid", "email", "endpoint", "exceptionmessage", "feedbackid", "finaldecision",
-            "groundtruth", "idempotencykey", "merchantid", "metadata", "modeltraininglabel", "password",
-            "paymentauthorization", "rawfeaturevector", "rawmlrequest", "rawmlresponse", "rawpayload",
-            "rawrequest", "rawresponse", "requestpayloadhash", "secret", "stacktrace", "submittedby",
-            "token", "traininglabel", "transactionid"
-    );
     private static final List<String> INTENDED_USE = List.of(
             "EXACT_MODEL_OFFLINE_EVALUATION",
             "RULES_VS_ML_DIAGNOSTIC_COMPARISON",
@@ -72,10 +63,16 @@ public class ModelCardValidator {
     private void validateSubject(ModelCard.Subject subject) {
         require(subject != null, "subject is missing");
         require("ML_MODEL".equals(subject.subjectType()), "subjectType unsupported");
-        identity(subject.modelName(), 64, "modelName");
-        identity(subject.modelVersion(), 64, "modelVersion");
-        identity(subject.featureContractVersion(), 96, "featureContractVersion");
-        sha256(subject.modelArtifactSha256(), "modelArtifactSha256");
+        try {
+            new ExactModelArtifactIdentity(
+                    subject.modelName(),
+                    subject.modelVersion(),
+                    subject.featureContractVersion(),
+                    subject.modelArtifactSha256()
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new ModelEvaluationValidationException(exception.getMessage());
+        }
         require("COMPLETE".equals(subject.identityCompleteness()), "identityCompleteness unsupported");
     }
 
@@ -164,13 +161,6 @@ public class ModelCardValidator {
         JsonNode node = value == null ? null : value.get(field);
         require(node != null && node.isTextual(), field + " must be text");
         return node.textValue();
-    }
-
-    private void identity(String value, int maximum, String field) {
-        require(value != null && !value.isBlank() && value.length() <= maximum && IDENTITY.matcher(value).matches(),
-                field + " is invalid");
-        String compact = value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
-        require(FORBIDDEN_IDENTITY_TERMS.stream().noneMatch(compact::contains), field + " contains forbidden value");
     }
 
     private void sha256(String value, String field) {

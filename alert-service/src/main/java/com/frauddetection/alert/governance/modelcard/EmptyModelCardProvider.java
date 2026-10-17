@@ -5,7 +5,7 @@ import java.util.Optional;
 final class EmptyModelCardProvider implements ModelCardProvider {
 
     @Override
-    public Optional<ModelCard> currentCard() {
+    public Optional<VerifiedModelCardArtifact> currentArtifact() {
         return Optional.empty();
     }
 }
