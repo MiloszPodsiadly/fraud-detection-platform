@@ -11,8 +11,7 @@ public enum AnalystRole {
             AnalystAuthority.TRANSACTION_MONITOR_READ,
             AnalystAuthority.MODEL_PROMOTION_READ,
             AnalystAuthority.MODEL_PROMOTION_SCOPE_DEVELOPMENT,
-            AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST,
-            AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION
+            AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST
     )),
     ANALYST(Set.of(
             AnalystAuthority.ALERT_READ,
@@ -29,8 +28,7 @@ public enum AnalystRole {
             AnalystAuthority.MODEL_PROMOTION_REGISTER,
             AnalystAuthority.MODEL_PROMOTION_PROPOSE,
             AnalystAuthority.MODEL_PROMOTION_SCOPE_DEVELOPMENT,
-            AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST,
-            AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION
+            AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST
     )),
     REVIEWER(Set.of(
             AnalystAuthority.ALERT_READ,
@@ -50,8 +48,7 @@ public enum AnalystRole {
             AnalystAuthority.MODEL_PROMOTION_APPROVE,
             AnalystAuthority.MODEL_PROMOTION_REJECT,
             AnalystAuthority.MODEL_PROMOTION_SCOPE_DEVELOPMENT,
-            AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST,
-            AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION
+            AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST
     )),
     FRAUD_OPS_ADMIN(AnalystAuthority.ALL);
 

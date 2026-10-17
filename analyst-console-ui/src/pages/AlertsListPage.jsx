@@ -1,3 +1,4 @@
+import { ErrorState } from "../components/ErrorState.jsx";
 import { SessionStatePanel } from "../components/SecurityStatePanels.jsx";
 import { SESSION_STATES } from "../auth/sessionState.js";
 import { WorkspaceNavigation } from "../workspace/WorkspaceNavigation.jsx";
@@ -30,7 +31,8 @@ export function AlertsListPage({
   onRetry,
   children
 }) {
-  const sessionBlocksDashboard = shouldBlockDashboard(sessionState, error);
+  const apiAccessError = [401, 403].includes(error?.status);
+  const sessionBlocksDashboard = shouldBlockDashboard(sessionState);
 
   return (
     <div className="dashboardGrid pageEnter">
@@ -90,12 +92,16 @@ export function AlertsListPage({
         </div>
       )}
 
-      {sessionBlocksDashboard ? <SessionStatePanel sessionState={sessionState} onRetry={onRetry} /> : children}
+      {apiAccessError
+        ? <ErrorState error={error} onRetry={onRetry} />
+        : sessionBlocksDashboard
+          ? <SessionStatePanel sessionState={sessionState} onRetry={onRetry} />
+          : children}
     </div>
   );
 }
 
-function shouldBlockDashboard(sessionState, error) {
+function shouldBlockDashboard(sessionState) {
   const blockedSessionStates = [
     SESSION_STATES.UNAUTHENTICATED,
     SESSION_STATES.EXPIRED,
@@ -103,5 +109,5 @@ function shouldBlockDashboard(sessionState, error) {
     SESSION_STATES.AUTH_ERROR
   ];
 
-  return blockedSessionStates.includes(sessionState?.status) || [401, 403].includes(error?.status);
+  return blockedSessionStates.includes(sessionState?.status);
 }

@@ -1,6 +1,7 @@
 package com.frauddetection.alert.security.auth;
 
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -36,6 +37,9 @@ public class JwtAnalystAuthenticationConverter {
         Set<String> authorities = roles.stream()
                 .flatMap(role -> role.authorities().stream())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (externalAccessValues.stream().anyMatch(properties::grantsProductionPromotionAccess)) {
+            authorities.add(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+        }
         AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities);
         return (UsernamePasswordAuthenticationToken) authenticationFactory.authenticated(principal);
     }

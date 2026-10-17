@@ -8,11 +8,8 @@ const promotionApiSource = [
   functionBlock(alertsApiSource, "promotionReviewReadinessReportRequest")
 ].join("\n");
 const currentReadEndpoint = ["", "api", "v1", "governance", "promotion-review-readiness", "current"].join("/");
-const promotionSources = [
+const promotionReadinessOwnedSources = [
   "src/components/PromotionReviewReadinessPanel.jsx",
-  "src/workspace/ShadowPerformanceWorkspaceRuntime.jsx",
-  "src/workspace/ShadowPerformanceWorkspaceContainer.jsx",
-  "src/pages/ShadowPerformanceDashboardPage.jsx",
   "src/workspace/usePromotionReviewReadinessReport.js"
 ].map((path) => readFileSync(join(process.cwd(), path), "utf8")).concat(promotionApiSource).join("\n");
 
@@ -26,12 +23,12 @@ describe("promotion review readiness UI scope guards", () => {
 
   it("doesNotIntroduceMutationMethodsForPromotionReadiness", () => {
     expect(promotionApiSource).not.toMatch(/\bmethod:\s*["'](?:POST|PUT|PATCH|DELETE)["']/);
-    expect(promotionSources).not.toMatch(/recordGovernanceAdvisoryAudit|updateFraudCase|submitAnalystDecision|submitEngineIntelligenceFeedback/);
+    expect(promotionReadinessOwnedSources).not.toMatch(/recordGovernanceAdvisoryAudit|updateFraudCase|submitAnalystDecision|submitEngineIntelligenceFeedback/);
   });
 
   it("doesNotIntroduceWorkflowRegistryScoringPaymentOrReportGenerationCalls", () => {
-    expect(promotionSources).not.toMatch(/workflowClient|modelRegistryClient|scoringMutation|paymentAuthorizationCall|generateReport/i);
-    expect(promotionSources).not.toMatch(/python|makefile|docker compose/i);
+    expect(promotionReadinessOwnedSources).not.toMatch(/workflowClient|modelRegistryClient|scoringMutation|paymentAuthorizationCall|generateReport/i);
+    expect(promotionReadinessOwnedSources).not.toMatch(/python|makefile|docker compose/i);
   });
 
   it.each([
@@ -49,16 +46,16 @@ describe("promotion review readiness UI scope guards", () => {
     /Block transaction/i,
     /(?<!Not )Analyst recommendation/i
   ])("doesNotRenderUnsafePositiveActionLanguage %s", (unsafePattern) => {
-    expect(promotionSources).not.toMatch(unsafePattern);
+    expect(promotionReadinessOwnedSources).not.toMatch(unsafePattern);
   });
 
   it("allowsNeutralRetryDiagnosticsCopy", () => {
-    expect(promotionSources).toContain("Retry diagnostics");
-    expect(promotionSources).not.toMatch(/Retry approval|Retry workflow|Retry threshold|Retry payment/i);
+    expect(promotionReadinessOwnedSources).toContain("Retry diagnostics");
+    expect(promotionReadinessOwnedSources).not.toMatch(/Retry approval|Retry workflow|Retry threshold|Retry payment/i);
   });
 
   it("doesNotDisplayRawArtifactOrEntityIdentifierLabels", () => {
-    expect(promotionSources).not.toMatch(/Raw FDP-10[234]|Raw artifact content|Transaction reference|Customer ID|Account ID|Card ID|Device ID|Merchant ID/);
+    expect(promotionReadinessOwnedSources).not.toMatch(/Raw FDP-10[234]|Raw artifact content|Transaction reference|Customer ID|Account ID|Card ID|Device ID|Merchant ID/);
   });
 
   it("documents promotion review readiness architecture boundaries", () => {

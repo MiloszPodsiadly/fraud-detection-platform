@@ -68,7 +68,6 @@ public final class AnalystAuthority {
             MODEL_PROMOTION_RETIRE,
             MODEL_PROMOTION_SCOPE_DEVELOPMENT,
             MODEL_PROMOTION_SCOPE_TEST,
-            MODEL_PROMOTION_SCOPE_PRODUCTION,
             AUDIT_READ,
             AUDIT_VERIFY,
             AUDIT_EXPORT,
