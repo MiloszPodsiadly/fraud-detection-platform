@@ -68,6 +68,9 @@ model-shadow-performance:
     max-summary-size-bytes: ${MODEL_SHADOW_PERFORMANCE_MAX_SUMMARY_SIZE_BYTES:524288}
 
 app:
+  model-promotion:
+    persistence:
+      enabled: ${MODEL_PROMOTION_PERSISTENCE_ENABLED:true}
   fraud-cases:
     work-queue:
       sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}
