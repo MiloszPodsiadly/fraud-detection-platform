@@ -74,6 +74,9 @@ model-shadow-performance:
 
 app:
   model-promotion:
+    trusted-issuers:
+      path: ${MODEL_PROMOTION_TRUSTED_ISSUERS_PATH:}
+      minimum-generation: ${MODEL_PROMOTION_TRUST_MIN_GENERATION:1}
     persistence:
       enabled: ${MODEL_PROMOTION_PERSISTENCE_ENABLED:true}
     api:

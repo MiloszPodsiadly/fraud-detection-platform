@@ -60,10 +60,46 @@ public class ModelPromotionPolicyValidator {
                 || assessmentTime.isBefore(effectiveFrom) || !assessmentTime.isBefore(effectiveTo)) {
             throw invalid(Reason.POLICY_NOT_EFFECTIVE);
         }
-        if (content.provenance().authority() == ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED
-                && timestamp(policy.authorizationEvidence().issuedAt()).isAfter(effectiveFrom)) {
+        if (content.provenance().authority() == ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED) {
+            ModelPromotionPolicy.PolicyProvenance provenance = content.provenance();
+            String issuer = policy.authorizationEvidence().authorityIdentity();
+            if (provenance.authorIdentity().equals(provenance.approvingAuthority())
+                    || issuer.equals(provenance.authorIdentity())
+                    || issuer.equals(provenance.approvingAuthority())) {
+                throw invalid(Reason.POLICY_CONTRACT_INVALID);
+            }
+            Instant issuedAt;
+            try {
+                issuedAt = ModelPromotionPolicySignatureContract.canonicalIssuedAt(
+                        policy.authorizationEvidence().issuedAt()
+                );
+            } catch (IllegalArgumentException exception) {
+                throw invalid(Reason.POLICY_CONTRACT_INVALID);
+            }
+            if (issuedAt.isBefore(approvedAt) || issuedAt.isAfter(effectiveFrom)) {
+                throw invalid(Reason.POLICY_CONTRACT_INVALID);
+            }
+        }
+        validateCriteria(content);
+    }
+
+    /** Validates the proposed institutional content before approval evidence and a signature are attached. */
+    public void validateUnsignedForPublication(ModelPromotionPolicy.Content content, String claimedDigest) {
+        if (content.provenance().authority() != ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED
+                || !canonicalSha256(content).equals(claimedDigest)) {
             throw invalid(Reason.POLICY_CONTRACT_INVALID);
         }
+        Instant effectiveFrom = timestamp(content.effectiveFromInclusive());
+        Instant effectiveTo = timestamp(content.effectiveToExclusive());
+        Instant approvedAt = timestamp(content.provenance().approvedAt());
+        if (!effectiveFrom.isBefore(effectiveTo) || approvedAt.isAfter(effectiveFrom)
+                || content.provenance().authorIdentity().equals(content.provenance().approvingAuthority())) {
+            throw invalid(Reason.POLICY_CONTRACT_INVALID);
+        }
+        validateCriteria(content);
+    }
+
+    private void validateCriteria(ModelPromotionPolicy.Content content) {
         EnumSet<ModelPromotionCriterion> observed = EnumSet.noneOf(ModelPromotionCriterion.class);
         for (ModelPromotionPolicy.CriterionRule rule : content.criteria()) {
             if (!observed.add(rule.criterion())) {
