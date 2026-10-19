@@ -48,7 +48,9 @@ be inferred away from otherwise valid metrics.
 Promotion policy is an immutable, digest-bound contract identified by policy id and revision. It binds scope, intended
 use, author and approval provenance, effective interval, evidence freshness, verification level, criterion semantics and
 thresholds. The repository does not currently contain an institutionally approved policy authority or active production
-policy; the production policy store is therefore empty and assessment fails closed. Synthetic test policies are marked
+policy. A Mongo policy-store implementation exists, but a deployed store is not necessarily empty or populated with
+an institutionally approved policy. The default authority verifier returns `UNAVAILABLE`, so an inserted policy alone
+cannot authorize formal recommendation. Synthetic test policies are marked
 `NON_INSTITUTIONAL_TEST` and can validate criterion behavior but can never authorize a formal recommendation.
 
 | Criterion | Authoritative evidence | Population and denominator |
@@ -93,6 +95,13 @@ evidence. Its bounded analyst-feedback labels are review signals, not certified 
 not values to synthesize in Java. Assessment and evidence bundle digests are retained in decision references so later
 approval work cannot silently substitute recomputed content.
 
+The state API field `structurallyAllowedTargetStates` reports only edges supported by the lifecycle state machine.
+It does not assert current policy/evidence eligibility or caller authorization. The assessment endpoint is a
+target-independent diagnostic and formal-recommendation assessment, not a target-specific approval decision.
+`formalRecommendationEligible` is separate from independent proposal review, while `governanceApproved` and
+`deploymentAuthorized` remain false in assessment responses. A SHADOW proposal can satisfy its narrower gate even
+when formal recommendation is blocked; CHAMPION requires its full gate and independent review.
+
 ## Authority Boundaries
 
 The Python model registry remains the owner of registered model bytes and immutable model identity. Python lifecycle
@@ -108,12 +117,19 @@ deployment, runtime activation, scoring changes, threshold changes or payment de
 ## Transactional Persistence
 
 The durable boundary uses separate collections for effective policies, current aggregates, pending/reviewed proposals,
-the immutable decision ledger, and current `CHAMPION` ownership claims. Registration and transitions require Mongo transactions.
+the immutable decision ledger, operation-ID claims, and current `CHAMPION` ownership claims. Registration and transitions
+require Mongo transactions.
 Each transition uses expected state plus expected revision CAS and atomically stores the resulting state, immutable policy
 and assessment snapshots, proposal, approval, idempotency outcome and local governance audit evidence. A failed audit or
 ledger write rolls back the state and ownership claim.
 
-Idempotency is scoped to the aggregate and operation id. Replays must match canonical command content, actor identity and
+Idempotency is scoped to the aggregate and operation id across registration, proposal submission and proposal review.
+A Mongo operation claim with deterministic `_id` reserves that namespace in the same transaction as the mutation;
+separate unique indexes on the decision and proposal collections alone cannot enforce cross-collection uniqueness.
+Existing decisions and proposals without claims remain replayable, and new claims also check those legacy records so
+their operation IDs cannot be reused for a different mutation. Already-committed legacy cross-collection collisions
+cannot be retroactively repaired by this check and require an explicit data audit before migration.
+Replays must match canonical command content, actor identity and
 the caller's authorization fingerprint. The proposal stores a separate stable request-intent digest over exact artifact,
 scope, intended use, source state and revision, target, evaluation window, proposal and operation identifiers, actor,
 and validated rationale. After authorization, this digest is checked against committed Mongo state before policy or
@@ -136,8 +152,18 @@ retention or deletion policy; access to the underlying Mongo collections must re
 The API rate limiter is process-local, bounded by tracked actors and request windows, and synchronizes concurrent access.
 At capacity it rejects untracked actors until an expired window is removed. Replicas do not share counters; ingress
 rate limiting is still needed for a fleet-wide bound. Institutional policy authorization remains unavailable in the
-default production verifier until a trusted authority implementation is configured.
+default production verifier until a trusted authority implementation is configured. Existing audit-signature machinery
+does not establish authorization of the exact promotion-policy digest by an approved issuer and key for the requested
+scope and effective interval. It is not treated as a policy-authority adapter; provenance strings and unsigned Mongo
+documents cannot turn `UNAVAILABLE` into `VERIFIED`.
 
-The startup guard requires the shared Mongo transaction runner and capability probe, and verifies the unique identity,
-operation, decision and `CHAMPION` indexes. The ledger is append-only through this application boundary; Mongo storage is
-not described as WORM or externally immutable, and external audit anchoring remains a separate verified guarantee.
+`MODEL_PROMOTION_PERSISTENCE_ENABLED` defaults to `true`. This flag controls the additional model-promotion startup
+verification, not persistence availability: even when set to `false`, the index initializer still connects to the
+configured MongoDB and creates or checks the required indexes, and model-promotion reads and writes remain available.
+It must not be used to disable Mongo or bypass a conflicting index definition; a malformed existing definition causes
+bootstrap to fail. Keep the flag enabled in production. With verification enabled, the startup guard requires the
+shared Mongo transaction runner and capability probe and verifies the identity, operation, decision, and `CHAMPION`
+indexes. Spring Data's global Mongo auto-index setting does not duplicate these definitions because the promotion
+documents do not declare annotation-based indexes. The ledger is append-only through this application boundary; Mongo
+storage is not described as WORM or externally immutable, and external audit anchoring remains a separate verified
+guarantee.
