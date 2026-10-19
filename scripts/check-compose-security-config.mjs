@@ -9,6 +9,7 @@ const exactModelTarget = "/run/model-shadow-performance";
 const exactModelSource = "${MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT:-./local-generated/model-shadow-performance}";
 const protectedGovernanceRoots = [
   "/run/model-card",
+  "/run/model-promotion-policy",
   "/run/model-shadow-performance",
   "/run/promotion-readiness",
   "/run/shadow-performance"
@@ -160,6 +161,55 @@ function assertGeneratedIdentityMount(serviceName, target, expectedSourceSuffix)
   const source = String(mount?.source ?? "").replaceAll("\\", "/");
   if (!mount || mount.type !== "bind" || !mount.read_only || !source.endsWith(expectedSourceSuffix)) {
     fail(`${serviceName} must read ${target} from generated local fixture path ${expectedSourceSuffix}`);
+  }
+}
+
+function assertModelPromotionPolicyTrustMount() {
+  const serviceName = "alert-service";
+  const sourceRoot = path.resolve("deployment", ".local", "model-promotion-policy");
+  const expectedSource = path.join(sourceRoot, "trusted-issuers.json");
+  const targetRoot = "/run/model-promotion-policy";
+  const expectedTarget = `${targetRoot}/trusted-issuers.json`;
+  expectEqual("model-promotion trusted issuer path",
+    env(serviceName, "MODEL_PROMOTION_TRUSTED_ISSUERS_PATH"), expectedTarget);
+  expectEqual("model-promotion minimum trust generation",
+    env(serviceName, "MODEL_PROMOTION_TRUST_MIN_GENERATION"), "1");
+  const mounts = (service(serviceName).volumes ?? []).filter((mount) => {
+    if (mount?.type !== "bind") return pathsOverlap(String(mount?.target ?? ""), targetRoot);
+    return pathsOverlap(String(mount.source ?? ""), sourceRoot)
+      || pathsOverlap(String(mount.target ?? ""), targetRoot);
+  });
+  if (mounts.length !== 1) {
+    fail("alert-service must mount only the model-promotion public registry, never its private key or directory");
+    return;
+  }
+  const mount = mounts[0];
+  if (normalizeHostPath(mount.source) !== normalizeHostPath(expectedSource)
+      || normalizeContainerPath(mount.target) !== expectedTarget
+      || mount.read_only !== true || mount.bind?.create_host_path !== false) {
+    fail("alert-service model-promotion trust mount must be the exact read-only public registry file");
+  }
+  let candidate = expectedSource;
+  while (true) {
+    try {
+      const stat = fs.lstatSync(candidate);
+      if (stat.isSymbolicLink()) {
+        fail(`model-promotion public registry source must not traverse symbolic link ${candidate}`);
+        break;
+      }
+      if (candidate === expectedSource && !stat.isFile()) {
+        fail("model-promotion public registry source must be a regular file");
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        fail(`model-promotion public registry source cannot be inspected: ${error.message}`);
+        break;
+      }
+      // A missing source is refused by Compose at container creation because create_host_path is false.
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) break;
+    candidate = parent;
   }
 }
 
@@ -586,6 +636,7 @@ if (variant === "security-hardened" || variant === "security-hardened-model-shad
   ]);
   assertGeneratedIdentityMount("alert-service", "/run/service-identity/alert-service-private.pem", "/deployment/.local/service-identity/alert-service-private.pem");
   assertGeneratedIdentityMount("audit-trust-authority", "/run/service-identity/jwks.json", "/deployment/.local/service-identity/jwks.json");
+  assertModelPromotionPolicyTrustMount();
   assertLocalBindings();
   assertUiLocalPort();
   assertHardening();

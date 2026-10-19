@@ -15,6 +15,7 @@ COPY feature-enricher-service/pom.xml feature-enricher-service/pom.xml
 COPY fraud-scoring-service/pom.xml fraud-scoring-service/pom.xml
 COPY alert-service/pom.xml alert-service/pom.xml
 COPY audit-trust-authority/pom.xml audit-trust-authority/pom.xml
+COPY model-promotion-policy-publisher/pom.xml model-promotion-policy-publisher/pom.xml
 
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -pl "${MODULE_NAME}" -am -Dmaven.test.skip=true dependency:go-offline

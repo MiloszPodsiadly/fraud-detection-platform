@@ -1,0 +1,13 @@
+# Local development trust material only; no policy approval authority is configured here.
+services:
+  alert-service:
+    environment:
+      MODEL_PROMOTION_TRUSTED_ISSUERS_PATH: /run/model-promotion-policy/trusted-issuers.json
+      MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
+    volumes:
+      - type: bind
+        source: ./.local/model-promotion-policy/trusted-issuers.json
+        target: /run/model-promotion-policy/trusted-issuers.json
+        read_only: true
+        bind:
+          create_host_path: false

@@ -19,6 +19,7 @@ elif [[ "$variant" == "full-security-hardened" ]]; then
     -f deployment/docker-compose.oidc.yml
     -f deployment/docker-compose.service-identity-mtls.yml
     -f deployment/docker-compose.trust-authority-jwt.yml
+    -f deployment/docker-compose.model-promotion-policy-trust.yml
     -f deployment/docker-compose.hardened.yml
   )
 fi

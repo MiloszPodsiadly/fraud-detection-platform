@@ -53,6 +53,137 @@ an institutionally approved policy. The default authority verifier returns `UNAV
 cannot authorize formal recommendation. Synthetic test policies are marked
 `NON_INSTITUTIONAL_TEST` and can validate criterion behavior but can never authorize a formal recommendation.
 
+### Institutional policy signature input (v1)
+
+`ModelPromotionPolicySignatureContract` defines the bytes to be signed with Ed25519. It uses the existing
+`GovernanceCanonicalJson` SHA-256 of `ModelPromotionPolicy.Content`; that digest already covers policy ID/revision,
+scope/environment, intended use, effective interval, approval provenance, criteria, thresholds and evidence semantics.
+The signature input is a JSON object with exactly these string fields, recursively sorted by field name:
+`authorityIdentity`, `contractVersion`, `issuedAt`, `keyId`, `policyCanonicalSha256`, `purpose`.
+`contractVersion` is `model-promotion-policy-signature-v1` and `purpose` is
+`MODEL_PROMOTION_POLICY_APPROVAL_V1`. The canonical JSON is UTF-8 with exactly one trailing LF byte and no signature
+field. Signature bytes are encoded as unpadded base64url; a decoded Ed25519 signature must contain exactly 64 bytes.
+Issuer identity and key ID each match `[A-Za-z0-9._:-]{1,128}`.
+`issuedAt` must be the canonical UTC `Instant.toString()` representation, with approval time <= issuance time <=
+policy effective start. Noncanonical timestamps, malformed signatures and mismatched content digests are rejected.
+The policy author, approving authority and signing issuer require distinct identity strings; this structural check
+does not establish the number or independence of human approvers.
+This purpose is distinct from `AUDIT_ANCHOR`, so a signature over that purpose cannot verify against this input.
+The fixed test-only Ed25519 vector and exact input-byte assertion live in `ModelPromotionPolicySignatureContractTest`.
+
+The signer identity authenticates a configured authority only; a valid signature alone does not prove that two
+independent humans approved the policy. Controlled publication and approval evidence are separate boundaries.
+
+### Trusted policy issuers
+
+`MODEL_PROMOTION_TRUSTED_ISSUERS_PATH` points to a deployment-controlled, read-only JSON registry file loaded at
+`alert-service` startup. With no path, policy authority verification returns `UNAVAILABLE`; an explicitly configured
+missing or malformed file fails startup. The file is not a MongoDB policy document and contains public keys only.
+Its top-level `version` is `model-promotion-issuer-registry-v1`, `generation` is a positive monotonic integer,
+and `keys` is a nonempty array. Each entry requires
+`issuerIdentity`, globally unique `keyId`, canonical base64 DER/SPKI `publicKeySpkiBase64`, lowercase SHA-256
+`publicKeySha256` over those DER bytes, nonempty `institutionalScopes`, `environments`, and `intendedUses`, canonical
+UTC `validFrom` and `validUntil`, and `status` (`ACTIVE`, `RETIRED`, or `REVOKED`). No wildcard permissions are
+supported. Currently the only institutional scope and intended use are `CURRENT_INSTITUTION` and
+`FRAUD_RISK_SCORING`. For current authorization a key must be `ACTIVE`, authorized for the exact policy
+scope/environment/use, and within its validity window both at issuance and at verification time. The policy
+interval must be well formed, and an expired policy cannot authorize a new decision. A future-effective policy may
+be pre-published; effectiveness at the assessment or decision time is checked by the existing resolver and decision
+validator. A retired or revoked key never yields `VERIFIED`. Audit-anchoring keys are not loaded from this registry.
+
+`VERIFIED` requires the exact v1 signing input and a valid Ed25519 signature under the configured public key;
+unknown issuers, malformed evidence, mismatched permissions, expired keys and invalid signatures return `REJECTED`.
+The resolver and durable decision validator both use this verifier, while no policy publication path is introduced
+by the alert-service runtime.
+
+### Key rotation, revocation and trust recovery
+
+The registry is loaded once at service startup; there is no runtime trust reload or mutable trust-management API.
+`MODEL_PROMOTION_TRUST_MIN_GENERATION` (default `1`) sets the minimum acceptable registry generation. A configured
+file with an older generation, invalid contents or missing file prevents startup; an absent path leaves verification
+`UNAVAILABLE`. The generation floor must be raised with each approved trust change and maintained by an independent,
+protected deployment control. An attacker able to roll back **both** the registry and this floor can defeat this
+application check. The repository cannot itself provide immutable configuration, fleet-wide monotonicity or timely
+restart of all service instances.
+
+Use the following controlled sequence, with institutional governance ownership and change records:
+
+1. Generate a new Ed25519 signing key in the production KMS/HSM or equivalent controlled signer. Do not put its
+   private key in the registry, MongoDB, `alert-service`, an image, or an audit-anchor key store. Record its globally
+   unique `keyId`, issuer identity, SPKI DER public key, SHA-256 fingerprint, exact scope/environment/use permissions
+   and bounded validity. Publish the new public-key entry as `ACTIVE` in a higher-generation registry. Verify the
+   fingerprint and permissions through an independent deployment review, raise the protected minimum generation,
+   then restart all verifier and publisher instances with the same approved trust data.
+2. Switch the offline institutional signer to the new key only after the new public key is trusted. The publisher
+   still requires independent approval for the exact policy and verifies its own signature against the registry.
+   Confirm new policies verify under the new key before retiring the old one; no policy is activated automatically.
+3. Stop signing with the previous key and set it to `RETIRED` in a newer registry generation. Set its `validUntil`
+   to the last authorized issuance instant and retain its public key for historical checks. Deploy the new generation
+   and floor to every instance. `RETIRED` never authorizes a new governance decision, even if a policy carries an
+   earlier signed `issuedAt`; a cryptographically intact older policy may be inspected only as history.
+4. If a key is compromised, stop its signer, mark it `REVOKED` in a newer generation, raise the protected floor and
+   restart every instance promptly. Preserve the revoked public key and all immutable policies and decisions for
+   investigation. Identify policies signed by that key, assess exposure and reapprove/reissue any still-needed policy
+   using an uncompromised key and independent approval. A valid signature from a revoked key is historical
+   cryptographic integrity only, not proof that its claimed issuance time or prior authorization is trustworthy.
+   Never delete or rewrite accepted decisions to conceal the incident.
+5. If configuration is invalid, keep the affected instance out of service; restore a reviewed registry at or above
+   the protected generation floor, verify fingerprints/statuses/permissions against the institutional change record,
+   and restart. Do not lower the floor to make an old file start. Check that all instances use the same generation
+   before resuming issuance or governance decisions.
+
+The signed `issuedAt` is tamper-evident **only for the key that signed it**; it is not an independent timestamp
+authority. A compromised signer can backdate an artifact. Issuance more than 30 seconds ahead of the verifier clock
+is rejected; operational clocks and KMS/HSM signing time therefore need controlled synchronization. Historical
+inspection checks signature, exact content, permissions and time windows but never grants current authorization;
+`INTACT_REVOKED_KEY` explicitly means cryptographic integrity under a now-untrusted key. Current verification
+rejects unknown, retired, revoked or expired keys and expired policies. The bounded
+`model_promotion_policy_authority_verification_total` metric uses only `status` and enum `reason` tags; it does not
+include issuer/key IDs, approval credentials or raw trust configuration. Secure distribution of registry and
+minimum-generation settings, KMS/HSM key custody, incident response and institutional approval controls remain
+deployment responsibilities.
+
+For the local development stack only, `node scripts/bootstrap-local-model-promotion-keys.mjs --ensure` creates a
+separate Ed25519 pair under Git-ignored and Docker-build-excluded
+`deployment/.local/model-promotion-policy/`. It writes `private-key.pkcs8.base64` for the offline publisher and
+`trusted-issuers.json` containing only the public key and `generation: 1`. The key is named
+`local-dev-model-promotion-key-1`, belongs to `local-dev-model-promotion-issuer`, and is authorized only for
+`DEVELOPMENT` and `TEST`, never `PRODUCTION`. `make up` and `scripts/app.cmd up` preserve an existing valid pair and
+mount only the public registry read-only into `alert-service` through the local Compose overlay. The private key is
+not mounted in any runtime service. `--check` validates the pair without generating it; an incomplete or expired
+pair fails instead of being silently replaced. Intentional rotation needs a reviewed new key ID, registry generation
+and protected floor; do not use fixture regeneration as a production rotation procedure. This local signer does not
+provide an institutional approval provider and does not make test policies production-approved.
+
+### Controlled offline publication
+
+`model-promotion-policy-publisher` is a separate Maven executable, not a dependency or Docker image component of
+`alert-service`. The publisher reads an unsigned policy (`content` plus `canonicalSha256`), validates its full
+contract, and calls an `InstitutionalPolicyPublicationAuthorization` provider. That provider must independently
+verify an approval for the exact digest, policy ID/revision, scope, intended use and effective interval, and must
+authenticate a publisher with the corresponding institutional mandate. The returned authorization is compared to
+every one of those policy fields, the author/approver identities, approval reference, issuer and key ID. Merely
+supplying policy JSON, an approver name, an environment variable, a Git signature or `FRAUD_OPS_ADMIN` does not
+authorize publication. No trustworthy institutional policy-approval source exists in this repository, so the CLI
+requires exactly one separately installed, institution-controlled ServiceLoader provider and otherwise fails closed.
+The integration tests use a distinct, signed **test-only** approval fixture; it is not a production provider.
+
+After approval, the offline process loads a private Ed25519 key from a controlled file, signs the v1 envelope,
+re-verifies it against the same public-key registry as `alert-service`, then optionally publishes. `--dry-run`
+performs all validation and signing checks but never connects to MongoDB. The private key is never placed in the
+policy document or the alert-service image. The CLI requires `--policy`, `--private-key`, `--trusted-issuers`,
+`--issuer` and `--key-id`; publication additionally requires `MODEL_PROMOTION_PUBLISH_MONGODB_URI` (a replica-set
+URI supplied by the controlled execution environment). The unsigned policy must become effective no earlier than
+signature issuance.
+
+The publisher uses a mandatory Mongo transaction, independent of alert-service's configurable transaction mode.
+Within that transaction it increments one per-scope/environment/use fence document, checks immutable revision
+identity and interval overlap, and inserts the signed immutable policy. Competing transactions therefore cannot
+both pass the overlap check and commit. The fence is only a concurrency-control record; the existing
+`model_promotion_policies` collection remains the authoritative read store. An exact republish returns a receipt
+without changing the policy, while conflicting content or an overlapping interval fails closed. Receipts identify
+policy ID/revision, canonical digest, issuer, key ID and publication time. Existing policy history is preserved.
+
 | Criterion | Authoritative evidence | Population and denominator |
 | --- | --- | --- |
 | Statistically meaningful sample | Exact Shadow Performance population and class balance | Evaluated bounded analyst-feedback cohort; total, positive and negative counts |

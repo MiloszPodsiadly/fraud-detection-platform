@@ -136,8 +136,10 @@ currently provided by the repository. It:
   observability, and the application container hardening overlay.
 
 `deployment/.local/` is ignored by Git and excluded from Docker build contexts. Generated private keys stay on
-the local workstation. Ordinary startup preserves valid identity material; intentionally rotate it with
-`make regenerate-local-runtime-fixtures`.
+the local workstation. Ordinary startup preserves valid identity material; intentionally rotate service-identity
+fixtures with `make regenerate-local-runtime-fixtures`. The separate local model-promotion policy key and public
+registry are created by `node scripts/bootstrap-local-model-promotion-keys.mjs --ensure`; only the public registry
+is mounted into `alert-service`. This local key does not supply institutional policy approval.
 
 `make up` and `.\scripts\app.cmd up` generate the local Shadow Performance Summary artifact before starting
 Docker Compose. For manual inspection, the equivalent Compose startup after running
@@ -150,6 +152,7 @@ docker compose --project-name fraud-detection-platform --env-file deployment/.en
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.model-promotion-policy-trust.yml \
   -f deployment/docker-compose.hardened.yml \
   -f deployment/docker-compose.shadow-performance-generated.yml \
   up --build -d
@@ -218,6 +221,8 @@ Expected resolved security-relevant values for this exact command:
 | `alert-service.APP_SECURITY_DEMO_AUTH_ENABLED` | `false` |
 | `alert-service.AUDIT_TRUST_AUTHORITY_ENABLED` | `true` |
 | `alert-service.AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED` | `true` |
+| `alert-service.MODEL_PROMOTION_TRUSTED_ISSUERS_PATH` | `/run/model-promotion-policy/trusted-issuers.json` (read-only public registry only) |
+| `alert-service.MODEL_PROMOTION_TRUST_MIN_GENERATION` | `1` (local fixture floor; production requires protected monotonic floor) |
 | `alert-service.ASSISTANT_MODE` | `DETERMINISTIC` |
 | `analyst-console-ui` build arg `VITE_AUTH_PROVIDER` | `bff` |
 
@@ -301,6 +306,7 @@ docker compose --project-name fraud-detection-platform --env-file deployment/.en
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.model-promotion-policy-trust.yml \
   -f deployment/docker-compose.hardened.yml \
   -f deployment/docker-compose.shadow-performance-generated.yml \
   down
@@ -327,6 +333,7 @@ docker compose --project-name fraud-detection-platform --env-file deployment/.en
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.model-promotion-policy-trust.yml \
   -f deployment/docker-compose.hardened.yml \
   -f deployment/docker-compose.shadow-performance-generated.yml \
   down -v

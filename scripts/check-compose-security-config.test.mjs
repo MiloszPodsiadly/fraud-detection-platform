@@ -239,6 +239,40 @@ test("hardened identity mounts expose only each service's own mTLS material", ()
   }
 });
 
+test("hardened model-promotion trust mount exposes only the public registry", () => {
+  const resolved = resolveHardenedCompose();
+  assert.equal(resolved.status, 0, resolved.stderr || resolved.error?.message);
+  const config = JSON.parse(resolved.stdout);
+  assert.equal(runChecker(config, "security-hardened").status, 0);
+  const sourceRoot = path.join(repositoryRoot, "deployment", ".local", "model-promotion-policy");
+  const target = "/run/model-promotion-policy/trusted-issuers.json";
+  const mount = (value) => value.services["alert-service"].volumes.find((volume) => volume.target === target);
+  const mutations = [
+    ["writable public registry", (value) => { mount(value).read_only = false; }],
+    ["implicit host source creation", (value) => { mount(value).bind.create_host_path = true; }],
+    ["wrong public registry source", (value) => { mount(value).source = path.join(sourceRoot, "other.json"); }],
+    ["private key mount", (value) => value.services["alert-service"].volumes.push({
+      type: "bind", source: path.join(sourceRoot, "private-key.pkcs8.base64"),
+      target: "/tmp/policy-key", read_only: true
+    })],
+    ["whole trust directory mount", (value) => value.services["alert-service"].volumes.push({
+      type: "bind", source: sourceRoot, target: "/run/policy-trust", read_only: true
+    })],
+    ["missing trusted issuer path", (value) => {
+      delete value.services["alert-service"].environment.MODEL_PROMOTION_TRUSTED_ISSUERS_PATH;
+    }],
+    ["lowered generation floor", (value) => {
+      value.services["alert-service"].environment.MODEL_PROMOTION_TRUST_MIN_GENERATION = "0";
+    }]
+  ];
+  for (const [label, mutate] of mutations) {
+    const candidate = structuredClone(config);
+    mutate(candidate);
+    const checked = runChecker(candidate, "security-hardened");
+    assert.notEqual(checked.status, 0, `${label} unexpectedly passed`);
+  }
+});
+
 function assertIdentityMutationRejected(config, label) {
   const result = runChecker(config, "security-hardened");
   assert.notEqual(result.status, 0, `${label} unexpectedly passed`);
@@ -343,6 +377,7 @@ function resolveHardenedCompose() {
     "-f", "deployment/docker-compose.oidc.yml",
     "-f", "deployment/docker-compose.service-identity-mtls.yml",
     "-f", "deployment/docker-compose.trust-authority-jwt.yml",
+    "-f", "deployment/docker-compose.model-promotion-policy-trust.yml",
     "-f", "deployment/docker-compose.hardened.yml",
     "config", "--format", "json"
   ], {
