@@ -6,6 +6,7 @@ SECURITY_HARDENED_BASE_COMPOSE = docker compose --project-name $(COMPOSE_PROJECT
 	-f deployment/docker-compose.oidc.yml \
 	-f deployment/docker-compose.service-identity-mtls.yml \
 	-f deployment/docker-compose.trust-authority-jwt.yml \
+	-f deployment/docker-compose.model-promotion-policy-trust.yml \
 	-f deployment/docker-compose.hardened.yml
 
 SHADOW_PERFORMANCE_DEMO_COMPOSE = $(SECURITY_HARDENED_BASE_COMPOSE) \
@@ -31,6 +32,7 @@ deployment/.env:
 
 local-runtime-fixtures:
 	bash scripts/bootstrap-local-fixtures.sh --ensure
+	node scripts/bootstrap-local-model-promotion-keys.mjs --ensure
 
 regenerate-local-runtime-fixtures:
 	bash scripts/bootstrap-local-fixtures.sh --force

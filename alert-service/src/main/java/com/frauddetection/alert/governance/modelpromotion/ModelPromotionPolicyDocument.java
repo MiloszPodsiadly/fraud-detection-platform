@@ -20,7 +20,8 @@ public record ModelPromotionPolicyDocument(
         @Field("policy_revision") long policyRevision,
         @Field("effective_from") Instant effectiveFrom,
         @Field("effective_to") Instant effectiveTo,
-        ModelPromotionPolicy policy
+        ModelPromotionPolicy policy,
+        @Field("published_at") Instant publishedAt
 ) {
 
     public static final String COLLECTION = "model_promotion_policies";
@@ -54,6 +55,10 @@ public record ModelPromotionPolicyDocument(
     }
 
     static ModelPromotionPolicyDocument from(ModelPromotionPolicy policy) {
+        return from(policy, null);
+    }
+
+    static ModelPromotionPolicyDocument from(ModelPromotionPolicy policy, Instant publishedAt) {
         Objects.requireNonNull(policy, "policy is required");
         ModelPromotionPolicy.Content content = policy.content();
         ModelGovernanceScope scope = content.governanceScope();
@@ -66,7 +71,8 @@ public record ModelPromotionPolicyDocument(
                 content.revision(),
                 timestamp(content.effectiveFromInclusive()),
                 timestamp(content.effectiveToExclusive()),
-                policy
+                policy,
+                publishedAt
         );
     }
 
