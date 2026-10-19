@@ -63,6 +63,7 @@ public class ModelPromotionApiService {
             List<ModelPromotionProposalDocument> proposals = workflowService.proposalHistory(
                     selection.stateRequest(), historyLimit
             );
+            boolean includeRationale = workflowService.canReadRationale(selection.stateRequest());
             return new StateResponse(
                     identity(aggregate.artifactIdentity()),
                     scope(aggregate.governanceScope()),
@@ -75,8 +76,8 @@ public class ModelPromotionApiService {
                             .toList(),
                     aggregate.authorizesRuntimeActivation(),
                     DEPLOYMENT_STATUS,
-                    decisions.stream().map(this::decision).toList(),
-                    proposals.stream().map(proposal -> proposal(proposal, false)).toList()
+                    decisions.stream().map(decision -> decision(decision, includeRationale)).toList(),
+                    proposals.stream().map(proposal -> proposal(proposal, false, includeRationale)).toList()
             );
         });
     }
@@ -121,7 +122,7 @@ public class ModelPromotionApiService {
                         request.rationale(),
                         request.rationaleSha256()
                 )
-        )));
+        ), false));
     }
 
     public ProposalResponse retire(RetirementProposalRequest request) {
@@ -139,7 +140,7 @@ public class ModelPromotionApiService {
                         request.rationale(),
                         request.rationaleSha256()
                 )
-        )));
+        ), false));
     }
 
     public ProposalResponse review(String proposalId, ReviewRequest request) {
@@ -152,7 +153,7 @@ public class ModelPromotionApiService {
                         request.rationale(),
                         request.rationaleSha256()
                 )
-        )));
+        ), false));
     }
 
     private AssessmentResponse assessment(ModelPromotionAssessment assessment) {
@@ -231,7 +232,7 @@ public class ModelPromotionApiService {
         );
     }
 
-    private DecisionResponse decision(ModelPromotionDecisionDocument decision) {
+    private DecisionResponse decision(ModelPromotionDecisionDocument decision, boolean includeRationale) {
         return new DecisionResponse(
                 decision.eventType().name(),
                 decision.sourceState(),
@@ -242,13 +243,13 @@ public class ModelPromotionApiService {
                 decision.assessmentSnapshot() == null ? null : decision.assessmentSnapshot().canonicalSha256(),
                 decision.proposal() == null ? null : decision.proposal().proposalId(),
                 decision.approval() == null ? null : decision.approval().outcome().name(),
-                decision.proposal() == null ? null : rationale(decision.proposal().rationale()),
-                decision.approval() == null ? null : rationale(decision.approval().rationale()),
+                decision.proposal() == null ? null : rationale(decision.proposal().rationale(), includeRationale),
+                decision.approval() == null ? null : rationale(decision.approval().rationale(), includeRationale),
                 decision.committedAt()
         );
     }
 
-    private ProposalResponse proposal(ModelPromotionProposalResult proposal) {
+    private ProposalResponse proposal(ModelPromotionProposalResult proposal, boolean includeRationale) {
         return new ProposalResponse(
                 proposal.proposalId(),
                 proposal.proposal().requestedState(),
@@ -258,13 +259,15 @@ public class ModelPromotionApiService {
                 proposal.assessmentSha256(),
                 proposal.submittedAt(),
                 proposal.reviewedAt(),
-                rationale(proposal.proposal().rationale()),
-                proposal.approval() == null ? null : rationale(proposal.approval().rationale()),
+                rationale(proposal.proposal().rationale(), includeRationale),
+                proposal.approval() == null ? null : rationale(proposal.approval().rationale(), includeRationale),
                 proposal.idempotentReplay()
         );
     }
 
-    private ProposalResponse proposal(ModelPromotionProposalDocument proposal, boolean idempotentReplay) {
+    private ProposalResponse proposal(
+            ModelPromotionProposalDocument proposal, boolean idempotentReplay, boolean includeRationale
+    ) {
         return new ProposalResponse(
                 proposal.proposalId(),
                 proposal.proposal().requestedState(),
@@ -274,14 +277,16 @@ public class ModelPromotionApiService {
                 proposal.assessmentSnapshot() == null ? null : proposal.assessmentSnapshot().canonicalSha256(),
                 proposal.submittedAt(),
                 proposal.reviewedAt(),
-                rationale(proposal.proposal().rationale()),
-                proposal.approval() == null ? null : rationale(proposal.approval().rationale()),
+                rationale(proposal.proposal().rationale(), includeRationale),
+                proposal.approval() == null ? null : rationale(proposal.approval().rationale(), includeRationale),
                 idempotentReplay
         );
     }
 
-    private DecisionRationaleResponse rationale(ModelPromotionDecisionRationale rationale) {
-        return new DecisionRationaleResponse(rationale.referenceId(), rationale.sha256(), rationale.content());
+    private DecisionRationaleResponse rationale(ModelPromotionDecisionRationale rationale, boolean includeRationale) {
+        return new DecisionRationaleResponse(
+                rationale.referenceId(), rationale.sha256(), includeRationale ? rationale.content() : null
+        );
     }
 
     private IdentityResponse identity(ExactModelArtifactIdentity identity) {

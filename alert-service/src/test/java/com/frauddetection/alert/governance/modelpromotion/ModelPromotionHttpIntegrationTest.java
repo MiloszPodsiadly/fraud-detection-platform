@@ -110,6 +110,7 @@ class ModelPromotionHttpIntegrationTest extends AbstractIntegrationTest {
                 )
         );
         assertThat(challengerProposal.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(((Map<?, ?>) challengerProposal.getBody().get("proposalRationale")).get("content")).isNull();
         assertThat(post(
                 "actor-b", "REVIEWER", "/proposals/proposal-challenger-http-1/reviews", review(
                         "approval-challenger-http-1", "review-challenger-http-1", "Independent challenger review"
@@ -138,6 +139,29 @@ class ModelPromotionHttpIntegrationTest extends AbstractIntegrationTest {
                 .containsEntry("currentRevision", 2);
         assertThat((List<?>) state.getBody().get("decisionHistory")).hasSize(3);
         assertThat((List<?>) state.getBody().get("proposals")).hasSize(2);
+        assertThat(((List<Map<?, ?>>) state.getBody().get("proposals")).stream()
+                .map(proposal -> (Map<?, ?>) proposal.get("proposalRationale"))
+                .map(rationale -> String.valueOf(rationale.get("content"))))
+                .contains("Verified exact evidence supports shadow use");
+
+        JsonResponse ordinaryRead = get("read-only-actor", "READ_ONLY_ANALYST", statePath(ModelGovernanceEnvironment.TEST));
+        assertThat(ordinaryRead.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(((List<Map<?, ?>>) ordinaryRead.getBody().get("proposals"))).allSatisfy(proposal -> {
+            assertThat(((Map<?, ?>) proposal.get("proposalRationale")).get("content")).isNull();
+            if (proposal.get("approvalRationale") != null) {
+                assertThat(((Map<?, ?>) proposal.get("approvalRationale")).get("content")).isNull();
+            }
+        });
+        assertThat(((List<Map<?, ?>>) ordinaryRead.getBody().get("decisionHistory"))).allSatisfy(decision -> {
+            if (decision.get("proposalRationale") != null) {
+                assertThat(((Map<?, ?>) decision.get("proposalRationale")).get("content")).isNull();
+            }
+            if (decision.get("approvalRationale") != null) {
+                assertThat(((Map<?, ?>) decision.get("approvalRationale")).get("content")).isNull();
+            }
+        });
+        assertThat(get("read-only-actor", "READ_ONLY_ANALYST", statePath(ModelGovernanceEnvironment.PRODUCTION))
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 
         ModelPromotionStateDocument persistedState = mongoTemplate.findById(
                 ModelPromotionPersistenceKey.aggregate(
@@ -157,7 +181,8 @@ class ModelPromotionHttpIntegrationTest extends AbstractIntegrationTest {
         assertThat(persistedProposal.approval().approvedBy()).isEqualTo("actor-b");
         assertThat(persistedProposal.proposal().rationale().content())
                 .isEqualTo("Verified exact evidence supports shadow use");
-        assertThat(persistedProposal.assessmentSnapshot().content().formalRecommendationEligible()).isTrue();
+        assertThat(persistedProposal.assessmentSnapshot().content().formalRecommendationEligible()).isFalse();
+        assertThat(persistedProposal.assessmentSnapshot().content().humanReviewable()).isTrue();
     }
 
     @Test
@@ -253,23 +278,27 @@ class ModelPromotionHttpIntegrationTest extends AbstractIntegrationTest {
     }
 
     private ModelPromotionPolicy.CriterionRule policyRule(ModelPromotionCriterion criterion) {
-        boolean nonWaivable = ModelPromotionPolicyValidator.isNonWaivable(criterion);
         Map<String, java.math.BigDecimal> thresholds = switch (criterion) {
-            case IDENTITY_AND_LINEAGE_INTEGRITY -> Map.of("maximumCriticalLineageGaps", java.math.BigDecimal.ZERO);
-            default -> Map.of();
+            case STATISTICALLY_MEANINGFUL_SAMPLE -> Map.of(
+                    "minimumEvaluatedRecords", new java.math.BigDecimal("4"),
+                    "minimumPositiveLabels", new java.math.BigDecimal("2"),
+                    "minimumNegativeLabels", new java.math.BigDecimal("2")
+            );
+            default -> ModelPromotionAssessmentTestFixtures.rule(
+                    criterion, ModelPromotionPolicy.CriterionApplicability.MANDATORY
+            ).thresholds();
         };
         return new ModelPromotionPolicy.CriterionRule(
                 criterion,
-                nonWaivable
-                        ? ModelPromotionPolicy.CriterionApplicability.MANDATORY
-                        : ModelPromotionPolicy.CriterionApplicability.NOT_APPLICABLE_AUTHORIZED,
+                ModelPromotionPolicy.CriterionApplicability.MANDATORY,
                 thresholds,
                 365L * 24 * 60 * 60,
                 "VERIFIED_REPORTS_AND_MANIFESTS",
                 criterion.evidenceSource(),
                 criterion.metricSemantics(),
                 criterion.populationDefinition(),
-                criterion.denominatorDefinition()
+                criterion.denominatorDefinition(),
+                null
         );
     }
 

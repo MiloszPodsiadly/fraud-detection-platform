@@ -21,6 +21,7 @@ public final class AnalystAuthority {
     public static final String MODEL_CARD_READ = "model-card:read";
     public static final String MODEL_SHADOW_PERFORMANCE_READ = "model-shadow-performance:read";
     public static final String MODEL_PROMOTION_READ = "model-promotion:read";
+    public static final String MODEL_PROMOTION_RATIONALE_READ = "model-promotion:rationale:read";
     public static final String MODEL_PROMOTION_REGISTER = "model-promotion:register";
     public static final String MODEL_PROMOTION_PROPOSE = "model-promotion:propose";
     public static final String MODEL_PROMOTION_APPROVE = "model-promotion:approve";
@@ -61,6 +62,7 @@ public final class AnalystAuthority {
             MODEL_CARD_READ,
             MODEL_SHADOW_PERFORMANCE_READ,
             MODEL_PROMOTION_READ,
+            MODEL_PROMOTION_RATIONALE_READ,
             MODEL_PROMOTION_REGISTER,
             MODEL_PROMOTION_PROPOSE,
             MODEL_PROMOTION_APPROVE,

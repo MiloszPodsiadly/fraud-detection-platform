@@ -47,6 +47,7 @@ import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionRev
 import com.frauddetection.alert.governance.modelcard.ModelCardController;
 import com.frauddetection.alert.governance.modelcard.ModelCardReadService;
 import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiController;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiRateLimiter;
 import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiService;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryController;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryReadService;
@@ -266,6 +267,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockitoBean
     private ModelPromotionApiService modelPromotionApiService;
+
+    @MockitoBean
+    private ModelPromotionApiRateLimiter modelPromotionApiRateLimiter;
 
     @MockitoBean
     private AlertRepository alertRepository;

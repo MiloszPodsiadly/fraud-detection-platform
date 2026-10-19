@@ -46,6 +46,7 @@ public enum AnalystRole {
             AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE,
             AnalystAuthority.MODEL_PROMOTION_READ,
             AnalystAuthority.MODEL_PROMOTION_APPROVE,
+            AnalystAuthority.MODEL_PROMOTION_RATIONALE_READ,
             AnalystAuthority.MODEL_PROMOTION_REJECT,
             AnalystAuthority.MODEL_PROMOTION_SCOPE_DEVELOPMENT,
             AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST
