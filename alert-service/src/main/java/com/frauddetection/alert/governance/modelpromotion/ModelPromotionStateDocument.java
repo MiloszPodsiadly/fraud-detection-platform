@@ -2,19 +2,12 @@ package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.time.Instant;
 
 @Document(collection = ModelPromotionStateDocument.COLLECTION)
-@CompoundIndex(
-        name = ModelPromotionStateDocument.IDENTITY_INDEX,
-        def = "{'model_name':1,'model_version':1,'feature_contract_version':1,'model_artifact_sha256':1," +
-                "'institutional_scope':1,'environment':1,'intended_use':1}",
-        unique = true
-)
 public class ModelPromotionStateDocument {
 
     public static final String COLLECTION = "model_promotion_states";

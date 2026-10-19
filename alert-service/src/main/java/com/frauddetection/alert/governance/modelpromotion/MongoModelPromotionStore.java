@@ -73,46 +73,35 @@ public class MongoModelPromotionStore {
                 operationKey,
                 commandSha256,
                 command.operationContext(),
-                false,
                 () -> registerWithinTransaction(command, aggregateKey, operationKey, commandSha256)
         );
     }
 
-    ModelPromotionMutationResult transition(DurableModelPromotionTransitionCommand request) {
-        requireTransactions();
-        ModelPromotionTransitionCommand command = request.transition();
-        String aggregateKey = ModelPromotionPersistenceKey.aggregate(
-                command.artifactIdentity(), command.governanceScope(), command.intendedUse()
-        );
-        String operationKey = ModelPromotionPersistenceKey.operation(
-                aggregateKey, request.operationContext().operationId()
-        );
-        String commandSha256 = decisionValidator.transitionCommandSha256(request);
-        Optional<ModelPromotionMutationResult> replay = replay(
-                operationKey, commandSha256, request.operationContext()
-        );
-        if (replay.isPresent()) {
-            return replay.get();
-        }
-        decisionValidator.validate(request);
-        return executeWithRetry(
-                operationKey,
-                commandSha256,
-                request.operationContext(),
-                command.requestedTargetState() == ModelPromotionLifecycleState.CHAMPION,
-                () -> transitionWithinTransaction(request, aggregateKey, operationKey, commandSha256)
-        );
+    ModelPromotionProposalResult submitProposal(ModelPromotionProposalSubmission submission) {
+        return submitProposal(submission, null);
     }
 
-    ModelPromotionProposalResult submitProposal(ModelPromotionProposalSubmission submission) {
+    ModelPromotionProposalResult submitProposal(
+            ModelPromotionProposalSubmission submission,
+            ModelPromotionProposalRequestIntent requestIntent
+    ) {
         requireTransactions();
         ModelPromotionTransitionProposal transition = submission.transition();
+        if (requestIntent != null && (!requestIntent.transition().equals(transition)
+                || !requestIntent.proposalId().equals(submission.proposal().proposalId())
+                || !requestIntent.actorId().equals(submission.operationContext().actorId())
+                || !requestIntent.rationale().equals(submission.proposal().rationale()))) {
+            throw new IllegalArgumentException("Proposal does not match the original request intent");
+        }
         String aggregateKey = ModelPromotionPersistenceKey.aggregate(
                 transition.artifactIdentity(), transition.governanceScope(), transition.intendedUse()
         );
         String commandSha256 = decisionValidator.proposalCommandSha256(submission);
+        String requestIntentSha256 = requestIntent == null ? null
+                : decisionValidator.proposalRequestIntentSha256(requestIntent);
         Optional<ModelPromotionProposalResult> replay = replayProposalSubmission(
-                aggregateKey, transition.operationId(), commandSha256, submission.operationContext()
+                aggregateKey, transition.operationId(), commandSha256, requestIntentSha256,
+                submission.operationContext()
         );
         if (replay.isPresent()) {
             return replay.get();
@@ -121,8 +110,31 @@ public class MongoModelPromotionStore {
         return executeProposalSubmissionWithRetry(
                 aggregateKey,
                 commandSha256,
+                requestIntentSha256,
                 submission,
-                () -> submitProposalWithinTransaction(submission, aggregateKey, commandSha256)
+                () -> submitProposalWithinTransaction(submission, aggregateKey, commandSha256, requestIntentSha256)
+        );
+    }
+
+    Optional<ModelPromotionProposalResult> recoverSubmittedProposal(
+            ModelPromotionProposalRequestIntent requestIntent,
+            ModelPromotionOperationContext context
+    ) {
+        if (!requestIntent.actorId().equals(context.actorId())
+                || !requestIntent.transition().operationId().equals(context.operationId())) {
+            throw new IllegalArgumentException("Request intent and authenticated operation differ");
+        }
+        String aggregateKey = ModelPromotionPersistenceKey.aggregate(
+                requestIntent.transition().artifactIdentity(),
+                requestIntent.transition().governanceScope(),
+                requestIntent.transition().intendedUse()
+        );
+        return replayProposalSubmission(
+                aggregateKey,
+                context.operationId(),
+                null,
+                decisionValidator.proposalRequestIntentSha256(requestIntent),
+                context
         );
     }
 
@@ -201,10 +213,12 @@ public class MongoModelPromotionStore {
     private ModelPromotionProposalResult submitProposalWithinTransaction(
             ModelPromotionProposalSubmission submission,
             String aggregateKey,
-            String commandSha256
+            String commandSha256,
+            String requestIntentSha256
     ) {
         Optional<ModelPromotionProposalResult> replay = replayProposalSubmission(
-                aggregateKey, submission.transition().operationId(), commandSha256, submission.operationContext()
+                aggregateKey, submission.transition().operationId(), commandSha256, requestIntentSha256,
+                submission.operationContext()
         );
         if (replay.isPresent()) {
             return replay.get();
@@ -220,6 +234,7 @@ public class MongoModelPromotionStore {
         ModelPromotionProposalDocument proposal = ModelPromotionProposalDocument.pending(
                 aggregateKey,
                 commandSha256,
+                requestIntentSha256,
                 submission,
                 auditFactory.accepted(
                         "SUBMIT_MODEL_PROMOTION_PROPOSAL",
@@ -331,7 +346,7 @@ public class MongoModelPromotionStore {
                 current.lifecycleState(),
                 current.lifecycleState(),
                 current.revision(),
-                current.acceptedDecisionId(),
+                null,
                 proposal.policySnapshot(),
                 proposal.assessmentSnapshot(),
                 proposal.proposal(),
@@ -416,6 +431,7 @@ public class MongoModelPromotionStore {
                 proposal.aggregateKey(),
                 proposal.operationId(),
                 proposal.commandSha256(),
+                proposal.requestIntentSha256(),
                 proposal.actorId(),
                 proposal.authorizationFingerprint(),
                 proposal.transition(),
@@ -584,6 +600,7 @@ public class MongoModelPromotionStore {
     private ModelPromotionProposalResult executeProposalSubmissionWithRetry(
             String aggregateKey,
             String commandSha256,
+            String requestIntentSha256,
             ModelPromotionProposalSubmission submission,
             Supplier<ModelPromotionProposalResult> transaction
     ) {
@@ -593,6 +610,7 @@ public class MongoModelPromotionStore {
                     aggregateKey,
                     submission.transition().operationId(),
                     commandSha256,
+                    requestIntentSha256,
                     submission.operationContext()
             );
             if (replay.isPresent()) {
@@ -605,6 +623,7 @@ public class MongoModelPromotionStore {
                         aggregateKey,
                         submission.transition().operationId(),
                         commandSha256,
+                        requestIntentSha256,
                         submission.operationContext()
                 );
                 if (committed.isPresent()) {
@@ -618,6 +637,7 @@ public class MongoModelPromotionStore {
                         aggregateKey,
                         submission.transition().operationId(),
                         commandSha256,
+                        requestIntentSha256,
                         submission.operationContext()
                 );
                 if (committed.isPresent()) {
@@ -647,6 +667,16 @@ public class MongoModelPromotionStore {
             }
             try {
                 return transactionRunner.runLocalCommit(transaction);
+            } catch (DuplicateKeyException exception) {
+                Optional<ModelPromotionProposalResult> committed = replayProposalReview(
+                        review.proposalId(), reviewCommandSha256, review.operationContext()
+                );
+                if (committed.isPresent()) {
+                    return committed.get();
+                }
+                throw new ModelPromotionPersistenceConflictException(
+                        "Model promotion review conflicts with an existing decision or champion claim", exception
+                );
             } catch (RuntimeException exception) {
                 Optional<ModelPromotionProposalResult> committed = replayProposalReview(
                         review.proposalId(), reviewCommandSha256, review.operationContext()
@@ -667,6 +697,7 @@ public class MongoModelPromotionStore {
             String aggregateKey,
             String operationId,
             String commandSha256,
+            String requestIntentSha256,
             ModelPromotionOperationContext context
     ) {
         ModelPromotionProposalDocument existing = mongoTemplate.findOne(
@@ -681,7 +712,10 @@ public class MongoModelPromotionStore {
                 || !existing.authorizationFingerprint().equals(context.authorizationFingerprint())) {
             throw new ModelPromotionPersistenceConflictException("Idempotency operation is unavailable to this caller");
         }
-        if (!existing.commandSha256().equals(commandSha256)) {
+        boolean sameIntent = requestIntentSha256 == null
+                ? existing.commandSha256().equals(commandSha256)
+                : requestIntentSha256.equals(existing.requestIntentSha256());
+        if (!sameIntent) {
             throw new ModelPromotionPersistenceConflictException(
                     "Idempotency operation was already used for different canonical content"
             );
@@ -727,7 +761,6 @@ public class MongoModelPromotionStore {
             String operationKey,
             String commandSha256,
             ModelPromotionOperationContext context,
-            boolean championTransition,
             Supplier<ModelPromotionMutationResult> transaction
     ) {
         RuntimeException last = null;
@@ -743,10 +776,9 @@ public class MongoModelPromotionStore {
                 if (committed.isPresent()) {
                     return committed.get();
                 }
-                String reason = championTransition
-                        ? "A CHAMPION already exists for this governance scope and intended use"
-                        : "Model promotion identity or decision already exists";
-                throw new ModelPromotionPersistenceConflictException(reason, exception);
+                throw new ModelPromotionPersistenceConflictException(
+                        "Model promotion identity or decision already exists", exception
+                );
             } catch (RuntimeException exception) {
                 Optional<ModelPromotionMutationResult> committed = replay(operationKey, commandSha256, context);
                 if (committed.isPresent()) {

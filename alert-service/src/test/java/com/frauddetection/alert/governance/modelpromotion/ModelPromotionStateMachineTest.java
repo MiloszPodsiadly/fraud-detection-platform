@@ -18,11 +18,10 @@ class ModelPromotionStateMachineTest {
         assertThat(candidate.revision()).isZero();
         assertThat(candidate.acceptedDecisionId()).isNull();
         assertThat(candidate.authorizesRuntimeActivation()).isFalse();
-        assertThat(candidate.championKey()).isEmpty();
     }
 
     @Test
-    void followsTheExplicitForwardLifecycleAndExposesChampionUniquenessKey() {
+    void followsTheExplicitForwardLifecycleWithoutRuntimeActivation() {
         ModelPromotionAggregate current = candidate(scope(ModelGovernanceEnvironment.PRODUCTION));
         current = transition(current, ModelPromotionLifecycleState.CHALLENGER, null, 1);
         current = transition(current, ModelPromotionLifecycleState.SHADOW_APPROVED, "assessment-2", 2);
@@ -32,15 +31,10 @@ class ModelPromotionStateMachineTest {
         assertThat(current.revision()).isEqualTo(4);
         assertThat(current.acceptedDecisionId()).isEqualTo("decision-4");
         assertThat(current.authorizesRuntimeActivation()).isFalse();
-        assertThat(current.championKey()).contains(new ModelPromotionChampionKey(
-                scope(ModelGovernanceEnvironment.PRODUCTION),
-                ModelPromotionIntendedUse.FRAUD_RISK_SCORING
-        ));
 
         ModelPromotionAggregate retired = transition(current, ModelPromotionLifecycleState.RETIRED, null, 5);
         assertThat(retired.lifecycleState()).isEqualTo(ModelPromotionLifecycleState.RETIRED);
         assertThat(stateMachine.isTerminal(retired.lifecycleState())).isTrue();
-        assertThat(retired.championKey()).isEmpty();
         assertThatThrownBy(() -> transition(
                 retired, ModelPromotionLifecycleState.CANDIDATE, null, 6
         )).isInstanceOf(ModelPromotionPersistenceConflictException.class)

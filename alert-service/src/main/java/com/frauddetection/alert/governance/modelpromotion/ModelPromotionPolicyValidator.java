@@ -68,6 +68,10 @@ public class ModelPromotionPolicyValidator {
                     && isNonWaivable(rule.criterion())) {
                 throw invalid(Reason.POLICY_CONTRACT_INVALID);
             }
+            if (rule.applicability() == ModelPromotionPolicy.CriterionApplicability.NOT_APPLICABLE_AUTHORIZED
+                    && "policy-authorized-not-applicable".equalsIgnoreCase(rule.applicabilityJustification())) {
+                throw invalid(Reason.POLICY_CONTRACT_INVALID);
+            }
             validateThresholds(rule);
         }
         if (!observed.equals(EnumSet.allOf(ModelPromotionCriterion.class))) {

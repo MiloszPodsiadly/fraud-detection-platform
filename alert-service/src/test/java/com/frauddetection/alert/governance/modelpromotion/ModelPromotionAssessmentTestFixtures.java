@@ -183,7 +183,9 @@ final class ModelPromotionAssessmentTestFixtures {
                 criterion.evidenceSource(),
                 criterion.metricSemantics(),
                 criterion.populationDefinition(),
-                criterion.denominatorDefinition()
+                criterion.denominatorDefinition(),
+                applicability == ModelPromotionPolicy.CriterionApplicability.NOT_APPLICABLE_AUTHORIZED
+                        ? "Synthetic shadow-only applicability fixture" : null
         );
     }
 

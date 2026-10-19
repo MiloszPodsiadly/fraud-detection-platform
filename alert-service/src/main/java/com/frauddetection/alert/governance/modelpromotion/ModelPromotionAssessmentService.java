@@ -396,11 +396,16 @@ public class ModelPromotionAssessmentService {
             blockers.add("POLICY_NOT_INSTITUTIONALLY_APPROVED");
         }
         criteria.stream()
+                .filter(result -> ModelPromotionEligibility.requiredFor(
+                        ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
+                ).contains(result.criterion()))
                 .filter(result -> result.outcome() != CriterionOutcome.PASS)
-                .filter(result -> result.outcome() != CriterionOutcome.NOT_APPLICABLE
-                        || ModelPromotionPolicyValidator.isNonWaivable(result.criterion()))
                 .map(result -> result.criterion().name() + ":" + result.reason())
                 .forEach(blockers::add);
+        if (!ModelPromotionEligibility.passed(ModelPromotionLifecycleState.PROMOTION_RECOMMENDED, criteria)
+                && blockers.isEmpty()) {
+            blockers.add("REQUIRED_CRITERIA_INCOMPLETE");
+        }
         return List.copyOf(blockers);
     }
 

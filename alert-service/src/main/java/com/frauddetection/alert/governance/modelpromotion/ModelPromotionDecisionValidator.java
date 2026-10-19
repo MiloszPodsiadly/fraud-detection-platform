@@ -59,6 +59,10 @@ class ModelPromotionDecisionValidator {
         ));
     }
 
+    String proposalRequestIntentSha256(ModelPromotionProposalRequestIntent intent) {
+        return canonicalSha256(intent);
+    }
+
     String reviewCommandSha256(ModelPromotionProposalReview review) {
         ModelPromotionApproval approval = review.approval();
         return canonicalSha256(new ReviewIntent(
@@ -201,7 +205,7 @@ class ModelPromotionDecisionValidator {
         if (requiresAssessment(target) && !content.humanReviewable()) {
             throw new ModelPromotionPersistenceConflictException("Assessment is not human-reviewable");
         }
-        if (requiresAssessment(target) && !completeMandatoryAssessment(content)) {
+        if (requiresAssessment(target) && !ModelPromotionEligibility.passed(target, content.criteria())) {
             throw new ModelPromotionPersistenceConflictException("Assessment is missing mandatory promotion criteria");
         }
         if ((target == ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
@@ -209,10 +213,13 @@ class ModelPromotionDecisionValidator {
                 && !content.formalRecommendationEligible()) {
             throw new ModelPromotionPersistenceConflictException("Assessment is not eligible for formal recommendation");
         }
-        if (target == ModelPromotionLifecycleState.CHAMPION
+        if ((target == ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
+                || target == ModelPromotionLifecycleState.CHAMPION)
                 && policy.content().provenance().authority()
                 != ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED) {
-            throw new ModelPromotionPersistenceConflictException("CHAMPION requires an institutional policy snapshot");
+            throw new ModelPromotionPersistenceConflictException(
+                    "Formal promotion requires an institutional policy snapshot"
+            );
         }
     }
 
@@ -248,23 +255,6 @@ class ModelPromotionDecisionValidator {
                     "Institutional policy authority could not be verified"
             );
         }
-    }
-
-    private boolean completeMandatoryAssessment(ModelPromotionAssessment.Content content) {
-        java.util.EnumMap<ModelPromotionCriterion, ModelPromotionAssessment.CriterionAssessment> criteria =
-                new java.util.EnumMap<>(ModelPromotionCriterion.class);
-        for (ModelPromotionAssessment.CriterionAssessment criterion : content.criteria()) {
-            if (criteria.put(criterion.criterion(), criterion) != null) {
-                return false;
-            }
-        }
-        if (criteria.size() != ModelPromotionCriterion.values().length) {
-            return false;
-        }
-        return java.util.Arrays.stream(ModelPromotionCriterion.values())
-                .filter(ModelPromotionPolicyValidator::isNonWaivable)
-                .allMatch(criterion -> criteria.get(criterion).outcome()
-                        == ModelPromotionAssessment.CriterionOutcome.PASS);
     }
 
     private boolean requiresAssessment(ModelPromotionLifecycleState state) {

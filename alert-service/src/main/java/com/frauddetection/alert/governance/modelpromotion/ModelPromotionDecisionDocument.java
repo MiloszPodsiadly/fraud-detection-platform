@@ -3,8 +3,6 @@ package com.frauddetection.alert.governance.modelpromotion;
 import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Immutable;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -12,14 +10,6 @@ import java.time.Instant;
 
 @Document(collection = ModelPromotionDecisionDocument.COLLECTION)
 @Immutable
-@CompoundIndexes({
-        @CompoundIndex(name = ModelPromotionDecisionDocument.OPERATION_INDEX,
-                def = "{'aggregate_key':1,'operation_id':1}", unique = true),
-        @CompoundIndex(name = ModelPromotionDecisionDocument.DECISION_INDEX,
-                def = "{'decision_id':1}", unique = true, sparse = true),
-        @CompoundIndex(name = ModelPromotionDecisionDocument.HISTORY_INDEX,
-                def = "{'aggregate_key':1,'committed_at':-1,'operation_id':1}")
-})
 public record ModelPromotionDecisionDocument(
         @Id String operationKey,
         @Field("aggregate_key") String aggregateKey,

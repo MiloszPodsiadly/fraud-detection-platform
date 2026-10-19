@@ -70,7 +70,7 @@ class ModelPromotionWorkflowServiceTest {
         ModelPromotionPolicy policy = ModelPromotionAssessmentTestFixtures.policy();
         when(policyResolver.resolve(scope(ModelGovernanceEnvironment.PRODUCTION), use(), NOW))
                 .thenReturn(ModelPromotionPolicyResolution.available(policy));
-        when(store.submitProposal(any())).thenAnswer(invocation -> {
+        when(store.submitProposal(any(), any())).thenAnswer(invocation -> {
             ModelPromotionProposalSubmission submission = invocation.getArgument(0);
             return new ModelPromotionProposalResult(
                     submission.proposal().proposalId(),
@@ -104,7 +104,7 @@ class ModelPromotionWorkflowServiceTest {
         assertThat(result.proposal().proposedBy()).isEqualTo("proposer");
         org.mockito.ArgumentCaptor<ModelPromotionProposalSubmission> submitted =
                 org.mockito.ArgumentCaptor.forClass(ModelPromotionProposalSubmission.class);
-        org.mockito.Mockito.verify(store).submitProposal(submitted.capture());
+        org.mockito.Mockito.verify(store).submitProposal(submitted.capture(), any());
         assertThat(submitted.getValue().operationContext().actorId()).isEqualTo("proposer");
         assertThat(submitted.getValue().policySnapshot()).isNull();
         assertThat(submitted.getValue().assessmentSnapshot()).isNull();
@@ -155,7 +155,7 @@ class ModelPromotionWorkflowServiceTest {
                 Set.of(AnalystAuthority.MODEL_PROMOTION_RETIRE, AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION),
                 Set.of()
         );
-        when(store.submitProposal(any())).thenAnswer(invocation -> {
+        when(store.submitProposal(any(), any())).thenAnswer(invocation -> {
             ModelPromotionProposalSubmission submission = invocation.getArgument(0);
             return new ModelPromotionProposalResult(
                     submission.proposal().proposalId(),
@@ -189,7 +189,7 @@ class ModelPromotionWorkflowServiceTest {
         assertThat(result.proposal().rationale().content()).isEqualTo(RATIONALE);
         org.mockito.ArgumentCaptor<ModelPromotionProposalSubmission> submitted =
                 org.mockito.ArgumentCaptor.forClass(ModelPromotionProposalSubmission.class);
-        org.mockito.Mockito.verify(store).submitProposal(submitted.capture());
+        org.mockito.Mockito.verify(store).submitProposal(submitted.capture(), any());
         assertThat(submitted.getValue().policySnapshot()).isNull();
         assertThat(submitted.getValue().assessmentSnapshot()).isNull();
         org.mockito.Mockito.verifyNoInteractions(policyResolver, evidenceResolver, assessmentService);
@@ -324,7 +324,7 @@ class ModelPromotionWorkflowServiceTest {
     @Test
     void submitsAdministrativeRejectionWithoutPolicyOrEvidence() {
         authenticate("proposer", withProductionScope(AnalystRole.ANALYST.authorities()), Set.of(AnalystRole.ANALYST));
-        when(store.submitProposal(any())).thenAnswer(invocation -> {
+        when(store.submitProposal(any(), any())).thenAnswer(invocation -> {
             ModelPromotionProposalSubmission submission = invocation.getArgument(0);
             return new ModelPromotionProposalResult(
                     submission.proposal().proposalId(),
@@ -355,7 +355,7 @@ class ModelPromotionWorkflowServiceTest {
 
         org.mockito.ArgumentCaptor<ModelPromotionProposalSubmission> submitted =
                 org.mockito.ArgumentCaptor.forClass(ModelPromotionProposalSubmission.class);
-        org.mockito.Mockito.verify(store).submitProposal(submitted.capture());
+        org.mockito.Mockito.verify(store).submitProposal(submitted.capture(), any());
         assertThat(submitted.getValue().policySnapshot()).isNull();
         assertThat(submitted.getValue().assessmentSnapshot()).isNull();
         org.mockito.Mockito.verifyNoInteractions(policyResolver, evidenceResolver, assessmentService);

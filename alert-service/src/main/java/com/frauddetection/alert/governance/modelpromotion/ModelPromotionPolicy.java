@@ -136,32 +136,6 @@ public record ModelPromotionPolicy(
             });
         }
 
-        public CriterionRule(
-                ModelPromotionCriterion criterion,
-                CriterionApplicability applicability,
-                Map<String, BigDecimal> thresholds,
-                long maximumEvidenceAgeSeconds,
-                String requiredVerificationLevel,
-                String evidenceSource,
-                String metricSemantics,
-                String populationDefinition,
-                String denominatorDefinition
-        ) {
-            this(
-                    criterion,
-                    applicability,
-                    thresholds,
-                    maximumEvidenceAgeSeconds,
-                    requiredVerificationLevel,
-                    evidenceSource,
-                    metricSemantics,
-                    populationDefinition,
-                    denominatorDefinition,
-                    applicability == CriterionApplicability.NOT_APPLICABLE_AUTHORIZED
-                            ? "policy-authorized-not-applicable"
-                            : null
-            );
-        }
     }
 
     public enum PolicyAuthority {

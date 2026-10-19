@@ -3,8 +3,6 @@ package com.frauddetection.alert.governance.modelpromotion;
 import com.frauddetection.alert.governance.GovernanceTimestampContract;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Immutable;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -13,17 +11,6 @@ import java.util.Objects;
 
 @Document(collection = ModelPromotionPolicyDocument.COLLECTION)
 @Immutable
-@CompoundIndexes({
-        @CompoundIndex(
-                name = ModelPromotionPolicyDocument.REVISION_INDEX,
-                def = "{'institutional_scope':1,'environment':1,'intended_use':1,'policy_id':1,'policy_revision':1}",
-                unique = true
-        ),
-        @CompoundIndex(
-                name = ModelPromotionPolicyDocument.EFFECTIVE_LOOKUP_INDEX,
-                def = "{'institutional_scope':1,'environment':1,'intended_use':1,'effective_from':-1,'effective_to':1}"
-        )
-})
 public record ModelPromotionPolicyDocument(
         @Id String policyKey,
         @Field("institutional_scope") String institutionalScope,

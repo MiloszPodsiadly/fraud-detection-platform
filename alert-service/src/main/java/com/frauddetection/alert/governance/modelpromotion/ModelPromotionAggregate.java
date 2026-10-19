@@ -3,7 +3,6 @@ package com.frauddetection.alert.governance.modelpromotion;
 import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
 
 import java.util.Objects;
-import java.util.Optional;
 
 public record ModelPromotionAggregate(
         ExactModelArtifactIdentity artifactIdentity,
@@ -50,10 +49,4 @@ public record ModelPromotionAggregate(
         return false;
     }
 
-    public Optional<ModelPromotionChampionKey> championKey() {
-        if (lifecycleState != ModelPromotionLifecycleState.CHAMPION) {
-            return Optional.empty();
-        }
-        return Optional.of(new ModelPromotionChampionKey(governanceScope, intendedUse));
-    }
 }

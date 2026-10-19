@@ -96,6 +96,29 @@ public class ModelPromotionWorkflowService {
                 request.operationId(),
                 requestedAt
         );
+        ModelPromotionTransitionProposal transition = new ModelPromotionTransitionProposal(
+                request.artifactIdentity(),
+                request.governanceScope(),
+                request.intendedUse(),
+                request.sourceState(),
+                request.expectedRevision(),
+                request.requestedTargetState(),
+                request.operationId()
+        );
+        ModelPromotionDecisionRationale rationale = new ModelPromotionDecisionRationale(
+                ModelPromotionDecisionRationale.proposalReference(request.proposalId()),
+                request.rationale(),
+                request.rationaleSha256()
+        );
+        ModelPromotionProposalRequestIntent requestIntent = new ModelPromotionProposalRequestIntent(
+                transition, request.evaluationWindow(), request.proposalId(), actor.actorId(), rationale
+        );
+        Optional<ModelPromotionProposalResult> committed = store.recoverSubmittedProposal(
+                requestIntent, actor.operationContext()
+        );
+        if (committed.isPresent()) {
+            return committed.get();
+        }
         boolean qualityGated = requiresAssessment(request.requestedTargetState());
         ModelPromotionPolicy policy = qualityGated
                 ? currentPolicy(request.governanceScope(), request.intendedUse(), requestedAt)
@@ -115,33 +138,21 @@ public class ModelPromotionWorkflowService {
                     "The promotion policy changed while the assessment was being created"
             );
         }
-        ModelPromotionTransitionProposal transition = new ModelPromotionTransitionProposal(
-                request.artifactIdentity(),
-                request.governanceScope(),
-                request.intendedUse(),
-                request.sourceState(),
-                request.expectedRevision(),
-                request.requestedTargetState(),
-                request.operationId()
-        );
         ModelPromotionProposal proposal = new ModelPromotionProposal(
                 request.proposalId(),
                 request.requestedTargetState(),
                 actor.actorId(),
                 requestedAt,
-                new ModelPromotionDecisionRationale(
-                        ModelPromotionDecisionRationale.proposalReference(request.proposalId()),
-                        request.rationale(),
-                        request.rationaleSha256()
-                )
+                rationale
         );
+        authorization.revalidate(requiredAuthority, request.governanceScope(), actor.operationContext());
         return store.submitProposal(new ModelPromotionProposalSubmission(
                 transition,
                 actor.operationContext(),
                 policy,
                 assessment,
                 proposal
-        ));
+        ), requestIntent);
     }
 
     public ModelPromotionProposalResult reviewProposal(ReviewRequest request) {
@@ -202,6 +213,12 @@ public class ModelPromotionWorkflowService {
         Objects.requireNonNull(request, "request is required");
         authorization.requireAuthority(AnalystAuthority.MODEL_PROMOTION_READ, request.governanceScope());
         return store.history(request.artifactIdentity(), request.governanceScope(), request.intendedUse(), limit);
+    }
+
+    public boolean canReadRationale(StateRequest request) {
+        Objects.requireNonNull(request, "request is required");
+        authorization.requireAuthority(AnalystAuthority.MODEL_PROMOTION_READ, request.governanceScope());
+        return authorization.canReadRationale(request.governanceScope());
     }
 
     public List<ModelPromotionProposalDocument> proposalHistory(StateRequest request, int limit) {

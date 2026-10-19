@@ -67,6 +67,35 @@ class ModelPromotionDecisionValidatorTest {
     }
 
     @Test
+    void forgedEligibleAssessmentCannotUseTestPolicyForFormalRecommendation() {
+        ModelPromotionPolicy testPolicy = ModelPromotionAssessmentTestFixtures.policy();
+        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionAssessment.Content original = assessment(testPolicy, evidence).content();
+        ModelPromotionAssessment.Content forged = new ModelPromotionAssessment.Content(
+                original.assessmentVersion(), original.assessmentCreatedAt(), original.evaluatorIdentity(),
+                original.evaluatorVersion(), original.artifactIdentity(), original.governanceScope(),
+                original.intendedUse(), original.policy(), original.evidence(), original.populationAndCoverage(),
+                original.criteria(), ModelPromotionAssessment.AssessmentStatus.ELIGIBLE_FOR_FORMAL_RECOMMENDATION,
+                original.diagnosticEvidenceAvailable(), true, true, false, false,
+                original.blockers(), original.limitations()
+        );
+        ModelPromotionAssessment tamperedAssessment = new ModelPromotionAssessment(
+                forged, validator.canonicalSha256(forged)
+        );
+
+        assertThatThrownBy(() -> validator.validate(command(
+                testPolicy,
+                tamperedAssessment,
+                evidence,
+                Instant.parse("2026-06-11T12:00:00Z"),
+                ModelPromotionLifecycleState.SHADOW_APPROVED,
+                2,
+                ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
+        ))).isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("institutional policy");
+    }
+
+    @Test
     void validInstitutionalPolicyDoesNotBypassUnavailableMandatoryEvidence() {
         ModelPromotionPolicy policy = institutionalPolicy("2027-01-01T00:00:00Z");
         ModelPromotionAssessment assessment = assessment(

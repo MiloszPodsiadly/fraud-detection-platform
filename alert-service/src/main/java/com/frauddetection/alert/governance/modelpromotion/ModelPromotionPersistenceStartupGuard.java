@@ -140,6 +140,10 @@ public class ModelPromotionPersistenceStartupGuard implements ApplicationRunner 
         if (unique != databaseEnforcesUnique) {
             throw failure("INDEX_UNIQUENESS_INVALID:" + indexName);
         }
+        if (ModelPromotionDecisionDocument.DECISION_INDEX.equals(indexName)
+                && !Boolean.TRUE.equals(index.getBoolean("sparse", false))) {
+            throw failure("INDEX_SPARSE_INVALID:" + indexName);
+        }
     }
 
     private IllegalStateException failure(String reason) {

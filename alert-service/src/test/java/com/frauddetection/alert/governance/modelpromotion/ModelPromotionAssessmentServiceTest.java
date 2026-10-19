@@ -90,7 +90,8 @@ class ModelPromotionAssessmentServiceTest {
                 provenance.evidenceSource(),
                 provenance.metricSemantics(),
                 provenance.populationDefinition(),
-                provenance.denominatorDefinition()
+                provenance.denominatorDefinition(),
+                null
         ));
         ModelPromotionEvidenceBundle source = ModelPromotionAssessmentTestFixtures.completeEvidence();
         ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.evidence(
@@ -126,6 +127,48 @@ class ModelPromotionAssessmentServiceTest {
         assertThat(first.content().formalRecommendationEligible()).isFalse();
         assertThat(first.content().blockers()).containsExactly("POLICY_NOT_INSTITUTIONALLY_APPROVED");
         assertThat(first.canonicalSha256()).isEqualTo(second.canonicalSha256());
+    }
+
+    @Test
+    void institutionallyApprovedPolicyCannotWaiveFormalQualityEvidence() {
+        List<ModelPromotionPolicy.CriterionRule> rules = java.util.Arrays.stream(ModelPromotionCriterion.values())
+                .map(criterion -> ModelPromotionAssessmentTestFixtures.rule(
+                        criterion,
+                        ModelPromotionPolicyValidator.isNonWaivable(criterion)
+                                ? ModelPromotionPolicy.CriterionApplicability.MANDATORY
+                                : ModelPromotionPolicy.CriterionApplicability.NOT_APPLICABLE_AUTHORIZED
+                )).toList();
+        ModelPromotionPolicy synthetic = ModelPromotionAssessmentTestFixtures.policy(
+                rules, "2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z"
+        );
+        ModelPromotionPolicy.Content original = synthetic.content();
+        ModelPromotionPolicy.Content approved = new ModelPromotionPolicy.Content(
+                original.policyVersion(), original.policyId(), original.revision(),
+                original.governanceScope(), original.intendedUse(),
+                new ModelPromotionPolicy.PolicyProvenance(
+                        ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED,
+                        "independent-author", "model-risk-committee", "2025-12-31T00:00:00Z", "signed-approval"
+                ),
+                original.effectiveFromInclusive(), original.effectiveToExclusive(), rules
+        );
+        String digest = ModelPromotionAssessmentTestFixtures.policyValidator().canonicalSha256(approved);
+        ModelPromotionPolicy policy = new ModelPromotionPolicy(
+                approved, digest,
+                new ModelPromotionPolicy.PolicyAuthorizationEvidence(
+                        "institutional-authority", "approved-key", "verified-signature", digest,
+                        "2025-12-31T00:00:00Z"
+                )
+        );
+        ModelPromotionAssessment assessment = serviceWithPolicy(policy)
+                .assess(ModelPromotionAssessmentTestFixtures.completeEvidence(), ASSESSMENT_TIME);
+
+        assertThat(assessment.content().formalRecommendationEligible()).isFalse();
+        assertThat(assessment.content().blockers())
+                .anyMatch(blocker -> blocker.startsWith("PRECISION_AT_ALERT_REVIEW_BUDGET:"))
+                .anyMatch(blocker -> blocker.startsWith("CRITICAL_SEGMENT_REGRESSIONS:"));
+        assertThat(ModelPromotionEligibility.passed(
+                ModelPromotionLifecycleState.PROMOTION_RECOMMENDED, assessment.content().criteria()
+        )).isFalse();
     }
 
     @Test
@@ -171,7 +214,8 @@ class ModelPromotionAssessmentServiceTest {
                 ModelPromotionCriterion.PRECISION_AT_ALERT_REVIEW_BUDGET.evidenceSource(),
                 ModelPromotionCriterion.PRECISION_AT_ALERT_REVIEW_BUDGET.metricSemantics(),
                 ModelPromotionCriterion.PRECISION_AT_ALERT_REVIEW_BUDGET.populationDefinition(),
-                ModelPromotionCriterion.PRECISION_AT_ALERT_REVIEW_BUDGET.denominatorDefinition()
+                ModelPromotionCriterion.PRECISION_AT_ALERT_REVIEW_BUDGET.denominatorDefinition(),
+                null
         ));
         ModelPromotionPolicy policy = ModelPromotionAssessmentTestFixtures.policy(
                 rules, "2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z"

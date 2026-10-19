@@ -1,8 +1,6 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -10,19 +8,12 @@ import java.time.Instant;
 import java.util.Objects;
 
 @Document(collection = ModelPromotionProposalDocument.COLLECTION)
-@CompoundIndexes({
-        @CompoundIndex(name = ModelPromotionProposalDocument.OPERATION_INDEX,
-                def = "{'aggregate_key':1,'operation_id':1}", unique = true),
-        @CompoundIndex(name = ModelPromotionProposalDocument.PENDING_REVIEW_INDEX,
-                def = "{'aggregate_key':1,'review_status':1,'submitted_at':-1}"),
-        @CompoundIndex(name = ModelPromotionProposalDocument.HISTORY_INDEX,
-                def = "{'aggregate_key':1,'submitted_at':-1,'_id':1}")
-})
 public record ModelPromotionProposalDocument(
         @Id String proposalId,
         @Field("aggregate_key") String aggregateKey,
         @Field("operation_id") String operationId,
         @Field("command_sha256") String commandSha256,
+        @Field("request_intent_sha256") String requestIntentSha256,
         @Field("actor_id") String actorId,
         @Field("authorization_fingerprint") String authorizationFingerprint,
         ModelPromotionTransitionProposal transition,
@@ -83,6 +74,7 @@ public record ModelPromotionProposalDocument(
     static ModelPromotionProposalDocument pending(
             String aggregateKey,
             String commandSha256,
+            String requestIntentSha256,
             ModelPromotionProposalSubmission submission,
             ModelPromotionDecisionDocument.LocalAuditEvidence submissionAudit,
             Instant submittedAt
@@ -92,6 +84,7 @@ public record ModelPromotionProposalDocument(
                 aggregateKey,
                 submission.transition().operationId(),
                 commandSha256,
+                requestIntentSha256,
                 submission.operationContext().actorId(),
                 submission.operationContext().authorizationFingerprint(),
                 submission.transition(),
@@ -108,6 +101,16 @@ public record ModelPromotionProposalDocument(
                 submittedAt,
                 null
         );
+    }
+
+    static ModelPromotionProposalDocument pending(
+            String aggregateKey,
+            String commandSha256,
+            ModelPromotionProposalSubmission submission,
+            ModelPromotionDecisionDocument.LocalAuditEvidence submissionAudit,
+            Instant submittedAt
+    ) {
+        return pending(aggregateKey, commandSha256, null, submission, submissionAudit, submittedAt);
     }
 
     ModelPromotionProposalResult toResult(boolean idempotentReplay) {
