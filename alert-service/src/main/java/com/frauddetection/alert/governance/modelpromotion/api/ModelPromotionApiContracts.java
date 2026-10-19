@@ -107,7 +107,7 @@ public final class ModelPromotionApiContracts {
             ModelPromotionLifecycleState lifecycleState,
             long currentRevision,
             String acceptedDecisionId,
-            List<ModelPromotionLifecycleState> allowedTargetStates,
+            List<ModelPromotionLifecycleState> structurallyAllowedTargetStates,
             boolean runtimeActivationAuthorized,
             String deploymentStatus,
             List<DecisionResponse> decisionHistory,

@@ -137,6 +137,10 @@ class ModelPromotionHttpIntegrationTest extends AbstractIntegrationTest {
         assertThat(state.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(state.getBody()).containsEntry("lifecycleState", "SHADOW_APPROVED")
                 .containsEntry("currentRevision", 2);
+        assertThat(state.getBody()).containsKey("structurallyAllowedTargetStates")
+                .doesNotContainKey("allowedTargetStates");
+        assertThat((List<String>) state.getBody().get("structurallyAllowedTargetStates"))
+                .contains("PROMOTION_RECOMMENDED");
         assertThat((List<?>) state.getBody().get("decisionHistory")).hasSize(3);
         assertThat((List<?>) state.getBody().get("proposals")).hasSize(2);
         assertThat(((List<Map<?, ?>>) state.getBody().get("proposals")).stream()
