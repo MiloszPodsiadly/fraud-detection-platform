@@ -143,7 +143,7 @@ class ModelPromotionDecisionValidator {
         ModelPromotionAssessment assessment = request.assessmentSnapshot();
         if (assessment == null) {
             if (reference.hasAssessment() || reference.hasEvidenceBundle()
-                    || requiresAssessment(request.transition().requestedTargetState())) {
+                    || ModelPromotionEligibility.requiresAssessment(request.transition().requestedTargetState())) {
                 throw new ModelPromotionPersistenceConflictException("Required assessment snapshot is unavailable");
             }
             return;
@@ -178,7 +178,7 @@ class ModelPromotionDecisionValidator {
             Instant requestedAt
     ) {
         if (assessment == null) {
-            if (requiresAssessment(target)) {
+            if (ModelPromotionEligibility.requiresAssessment(target)) {
                 throw new ModelPromotionPersistenceConflictException("Required assessment snapshot is unavailable");
             }
             return;
@@ -202,10 +202,10 @@ class ModelPromotionDecisionValidator {
         if (assessedAt.isAfter(requestedAt) || assessmentExpired(content, requestedAt)) {
             throw new ModelPromotionPersistenceConflictException("Assessment snapshot is stale");
         }
-        if (requiresAssessment(target) && !content.humanReviewable()) {
+        if (ModelPromotionEligibility.requiresAssessment(target) && !content.humanReviewable()) {
             throw new ModelPromotionPersistenceConflictException("Assessment is not human-reviewable");
         }
-        if (requiresAssessment(target) && !ModelPromotionEligibility.passed(target, content.criteria())) {
+        if (ModelPromotionEligibility.requiresAssessment(target) && !ModelPromotionEligibility.passed(target, content.criteria())) {
             throw new ModelPromotionPersistenceConflictException("Assessment is missing mandatory promotion criteria");
         }
         if ((target == ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
@@ -241,7 +241,7 @@ class ModelPromotionDecisionValidator {
             Instant requestedAt
     ) {
         if (policy == null) {
-            if (requiresAssessment(target)) {
+            if (ModelPromotionEligibility.requiresAssessment(target)) {
                 throw new ModelPromotionPersistenceConflictException("Quality-gated transition requires a policy snapshot");
             }
             return;
@@ -255,12 +255,6 @@ class ModelPromotionDecisionValidator {
                     "Institutional policy authority could not be verified"
             );
         }
-    }
-
-    private boolean requiresAssessment(ModelPromotionLifecycleState state) {
-        return state == ModelPromotionLifecycleState.SHADOW_APPROVED
-                || state == ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
-                || state == ModelPromotionLifecycleState.CHAMPION;
     }
 
     private record RegistrationIntent(

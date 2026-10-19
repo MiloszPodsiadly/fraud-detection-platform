@@ -25,12 +25,6 @@ public final class ModelPromotionStateMachine {
             ModelPromotionLifecycleState.CHAMPION, Set.of(ModelPromotionLifecycleState.RETIRED)
     );
 
-    private static final Set<ModelPromotionLifecycleState> ASSESSMENT_REQUIRED = Set.of(
-            ModelPromotionLifecycleState.SHADOW_APPROVED,
-            ModelPromotionLifecycleState.PROMOTION_RECOMMENDED,
-            ModelPromotionLifecycleState.CHAMPION
-    );
-
     public boolean canTransition(ModelPromotionLifecycleState source, ModelPromotionLifecycleState target) {
         return ALLOWED.getOrDefault(source, Set.of()).contains(target);
     }
@@ -49,7 +43,7 @@ public final class ModelPromotionStateMachine {
             throw new ModelPromotionPersistenceConflictException("Unsupported model promotion transition: "
                     + current.lifecycleState() + " -> " + command.requestedTargetState());
         }
-        if (ASSESSMENT_REQUIRED.contains(command.requestedTargetState())
+        if (ModelPromotionEligibility.requiresAssessment(command.requestedTargetState())
                 && (!command.decisionReference().hasEvidenceBundle()
                 || !command.decisionReference().hasAssessment())) {
             throw new ModelPromotionPersistenceConflictException(

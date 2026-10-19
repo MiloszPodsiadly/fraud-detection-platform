@@ -109,6 +109,31 @@ class ModelPromotionDecisionValidatorTest {
     }
 
     @Test
+    void missingMandatoryAssessmentCriterionBlocksTheTransition() {
+        ModelPromotionPolicy policy = institutionalPolicy("2027-01-01T00:00:00Z");
+        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionAssessment.Content original = assessment(policy, evidence).content();
+        ModelPromotionAssessment.Content incomplete = new ModelPromotionAssessment.Content(
+                original.assessmentVersion(), original.assessmentCreatedAt(), original.evaluatorIdentity(),
+                original.evaluatorVersion(), original.artifactIdentity(), original.governanceScope(),
+                original.intendedUse(), original.policy(), original.evidence(), original.populationAndCoverage(),
+                original.criteria().stream()
+                        .filter(criterion -> criterion.criterion() != ModelPromotionCriterion.EXACT_SHA_MODEL_CARD)
+                        .toList(),
+                original.assessmentStatus(), original.diagnosticEvidenceAvailable(), original.humanReviewable(),
+                original.formalRecommendationEligible(), false, false, original.blockers(), original.limitations()
+        );
+        ModelPromotionAssessment tamperedAssessment = new ModelPromotionAssessment(
+                incomplete, validator.canonicalSha256(incomplete)
+        );
+
+        assertThatThrownBy(() -> validator.validate(command(
+                policy, tamperedAssessment, evidence, Instant.parse("2026-06-11T12:00:00Z")
+        ))).isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("mandatory promotion criteria");
+    }
+
+    @Test
     void durableDecisionRevalidatesInstitutionalPolicyAuthority() {
         ModelPromotionPolicy policy = institutionalPolicy("2027-01-01T00:00:00Z");
         ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();

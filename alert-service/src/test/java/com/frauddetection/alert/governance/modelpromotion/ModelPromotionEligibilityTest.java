@@ -5,10 +5,62 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ModelPromotionEligibilityTest {
+
+    @Test
+    void requiredCriteriaCannotBeMutatedByCallers() {
+        Set<ModelPromotionCriterion> shadow = ModelPromotionEligibility.requiredFor(
+                ModelPromotionLifecycleState.SHADOW_APPROVED
+        );
+        Set<ModelPromotionCriterion> recommendation = ModelPromotionEligibility.requiredFor(
+                ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
+        );
+        Set<ModelPromotionCriterion> champion = ModelPromotionEligibility.requiredFor(
+                ModelPromotionLifecycleState.CHAMPION
+        );
+
+        assertThatThrownBy(() -> shadow.add(ModelPromotionCriterion.FALSE_POSITIVE_RATE))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> recommendation.add(ModelPromotionCriterion.EXACT_MODEL_LATENCY_STABILITY))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> champion.remove(ModelPromotionCriterion.EXACT_SHA_MODEL_CARD))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(ModelPromotionEligibility.requiredFor(ModelPromotionLifecycleState.SHADOW_APPROVED)).hasSize(4);
+        assertThat(ModelPromotionEligibility.requiredFor(ModelPromotionLifecycleState.PROMOTION_RECOMMENDED)).hasSize(8);
+        assertThat(ModelPromotionEligibility.requiredFor(ModelPromotionLifecycleState.CHAMPION)).hasSize(10);
+        assertThat(ModelPromotionEligibility.requiredFor(ModelPromotionLifecycleState.RETIRED)).isEmpty();
+    }
+
+    @Test
+    void assessmentRequirementFollowsTheSameImmutableGateMatrix() {
+        for (ModelPromotionLifecycleState target : ModelPromotionLifecycleState.values()) {
+            assertThat(ModelPromotionEligibility.requiresAssessment(target))
+                    .isEqualTo(!ModelPromotionEligibility.requiredFor(target).isEmpty());
+        }
+    }
+
+    @Test
+    void omittedMandatoryCriterionCannotPassTheTargetGate() {
+        ModelPromotionAssessment complete = ModelPromotionAssessmentTestFixtures.service(
+                (scope, use, at) -> Optional.of(ModelPromotionAssessmentTestFixtures.policy())
+        ).assess(ModelPromotionAssessmentTestFixtures.completeEvidence(),
+                ModelPromotionAssessmentTestFixtures.ASSESSMENT_TIME);
+        List<ModelPromotionAssessment.CriterionAssessment> withoutModelCard = complete.content().criteria().stream()
+                .filter(criterion -> criterion.criterion() != ModelPromotionCriterion.EXACT_SHA_MODEL_CARD)
+                .toList();
+
+        assertThat(ModelPromotionEligibility.passed(ModelPromotionLifecycleState.SHADOW_APPROVED, withoutModelCard))
+                .isFalse();
+        assertThat(ModelPromotionEligibility.passed(ModelPromotionLifecycleState.PROMOTION_RECOMMENDED, withoutModelCard))
+                .isFalse();
+        assertThat(ModelPromotionEligibility.passed(ModelPromotionLifecycleState.CHAMPION, withoutModelCard))
+                .isFalse();
+    }
 
     @Test
     void shadowRecommendationAndChampionRequireIncreasingEvidence() {

@@ -23,6 +23,11 @@ public class ModelPromotionPolicyValidator {
             "alertReviewBudget", "maximumCriticalRegressions", "minimumSegmentsEvaluated",
             "minimumSampleSize", "minimumDenominator", "maximumCriticalLineageGaps"
     );
+    private static final Set<String> POSITIVE_THRESHOLDS = Set.of(
+            "minimumEvaluatedRecords", "minimumPositiveLabels", "minimumNegativeLabels",
+            "alertReviewBudget", "minimumSegmentsEvaluated", "minimumSampleSize",
+            "minimumDenominator", "maximumMilliseconds"
+    );
     private static final Set<ModelPromotionCriterion> NON_WAIVABLE_CRITERIA = EnumSet.of(
             ModelPromotionCriterion.COMPLETE_EVALUATION_PROVENANCE,
             ModelPromotionCriterion.EXACT_SHA_MODEL_CARD,
@@ -89,7 +94,7 @@ public class ModelPromotionPolicyValidator {
 
     private void validateThresholds(ModelPromotionPolicy.CriterionRule rule) {
         rule.thresholds().forEach((name, value) -> {
-            if (value.signum() < 0) {
+            if (value.signum() < 0 || (POSITIVE_THRESHOLDS.contains(name) && value.signum() == 0)) {
                 throw invalid(Reason.POLICY_CONTRACT_INVALID);
             }
             if (RATE_THRESHOLDS.contains(name) && value.compareTo(BigDecimal.ONE) > 0) {
@@ -103,6 +108,12 @@ public class ModelPromotionPolicyValidator {
                 }
             }
         });
+        if (rule.criterion() == ModelPromotionCriterion.STATISTICALLY_MEANINGFUL_SAMPLE
+                && rule.applicability() == ModelPromotionPolicy.CriterionApplicability.MANDATORY
+                && (long) rule.thresholds().get("minimumPositiveLabels").intValueExact()
+                + rule.thresholds().get("minimumNegativeLabels").intValueExact() > Integer.MAX_VALUE) {
+            throw invalid(Reason.POLICY_CONTRACT_INVALID);
+        }
     }
 
     private Instant timestamp(String value) {

@@ -119,7 +119,7 @@ public class ModelPromotionWorkflowService {
         if (committed.isPresent()) {
             return committed.get();
         }
-        boolean qualityGated = requiresAssessment(request.requestedTargetState());
+        boolean qualityGated = ModelPromotionEligibility.requiresAssessment(request.requestedTargetState());
         ModelPromotionPolicy policy = qualityGated
                 ? currentPolicy(request.governanceScope(), request.intendedUse(), requestedAt)
                 : null;
@@ -241,7 +241,7 @@ public class ModelPromotionWorkflowService {
         if (outcome != ModelPromotionApproval.Outcome.APPROVED) {
             return;
         }
-        if (!requiresAssessment(proposal.transition().requestedTargetState())) {
+        if (!ModelPromotionEligibility.requiresAssessment(proposal.transition().requestedTargetState())) {
             return;
         }
         ModelPromotionPolicy currentPolicy = currentPolicy(
@@ -323,12 +323,6 @@ public class ModelPromotionWorkflowService {
                 && assessmentPolicy.policyId().equals(policy.content().policyId())
                 && assessmentPolicy.revision().equals(policy.content().revision())
                 && assessmentPolicy.canonicalSha256().equals(policy.canonicalSha256());
-    }
-
-    private boolean requiresAssessment(ModelPromotionLifecycleState targetState) {
-        return targetState == ModelPromotionLifecycleState.SHADOW_APPROVED
-                || targetState == ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
-                || targetState == ModelPromotionLifecycleState.CHAMPION;
     }
 
     public record CandidateRegistrationRequest(

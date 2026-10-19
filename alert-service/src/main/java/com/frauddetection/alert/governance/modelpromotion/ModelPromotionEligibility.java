@@ -7,19 +7,24 @@ import java.util.Set;
 
 final class ModelPromotionEligibility {
 
-    private static final Set<ModelPromotionCriterion> SHADOW = EnumSet.of(
+    private static final Set<ModelPromotionCriterion> SHADOW = Set.copyOf(EnumSet.of(
             ModelPromotionCriterion.COMPLETE_EVALUATION_PROVENANCE,
             ModelPromotionCriterion.EXACT_SHA_MODEL_CARD,
             ModelPromotionCriterion.IDENTITY_AND_LINEAGE_INTEGRITY,
             ModelPromotionCriterion.STATISTICALLY_MEANINGFUL_SAMPLE
-    );
-    private static final Set<ModelPromotionCriterion> RECOMMENDATION = EnumSet.complementOf(EnumSet.of(
+    ));
+    private static final Set<ModelPromotionCriterion> RECOMMENDATION = Set.copyOf(EnumSet.complementOf(EnumSet.of(
             ModelPromotionCriterion.EXACT_MODEL_LATENCY_STABILITY,
             ModelPromotionCriterion.EXACT_MODEL_FALLBACK_RATE
-    ));
-    private static final Set<ModelPromotionCriterion> CHAMPION = EnumSet.allOf(ModelPromotionCriterion.class);
+    )));
+    private static final Set<ModelPromotionCriterion> CHAMPION =
+            Set.copyOf(EnumSet.allOf(ModelPromotionCriterion.class));
 
     private ModelPromotionEligibility() {
+    }
+
+    static boolean requiresAssessment(ModelPromotionLifecycleState target) {
+        return !requiredFor(target).isEmpty();
     }
 
     static Set<ModelPromotionCriterion> requiredFor(ModelPromotionLifecycleState target) {
