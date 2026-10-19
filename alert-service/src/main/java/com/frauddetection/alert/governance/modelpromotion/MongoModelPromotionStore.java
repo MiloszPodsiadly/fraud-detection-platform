@@ -129,13 +129,17 @@ public class MongoModelPromotionStore {
                 requestIntent.transition().governanceScope(),
                 requestIntent.transition().intendedUse()
         );
-        return replayProposalSubmission(
+        Optional<ModelPromotionProposalResult> recovered = replayProposalSubmission(
                 aggregateKey,
                 context.operationId(),
                 null,
                 decisionValidator.proposalRequestIntentSha256(requestIntent),
                 context
         );
+        if (recovered.isEmpty()) {
+            assertOperationAvailable(aggregateKey, context.operationId());
+        }
+        return recovered;
     }
 
     Optional<ModelPromotionProposalDocument> findProposal(String proposalId) {
@@ -230,6 +234,11 @@ public class MongoModelPromotionStore {
             throw new ModelPromotionPersistenceConflictException("Model promotion candidate is not registered");
         }
         stateMachine.validateProposal(persisted.toAggregate(), submission.transition());
+        claimOperation(
+                aggregateKey,
+                submission.transition().operationId(),
+                ModelPromotionOperationClaimDocument.OperationType.SUBMIT_PROPOSAL
+        );
         Instant submittedAt = clock.instant();
         ModelPromotionProposalDocument proposal = ModelPromotionProposalDocument.pending(
                 aggregateKey,
@@ -281,6 +290,11 @@ public class MongoModelPromotionStore {
         if (claimed.getModifiedCount() != 1) {
             throw new ModelPromotionPersistenceConflictException("Model promotion proposal review is already in progress");
         }
+        claimOperation(
+                proposal.aggregateKey(),
+                review.operationContext().operationId(),
+                ModelPromotionOperationClaimDocument.OperationType.REVIEW_PROPOSAL
+        );
         preconditionRevalidation.run();
 
         Instant reviewedAt = clock.instant();
@@ -462,6 +476,11 @@ public class MongoModelPromotionStore {
         if (replay.isPresent()) {
             return replay.get();
         }
+        claimOperation(
+                aggregateKey,
+                command.operationContext().operationId(),
+                ModelPromotionOperationClaimDocument.OperationType.REGISTER_CANDIDATE
+        );
         Instant committedAt = clock.instant();
         ModelPromotionStateDocument state = ModelPromotionStateDocument.candidate(command, committedAt);
         mongoTemplate.insert(state);
@@ -814,6 +833,34 @@ public class MongoModelPromotionStore {
             );
         }
         return Optional.of(existing.toResult().asReplay());
+    }
+
+    private void claimOperation(
+            String aggregateKey,
+            String operationId,
+            ModelPromotionOperationClaimDocument.OperationType operationType
+    ) {
+        assertOperationAvailable(aggregateKey, operationId);
+        mongoTemplate.insert(new ModelPromotionOperationClaimDocument(
+                ModelPromotionPersistenceKey.operation(aggregateKey, operationId),
+                aggregateKey,
+                operationId,
+                operationType
+        ));
+    }
+
+    private void assertOperationAvailable(String aggregateKey, String operationId) {
+        String operationKey = ModelPromotionPersistenceKey.operation(aggregateKey, operationId);
+        Query priorOperation = Query.query(Criteria.where("aggregate_key").is(aggregateKey)
+                .and("operation_id").is(operationId));
+        if (mongoTemplate.exists(Query.query(Criteria.where("_id").is(operationKey)),
+                ModelPromotionOperationClaimDocument.class)
+                || mongoTemplate.exists(priorOperation, ModelPromotionDecisionDocument.class)
+                || mongoTemplate.exists(priorOperation, ModelPromotionProposalDocument.class)) {
+            throw new ModelPromotionPersistenceConflictException(
+                    "Model promotion operation ID is already used by this aggregate"
+            );
+        }
     }
 
     private boolean isTransientTransactionFailure(Throwable throwable) {

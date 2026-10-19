@@ -81,6 +81,61 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void registrationOperationIdCannotBeReusedForProposal() {
+        ExactModelArtifactIdentity identity = identity("8");
+        ModelGovernanceScope scope = scope("TEST");
+        store.registerCandidate(registration(identity, scope, "shared-operation"));
+
+        assertThatThrownBy(() -> store.submitProposal(proposal(
+                identity, scope, "shared-operation", "proposal-shared", "proposer"
+        ))).isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("operation ID");
+        assertThat(store.findProposal("proposal-shared")).isEmpty();
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(1);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(1);
+    }
+
+    @Test
+    void proposalOperationIdCannotBeReusedForEitherReviewOutcome() {
+        ExactModelArtifactIdentity identity = identity("8");
+        ModelGovernanceScope scope = scope("TEST");
+        store.registerCandidate(registration(identity, scope, "register-distinct"));
+        store.submitProposal(proposal(identity, scope, "shared-operation", "proposal-shared", "proposer"));
+
+        for (ModelPromotionApproval.Outcome outcome : ModelPromotionApproval.Outcome.values()) {
+            assertThatThrownBy(() -> store.reviewProposal(
+                    review("proposal-shared", "shared-operation", "independent-reviewer", outcome), () -> {
+                    }
+            )).isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                    .hasMessageContaining("operation ID");
+        }
+        assertThat(store.findProposal("proposal-shared").orElseThrow().reviewStatus())
+                .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(1);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(2);
+    }
+
+    @Test
+    void reviewOperationIdCannotBeReusedForAnotherProposal() {
+        ExactModelArtifactIdentity identity = identity("8");
+        ModelGovernanceScope scope = scope("TEST");
+        store.registerCandidate(registration(identity, scope, "register-distinct"));
+        store.submitProposal(proposal(identity, scope, "proposal-operation-a", "proposal-a", "proposer-a"));
+        store.submitProposal(proposal(identity, scope, "proposal-operation-b", "proposal-b", "proposer-b"));
+        store.reviewProposal(review("proposal-a", "shared-review", "reviewer",
+                ModelPromotionApproval.Outcome.REJECTED), () -> {
+        });
+
+        assertThatThrownBy(() -> store.reviewProposal(review("proposal-b", "shared-review", "reviewer",
+                ModelPromotionApproval.Outcome.REJECTED), () -> {
+        })).isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("operation ID");
+        assertThat(store.findProposal("proposal-b").orElseThrow().reviewStatus())
+                .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(2);
+    }
+
+    @Test
     void committedQualityProposalReplaysFromMongoBeforePolicyAndEvidenceAfterRestart() {
         ExactModelArtifactIdentity identity = ModelPromotionAssessmentTestFixtures.identity();
         ModelGovernanceScope scope = scope("PRODUCTION");
@@ -467,6 +522,29 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
             executor.shutdownNow();
         }
         assertThat(store.proposals(identity, scope, use(), 10)).hasSize(1);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(2);
+    }
+
+    @Test
+    void concurrentDifferentProposalContentUnderOneOperationIdCommitsOnlyOne() throws Exception {
+        ExactModelArtifactIdentity identity = identity("9");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-concurrent-content"));
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            List<Callable<Boolean>> attempts = List.of(
+                    () -> submitAfter(start, proposal(identity, scope, "shared-content-operation", "proposal-a", "proposer")),
+                    () -> submitAfter(start, proposal(identity, scope, "shared-content-operation", "proposal-b", "proposer"))
+            );
+            var futures = attempts.stream().map(executor::submit).toList();
+            start.countDown();
+            assertThat((futures.get(0).get() ? 1 : 0) + (futures.get(1).get() ? 1 : 0)).isEqualTo(1);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(store.proposals(identity, scope, use(), 10)).hasSize(1);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(2);
     }
 
     @Test
@@ -651,6 +729,11 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         assertThat(pending.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
         assertThat(pending.approval()).isNull();
         assertThat(store.history(identity, scope, use(), 10)).hasSize(1);
+        assertThat(mongoTemplate.findById(
+                ModelPromotionPersistenceKey.operation(
+                        ModelPromotionPersistenceKey.aggregate(identity, scope, use()), "review-audit-failure"
+                ), ModelPromotionOperationClaimDocument.class
+        )).isNull();
     }
 
     @Test
@@ -686,10 +769,15 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                 .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
         assertThat(rejectionDecisions(identity, scope)).isEmpty();
         assertThat(store.history(identity, scope, use(), 10)).hasSize(1);
+        assertThat(mongoTemplate.findById(
+                ModelPromotionPersistenceKey.operation(
+                        ModelPromotionPersistenceKey.aggregate(identity, scope, use()), "reject-rejection-audit"
+                ), ModelPromotionOperationClaimDocument.class
+        )).isNull();
     }
 
     @Test
-    void rejectionDecisionInsertFailureRollsBackReviewStatus() {
+    void existingRejectionDecisionOperationConflictDoesNotAdvanceReviewStatus() {
         ExactModelArtifactIdentity identity = identity("8");
         ModelGovernanceScope scope = scope("PRODUCTION");
         store.registerCandidate(registration(identity, scope, "register-rejection-insert"));
@@ -706,7 +794,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
 
         assertThatThrownBy(() -> store.reviewProposal(review, () -> {
         })).isInstanceOf(ModelPromotionPersistenceConflictException.class)
-                .hasCauseInstanceOf(org.springframework.dao.DuplicateKeyException.class);
+                .hasMessageContaining("operation ID");
 
         assertThat(store.findProposal("proposal-rejection-insert").orElseThrow().reviewStatus())
                 .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
@@ -736,6 +824,42 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void disabledStartupVerificationDoesNotDisableIndexBootstrap() {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<RegulatedMutationTransactionCapabilityProbe> probeProvider = mock(ObjectProvider.class);
+        RegulatedMutationTransactionCapabilityProbe probe = mock(RegulatedMutationTransactionCapabilityProbe.class);
+        when(probeProvider.getIfAvailable()).thenReturn(probe);
+        ModelPromotionPersistenceStartupGuard disabledGuard = new ModelPromotionPersistenceStartupGuard(
+                mongoTemplate, requiredTransactionRunner(), probeProvider, false
+        );
+        mongoTemplate.indexOps(ModelPromotionDecisionDocument.class)
+                .dropIndex(ModelPromotionDecisionDocument.OPERATION_INDEX);
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> disabledGuard.run(null)).doesNotThrowAnyException();
+        verifyNoInteractions(probe);
+
+        new ModelPromotionPersistenceIndexInitializer(mongoTemplate).ensureIndexes();
+        assertThat(mongoTemplate.indexOps(ModelPromotionDecisionDocument.class).getIndexInfo())
+                .anySatisfy(index -> assertThat(index.getName())
+                        .isEqualTo(ModelPromotionDecisionDocument.OPERATION_INDEX));
+    }
+
+    @Test
+    void indexBootstrapRejectsConflictingNonUniqueDecisionIndexEvenWithoutStartupVerification() {
+        mongoTemplate.indexOps(ModelPromotionDecisionDocument.class)
+                .dropIndex(ModelPromotionDecisionDocument.OPERATION_INDEX);
+        mongoTemplate.indexOps(ModelPromotionDecisionDocument.class).ensureIndex(
+                new org.springframework.data.mongodb.core.index.Index()
+                        .on("aggregate_key", org.springframework.data.domain.Sort.Direction.ASC)
+                        .on("operation_id", org.springframework.data.domain.Sort.Direction.ASC)
+                        .named(ModelPromotionDecisionDocument.OPERATION_INDEX)
+        );
+
+        assertThatThrownBy(() -> new ModelPromotionPersistenceIndexInitializer(mongoTemplate).ensureIndexes())
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+    }
+
+    @Test
     void startupGuardRejectsDecisionIndexWithoutSparseSemantics() {
         @SuppressWarnings("unchecked")
         ObjectProvider<RegulatedMutationTransactionCapabilityProbe> probeProvider = mock(ObjectProvider.class);
@@ -762,6 +886,16 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         try {
             store.reviewProposal(review, () -> {
             });
+            return true;
+        } catch (ModelPromotionPersistenceConflictException expected) {
+            return false;
+        }
+    }
+
+    private boolean submitAfter(CountDownLatch start, ModelPromotionProposalSubmission proposal) throws Exception {
+        start.await();
+        try {
+            store.submitProposal(proposal);
             return true;
         } catch (ModelPromotionPersistenceConflictException expected) {
             return false;

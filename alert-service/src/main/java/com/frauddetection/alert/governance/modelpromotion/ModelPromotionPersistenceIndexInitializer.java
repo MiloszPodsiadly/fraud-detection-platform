@@ -17,6 +17,8 @@ public class ModelPromotionPersistenceIndexInitializer {
 
     @PostConstruct
     void ensureIndexes() {
+        // The persistence flag controls the extra startup verification, not Mongo persistence.
+        // Required indexes must exist even when that verification is disabled.
         mongoTemplate.indexOps(ModelPromotionPolicyDocument.class).ensureIndex(
                 new Index()
                         .on("institutional_scope", Sort.Direction.ASC)
@@ -80,6 +82,9 @@ public class ModelPromotionPersistenceIndexInitializer {
         );
         if (!mongoTemplate.collectionExists(ModelPromotionChampionClaimDocument.COLLECTION)) {
             mongoTemplate.createCollection(ModelPromotionChampionClaimDocument.COLLECTION);
+        }
+        if (!mongoTemplate.collectionExists(ModelPromotionOperationClaimDocument.COLLECTION)) {
+            mongoTemplate.createCollection(ModelPromotionOperationClaimDocument.COLLECTION);
         }
     }
 }

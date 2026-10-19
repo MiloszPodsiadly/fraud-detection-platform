@@ -121,6 +121,12 @@ public class ModelPromotionPersistenceStartupGuard implements ApplicationRunner 
                 true,
                 new Document("_id", 1)
         );
+        verifyIndex(
+                ModelPromotionOperationClaimDocument.COLLECTION,
+                "_id_",
+                true,
+                new Document("_id", 1)
+        );
     }
 
     private void verifyIndex(String collectionName, String indexName, boolean unique, Document keys) {
