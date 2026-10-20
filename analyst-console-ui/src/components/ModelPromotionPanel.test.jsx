@@ -61,4 +61,54 @@ describe("ModelPromotionPanel governance semantics", () => {
     fireEvent.click(screen.getByRole("button", { name: "Independently approve" }));
     expect(current.review).toHaveBeenCalledWith("proposal-1", "APPROVED", "Independent assessment");
   });
+
+  it("distinguishes verified policy trust from model approval and deployment", () => {
+    const current = workflow({
+      assessment: {
+        ...workflow().assessment,
+        appliedPolicy: { policyId: "approved-policy", canonicalSha256: "b".repeat(64),
+          resolutionStatus: "AVAILABLE", authority: "INSTITUTIONAL_APPROVED" }
+      }
+    });
+    render(<ModelPromotionPanel workflow={current} canRead />);
+
+    expect(screen.getByText("Signed policy trust")).toBeInTheDocument();
+    expect(screen.getByText("VERIFIED")).toBeInTheDocument();
+    expect(screen.getByText("Policy approval authority (not model approval)")).toBeInTheDocument();
+    expect(screen.getByText("INSTITUTIONAL_APPROVED")).toBeInTheDocument();
+    expect(screen.getByText("Governance approved")).toBeInTheDocument();
+    expect(screen.getAllByText("NO")).not.toHaveLength(0);
+    expect(screen.getAllByText("NOT_AUTHORIZED_BY_MODEL_PROMOTION_GOVERNANCE")).not.toHaveLength(0);
+  });
+
+  it("shows a reviewed model proposal separately from lifecycle and evidence eligibility", () => {
+    const current = workflow({
+      state: {
+        ...workflow().state,
+        proposals: [{ proposalId: "proposal-2", requestedTargetState: "CHALLENGER",
+          reviewStatus: "REVIEWED", reviewOutcome: "APPROVED", submittedAt: "2026-06-11T12:00:00Z" }]
+      }
+    });
+    render(<ModelPromotionPanel workflow={current} canRead />);
+
+    expect(screen.getByText(/CHALLENGER — REVIEWED \(APPROVED\)/)).toBeInTheDocument();
+    expect(screen.getByText("Current lifecycle state")).toBeInTheDocument();
+    expect(screen.getByText("Formal recommendation eligible")).toBeInTheDocument();
+    expect(screen.getAllByText("NO")).not.toHaveLength(0);
+    expect(screen.getAllByText("NOT_AUTHORIZED_BY_MODEL_PROMOTION_GOVERNANCE")).not.toHaveLength(0);
+  });
+
+  it("does not label a non-institutional test policy as verified", () => {
+    const current = workflow({
+      assessment: {
+        ...workflow().assessment,
+        appliedPolicy: { policyId: "test-policy", canonicalSha256: "b".repeat(64),
+          resolutionStatus: "AVAILABLE", authority: "NON_INSTITUTIONAL_TEST" }
+      }
+    });
+    render(<ModelPromotionPanel workflow={current} canRead />);
+
+    expect(screen.getByText("NOT_INSTITUTIONAL")).toBeInTheDocument();
+    expect(screen.queryByText("VERIFIED")).not.toBeInTheDocument();
+  });
 });
