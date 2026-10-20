@@ -167,9 +167,11 @@ function assertGeneratedIdentityMount(serviceName, target, expectedSourceSuffix)
 function assertModelPromotionPolicyTrustMount() {
   const serviceName = "alert-service";
   const sourceRoot = path.resolve("deployment", ".local", "model-promotion-policy");
+  const realSourceRoot = realPathIfPresent(sourceRoot);
   const expectedSource = path.join(sourceRoot, "trusted-issuers.json");
   const targetRoot = "/run/model-promotion-policy";
   const expectedTarget = `${targetRoot}/trusted-issuers.json`;
+  assertDeclarativeModelPromotionPolicyTrustMount();
   expectEqual("model-promotion trusted issuer path",
     env(serviceName, "MODEL_PROMOTION_TRUSTED_ISSUERS_PATH"), expectedTarget);
   expectEqual("model-promotion minimum trust generation",
@@ -177,6 +179,7 @@ function assertModelPromotionPolicyTrustMount() {
   const mounts = (service(serviceName).volumes ?? []).filter((mount) => {
     if (mount?.type !== "bind") return pathsOverlap(String(mount?.target ?? ""), targetRoot);
     return pathsOverlap(String(mount.source ?? ""), sourceRoot)
+      || pathsOverlap(realPathIfPresent(String(mount.source ?? "")), realSourceRoot)
       || pathsOverlap(String(mount.target ?? ""), targetRoot);
   });
   if (mounts.length !== 1) {
@@ -184,10 +187,13 @@ function assertModelPromotionPolicyTrustMount() {
     return;
   }
   const mount = mounts[0];
-  if (normalizeHostPath(mount.source) !== normalizeHostPath(expectedSource)
+  const createHostPath = mount.bind?.create_host_path;
+  if (normalizeComparablePath(mount.source) !== normalizeComparablePath(expectedSource)
       || normalizeContainerPath(mount.target) !== expectedTarget
-      || mount.read_only !== true || mount.bind?.create_host_path !== false) {
-    fail("alert-service model-promotion trust mount must be the exact read-only public registry file");
+      || mount.read_only !== true || (createHostPath !== false && createHostPath !== undefined)) {
+    fail("alert-service model-promotion trust mount must be the exact read-only public registry file"
+      + ` (source=${String(mount.source)}, target=${String(mount.target)},`
+      + ` read_only=${String(mount.read_only)}, create_host_path=${String(createHostPath)})`);
   }
   let candidate = expectedSource;
   while (true) {
@@ -201,15 +207,44 @@ function assertModelPromotionPolicyTrustMount() {
         fail("model-promotion public registry source must be a regular file");
       }
     } catch (error) {
-      if (error?.code !== "ENOENT") {
+      if (error?.code === "ENOENT") {
+        fail(`model-promotion public registry source is missing: ${candidate}`);
+        break;
+      } else {
         fail(`model-promotion public registry source cannot be inspected: ${error.message}`);
         break;
       }
-      // A missing source is refused by Compose at container creation because create_host_path is false.
     }
     const parent = path.dirname(candidate);
     if (parent === candidate) break;
     candidate = parent;
+  }
+}
+
+function assertDeclarativeModelPromotionPolicyTrustMount() {
+  const file = path.resolve("deployment", "docker-compose.model-promotion-policy-trust.yml");
+  let source;
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    fail(`model-promotion trust overlay cannot be read: ${error.message}`);
+    return;
+  }
+  const lines = source.replaceAll("\r\n", "\n").split("\n");
+  const servicesBlock = mappingBlock(lines, "services", 0, 0, lines.length);
+  const alertServiceBlock = servicesBlock
+    ? mappingBlock(lines, "alert-service", 2, servicesBlock.start, servicesBlock.end)
+    : undefined;
+  const volumesBlock = alertServiceBlock
+    ? mappingBlock(lines, "volumes", 4, alertServiceBlock.start, alertServiceBlock.end)
+    : undefined;
+  if (!volumesBlock) return;
+  const mounts = longSyntaxSequence(lines, volumesBlock.start, volumesBlock.end, 6);
+  if (mounts.length !== 1 || mounts[0].type !== "bind"
+      || mounts[0].source !== "./.local/model-promotion-policy/trusted-issuers.json"
+      || mounts[0].target !== "/run/model-promotion-policy/trusted-issuers.json"
+      || mounts[0].read_only !== true || mounts[0].bind?.create_host_path !== false) {
+    fail("model-promotion trust overlay must declare one exact read-only public file bind without host-path creation");
   }
 }
 

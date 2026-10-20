@@ -87,6 +87,7 @@ if [[ "$variant" == "full-security-hardened" ]]; then
     deployment/.local/service-identity/mtls/ml-inference-service-key.pem
     deployment/.local/service-identity/alert-service-private.pem
     deployment/.local/service-identity/jwks.json
+    deployment/.local/model-promotion-policy/trusted-issuers.json
   )
   for fixture_file in "${fixture_files[@]}"; do
     if [[ ! -f "$fixture_file" ]]; then
@@ -95,6 +96,10 @@ if [[ "$variant" == "full-security-hardened" ]]; then
     fi
     echo "Required generated fixture exists: $fixture_file"
   done
+fi
+
+if [[ "$variant" == "full-security-hardened" ]]; then
+  "${compose[@]}" config --format json | node scripts/check-compose-security-config.mjs security-hardened
 fi
 
 configured_services="$("${compose[@]}" config --services)"
@@ -138,6 +143,25 @@ for service in "${health_services[@]}"; do
     exit 1
   fi
 done
+
+if [[ "$variant" == "full-security-hardened" ]]; then
+  reader_uid="$("${compose[@]}" exec -T alert-service id -u)"
+  if [[ "$reader_uid" != "10001" ]]; then
+    failed_service="alert-service"
+    echo "alert-service trust reader must run as UID 10001, got $reader_uid" >&2
+    exit 1
+  fi
+  if ! "${compose[@]}" exec -T alert-service test -r /run/model-promotion-policy/trusted-issuers.json; then
+    failed_service="alert-service"
+    echo "Non-root alert-service cannot read the public policy trust registry." >&2
+    exit 1
+  fi
+  if "${compose[@]}" exec -T alert-service test -e /run/model-promotion-policy/private-key.pkcs8.base64; then
+    failed_service="alert-service"
+    echo "Policy issuer private key is visible to alert-service." >&2
+    exit 1
+  fi
+fi
 
 echo "Verifying analyst-console-ui endpoint: http://127.0.0.1:4173/"
 if ! curl -fsS http://127.0.0.1:4173/ >/dev/null; then

@@ -250,6 +250,7 @@ test("hardened model-promotion trust mount exposes only the public registry", ()
   const mutations = [
     ["writable public registry", (value) => { mount(value).read_only = false; }],
     ["implicit host source creation", (value) => { mount(value).bind.create_host_path = true; }],
+    ["path alias", (value) => { mount(value).source = `${sourceRoot}/../model-promotion-policy/trusted-issuers.json`; }],
     ["wrong public registry source", (value) => { mount(value).source = path.join(sourceRoot, "other.json"); }],
     ["private key mount", (value) => value.services["alert-service"].volumes.push({
       type: "bind", source: path.join(sourceRoot, "private-key.pkcs8.base64"),
@@ -270,6 +271,76 @@ test("hardened model-promotion trust mount exposes only the public registry", ()
     mutate(candidate);
     const checked = runChecker(candidate, "security-hardened");
     assert.notEqual(checked.status, 0, `${label} unexpectedly passed`);
+  }
+  const composeWithoutFalseField = structuredClone(config);
+  delete mount(composeWithoutFalseField).bind.create_host_path;
+  assert.equal(runChecker(composeWithoutFalseField, "security-hardened").status, 0,
+    "a Compose renderer may omit an explicit false field, while the source overlay and file preflight remain authoritative");
+});
+
+test("model-promotion public registry rejects missing and symbolic-link sources", () => {
+  const resolved = resolveHardenedCompose();
+  assert.equal(resolved.status, 0, resolved.stderr || resolved.error?.message);
+  const config = JSON.parse(resolved.stdout);
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "model-promotion-trust-test-"));
+  try {
+    const deployment = path.join(temporary, "deployment");
+    const publicRoot = path.join(deployment, ".local", "model-promotion-policy");
+    fs.mkdirSync(path.dirname(publicRoot), { recursive: true });
+    fs.copyFileSync(path.join(repositoryRoot, "deployment", "docker-compose.model-promotion-policy-trust.yml"),
+      path.join(deployment, "docker-compose.model-promotion-policy-trust.yml"));
+    const missing = structuredClone(config);
+    const publicSource = path.join(publicRoot, "trusted-issuers.json");
+    missing.services["alert-service"].volumes.find(volume =>
+      volume.target === "/run/model-promotion-policy/trusted-issuers.json").source = publicSource;
+    const missingResult = runChecker(missing, "security-hardened", temporary);
+    assert.notEqual(missingResult.status, 0);
+    assert.match(missingResult.stderr, /model-promotion public registry source is missing/);
+
+    const actualRoot = path.join(temporary, "real-public-root");
+    fs.mkdirSync(actualRoot);
+    fs.writeFileSync(path.join(actualRoot, "trusted-issuers.json"), "{}\n", "utf8");
+    fs.symlinkSync(actualRoot, publicRoot, process.platform === "win32" ? "junction" : "dir");
+    const linkedResult = runChecker(missing, "security-hardened", temporary);
+    assert.notEqual(linkedResult.status, 0);
+    assert.match(linkedResult.stderr, /model-promotion public registry source must not traverse symbolic link/);
+
+    fs.rmSync(publicRoot);
+    fs.mkdirSync(publicRoot);
+    fs.writeFileSync(publicSource, "{}\n", "utf8");
+    const overlayFile = path.join(deployment, "docker-compose.model-promotion-policy-trust.yml");
+    fs.writeFileSync(overlayFile,
+      fs.readFileSync(overlayFile, "utf8").replace("create_host_path: false", "create_host_path: true"),
+      "utf8");
+    const unsafeDeclaration = runChecker(missing, "security-hardened", temporary);
+    assert.notEqual(unsafeDeclaration.status, 0);
+    assert.match(unsafeDeclaration.stderr, /model-promotion trust overlay must declare one exact read-only public file bind/);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("model-promotion checker detects a private source hidden behind an external symlink", () => {
+  const resolved = resolveHardenedCompose();
+  assert.equal(resolved.status, 0, resolved.stderr || resolved.error?.message);
+  const config = JSON.parse(resolved.stdout);
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "model-promotion-alias-test-"));
+  try {
+    const sourceRoot = path.join(repositoryRoot, "deployment", ".local", "model-promotion-policy");
+    const alias = path.join(temporary, "unrelated-looking-source");
+    fs.symlinkSync(sourceRoot, alias, process.platform === "win32" ? "junction" : "dir");
+    config.services["alert-service"].volumes.push({
+      type: "bind",
+      source: path.join(alias, "private-key.pkcs8.base64"),
+      target: "/tmp/unrelated-looking-file",
+      read_only: true,
+      bind: { create_host_path: false }
+    });
+    const checked = runChecker(config, "security-hardened");
+    assert.notEqual(checked.status, 0);
+    assert.match(checked.stderr, /alert-service must mount only the model-promotion public registry/);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
   }
 });
 
@@ -346,9 +417,9 @@ function runResolved(config, requireExisting, resolvedSourceFile) {
   });
 }
 
-function runChecker(config, variant) {
+function runChecker(config, variant, cwd = repositoryRoot) {
   return spawnSync(process.execPath, [checker, variant], {
-    cwd: repositoryRoot,
+    cwd,
     input: JSON.stringify(config),
     encoding: "utf8"
   });

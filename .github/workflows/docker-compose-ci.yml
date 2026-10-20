@@ -108,6 +108,9 @@ jobs:
       - name: Test local startup contract
         run: node --test scripts/local-startup-contract.test.mjs
 
+      - name: Test model-promotion trust administration
+        run: node --test scripts/model-promotion-trust-admin.test.mjs
+
       - name: Verify artifact preflight and Docker read-only behavior
         run: bash scripts/ci/check-compose-bind-mount-security.sh
 
