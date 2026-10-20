@@ -47,11 +47,12 @@ be inferred away from otherwise valid metrics.
 
 Promotion policy is an immutable, digest-bound contract identified by policy id and revision. It binds scope, intended
 use, author and approval provenance, effective interval, evidence freshness, verification level, criterion semantics and
-thresholds. The repository does not currently contain an institutionally approved policy authority or active production
-policy. A Mongo policy-store implementation exists, but a deployed store is not necessarily empty or populated with
-an institutionally approved policy. The default authority verifier returns `UNAVAILABLE`, so an inserted policy alone
-cannot authorize formal recommendation. Synthetic test policies are marked
-`NON_INSTITUTIONAL_TEST` and can validate criterion behavior but can never authorize a formal recommendation.
+thresholds. The repository contains a first-party, independently signed author/approver/publisher publication path and
+an Ed25519 issuer verifier, but it does **not** provision production credentials or an active production policy.
+Without a configured public issuer registry the verifier returns `UNAVAILABLE`; an inserted Mongo policy alone cannot
+authorize a formal recommendation. Synthetic policies marked `NON_INSTITUTIONAL_TEST` cannot authorize **any**
+production quality-gated promotion, including `SHADOW_APPROVED`. The local Compose registry contains only
+development/test keys. See [trust operations](../operations/model_promotion_trust_operations.md).
 
 ### Institutional policy signature input (v1)
 
@@ -108,7 +109,8 @@ restart of all service instances.
 
 Use the following controlled sequence, with institutional governance ownership and change records:
 
-1. Generate a new Ed25519 signing key in the production KMS/HSM or equivalent controlled signer. Do not put its
+1. Generate a new Ed25519 signing key under separately controlled offline custody (a future KMS/HSM integration is
+   optional, not part of this implementation). Do not put its
    private key in the registry, MongoDB, `alert-service`, an image, or an audit-anchor key store. Record its globally
    unique `keyId`, issuer identity, SPKI DER public key, SHA-256 fingerprint, exact scope/environment/use permissions
    and bounded validity. Publish the new public-key entry as `ACTIVE` in a higher-generation registry. Verify the
@@ -134,55 +136,103 @@ Use the following controlled sequence, with institutional governance ownership a
 
 The signed `issuedAt` is tamper-evident **only for the key that signed it**; it is not an independent timestamp
 authority. A compromised signer can backdate an artifact. Issuance more than 30 seconds ahead of the verifier clock
-is rejected; operational clocks and KMS/HSM signing time therefore need controlled synchronization. Historical
+is rejected; operational clocks and offline signing time therefore need controlled synchronization. Historical
 inspection checks signature, exact content, permissions and time windows but never grants current authorization;
 `INTACT_REVOKED_KEY` explicitly means cryptographic integrity under a now-untrusted key. Current verification
 rejects unknown, retired, revoked or expired keys and expired policies. The bounded
 `model_promotion_policy_authority_verification_total` metric uses only `status` and enum `reason` tags; it does not
 include issuer/key IDs, approval credentials or raw trust configuration. Secure distribution of registry and
-minimum-generation settings, KMS/HSM key custody, incident response and institutional approval controls remain
+minimum-generation settings, private-key custody, incident response and institutional approval controls remain
 deployment responsibilities.
 
 For the local development stack only, `node scripts/bootstrap-local-model-promotion-keys.mjs --ensure` creates a
 separate Ed25519 pair under Git-ignored and Docker-build-excluded
-`deployment/.local/model-promotion-policy/`. It writes `private-key.pkcs8.base64` for the offline publisher and
+`deployment/.local/model-promotion-policy/`. It writes `private-key.pkcs8.base64` for the offline issuer and
 `trusted-issuers.json` containing only the public key and `generation: 1`. The key is named
 `local-dev-model-promotion-key-1`, belongs to `local-dev-model-promotion-issuer`, and is authorized only for
 `DEVELOPMENT` and `TEST`, never `PRODUCTION`. `make up` and `scripts/app.cmd up` preserve an existing valid pair and
 mount only the public registry read-only into `alert-service` through the local Compose overlay. The private key is
 not mounted in any runtime service. `--check` validates the pair without generating it; an incomplete or expired
-pair fails instead of being silently replaced. Intentional rotation needs a reviewed new key ID, registry generation
-and protected floor; do not use fixture regeneration as a production rotation procedure. This local signer does not
-provide an institutional approval provider and does not make test policies production-approved.
+pair fails instead of being silently replaced. The same bootstrap creates a separate `approval/` directory with
+author A, approver B and publisher private keys and `trusted-approvals.json` public mandates; the issuer also has
+an explicit `POLICY_ISSUER` mandate there. These additional private keys are not mounted in `alert-service` and
+normal startup creates no decision or approved policy. Intentional rotation needs a reviewed new key ID, registry generation
+and protected floor; do not use fixture regeneration as a production rotation procedure. This local signer alone does
+not establish independent institutional approval or make test policies production-approved.
+
+### Internal independent approval proof (v1)
+
+`InternalPolicyApprovalArtifact` is one versioned proof containing two separately signed statements. Its
+`AuthorStatement` includes contract version `model-promotion-internal-approval-v1`, purpose
+`MODEL_PROMOTION_POLICY_AUTHOR_V1`, exact policy ID/revision and canonical full-content SHA-256, scope/environment,
+intended use, effective interval, author identity/key ID, designated publisher identity/key ID, issuer identity/key
+ID and `authoredAt`. The author signs its recursively field-sorted canonical JSON UTF-8 bytes with one trailing LF.
+The `ApprovalDecision` includes the same contract version, distinct purpose
+`MODEL_PROMOTION_POLICY_APPROVER_V1`, SHA-256 of the exact author-signing bytes, approver identity/key ID, explicit
+`APPROVED` or `REJECTED`, `decidedAt`, `expiresAt` and approval reference. The independent approver signs that
+statement with the same canonical byte encoding. Both Ed25519 signatures use canonical unpadded base64url. The
+version and purpose are part of the signed bytes; neither signature can be substituted for the policy-issuer
+signature or the other actor's signature.
+
+`InternalPolicyApprovalTrustRegistry` is a separate deployment-controlled public-key JSON registry, version
+`model-promotion-approval-trust-v1`, with a positive `generation`, unique key IDs, canonical Ed25519 SPKI public keys
+and SHA-256 fingerprints, exact institutional scope/environment/intended-use permissions, validity windows,
+`ACTIVE`/`RETIRED`/`REVOKED` status and explicit `POLICY_AUTHOR`, `POLICY_APPROVER`, `POLICY_PUBLISHER`,
+`POLICY_ISSUER` capabilities. A minimum generation supplied by protected deployment configuration prevents loading
+an older registry unless that external floor is also rolled back. No private key or approval authority is inferred
+from a policy, Mongo document, CLI identity string or `FRAUD_OPS_ADMIN` role. Only an operator controlling the
+deployment registry can grant or revoke these mandates.
+
+The first-party verifier recomputes the proposed policy digest, matches both statements and provenance, verifies
+both actor signatures, rejects self-approval and reuse of the same physical author/approver key, checks role and
+validity at signing and verification time, and rejects expired approval or non-`APPROVED` decisions. The executing
+publisher proves control of its separately mandated private key by signing a fresh random challenge containing
+purpose `MODEL_PROMOTION_POLICY_PUBLISHER_CHALLENGE_V1`, contract version, proof SHA-256 and nonce. The matching
+trusted public key verifies that response; a claimed publisher identity in JSON alone is insufficient. Issuer
+identity/key must have an explicit issuer mandate and the subsequent policy signature must also verify under the
+separate policy-issuer registry. Signed timestamps are tamper-evident but not independent timestamp-authority proof;
+private-key custody, actor identity enrollment and registry/floor protection remain operator responsibilities.
+
+The offline CLI now uses this first-party verifier directly; no separately installed ServiceLoader provider or
+external JAR is needed. `author` creates a signed author submission, `approve` creates an independently signed
+`APPROVED` or `REJECTED` artifact, and `publish` authenticates its publisher credential before policy signing.
+The exact local commands and review hand-off are in the
+[publication procedure](../operations/model_promotion_policy_publication.md).
 
 ### Controlled offline publication
 
 `model-promotion-policy-publisher` is a separate Maven executable, not a dependency or Docker image component of
 `alert-service`. The publisher reads an unsigned policy (`content` plus `canonicalSha256`), validates its full
-contract, and calls an `InstitutionalPolicyPublicationAuthorization` provider. That provider must independently
+contract, and calls the repository's `InternalPolicyPublicationAuthorization` implementation. It must independently
 verify an approval for the exact digest, policy ID/revision, scope, intended use and effective interval, and must
 authenticate a publisher with the corresponding institutional mandate. The returned authorization is compared to
 every one of those policy fields, the author/approver identities, approval reference, issuer and key ID. Merely
 supplying policy JSON, an approver name, an environment variable, a Git signature or `FRAUD_OPS_ADMIN` does not
-authorize publication. No trustworthy institutional policy-approval source exists in this repository, so the CLI
-requires exactly one separately installed, institution-controlled ServiceLoader provider and otherwise fails closed.
-The integration tests use a distinct, signed **test-only** approval fixture; it is not a production provider.
+authorize publication. The CLI's actor identity strings select public mandates; each actor must prove possession of
+the matching Ed25519 private key. Its output files are created without overwriting existing files. Tests exercise
+the first-party approval implementation as well as earlier isolated publication fixtures.
 
 After approval, the offline process loads a private Ed25519 key from a controlled file, signs the v1 envelope,
 re-verifies it against the same public-key registry as `alert-service`, then optionally publishes. `--dry-run`
 performs all validation and signing checks but never connects to MongoDB. The private key is never placed in the
-policy document or the alert-service image. The CLI requires `--policy`, `--private-key`, `--trusted-issuers`,
-`--issuer` and `--key-id`; publication additionally requires `MODEL_PROMOTION_PUBLISH_MONGODB_URI` (a replica-set
-URI supplied by the controlled execution environment). The unsigned policy must become effective no earlier than
-signature issuance.
+policy document or the alert-service image. `publish` requires the unsigned policy, signed approval artifact,
+separate approval and issuer public registries, publisher credential and issuer private key. Live publication
+additionally requires `MODEL_PROMOTION_PUBLISH_MONGODB_URI` (a replica-set URI supplied by the controlled execution
+environment). The unsigned policy must become effective no earlier than signature issuance.
 
 The publisher uses a mandatory Mongo transaction, independent of alert-service's configurable transaction mode.
 Within that transaction it increments one per-scope/environment/use fence document, checks immutable revision
-identity and interval overlap, and inserts the signed immutable policy. Competing transactions therefore cannot
+identity and interval overlap, and inserts the signed immutable policy together with a distinct approval-evidence
+document holding the original proof and digest, actor/key fingerprints, publisher role and authorized scope/use,
+approval-registry generation and canonical registry digest. The deployment must preserve that registry version for
+independent historical mandate review. Competing transactions therefore cannot
 both pass the overlap check and commit. The fence is only a concurrency-control record; the existing
-`model_promotion_policies` collection remains the authoritative read store. An exact republish returns a receipt
-without changing the policy, while conflicting content or an overlapping interval fails closed. Receipts identify
-policy ID/revision, canonical digest, issuer, key ID and publication time. Existing policy history is preserved.
+`model_promotion_policies` collection remains the authoritative read store; the evidence collection is not another
+policy authority. A repeat with the same content and original approval proof returns a receipt without changing
+either document (even if a fresh signature would have a new issuance time). Different proof/content or an overlapping
+interval fails closed. Receipts identify policy ID/revision, canonical digest, issuer, key ID and publication time.
+The intended publisher exposes no update/delete evidence path. Direct Mongo access is a separate operational trust
+boundary, and this application-level immutability is not WORM storage.
 
 | Criterion | Authoritative evidence | Population and denominator |
 | --- | --- | --- |
@@ -211,6 +261,26 @@ The lifecycle gate applies the same assessed criteria with target-specific requi
 | Complete provenance, exact-SHA Model Card, identity and lineage integrity, meaningful sample | Required | Required | Required |
 | Matched Rules-vs-ML precision, false-positive rate, disagreement, critical segments | Diagnostic | Required | Required |
 | Exact-model latency and fallback | Diagnostic | Diagnostic | Required |
+
+Current producer availability (the Python exact-model report is read only through verified manifest-bound artifacts;
+`ModelPromotionEvidenceResolver` never creates missing measurements):
+
+| Criterion | Source and exact artifact | Trusted output now | Missing requirement / lineage and denominator | Required gate | Can produce now? |
+| --- | --- | --- | --- | --- | --- |
+| Meaningful sample | Python Exact Model Shadow Performance report for exact SHA/window | Bounded evaluated count and both feedback-label class counts | Policy minimums; evaluated population and positive/negative counts | Shadow+ | Conditional on real cohort size |
+| Precision at review budget | Exact report `mlPredictionMetrics.precisionAtK` | ML-only requested/actual K and precision | Rules precision on the **same** labeled rows and identical budget; matched denominator | Recommendation+ | No |
+| False-positive rate | Exact report `mlPredictionMetrics` | FP, TN and rate on bounded feedback cohort | Adequate negatives, `FP/(FP+TN)` and source-label lineage | Recommendation+ | Conditional |
+| Rules-vs-ML disagreement | Exact report `rulesVsMlDisagreement` | Differing-classification categories and compared count | Sufficient records with both exact-ML and Rules evidence; `recordsCompared` | Recommendation+ | Conditional |
+| Critical segment regressions | No matched segment-regression artifact | None | Policy-defined segment identity, matched population, segments evaluated and breach count | Recommendation+ | No |
+| Exact-model latency stability | Exact report `operationalDiagnostics.mlLatencyP95` | Explicit `UNAVAILABLE` diagnostic | Exact-artifact inference observations in window, p95, sample size and time basis | Champion | No |
+| Exact-model fallback rate | Exact report `operationalDiagnostics.fallbackRate` | Explicit `UNAVAILABLE` diagnostic | Exact-artifact fallback numerator and eligible scoring-attempt denominator in window | Champion | No |
+| Complete provenance | Verified Model Card + exact report and manifests | Shared source manifest, verification level, generated time and window | All mandatory source/manifest equality checks; no external attestation claim | Shadow+ | Conditional on matching verified artifacts |
+| Exact-SHA Model Card | Verified Model Card artifact | Subject SHA and verified manifest | Exact model bytes and one matching subject/artifact SHA | Shadow+ | Conditional on a real card |
+| Identity and lineage integrity | Exact report `population` + `lineagePolicy` | Considered/evaluated rows and exclusion counters | No critical unresolved identity or lineage gaps; source records considered | Shadow+ | Conditional |
+
+`Shadow+` means `SHADOW_APPROVED`, `PROMOTION_RECOMMENDED`, and `CHAMPION`; `Recommendation+` means the latter two.
+The conditional rows can still fail policy thresholds or artifact checks. No existing trustworthy producer output
+supports a small safe binding for the four `No` rows, so this prompt adds no synthetic metric adapter or ML engine.
 
 The shadow gate permits controlled experimentation with incomplete comparison or operational diagnostics, but still
 requires a policy-backed sample and verified integrity. Formal recommendation requires an independently verified
@@ -269,6 +339,13 @@ continues to bind the policy and assessment snapshots accepted on the first comm
 after restart or a lost client response. Modified or unauthorized replays fail closed. History reads are bounded for resource control, but the
 bound is not a retention policy and does not delete historical decisions.
 
+Concurrent reviews of one proposal use the proposal-status CAS within that transaction. A losing review with a
+Mongo `TransientTransactionError` retries the complete transaction with bounded backoff, re-reading the durable
+proposal on each attempt. Once another review commits, the loser receives a stable domain conflict; an identical
+operation instead receives an idempotent replay. `UnknownTransactionCommitResult` is different: the service does not
+start a second decision, but performs bounded primary reads for the committed outcome and returns unavailable if it
+cannot establish one. Exhausted transient retries also return unavailable while the proposal is still pending.
+
 Accepted lifecycle decisions have unique `decision_id` values. Rejection events have their own unique operation key
 and no `decision_id`; they preserve the prior accepted decision identity, state and revision. Proposal status, rejection
 or acceptance ledger event, local audit evidence and any state or champion-claim mutation commit in one Mongo transaction.
@@ -282,11 +359,12 @@ retention or deletion policy; access to the underlying Mongo collections must re
 
 The API rate limiter is process-local, bounded by tracked actors and request windows, and synchronizes concurrent access.
 At capacity it rejects untracked actors until an expired window is removed. Replicas do not share counters; ingress
-rate limiting is still needed for a fleet-wide bound. Institutional policy authorization remains unavailable in the
-default production verifier until a trusted authority implementation is configured. Existing audit-signature machinery
-does not establish authorization of the exact promotion-policy digest by an approved issuer and key for the requested
-scope and effective interval. It is not treated as a policy-authority adapter; provenance strings and unsigned Mongo
-documents cannot turn `UNAVAILABLE` into `VERIFIED`.
+rate limiting is still needed for a fleet-wide bound. The first-party verifier authorizes only signatures under a
+deployment-provisioned, current public issuer registry; with no configured registry it remains `UNAVAILABLE`.
+Existing audit-signature keys are not a policy-authority adapter. Provenance strings and unsigned Mongo documents
+cannot turn `UNAVAILABLE` into `VERIFIED`. The loaded issuer generation is visible as the bounded,
+label-free `model_promotion_policy_trust_registry_generation` gauge; operators must also compare the mounted file
+fingerprint because generation alone does not establish identical bytes across replicas.
 
 `MODEL_PROMOTION_PERSISTENCE_ENABLED` defaults to `true`. This flag controls the additional model-promotion startup
 verification, not persistence availability: even when set to `false`, the index initializer still connects to the

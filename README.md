@@ -32,6 +32,7 @@ The platform is built around explicit service ownership and event-driven handoff
 | Fraud scoring | `fraud-scoring-service` | Rule scoring plus ML integration in rule, shadow, ML, or compare modes. |
 | ML runtime | `ml-inference-service` | Python model inference, governance snapshots, drift and advisory endpoints. |
 | Alert workflow | `alert-service` | Alerts, fraud cases, analyst decisions, RBAC, audit, recovery, and regulated mutation controls. |
+| Model-promotion policy publication | `model-promotion-policy-publisher` | Offline signing and immutable publication after independent policy approval; not a runtime service. |
 | Trust authority | `audit-trust-authority` | Local signing and verification authority for audit anchor material. |
 | Analyst UI | `analyst-console-ui` | React console for monitoring, alert review, case workflow, and security UX. |
 | Shared contracts | `common-events` | Kafka event contracts and shared value objects. |
@@ -137,9 +138,15 @@ currently provided by the repository. It:
 
 `deployment/.local/` is ignored by Git and excluded from Docker build contexts. Generated private keys stay on
 the local workstation. Ordinary startup preserves valid identity material; intentionally rotate service-identity
-fixtures with `make regenerate-local-runtime-fixtures`. The separate local model-promotion policy key and public
-registry are created by `node scripts/bootstrap-local-model-promotion-keys.mjs --ensure`; only the public registry
-is mounted into `alert-service`. This local key does not supply institutional policy approval.
+fixtures with `make regenerate-local-runtime-fixtures`. The separate local model-promotion issuer key, author A,
+approver B and publisher credentials, plus their public registries, are created by
+`node scripts/bootstrap-local-model-promotion-keys.mjs --ensure`. Only the issuer's public registry is mounted into
+`alert-service`; private credentials stay outside its image. Startup never creates an approved policy. Follow the
+explicit [local approval and publication procedure](docs/operations/model_promotion_policy_publication.md).
+For separate production provisioning, fingerprint review, key rotation, revocation, protected generation floors and
+recovery, use [model-promotion trust operations](docs/operations/model_promotion_trust_operations.md). The local
+fixture keys and generation-1 Compose overlay are not production credentials or a production trust deployment.
+`VERIFIED` means the policy signature is trusted; model review, `CHAMPION`, and runtime deployment remain separate.
 
 `make up` and `.\scripts\app.cmd up` generate the local Shadow Performance Summary artifact before starting
 Docker Compose. For manual inspection, the equivalent Compose startup after running
