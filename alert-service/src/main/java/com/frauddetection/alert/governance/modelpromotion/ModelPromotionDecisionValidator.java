@@ -247,6 +247,14 @@ class ModelPromotionDecisionValidator {
             return;
         }
         policyValidator.validate(policy, governanceScope, intendedUse, requestedAt);
+        if (ModelPromotionEligibility.requiresAssessment(target)
+                && governanceScope.environment() == ModelGovernanceEnvironment.PRODUCTION
+                && policy.content().provenance().authority()
+                == ModelPromotionPolicy.PolicyAuthority.NON_INSTITUTIONAL_TEST) {
+            throw new ModelPromotionPersistenceConflictException(
+                    "A non-institutional test policy cannot authorize a production quality-gated transition"
+            );
+        }
         if (policy.content().provenance().authority()
                 == ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED
                 && authorityVerifier.verify(policy).status()

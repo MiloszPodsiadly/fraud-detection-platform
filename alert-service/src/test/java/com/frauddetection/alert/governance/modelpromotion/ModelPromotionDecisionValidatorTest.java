@@ -67,6 +67,18 @@ class ModelPromotionDecisionValidatorTest {
     }
 
     @Test
+    void testPolicyCannotAuthorizeProductionShadowApproved() {
+        ModelPromotionPolicy testPolicy = ModelPromotionAssessmentTestFixtures.policy();
+        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
+        ModelPromotionAssessment assessment = assessment(testPolicy, evidence);
+
+        assertThatThrownBy(() -> validator.validate(command(
+                testPolicy, assessment, evidence, Instant.parse("2026-06-11T12:00:00Z")
+        ))).isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("non-institutional test policy");
+    }
+
+    @Test
     void forgedEligibleAssessmentCannotUseTestPolicyForFormalRecommendation() {
         ModelPromotionPolicy testPolicy = ModelPromotionAssessmentTestFixtures.policy();
         ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
@@ -92,7 +104,7 @@ class ModelPromotionDecisionValidatorTest {
                 2,
                 ModelPromotionLifecycleState.PROMOTION_RECOMMENDED
         ))).isInstanceOf(ModelPromotionPersistenceConflictException.class)
-                .hasMessageContaining("institutional policy");
+                .hasMessageContaining("non-institutional test policy");
     }
 
     @Test

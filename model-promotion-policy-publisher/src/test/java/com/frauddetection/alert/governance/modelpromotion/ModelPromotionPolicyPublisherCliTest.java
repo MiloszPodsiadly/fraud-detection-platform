@@ -7,9 +7,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ModelPromotionPolicyPublisherCliTest {
 
     @Test
-    void noInstitutionalApprovalProviderMeansPublicationIsUnavailable() {
+    void firstPartyWorkflowRequiresAnExplicitCommand() {
         assertThatThrownBy(() -> ModelPromotionPolicyPublisherCli.main(new String[0]))
-                .isInstanceOf(SecurityException.class)
-                .hasMessageContaining("independently trusted publication authorization provider");
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("prepare, demo-draft, author, approve, publish, trust-check or inspect-policy");
     }
 }

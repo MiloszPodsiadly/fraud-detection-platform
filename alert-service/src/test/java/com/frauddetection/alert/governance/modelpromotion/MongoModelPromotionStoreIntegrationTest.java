@@ -10,11 +10,14 @@ import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
+import com.mongodb.MongoException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
@@ -35,6 +38,8 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -138,14 +143,14 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
     @Test
     void committedQualityProposalReplaysFromMongoBeforePolicyAndEvidenceAfterRestart() {
         ExactModelArtifactIdentity identity = ModelPromotionAssessmentTestFixtures.identity();
-        ModelGovernanceScope scope = scope("PRODUCTION");
+        ModelGovernanceScope scope = scope("TEST");
         store.registerCandidate(registration(identity, scope, "register-replay"));
         store.submitProposal(proposal(identity, scope, "propose-challenger", "proposal-challenger", "proposer"));
         store.reviewProposal(review("proposal-challenger", "approve-challenger", "reviewer"), () -> {
         });
 
-        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence();
-        ModelPromotionPolicy policy = ModelPromotionAssessmentTestFixtures.policy();
+        ModelPromotionEvidenceBundle evidence = ModelPromotionAssessmentTestFixtures.completeEvidence(scope);
+        ModelPromotionPolicy policy = ModelPromotionAssessmentTestFixtures.policy(scope);
         ModelPromotionAssessment assessment = ModelPromotionAssessmentTestFixtures.service(
                 (requestedScope, intendedUse, at) -> Optional.of(policy)
         ).assess(evidence, NOW);
@@ -158,7 +163,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         when(assessmentService.assess(evidence, NOW)).thenReturn(assessment);
         authenticate("proposer", Set.of(
                 AnalystAuthority.MODEL_PROMOTION_PROPOSE,
-                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST
         ));
         ModelPromotionWorkflowService.TransitionProposalRequest request = new ModelPromotionWorkflowService.TransitionProposalRequest(
                 identity, scope, use(), ModelPromotionLifecycleState.CHALLENGER, 1,
@@ -210,11 +215,11 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
 
         authenticate("another-proposer", Set.of(
                 AnalystAuthority.MODEL_PROMOTION_PROPOSE,
-                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST
         ));
         assertThatThrownBy(() -> recoveredWorkflow.proposeTransition(request))
                 .isInstanceOf(ModelPromotionPersistenceConflictException.class);
-        authenticate("proposer", Set.of(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION));
+        authenticate("proposer", Set.of(AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST));
         assertThatThrownBy(() -> recoveredWorkflow.proposeTransition(request))
                 .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
                 .satisfies(error -> assertThat(((ModelPromotionWorkflowBlockedException) error).reason())
@@ -225,7 +230,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
 
         authenticate("proposer", Set.of(
                 AnalystAuthority.MODEL_PROMOTION_PROPOSE,
-                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST
         ));
         when(unavailablePolicy.resolve(scope, use(), NOW)).thenReturn(
                 ModelPromotionPolicyResolution.unavailable(ModelPromotionPolicyResolution.Reason.POLICY_STORE_UNAVAILABLE)
@@ -580,7 +585,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         assertThat(decision.approval().approvedBy()).isEqualTo("retirement-reviewer");
     }
 
-    @Test
+    @RepeatedTest(12)
     void concurrentIndependentReviewsProduceOneAcceptedDecision() throws Exception {
         ExactModelArtifactIdentity identity = identity("5");
         ModelGovernanceScope scope = scope("PRODUCTION");
@@ -607,10 +612,213 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
             executor.shutdownNow();
         }
 
-        assertThat(store.currentState(identity, scope, use()).orElseThrow().lifecycleState())
-                .isEqualTo(ModelPromotionLifecycleState.CHALLENGER);
-        assertThat(store.findProposal("proposal-2").orElseThrow().reviewStatus())
-                .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.APPROVED);
+        ModelPromotionAggregate finalState = store.currentState(identity, scope, use()).orElseThrow();
+        assertThat(finalState.lifecycleState()).isEqualTo(ModelPromotionLifecycleState.CHALLENGER);
+        assertThat(finalState.revision()).isEqualTo(1);
+        ModelPromotionProposalDocument finalProposal = store.findProposal("proposal-2").orElseThrow();
+        assertThat(finalProposal.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.APPROVED);
+        assertThat(finalProposal.reviewAudit()).isNotNull();
+        assertThat(finalProposal.reviewOperationId()).isIn("review-one", "review-two");
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionProposalDocument.class)).isEqualTo(1);
+        List<ModelPromotionDecisionDocument> accepted = store.history(identity, scope, use(), 10).stream()
+                .filter(decision -> decision.eventType()
+                        == ModelPromotionDecisionDocument.EventType.LIFECYCLE_TRANSITION_ACCEPTED).toList();
+        assertThat(accepted).hasSize(1);
+        assertThat(accepted.getFirst().localAudit()).isNotNull();
+        assertThat(accepted.getFirst().operationId()).isEqualTo(finalProposal.reviewOperationId());
+        assertThat(accepted.getFirst().resultingRevision()).isEqualTo(1);
+        String losingOperation = "review-one".equals(finalProposal.reviewOperationId()) ? "review-two" : "review-one";
+        assertThat(mongoTemplate.findById(ModelPromotionPersistenceKey.operation(
+                finalProposal.aggregateKey(), losingOperation), ModelPromotionOperationClaimDocument.class)).isNull();
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(3);
+    }
+
+    @Test
+    void concurrentApprovalAndRejectionLeaveExactlyOneAuditedDecision() throws Exception {
+        ExactModelArtifactIdentity identity = identity("5");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-mixed-review"));
+        store.submitProposal(proposal(identity, scope, "submit-mixed-review", "proposal-mixed-review", "proposer"));
+
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var approval = executor.submit(() -> reviewAfter(start, review(
+                    "proposal-mixed-review", "approve-mixed", "reviewer-approve",
+                    ModelPromotionApproval.Outcome.APPROVED)));
+            var rejection = executor.submit(() -> reviewAfter(start, review(
+                    "proposal-mixed-review", "reject-mixed", "reviewer-reject",
+                    ModelPromotionApproval.Outcome.REJECTED)));
+            start.countDown();
+            assertThat(List.of(approval.get(), rejection.get())).containsExactlyInAnyOrder(true, false);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        ModelPromotionProposalDocument durable = store.findProposal("proposal-mixed-review").orElseThrow();
+        assertThat(durable.reviewStatus()).isIn(
+                ModelPromotionProposalDocument.ReviewStatus.APPROVED,
+                ModelPromotionProposalDocument.ReviewStatus.REJECTED);
+        assertThat(durable.reviewAudit()).isNotNull();
+        List<ModelPromotionDecisionDocument> decisions = store.history(identity, scope, use(), 10);
+        assertThat(decisions).hasSize(2);
+        assertThat(decisions.stream().filter(decision -> decision.operationId().equals(durable.reviewOperationId())))
+                .singleElement().satisfies(decision -> assertThat(decision.localAudit()).isNotNull());
+        ModelPromotionAggregate state = store.currentState(identity, scope, use()).orElseThrow();
+        assertThat(state.lifecycleState()).isEqualTo(durable.reviewStatus()
+                == ModelPromotionProposalDocument.ReviewStatus.APPROVED
+                ? ModelPromotionLifecycleState.CHALLENGER : ModelPromotionLifecycleState.CANDIDATE);
+        assertThat(state.revision()).isEqualTo(durable.reviewStatus()
+                == ModelPromotionProposalDocument.ReviewStatus.APPROVED ? 1 : 0);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(3);
+    }
+
+    @Test
+    void identicalConcurrentReviewRetriesReplayOneDecision() throws Exception {
+        ExactModelArtifactIdentity identity = identity("5");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-identical"));
+        store.submitProposal(proposal(identity, scope, "submit-identical", "proposal-identical", "proposer"));
+        ModelPromotionProposalReview command = review("proposal-identical", "review-identical", "same-reviewer");
+
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            Callable<ModelPromotionProposalResult> attempt = () -> {
+                start.await();
+                return store.reviewProposal(command, () -> {
+                });
+            };
+            var first = executor.submit(attempt);
+            var second = executor.submit(attempt);
+            start.countDown();
+            assertThat(List.of(first.get().idempotentReplay(), second.get().idempotentReplay()))
+                    .containsExactlyInAnyOrder(false, true);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(2);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(3);
+    }
+
+    @Test
+    void differentReviewersCannotShareOneOperationId() throws Exception {
+        ExactModelArtifactIdentity identity = identity("5");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-shared-review"));
+        store.submitProposal(proposal(identity, scope, "submit-shared-review", "proposal-shared-review", "proposer"));
+
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> reviewAfter(start, review(
+                    "proposal-shared-review", "review-shared", "reviewer-one")));
+            var second = executor.submit(() -> reviewAfter(start, review(
+                    "proposal-shared-review", "review-shared", "reviewer-two")));
+            start.countDown();
+            assertThat(List.of(first.get(), second.get())).containsExactlyInAnyOrder(true, false);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(2);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(3);
+    }
+
+    @Test
+    void eightConcurrentReviewsSettleWithOneDurableDecision() throws Exception {
+        ExactModelArtifactIdentity identity = identity("5");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-eight-reviewers"));
+        store.submitProposal(proposal(identity, scope, "submit-eight-reviewers", "proposal-eight-reviewers", "proposer"));
+
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(8);
+        try {
+            List<Callable<Boolean>> attempts = new ArrayList<>();
+            for (int index = 0; index < 8; index++) {
+                int reviewer = index;
+                attempts.add(() -> reviewAfter(start, review("proposal-eight-reviewers",
+                        "review-eight-" + reviewer, "reviewer-eight-" + reviewer)));
+            }
+            var futures = attempts.stream().map(executor::submit).toList();
+            start.countDown();
+            long successes = 0;
+            for (var future : futures) if (future.get()) successes++;
+            assertThat(successes).isEqualTo(1);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(store.findProposal("proposal-eight-reviewers").orElseThrow().reviewAudit()).isNotNull();
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().revision()).isEqualTo(1);
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(2);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(3);
+    }
+
+    @Test
+    void unknownCommitResultReadsDurableDecisionWithoutSecondMutation() {
+        ExactModelArtifactIdentity identity = identity("5");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-unknown-commit"));
+        store.submitProposal(proposal(identity, scope, "submit-unknown-commit", "proposal-unknown-commit", "proposer"));
+        AtomicBoolean signal = new AtomicBoolean();
+        MongoModelPromotionStore uncertain = storeWithCommitSignal(signal, true);
+        ModelPromotionProposalReview command = review(
+                "proposal-unknown-commit", "review-unknown-commit", "independent-reviewer");
+
+        ModelPromotionProposalResult recovered = uncertain.reviewProposal(command, () -> {
+        });
+
+        assertThat(signal.get()).isTrue();
+        assertThat(recovered.idempotentReplay()).isTrue();
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().revision()).isEqualTo(1);
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(2);
+        assertThat(store.findProposal(command.proposalId()).orElseThrow().reviewAudit()).isNotNull();
+        assertThat(store(new ModelPromotionLocalAuditFactory(), validator).reviewProposal(command, () -> {
+            throw new AssertionError("Restart replay must not execute mutable checks");
+        }).idempotentReplay()).isTrue();
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(2);
+    }
+
+    @Test
+    void unknownCommitResultWithoutDurableDecisionRemainsUnavailable() {
+        ExactModelArtifactIdentity identity = identity("5");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-no-commit"));
+        store.submitProposal(proposal(identity, scope, "submit-no-commit", "proposal-no-commit", "proposer"));
+        AtomicBoolean signal = new AtomicBoolean();
+        MongoModelPromotionStore uncertain = storeWithCommitSignal(signal, false);
+
+        assertThatThrownBy(() -> uncertain.reviewProposal(
+                review("proposal-no-commit", "review-no-commit", "independent-reviewer"), () -> {
+                })).isInstanceOf(DataAccessResourceFailureException.class)
+                .hasMessageContaining("outcome is unknown");
+        assertThat(signal.get()).isTrue();
+        assertThat(store.findProposal("proposal-no-commit").orElseThrow().reviewStatus())
+                .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().revision()).isZero();
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(1);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(2);
+    }
+
+    @Test
+    void temporaryTransientMongoFailureRetriesOneCompleteReviewTransaction() {
+        ExactModelArtifactIdentity identity = identity("5");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        store.registerCandidate(registration(identity, scope, "register-temporary-failure"));
+        store.submitProposal(proposal(identity, scope, "submit-temporary-failure",
+                "proposal-temporary-failure", "proposer"));
+        AtomicBoolean injected = new AtomicBoolean();
+        MongoModelPromotionStore recovering = storeWithOneTransientFailure(injected);
+
+        ModelPromotionProposalResult result = recovering.reviewProposal(review(
+                "proposal-temporary-failure", "review-temporary-failure", "independent-reviewer"), () -> {
+        });
+
+        assertThat(injected.get()).isTrue();
+        assertThat(result.idempotentReplay()).isFalse();
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().revision()).isEqualTo(1);
+        assertThat(store.history(identity, scope, use(), 10)).hasSize(2);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionOperationClaimDocument.class)).isEqualTo(3);
     }
 
     @Test
@@ -950,6 +1158,53 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         return new RegulatedMutationTransactionRunner(
                 RegulatedMutationTransactionMode.REQUIRED.name(),
                 managerProvider
+        );
+    }
+
+    private MongoModelPromotionStore storeWithCommitSignal(AtomicBoolean signal, boolean commitBeforeSignal) {
+        MongoTransactionManager manager = new MongoTransactionManager(databaseFactory);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformTransactionManager> managerProvider = mock(ObjectProvider.class);
+        when(managerProvider.getIfAvailable()).thenReturn(manager);
+        RegulatedMutationTransactionRunner runner = new RegulatedMutationTransactionRunner(
+                RegulatedMutationTransactionMode.REQUIRED.name(), managerProvider) {
+            @Override
+            public <T> T runLocalCommit(Supplier<T> callback) {
+                if (!signal.compareAndSet(false, true)) {
+                    throw new AssertionError("An unknown commit result must not rerun the transaction");
+                }
+                if (commitBeforeSignal) super.runLocalCommit(callback);
+                MongoException unknown = new MongoException(91, "injected unknown commit result");
+                unknown.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL);
+                throw unknown;
+            }
+        };
+        return new MongoModelPromotionStore(
+                mongoTemplate, runner, validator, new ModelPromotionLocalAuditFactory(),
+                Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+    }
+
+    private MongoModelPromotionStore storeWithOneTransientFailure(AtomicBoolean injected) {
+        MongoTransactionManager manager = new MongoTransactionManager(databaseFactory);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformTransactionManager> managerProvider = mock(ObjectProvider.class);
+        when(managerProvider.getIfAvailable()).thenReturn(manager);
+        RegulatedMutationTransactionRunner runner = new RegulatedMutationTransactionRunner(
+                RegulatedMutationTransactionMode.REQUIRED.name(), managerProvider) {
+            @Override
+            public <T> T runLocalCommit(Supplier<T> callback) {
+                if (injected.compareAndSet(false, true)) {
+                    MongoException transientFailure = new MongoException(112, "injected temporary write conflict");
+                    transientFailure.addLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+                    throw transientFailure;
+                }
+                return super.runLocalCommit(callback);
+            }
+        };
+        return new MongoModelPromotionStore(
+                mongoTemplate, runner, validator, new ModelPromotionLocalAuditFactory(),
+                Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
 

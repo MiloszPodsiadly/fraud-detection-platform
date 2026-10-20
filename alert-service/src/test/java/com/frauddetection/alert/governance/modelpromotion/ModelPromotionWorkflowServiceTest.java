@@ -111,6 +111,25 @@ class ModelPromotionWorkflowServiceTest {
     }
 
     @Test
+    void nonInstitutionalTestPolicyCannotOpenProductionShadowApproval() {
+        authenticate("proposer", Set.of(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION), Set.of());
+        ModelPromotionPolicy testPolicy = ModelPromotionAssessmentTestFixtures.policy(
+                scope(ModelGovernanceEnvironment.PRODUCTION));
+        when(policyResolver.resolve(scope(ModelGovernanceEnvironment.PRODUCTION), use(), NOW))
+                .thenReturn(ModelPromotionPolicyResolution.available(testPolicy));
+
+        assertThatThrownBy(() -> service.proposeTransition(new ModelPromotionWorkflowService.TransitionProposalRequest(
+                identity(), scope(ModelGovernanceEnvironment.PRODUCTION), use(),
+                ModelPromotionLifecycleState.CHALLENGER, 1, ModelPromotionLifecycleState.SHADOW_APPROVED,
+                window(), "test-policy-operation", "test-policy-proposal", RATIONALE, RATIONALE_SHA256)))
+                .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
+                .satisfies(exception -> assertThat(((ModelPromotionWorkflowBlockedException) exception).reason())
+                        .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.POLICY_UNAVAILABLE));
+        org.mockito.Mockito.verifyNoInteractions(evidenceResolver, assessmentService);
+    }
+
+    @Test
     void rejectsAdministratorSelfApproval() {
         ModelPromotionProposalDocument proposal = pendingProposal(
                 "admin-user", ModelGovernanceEnvironment.PRODUCTION

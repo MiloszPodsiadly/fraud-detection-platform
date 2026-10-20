@@ -54,10 +54,14 @@ final class ModelPromotionTrustedIssuerRegistry {
             throw new IllegalStateException("Policy issuer registry version, generation or keys are invalid");
         }
         Map<String, TrustedKey> loaded = new HashMap<>();
+        Set<String> publicFingerprints = new HashSet<>();
         for (ConfiguredKey configured : configuration.keys()) {
             TrustedKey key = parse(configured);
             if (loaded.putIfAbsent(key.keyId(), key) != null) {
                 throw new IllegalStateException("Policy issuer key IDs must be globally unique");
+            }
+            if (!publicFingerprints.add(key.publicKeySha256())) {
+                throw new IllegalStateException("Policy issuer public keys must be globally unique");
             }
         }
         return new ModelPromotionTrustedIssuerRegistry(configuration.generation(), loaded);
@@ -97,23 +101,8 @@ final class ModelPromotionTrustedIssuerRegistry {
             if (entry.status() == null) {
                 throw new IllegalArgumentException("Policy issuer key status is required");
             }
-            if (entry.publicKeySpkiBase64() == null || entry.publicKeySpkiBase64().isBlank()) {
-                throw new IllegalArgumentException("Ed25519 public key material is required");
-            }
-            byte[] encoded = Base64.getDecoder().decode(entry.publicKeySpkiBase64());
-            if (!Base64.getEncoder().encodeToString(encoded).equals(entry.publicKeySpkiBase64())) {
-                throw new IllegalArgumentException("Public key must be canonical base64 DER SPKI");
-            }
-            PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(encoded));
-            if (!java.util.Arrays.equals(encoded, publicKey.getEncoded())) {
-                throw new IllegalArgumentException("Public key must be canonical Ed25519 DER SPKI");
-            }
-            Signature verifier = Signature.getInstance("Ed25519");
-            verifier.initVerify(publicKey);
-            String fingerprint = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(encoded));
-            if (!fingerprint.equals(entry.publicKeySha256())) {
-                throw new IllegalArgumentException("Public-key fingerprint mismatch");
-            }
+            PublicKey publicKey = publicKey(entry.publicKeySpkiBase64(), entry.publicKeySha256());
+            String fingerprint = entry.publicKeySha256();
             return new TrustedKey(entry.issuerIdentity(), entry.keyId(), publicKey, fingerprint,
                     scopes, environments, uses, from, until, entry.status());
         } catch (GeneralSecurityException | IllegalArgumentException exception) {
@@ -121,7 +110,28 @@ final class ModelPromotionTrustedIssuerRegistry {
         }
     }
 
-    private static Instant canonicalTime(String value, String field) {
+    static PublicKey publicKey(String spkiBase64, String expectedSha256) throws GeneralSecurityException {
+        if (spkiBase64 == null || spkiBase64.isBlank()) {
+            throw new IllegalArgumentException("Ed25519 public key material is required");
+        }
+        byte[] encoded = Base64.getDecoder().decode(spkiBase64);
+        if (!Base64.getEncoder().encodeToString(encoded).equals(spkiBase64)) {
+            throw new IllegalArgumentException("Public key must be canonical base64 DER SPKI");
+        }
+        PublicKey key = KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(encoded));
+        if (!java.util.Arrays.equals(encoded, key.getEncoded())) {
+            throw new IllegalArgumentException("Public key must be canonical Ed25519 DER SPKI");
+        }
+        Signature verifier = Signature.getInstance("Ed25519");
+        verifier.initVerify(key);
+        String fingerprint = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(encoded));
+        if (!fingerprint.equals(expectedSha256)) {
+            throw new IllegalArgumentException("Public-key fingerprint mismatch");
+        }
+        return key;
+    }
+
+    static Instant canonicalTime(String value, String field) {
         Instant parsed = GovernanceTimestampContract.parse(value, field);
         if (!parsed.toString().equals(value)) {
             throw new IllegalArgumentException(field + " must be canonical UTC");
@@ -129,7 +139,7 @@ final class ModelPromotionTrustedIssuerRegistry {
         return parsed;
     }
 
-    private static <T> Set<T> requiredSet(List<T> values, String field) {
+    static <T> Set<T> requiredSet(List<T> values, String field) {
         if (values == null || values.isEmpty() || values.stream().anyMatch(java.util.Objects::isNull)) {
             throw new IllegalArgumentException(field + " must be explicitly nonempty");
         }
@@ -140,7 +150,7 @@ final class ModelPromotionTrustedIssuerRegistry {
         return Set.copyOf(result);
     }
 
-    private static void identifier(String value, String field) {
+    static void identifier(String value, String field) {
         if (value == null || !value.matches("^[A-Za-z0-9._:-]{1,128}$")) {
             throw new IllegalArgumentException(field + " is invalid");
         }

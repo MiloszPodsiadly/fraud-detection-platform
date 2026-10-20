@@ -123,6 +123,14 @@ public class ModelPromotionWorkflowService {
         ModelPromotionPolicy policy = qualityGated
                 ? currentPolicy(request.governanceScope(), request.intendedUse(), requestedAt)
                 : null;
+        if (qualityGated && request.governanceScope().environment() == ModelGovernanceEnvironment.PRODUCTION
+                && policy.content().provenance().authority()
+                == ModelPromotionPolicy.PolicyAuthority.NON_INSTITUTIONAL_TEST) {
+            throw new ModelPromotionWorkflowBlockedException(
+                    ModelPromotionWorkflowBlockedException.Reason.POLICY_UNAVAILABLE,
+                    "A non-institutional test policy cannot authorize a production quality-gated transition"
+            );
+        }
         ModelPromotionAssessment assessment = qualityGated
                 ? assessExact(
                 request.artifactIdentity(),

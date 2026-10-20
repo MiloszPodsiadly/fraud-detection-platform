@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,7 +39,12 @@ class ModelPromotionPolicyAuthorityConfiguration {
         ModelPromotionTrustedIssuerRegistry registry = ModelPromotionTrustedIssuerRegistry.load(
                 objectMapper, Path.of(trustedIssuersPath), minimumGeneration
         );
+        MeterRegistry meterRegistry = meters.getIfAvailable();
+        if (meterRegistry != null) {
+            Gauge.builder("model_promotion_policy_trust_registry_generation", registry,
+                    ModelPromotionTrustedIssuerRegistry::generation).register(meterRegistry);
+        }
         return new Ed25519ModelPromotionPolicyAuthorityVerifier(objectMapper, registry,
-                clocks.getIfAvailable(Clock::systemUTC), meters.getIfAvailable());
+                clocks.getIfAvailable(Clock::systemUTC), meterRegistry);
     }
 }

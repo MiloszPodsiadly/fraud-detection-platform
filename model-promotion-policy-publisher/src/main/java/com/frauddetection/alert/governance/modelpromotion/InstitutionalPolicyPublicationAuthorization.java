@@ -24,7 +24,12 @@ public interface InstitutionalPolicyPublicationAuthorization {
             String approvalReference,
             String publisherIdentity,
             String issuerIdentity,
-            String keyId
+            String keyId,
+            long approvalTrustGeneration,
+            String approvalTrustSha256,
+            String approverPublicKeySha256,
+            String publisherPublicKeySha256,
+            String issuerPublicKeySha256
     ) {
     }
 }

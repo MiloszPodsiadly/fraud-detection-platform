@@ -125,6 +125,12 @@ class Ed25519ModelPromotionPolicyAuthorityVerifierTest {
         ModelPromotionTrustedIssuerRegistry.ConfiguredKey valid = configuredKey(pair);
         assertThatThrownBy(() -> registry(List.of(valid, valid))).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> registry(List.of(valid, new ModelPromotionTrustedIssuerRegistry.ConfiguredKey(
+                ISSUER, "alias-key", valid.publicKeySpkiBase64(), valid.publicKeySha256(),
+                valid.institutionalScopes(), valid.environments(), valid.intendedUses(),
+                valid.validFrom(), valid.validUntil(), ModelPromotionTrustedIssuerRegistry.KeyStatus.REVOKED))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("public keys must be globally unique");
+        assertThatThrownBy(() -> registry(List.of(valid, new ModelPromotionTrustedIssuerRegistry.ConfiguredKey(
                 "other-institutional-issuer", KEY_ID, valid.publicKeySpkiBase64(), valid.publicKeySha256(),
                 valid.institutionalScopes(), valid.environments(), valid.intendedUses(),
                 valid.validFrom(), valid.validUntil(), valid.status()))))

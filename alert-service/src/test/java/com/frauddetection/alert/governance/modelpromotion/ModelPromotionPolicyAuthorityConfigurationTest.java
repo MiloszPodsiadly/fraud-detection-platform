@@ -63,13 +63,16 @@ class ModelPromotionPolicyAuthorityConfigurationTest {
         Files.writeString(registryPath, mapper.writeValueAsString(new ModelPromotionTrustedIssuerRegistry.Configuration(
                 ModelPromotionTrustedIssuerRegistry.VERSION, 1, List.of(key))));
 
-        contextRunner.withPropertyValues("app.model-promotion.trusted-issuers.path=" + registryPath).run(context -> {
+        contextRunner.withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+                .withPropertyValues("app.model-promotion.trusted-issuers.path=" + registryPath).run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(context.getBeansOfType(ModelPromotionPolicyAuthorityVerifier.class)).hasSize(1);
             ModelPromotionPolicyAuthorityVerifier verifier = context.getBean(ModelPromotionPolicyAuthorityVerifier.class);
             assertThat(verifier).isInstanceOf(Ed25519ModelPromotionPolicyAuthorityVerifier.class);
             assertThat(verifier.verify(signedPolicy(pair)).status())
                     .isEqualTo(ModelPromotionPolicyAuthorityVerification.Status.VERIFIED);
+            assertThat(context.getBean(MeterRegistry.class)
+                    .get("model_promotion_policy_trust_registry_generation").gauge().value()).isEqualTo(1);
         });
     }
 

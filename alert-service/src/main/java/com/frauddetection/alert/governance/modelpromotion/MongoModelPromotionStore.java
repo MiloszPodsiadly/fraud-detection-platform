@@ -6,6 +6,7 @@ import com.mongodb.client.result.UpdateResult;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -25,6 +26,8 @@ import java.util.function.Supplier;
 public class MongoModelPromotionStore {
 
     private static final int MAX_TRANSACTION_ATTEMPTS = 3;
+    private static final int MAX_REVIEW_TRANSACTION_ATTEMPTS = 6;
+    private static final int REVIEW_SETTLE_OBSERVATIONS = 10;
     private static final int MAX_HISTORY_LIMIT = 100;
     private static final int MAX_PROPOSAL_LIMIT = 100;
 
@@ -676,40 +679,74 @@ public class MongoModelPromotionStore {
             String reviewCommandSha256,
             Supplier<ModelPromotionProposalResult> transaction
     ) {
-        RuntimeException last = null;
-        for (int attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt++) {
-            Optional<ModelPromotionProposalResult> replay = replayProposalReview(
-                    review.proposalId(), reviewCommandSha256, review.operationContext()
-            );
-            if (replay.isPresent()) {
-                return replay.get();
-            }
+        RuntimeException lastTransient = null;
+        for (int attempt = 1; attempt <= MAX_REVIEW_TRANSACTION_ATTEMPTS; attempt++) {
+            Optional<ModelPromotionProposalResult> settled = inspectDurableReviewOutcome(review, reviewCommandSha256);
+            if (settled.isPresent()) return settled.get();
             try {
                 return transactionRunner.runLocalCommit(transaction);
             } catch (DuplicateKeyException exception) {
-                Optional<ModelPromotionProposalResult> committed = replayProposalReview(
-                        review.proposalId(), reviewCommandSha256, review.operationContext()
-                );
-                if (committed.isPresent()) {
-                    return committed.get();
-                }
+                Optional<ModelPromotionProposalResult> committed = inspectDurableReviewOutcome(
+                        review, reviewCommandSha256);
+                if (committed.isPresent()) return committed.get();
                 throw new ModelPromotionPersistenceConflictException(
                         "Model promotion review conflicts with an existing decision or champion claim", exception
                 );
             } catch (RuntimeException exception) {
-                Optional<ModelPromotionProposalResult> committed = replayProposalReview(
-                        review.proposalId(), reviewCommandSha256, review.operationContext()
-                );
-                if (committed.isPresent()) {
-                    return committed.get();
+                if (hasTransactionLabel(exception, MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) {
+                    return awaitDurableReviewOutcome(review, reviewCommandSha256, exception,
+                            "Model promotion review commit outcome is unknown");
                 }
-                if (!isTransientTransactionFailure(exception) || attempt == MAX_TRANSACTION_ATTEMPTS) {
+                Optional<ModelPromotionProposalResult> committed = inspectDurableReviewOutcome(
+                        review, reviewCommandSha256);
+                if (committed.isPresent()) return committed.get();
+                if (!isTransientTransactionFailure(exception)) {
                     throw exception;
                 }
-                last = exception;
+                lastTransient = exception;
+                if (attempt < MAX_REVIEW_TRANSACTION_ATTEMPTS) {
+                    reviewRetryPause(20L << (attempt - 1), exception);
+                }
             }
         }
-        throw last == null ? new IllegalStateException("Model promotion review transaction failed") : last;
+        return awaitDurableReviewOutcome(review, reviewCommandSha256, lastTransient,
+                "Model promotion review remained unavailable after bounded transaction retries");
+    }
+
+    private Optional<ModelPromotionProposalResult> inspectDurableReviewOutcome(
+            ModelPromotionProposalReview review, String reviewCommandSha256) {
+        ModelPromotionProposalDocument durable = mongoTemplate.findById(
+                review.proposalId(), ModelPromotionProposalDocument.class);
+        if (durable == null) {
+            throw new ModelPromotionPersistenceConflictException("Model promotion proposal is unavailable");
+        }
+        Optional<ModelPromotionProposalResult> replay = replayProposalReview(
+                durable, reviewCommandSha256, review.operationContext());
+        if (replay.isPresent()) return replay;
+        if (durable.reviewStatus() != ModelPromotionProposalDocument.ReviewStatus.PENDING) {
+            throw new ModelPromotionPersistenceConflictException("Model promotion proposal was already reviewed");
+        }
+        return Optional.empty();
+    }
+
+    private ModelPromotionProposalResult awaitDurableReviewOutcome(
+            ModelPromotionProposalReview review, String reviewCommandSha256,
+            RuntimeException cause, String unavailableMessage) {
+        for (int observation = 0; observation < REVIEW_SETTLE_OBSERVATIONS; observation++) {
+            reviewRetryPause(100, cause);
+            Optional<ModelPromotionProposalResult> settled = inspectDurableReviewOutcome(review, reviewCommandSha256);
+            if (settled.isPresent()) return settled.get();
+        }
+        throw new DataAccessResourceFailureException(unavailableMessage, cause);
+    }
+
+    private void reviewRetryPause(long millis, RuntimeException cause) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new DataAccessResourceFailureException("Model promotion review retry was interrupted", cause);
+        }
     }
 
     private Optional<ModelPromotionProposalResult> replayProposalSubmission(
@@ -864,11 +901,14 @@ public class MongoModelPromotionStore {
     }
 
     private boolean isTransientTransactionFailure(Throwable throwable) {
+        return hasTransactionLabel(throwable, MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+    }
+
+    private boolean hasTransactionLabel(Throwable throwable, String label) {
         Throwable current = throwable;
         while (current != null) {
             if (current instanceof MongoException mongoException
-                    && (mongoException.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)
-                    || mongoException.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL))) {
+                    && mongoException.hasErrorLabel(label)) {
                 return true;
             }
             current = current.getCause();

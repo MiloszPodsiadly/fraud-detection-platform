@@ -24,6 +24,15 @@ final class ModelPromotionAssessmentTestFixtures {
         return evidence(completeEvaluation());
     }
 
+    static ModelPromotionEvidenceBundle completeEvidence(ModelGovernanceScope governanceScope) {
+        ModelPromotionEvidenceBundle.Content original = completeEvidence().content();
+        ModelPromotionEvidenceBundle.Content scoped = new ModelPromotionEvidenceBundle.Content(
+                original.bundleVersion(), original.artifactIdentity(), governanceScope, original.intendedUse(),
+                original.evaluationWindow(), original.modelCard(), original.shadowPerformance(),
+                original.evaluation(), original.trust(), original.limitations());
+        return new ModelPromotionEvidenceBundle(scoped, digest(scoped));
+    }
+
     static ModelPromotionEvidenceBundle currentLimitedEvidence() {
         ModelPromotionEvidenceBundle.EvaluationEvidence complete = completeEvaluation();
         return evidence(new ModelPromotionEvidenceBundle.EvaluationEvidence(
@@ -103,6 +112,15 @@ final class ModelPromotionAssessmentTestFixtures {
 
     static ModelPromotionPolicy policy() {
         return policy(defaultRules(), "2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z");
+    }
+
+    static ModelPromotionPolicy policy(ModelGovernanceScope governanceScope) {
+        ModelPromotionPolicy.Content original = policy().content();
+        ModelPromotionPolicy.Content scoped = new ModelPromotionPolicy.Content(
+                original.policyVersion(), original.policyId(), original.revision(), governanceScope,
+                original.intendedUse(), original.provenance(), original.effectiveFromInclusive(),
+                original.effectiveToExclusive(), original.criteria());
+        return new ModelPromotionPolicy(scoped, policyValidator().canonicalSha256(scoped));
     }
 
     static ModelPromotionPolicy policy(

@@ -16,13 +16,13 @@ final class ModelPromotionPolicyPublisher {
 
     private final ObjectMapper mapper;
     private final ModelPromotionPolicyValidator validator;
-    private final InstitutionalPolicyPublicationAuthorization authorization;
+    private final InternalPolicyPublicationAuthorization authorization;
     private final ModelPromotionPolicyAuthorityVerifier verifier;
     private final MongoModelPromotionPolicyPublicationStore store;
     private final Clock clock;
 
     ModelPromotionPolicyPublisher(ObjectMapper mapper, ModelPromotionPolicyValidator validator,
-            InstitutionalPolicyPublicationAuthorization authorization,
+            InternalPolicyPublicationAuthorization authorization,
             ModelPromotionPolicyAuthorityVerifier verifier,
             MongoModelPromotionPolicyPublicationStore store, Clock clock) {
         this.mapper = Objects.requireNonNull(mapper);
@@ -57,7 +57,7 @@ final class ModelPromotionPolicyPublisher {
             if (verifier.verify(policy).status() != ModelPromotionPolicyAuthorityVerification.Status.VERIFIED) {
                 throw new SecurityException("Signed policy was not verified by the production trust registry");
             }
-            return new PreparedPublication(policy, issued);
+            return new PreparedPublication(policy, issued, authorization.approvalArtifact(), approved);
         } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("Policy signing failed", exception);
         }
@@ -70,7 +70,8 @@ final class ModelPromotionPolicyPublisher {
 
     ModelPromotionPolicyPublicationReceipt publishPrepared(PreparedPublication prepared) {
         Objects.requireNonNull(store, "Mongo publication store is required outside dry-run mode");
-        return store.publish(prepared.policy(), clock.instant());
+        return store.publish(prepared.policy(), clock.instant(), prepared.approvalArtifact(),
+                prepared.authorization());
     }
 
     private void requireExactAuthorization(UnsignedPolicy proposed,
@@ -92,14 +93,25 @@ final class ModelPromotionPolicyPublisher {
                 || !Objects.equals(approved.approvalReference(), provenance.approvalReference())
                 || approved.publisherIdentity() == null || approved.publisherIdentity().isBlank()
                 || !Objects.equals(approved.issuerIdentity(), issuerIdentity)
-                || !Objects.equals(approved.keyId(), keyId)) {
+                || !Objects.equals(approved.keyId(), keyId)
+                || approved.approvalTrustGeneration() < 1
+                || !sha256(approved.approvalTrustSha256())
+                || !sha256(approved.approverPublicKeySha256())
+                || !sha256(approved.publisherPublicKeySha256())
+                || !sha256(approved.issuerPublicKeySha256())) {
             throw new SecurityException("Independent approval does not authorize the exact policy and publisher");
         }
+    }
+
+    private boolean sha256(String value) {
+        return value != null && value.matches("^[0-9a-f]{64}$");
     }
 
     record UnsignedPolicy(ModelPromotionPolicy.Content content, String canonicalSha256) {
     }
 
-    record PreparedPublication(ModelPromotionPolicy policy, Instant signedAt) {
+    record PreparedPublication(ModelPromotionPolicy policy, Instant signedAt,
+            InternalPolicyApprovalArtifact approvalArtifact,
+            InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
     }
 }
