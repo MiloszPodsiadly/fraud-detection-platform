@@ -277,11 +277,15 @@ Local Keycloak users for the analyst console and model-policy workflow:
 | --- | --- | --- |
 | `readonly` | `readonly` | `READ_ONLY_ANALYST` |
 | `analyst` | `analyst` | `ANALYST` |
-| `reviewer` | `reviewer` | `REVIEWER` |
-| `opsadmin` | `opsadmin` | `FRAUD_OPS_ADMIN` |
+| `reviewer` | `reviewer` | `REVIEWER`, `model-policy-credential-holder` |
+| `opsadmin` | `opsadmin` | `FRAUD_OPS_ADMIN`, `model-policy-credential-holder` |
 | `policy-author` | `policy-author` | `model-policy-author` |
 | `policy-approver` | `policy-approver` | `model-policy-approver` |
 | `policy-requester` | `policy-requester` | `model-policy-publisher` |
+| `policy-recovery` | `policy-recovery` | `model-policy-recovery`, `model-policy-production`, `model-policy-approver` |
+| `policy-security-a` | `policy-security-a` | credential admin/holder, trust requester, production |
+| `policy-security-b` | `policy-security-b` | credential admin/holder, trust approver, production |
+| `policy-security-c` | `policy-security-c` | credential admin/holder |
 
 These credentials are local-only and must not be reused outside local test environments.
 

@@ -11,6 +11,13 @@ signature result; `PENDING`, `RETRYABLE` and `BLOCKED` do not imply `VERIFIED`. 
 reconciliation handle process restarts and uncertain commit acknowledgement. The local worker uses the shared Mongo
 replica set; production needs separately scoped database credentials and independently managed trust material.
 
+In the local Compose stack, a network-isolated, one-shot key loader copies only the publisher's two signing keys
+and three trust registries into a dedicated Docker volume. It sets UID/GID `10001:10001` and file mode `0400`;
+the non-root publisher mounts that volume read-only. The host bootstrap rejects missing, malformed or symlinked
+local credentials, and `alert-service` receives only public registries. Docker Desktop may display Windows bind
+sources as `0777` inside the short-lived loader, so the protected volume—not bind-file mode—is the publisher's
+runtime boundary. The fixture is local-only and does not replace production secret management.
+
 The commands below are a controlled **offline emergency/fixture path** for `DEVELOPMENT`/`TEST`, not the normal
 online approval route. Its author and approver must be different people controlling different private keys.
 The demo key files are **not production credentials**. Run from the repository root; Java 21, Maven, Node.js and a
