@@ -28,7 +28,9 @@ public record PolicyPublicationJobDocument(
         int attempts,
         String publishedPolicySha256,
         Instant publishedAt,
-        String failureCode
+        String failureCode,
+        int recoveryCount,
+        Instant lastRecoveryAt
 ) {
     public static final String COLLECTION = "model_policy_publication_jobs";
 

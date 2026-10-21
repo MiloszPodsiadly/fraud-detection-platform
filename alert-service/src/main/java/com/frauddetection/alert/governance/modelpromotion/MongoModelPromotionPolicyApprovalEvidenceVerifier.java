@@ -26,6 +26,12 @@ final class MongoModelPromotionPolicyApprovalEvidenceVerifier
         this.online = online;
     }
 
+    InternalPolicyApprovalTrustRegistry loadedApprovalTrust() { return approvalTrust; }
+
+    OnlinePolicyActorTrustRegistry loadedActorTrust() {
+        return online == null ? null : online.loadedActorTrust();
+    }
+
     @Override
     public ModelPromotionPolicyApprovalEvidenceVerification verify(ModelPromotionPolicy policy) {
         if (policy == null || policy.content() == null) {

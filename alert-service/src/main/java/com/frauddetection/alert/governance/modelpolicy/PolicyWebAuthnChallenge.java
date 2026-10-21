@@ -26,7 +26,10 @@ public record PolicyWebAuthnChallenge(
         String requestJson,
         Instant expiresAt,
         boolean used,
-        String rationale
+        String rationale,
+        String registrationGrantId,
+        String registrationGrantPurpose,
+        String registrationGrantSha256
 ) {
     public static final String COLLECTION = "model_policy_webauthn_challenges";
 }

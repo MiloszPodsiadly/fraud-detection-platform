@@ -69,7 +69,8 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
         store.ensureIndexes();
         mapper = new ObjectMapper();
         service = new PolicyGovernanceService(store, new ModelPromotionPolicyValidator(mapper), mapper,
-                "publisher-c", "publisher-key", "issuer-d", "issuer-key");
+                "publisher-c", "publisher-key", "issuer-d", "issuer-key",
+                org.mockito.Mockito.mock(com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectory.class));
     }
 
     @AfterEach
@@ -82,10 +83,10 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
     void approvalUsesBackendAcceptanceClockAndDurableAtomicHistory() {
         PolicyProposalDocument created = service.create(author(), new DraftCommand("create-1", input("policy-1", false)));
         assertThat(created.status()).isEqualTo(PolicyGovernanceState.DRAFT);
-        PolicyProposalDocument submitted = service.submit(author(), created.id(), new TransitionCommand("submit-1", 0));
+        PolicyProposalDocument submitted = submit(author(), created.id(), new TransitionCommand("submit-1", 0));
         assertThat(submitted.draftSha256()).isEqualTo(created.draftSha256());
         clock.set(START.plusSeconds(73));
-        PolicyProposalDocument approved = service.review(approver(), created.id(),
+        PolicyProposalDocument approved = review(approver(), created.id(),
                 new ReviewCommand("review-1", 1, ReviewDecision.APPROVE, "evidence:review-1"));
         assertThat(approved.status()).isEqualTo(PolicyGovernanceState.APPROVED);
         assertThat(approved.decidedAt()).isEqualTo(START.plusSeconds(73));
@@ -100,12 +101,12 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
     @Test
     void rejectionIsFinalAndCannotBecomePublicationRequest() {
         PolicyProposalDocument submitted = submitted("reject-1");
-        PolicyProposalDocument rejected = service.review(approver(), submitted.id(),
+        PolicyProposalDocument rejected = review(approver(), submitted.id(),
                 new ReviewCommand("review-reject", 1, ReviewDecision.REJECT, "evidence:reject"));
         assertThat(rejected.status()).isEqualTo(PolicyGovernanceState.REJECTED);
         assertThatThrownBy(() -> service.requestPublication(publisher(), submitted.id(),
                 new TransitionCommand("request-rejected", 2))).isInstanceOf(PolicyGovernanceConflictException.class);
-        assertThatThrownBy(() -> service.review(approver(), submitted.id(),
+        assertThatThrownBy(() -> review(approver(), submitted.id(),
                 new ReviewCommand("review-late", 2, ReviewDecision.APPROVE, "evidence:late")))
                 .isInstanceOf(PolicyGovernanceConflictException.class);
     }
@@ -113,13 +114,13 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
     @Test
     void selfApprovalAndMissingMandateFailClosed() {
         PolicyProposalDocument submitted = submitted("self-1");
-        assertThatThrownBy(() -> service.review(authorWithApprovalGrant(), submitted.id(),
+        assertThatThrownBy(() -> review(authorWithApprovalGrant(), submitted.id(),
                 new ReviewCommand("self-review", 1, ReviewDecision.APPROVE, "evidence:self")))
                 .isInstanceOf(AccessDeniedException.class);
-        assertThatThrownBy(() -> service.review(new PolicyGovernanceActor(APPROVER_ID, Set.of("ROLE_REVIEWER")),
+        assertThatThrownBy(() -> review(new PolicyGovernanceActor(APPROVER_ID, Set.of("ROLE_REVIEWER")),
                 submitted.id(), new ReviewCommand("reviewer-role", 1, ReviewDecision.APPROVE, "evidence:role")))
                 .isInstanceOf(AccessDeniedException.class);
-        assertThatThrownBy(() -> service.review(new PolicyGovernanceActor(APPROVER_ID, Set.of("ROLE_FRAUD_OPS_ADMIN")),
+        assertThatThrownBy(() -> review(new PolicyGovernanceActor(APPROVER_ID, Set.of("ROLE_FRAUD_OPS_ADMIN")),
                 submitted.id(), new ReviewCommand("admin-role", 1, ReviewDecision.APPROVE, "evidence:admin")))
                 .isInstanceOf(AccessDeniedException.class);
         assertThat(store.find(submitted.id()).status()).isEqualTo(PolicyGovernanceState.SUBMITTED);
@@ -136,14 +137,14 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
         assertThatThrownBy(() -> service.get(author(), created.id())).isInstanceOf(AccessDeniedException.class);
         assertThat(service.list(author())).isEmpty();
         assertThat(service.list(authorized)).hasSize(1);
-        PolicyProposalDocument submitted = service.submit(authorized, created.id(),
+        PolicyProposalDocument submitted = submit(authorized, created.id(),
                 new TransitionCommand("prod-submit", 0));
-        assertThatThrownBy(() -> service.review(approver(), submitted.id(),
+        assertThatThrownBy(() -> review(approver(), submitted.id(),
                 new ReviewCommand("prod-review-denied", 1, ReviewDecision.APPROVE, "evidence:prod")))
                 .isInstanceOf(AccessDeniedException.class);
         PolicyGovernanceActor productionApprover = new PolicyGovernanceActor(APPROVER_ID,
                 Set.of(ModelPolicyAuthority.APPROVE, ModelPolicyAuthority.PRODUCTION));
-        assertThat(service.review(productionApprover, submitted.id(),
+        assertThat(review(productionApprover, submitted.id(),
                 new ReviewCommand("prod-review", 1, ReviewDecision.APPROVE, "evidence:prod")).status())
                 .isEqualTo(PolicyGovernanceState.APPROVED);
     }
@@ -157,9 +158,9 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
         assertThatThrownBy(() -> service.create(author(),
                 new DraftCommand("retry-create", input("different-policy", false))))
                 .isInstanceOf(PolicyGovernanceConflictException.class);
-        PolicyProposalDocument submitted = service.submit(author(), first.id(),
+        PolicyProposalDocument submitted = submit(author(), first.id(),
                 new TransitionCommand("retry-submit", 0));
-        assertThat(service.submit(author(), first.id(), new TransitionCommand("retry-submit", 0)))
+        assertThat(submit(author(), first.id(), new TransitionCommand("retry-submit", 0)))
                 .isEqualTo(submitted);
         assertThat(service.history(auditor(), first.id())).hasSize(2);
     }
@@ -167,7 +168,7 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
     @Test
     void approvedContentCannotBeEditedAndRestartRecoversDecision() {
         PolicyProposalDocument submitted = submitted("restart-1");
-        PolicyProposalDocument approved = service.review(approver(), submitted.id(),
+        PolicyProposalDocument approved = review(approver(), submitted.id(),
                 new ReviewCommand("restart-review", 1, ReviewDecision.APPROVE, "evidence:restart"));
         assertThatThrownBy(() -> service.edit(author(), approved.id(),
                 new UpdateDraftCommand("edit-approved", 2, input("restart-1", false))))
@@ -199,10 +200,10 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
     @Test
     void opaqueLegacyReviewEvidenceCannotRequestPublication() {
         PolicyProposalDocument submitted = submitted("publish-1");
-        assertThatThrownBy(() -> service.review(approver(), submitted.id(),
+        assertThatThrownBy(() -> review(approver(), submitted.id(),
                 new ReviewCommand("without-evidence", 1, ReviewDecision.APPROVE, "")))
                 .isInstanceOf(IllegalArgumentException.class);
-        PolicyProposalDocument approved = service.review(approver(), submitted.id(),
+        PolicyProposalDocument approved = review(approver(), submitted.id(),
                 new ReviewCommand("with-evidence", 1, ReviewDecision.APPROVE, "evidence:review"));
         assertThatThrownBy(() -> service.requestPublication(publisher(), approved.id(),
                 new TransitionCommand("request-1", 2)))
@@ -214,7 +215,7 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
     @Test
     void missingPersistedEvidenceFailsClosedBeforePublicationRequest() {
         PolicyProposalDocument submitted = submitted("missing-evidence");
-        PolicyProposalDocument approved = service.review(approver(), submitted.id(),
+        PolicyProposalDocument approved = review(approver(), submitted.id(),
                 new ReviewCommand("review-evidence", 1, ReviewDecision.APPROVE, "evidence:review"));
         mongo.updateFirst(Query.query(Criteria.where("_id").is(approved.id())),
                 new Update().unset("approvalEvidenceReference"), PolicyProposalDocument.class);
@@ -231,8 +232,8 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
                 input("policy-rollback", false)));
         mongo.insert(new PolicyGovernanceHistoryDocument(UUID.randomUUID().toString(), created.id(), 1,
                 "BLOCKING_TEST_RECORD", PolicyGovernanceState.DRAFT, PolicyGovernanceState.SUBMITTED,
-                AUTHOR_ID, "unrelated", "0".repeat(64), created.draftSha256(), null, START));
-        assertThatThrownBy(() -> service.submit(author(), created.id(),
+                AUTHOR_ID, "unrelated", "0".repeat(64), created.draftSha256(), null, START, null));
+        assertThatThrownBy(() -> submit(author(), created.id(),
                 new TransitionCommand("submit-rollback", 0))).isInstanceOf(PolicyGovernanceConflictException.class);
         assertThat(store.find(created.id()).status()).isEqualTo(PolicyGovernanceState.DRAFT);
         assertThat(mongo.findById("submit-rollback", PolicyGovernanceOperationDocument.class)).isNull();
@@ -253,7 +254,7 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
         assertThat(edited.draftSha256()).isNotEqualTo(created.draftSha256());
         assertThatThrownBy(() -> service.edit(author(), created.id(),
                 new UpdateDraftCommand("edit-stale", 0, amended))).isInstanceOf(PolicyGovernanceConflictException.class);
-        PolicyProposalDocument submitted = service.submit(author(), created.id(), new TransitionCommand("submit-edit", 1));
+        PolicyProposalDocument submitted = submit(author(), created.id(), new TransitionCommand("submit-edit", 1));
         assertThat(submitted.draftSha256()).isEqualTo(edited.draftSha256());
     }
 
@@ -262,7 +263,7 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
         ready.countDown();
         try {
             go.await();
-            return service.review(approver(), id, new ReviewCommand(operation, 1, decision, "evidence:" + operation));
+            return review(approver(), id, new ReviewCommand(operation, 1, decision, "evidence:" + operation));
         } catch (Exception failure) {
             return failure;
         }
@@ -271,7 +272,32 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
     private PolicyProposalDocument submitted(String policyId) {
         PolicyProposalDocument created = service.create(author(), new DraftCommand("create-" + policyId,
                 input(policyId, false)));
-        return service.submit(author(), created.id(), new TransitionCommand("submit-" + policyId, 0));
+        return submit(author(), created.id(), new TransitionCommand("submit-" + policyId, 0));
+    }
+
+    // These tests isolate the Mongo transition engine; the WebAuthn integration suite proves
+    // that production creates this capability only after a verified assertion in the same transaction.
+    private PolicyProposalDocument submit(PolicyGovernanceActor actor, String id, TransitionCommand command) {
+        return service.submit(actor, id, command,
+                proof(actor, id, command.operationId(), command.expectedVersion(), "POLICY_SUBMIT"));
+    }
+
+    private PolicyProposalDocument review(PolicyGovernanceActor actor, String id, ReviewCommand command) {
+        return service.review(actor, id, command, proof(actor, id, command.operationId(),
+                command.expectedVersion(), command.decision() == ReviewDecision.APPROVE
+                        ? "POLICY_APPROVE" : "POLICY_REJECT"));
+    }
+
+    private PolicyWebAuthnService.VerifiedPolicyAction proof(PolicyGovernanceActor actor, String id,
+            String operation, long expectedVersion, String action) {
+        try {
+            var constructor = PolicyWebAuthnService.VerifiedPolicyAction.class.getDeclaredConstructor(
+                    String.class, String.class, String.class, long.class, String.class, Instant.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance(actor.id(), id, operation, expectedVersion, action, clock.instant());
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError("Verified transition fixture unavailable", failure);
+        }
     }
 
     private PolicyGovernanceActor author() {

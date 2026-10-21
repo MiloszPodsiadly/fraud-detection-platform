@@ -146,6 +146,35 @@ class ModelPromotionWorkflowServiceTest {
     }
 
     @Test
+    void unsignedProductionReviewIsDeniedExceptSeparatelyAuthorizedEmergencyRetirement() {
+        ModelPromotionProposalDocument ordinary = pendingProposal("proposer", ModelGovernanceEnvironment.PRODUCTION);
+        when(store.findProposal(ordinary.proposalId())).thenReturn(Optional.of(ordinary));
+        authenticate("reviewer", Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION), Set.of());
+        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(ordinary.proposalId())))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("WebAuthn");
+
+        ModelPromotionProposalDocument retirement = pendingProposal("proposer",
+                ModelGovernanceEnvironment.PRODUCTION, ModelPromotionLifecycleState.RETIRED);
+        when(store.findProposal(retirement.proposalId())).thenReturn(Optional.of(retirement));
+        String rationale = "BREAK_GLASS:case123:Emergency containment required immediately";
+        var emergency = new ModelPromotionWorkflowService.ReviewRequest(retirement.proposalId(),
+                "retirement-approval", ModelPromotionApproval.Outcome.APPROVED,
+                "retirement-review", rationale, ModelPromotionDecisionRationale.sha256(rationale));
+        assertThatThrownBy(() -> service.reviewProposal(emergency))
+                .isInstanceOf(ModelPromotionWorkflowBlockedException.class);
+        authenticate("reviewer", Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE,
+                AnalystAuthority.MODEL_PROMOTION_RETIRE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION), Set.of());
+        when(store.reviewProposal(any(), any())).thenAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return retirement.toResult(false);
+        });
+        assertThat(service.reviewProposal(emergency)).isNotNull();
+    }
+
+    @Test
     void rejectsProductionProposalForOrdinaryAnalystRole() {
         authenticate("proposer", AnalystRole.ANALYST.authorities(), Set.of(AnalystRole.ANALYST));
 
@@ -240,7 +269,7 @@ class ModelPromotionWorkflowServiceTest {
         when(store.findProposal(proposal.proposalId())).thenReturn(Optional.of(proposal));
         when(policyResolver.resolve(scope(ModelGovernanceEnvironment.PRODUCTION), use(), NOW))
                 .thenReturn(ModelPromotionPolicyResolution.available(proposal.policySnapshot()));
-        when(store.reviewProposal(any(), any())).thenAnswer(invocation -> {
+        when(store.reviewProposal(any(), any(), any())).thenAnswer(invocation -> {
             authenticate(
                     "reviewer",
                     Set.of(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION),
@@ -255,7 +284,7 @@ class ModelPromotionWorkflowServiceTest {
                 Set.of()
         );
 
-        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId())))
+        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId()), () -> {}))
                 .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
                 .satisfies(exception -> assertThat(((ModelPromotionWorkflowBlockedException) exception).reason())
                         .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.UNAUTHORIZED));
@@ -281,7 +310,7 @@ class ModelPromotionWorkflowServiceTest {
                 Set.of()
         );
 
-        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId())))
+        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId()), () -> {}))
                 .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
                 .satisfies(exception -> assertThat(((ModelPromotionWorkflowBlockedException) exception).reason())
                         .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.POLICY_CHANGED));
@@ -306,7 +335,7 @@ class ModelPromotionWorkflowServiceTest {
                 Set.of()
         );
 
-        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId())))
+        assertThatThrownBy(() -> service.reviewProposal(reviewRequest(proposal.proposalId()), () -> {}))
                 .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
                 .satisfies(exception -> assertThat(((ModelPromotionWorkflowBlockedException) exception).reason())
                         .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.EVIDENCE_CHANGED));
@@ -318,7 +347,7 @@ class ModelPromotionWorkflowServiceTest {
                 "proposer", ModelGovernanceEnvironment.PRODUCTION
         );
         when(store.findProposal(proposal.proposalId())).thenReturn(Optional.of(proposal));
-        when(store.reviewProposal(any(), any())).thenAnswer(invocation -> {
+        when(store.reviewProposal(any(), any(), any())).thenAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();
             return proposal.toResult(false);
         });
@@ -335,7 +364,7 @@ class ModelPromotionWorkflowServiceTest {
                 "reject-operation",
                 RATIONALE,
                 RATIONALE_SHA256
-        ));
+        ), () -> {});
 
         assertThat(result.proposalId()).isEqualTo(proposal.proposalId());
     }
@@ -384,13 +413,21 @@ class ModelPromotionWorkflowServiceTest {
             String proposer,
             ModelGovernanceEnvironment environment
     ) {
+        return pendingProposal(proposer, environment, ModelPromotionLifecycleState.CHALLENGER);
+    }
+
+    private ModelPromotionProposalDocument pendingProposal(
+            String proposer, ModelGovernanceEnvironment environment,
+            ModelPromotionLifecycleState targetState
+    ) {
         ModelPromotionTransitionProposal transition = new ModelPromotionTransitionProposal(
                 identity(),
                 scope(environment),
                 use(),
-                ModelPromotionLifecycleState.CANDIDATE,
-                0,
-                ModelPromotionLifecycleState.CHALLENGER,
+                targetState == ModelPromotionLifecycleState.RETIRED
+                        ? ModelPromotionLifecycleState.CHAMPION : ModelPromotionLifecycleState.CANDIDATE,
+                targetState == ModelPromotionLifecycleState.RETIRED ? 4 : 0,
+                targetState,
                 "proposal-operation"
         );
         ModelPromotionOperationContext context = new ModelPromotionOperationContext(
@@ -399,11 +436,12 @@ class ModelPromotionWorkflowServiceTest {
         ModelPromotionProposalSubmission submission = new ModelPromotionProposalSubmission(
                 transition,
                 context,
-                ModelPromotionAssessmentTestFixtures.policy(),
+                targetState == ModelPromotionLifecycleState.RETIRED
+                        ? null : ModelPromotionAssessmentTestFixtures.policy(),
                 null,
                 new ModelPromotionProposal(
                         "proposal-1",
-                        ModelPromotionLifecycleState.CHALLENGER,
+                        targetState,
                         proposer,
                         NOW,
                         proposalRationale("proposal-1")
@@ -432,7 +470,7 @@ class ModelPromotionWorkflowServiceTest {
     }
 
     private void reviewProposalRunsPreconditions(ModelPromotionProposalDocument proposal) {
-        when(store.reviewProposal(any(), any())).thenAnswer(invocation -> {
+        when(store.reviewProposal(any(), any(), any())).thenAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();
             return proposal.toResult(false);
         });

@@ -3,6 +3,7 @@ package com.frauddetection.alert.security.auth;
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -24,6 +25,7 @@ public class JwtAnalystAuthenticationConverter {
     private final AnalystAuthenticationFactory authenticationFactory;
     private final ModelPolicyIamMapping policyIamMapping;
 
+    @Autowired
     public JwtAnalystAuthenticationConverter(
             JwtSecurityProperties properties,
             AnalystAuthenticationFactory authenticationFactory,

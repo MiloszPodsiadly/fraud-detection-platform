@@ -17,7 +17,22 @@ public record PolicyWebAuthnCredential(
         long signatureCount,
         boolean revoked,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String status,
+        String enrollmentMethod,
+        String grantId,
+        String approvedBy,
+        String caseReference,
+        String label
 ) {
     public static final String COLLECTION = "model_policy_webauthn_credentials";
+
+    public boolean canSignNewAction() {
+        return !revoked && "ACTIVE".equals(status);
+    }
+
+    /** Operational retirement differs from compromise when relying on a published approval. */
+    public boolean canSupportPublishedApproval() {
+        return canSignNewAction() || revoked && ("REVOKED".equals(status) || "LOST".equals(status));
+    }
 }

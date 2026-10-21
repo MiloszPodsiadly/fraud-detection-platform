@@ -67,8 +67,22 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditEventResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAuditService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceController;
+import com.frauddetection.alert.governance.modelpolicy.PolicySecurityActorController;
+import com.frauddetection.alert.governance.modelpromotion.PolicySecurityOperationsController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustAdministrationController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationRecoveryController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyPublicationRecoveryService;
+import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectoryController;
+import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectory;
 import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
@@ -179,7 +193,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class,
-        PolicyGovernanceController.class
+        PolicyGovernanceController.class,
+        PolicySecurityActorController.class,
+        PolicySecurityOperationsController.class,
+        PolicyTrustAdministrationController.class,
+        OnlinePolicyApproverDirectoryController.class,
+        PolicyCredentialEnrollmentGrantController.class,
+        PolicyPublicationStatusController.class,
+        PolicyPublicationRecoveryController.class
 })
 @Import({
         AlertSecurityConfig.class,
@@ -310,6 +331,27 @@ class AlertSecurityConfigTest {
     @MockitoBean
     private PolicyWebAuthnService policyWebAuthnService;
 
+    @MockitoBean
+    private PolicyCredentialEnrollmentGrantService policyCredentialEnrollmentGrantService;
+
+    @MockitoBean
+    private PolicyPublicationStatusService policyPublicationStatusService;
+
+    @MockitoBean
+    private PolicyPublicationRecoveryService policyPublicationRecoveryService;
+
+    @MockitoBean
+    private OnlinePolicyApproverDirectory onlinePolicyApproverDirectory;
+
+    @MockitoBean
+    private PolicyTrustChangeService policyTrustChangeService;
+
+    @MockitoBean
+    private PolicyTrustRegistrySnapshotService policyTrustRegistrySnapshotService;
+
+    @MockitoBean
+    private MongoTemplate policySecurityMongoTemplate;
+
     @Test
     void policyRoutesRequireSeparatePolicyMandate() throws Exception {
         mockMvc.perform(get("/api/v1/governance/model-policies"))
@@ -323,12 +365,57 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/governance/model-policies")
                         .with(policyActor(ModelPolicyAuthority.READ)))
                 .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/governance/model-policies/proposal-1/history")
+                        .with(policyActor(ModelPolicyAuthority.READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/governance/model-policies/proposal-1/history")
+                        .with(policyActor(ModelPolicyAuthority.AUDIT_READ)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/governance/model-policies/proposal-1/unexpected")
+                        .with(policyActor(ModelPolicyAuthority.READ)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void trustAdministrationRequiresDedicatedMandatesNotFraudOps() throws Exception {
+        mockMvc.perform(get("/api/v1/governance/policy-trust/registries")
+                        .with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/governance/policy-security/me")
+                        .with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/governance/policy-trust/requests/challenges")
+                        .with(policyActor(ModelPolicyAuthority.TRUST_READ))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/governance/policy-trust/requests/change-1/reviews/challenges")
+                        .with(policyActor(ModelPolicyAuthority.TRUST_REQUEST))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void unavailableOperationsDiagnosticsNeverReportReady() throws Exception {
+        mockMvc.perform(get("/api/v1/governance/policy-security/operations")
+                        .with(oidcLogin().idToken(token -> token.issuer("https://issuer.example")
+                                        .subject("security-operator"))
+                                .authorities(new SimpleGrantedAuthority(ModelPolicyAuthority.TRUST_READ))))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/governance/policy-security/operations")
+                        .with(oidcLogin().idToken(token -> token.issuer("https://issuer.example")
+                                        .subject("security-operator"))
+                                .authorities(new SimpleGrantedAuthority(ModelPolicyAuthority.TRUST_READ),
+                                        new SimpleGrantedAuthority(ModelPolicyAuthority.PRODUCTION))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mongoTransactionReadiness").value("UNKNOWN"))
+                .andExpect(jsonPath("$.trustRegistryConsistency").value("UNKNOWN"));
     }
 
     @Test
     void policyWebAuthnActionsRequireOidcLoginEvenWithPolicyAuthorities() throws Exception {
         mockMvc.perform(post("/api/v1/governance/model-policies/webauthn/registrations")
-                        .with(policyActor(ModelPolicyAuthority.CREDENTIAL_ENROLL)))
+                        .with(policyActor(ModelPolicyAuthority.CREDENTIAL_ENROLL))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/v1/governance/model-policies/proposal-1/submit")
                         .with(policyActor(ModelPolicyAuthority.SUBMIT))
@@ -342,10 +429,11 @@ class AlertSecurityConfigTest {
 
     @Test
     void policyCredentialEnrollmentAcceptsOidcSessionWithExplicitMandate() throws Exception {
-        when(policyWebAuthnService.startRegistration(any())).thenReturn(
+        when(policyWebAuthnService.startRegistration(any(), any())).thenReturn(
                 new PolicyWebAuthnService.CeremonyOptions("registration:test", "{}",
                         Instant.parse("2026-11-01T10:02:00Z")));
         mockMvc.perform(post("/api/v1/governance/model-policies/webauthn/registrations")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"grantToken\":\"test\"}")
                         .with(oidcLogin().idToken(token -> token.issuer("https://issuer.example")
                                         .subject("policy-operator"))
                                 .authorities(new SimpleGrantedAuthority(ModelPolicyAuthority.CREDENTIAL_ENROLL))))

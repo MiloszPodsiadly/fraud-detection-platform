@@ -38,6 +38,8 @@ final class Ed25519ModelPromotionPolicyAuthorityVerifier implements ModelPromoti
         this.meterRegistry = meterRegistry;
     }
 
+    ModelPromotionTrustedIssuerRegistry loadedRegistry() { return registry; }
+
     @Override
     public ModelPromotionPolicyAuthorityVerification verify(ModelPromotionPolicy policy) {
         ModelPromotionPolicyAuthorityVerification result = verifyForCurrentAuthorization(policy);

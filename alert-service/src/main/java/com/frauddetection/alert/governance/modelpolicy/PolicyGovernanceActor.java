@@ -39,9 +39,17 @@ public record PolicyGovernanceActor(String id, Set<String> authorities, String i
         if (issuer == null || issuer.isBlank() || subject == null || subject.isBlank()) {
             throw new AccessDeniedException("Stable issuer and subject are required for policy governance");
         }
-        return new PolicyGovernanceActor("oidc:" + sha256(issuer + "#" + subject),
+        return new PolicyGovernanceActor(identityId(issuer, subject),
                 authentication.getAuthorities().stream().map(authority -> authority.getAuthority())
                         .collect(Collectors.toUnmodifiableSet()), issuer, subject);
+    }
+
+    public static String identityId(String issuer, String subject) {
+        if (issuer == null || issuer.isBlank() || subject == null || subject.isBlank()
+                || issuer.contains("#") || subject.contains("#")) {
+            throw new IllegalArgumentException("Trusted issuer and subject are required");
+        }
+        return "oidc:" + sha256(issuer + "#" + subject);
     }
 
     public static PolicyGovernanceActor fromOidcSession(Authentication authentication) {

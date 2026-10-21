@@ -205,10 +205,15 @@ app:
       # Bind these group names only to trusted IdP groups in the deployment.
       group-mapping:
         model-policy-reader: ["model-policy:read", "model-policy:audit:read"]
-        model-policy-author: ["model-policy:read", "model-policy:create", "model-policy:submit", "model-policy:credential:enroll"]
+        model-policy-author: ["model-policy:read", "model-policy:directory:read", "model-policy:create", "model-policy:submit", "model-policy:credential:enroll"]
         model-policy-approver: ["model-policy:read", "model-policy:approve", "model-policy:reject", "model-policy:credential:enroll"]
         model-policy-publisher: ["model-policy:read", "model-policy:publish:request"]
+        model-policy-recovery: ["model-policy:read", "model-policy:publication:recover", "model-policy:audit:read"]
+        model-policy-credential-admin: ["model-policy:credential:admin"]
+        model-policy-credential-holder: ["model-policy:credential:enroll"]
         model-policy-production: ["model-policy:scope:production"]
+        model-policy-trust-requester: ["model-policy:trust:read", "model-policy:trust:request"]
+        model-policy-trust-approver: ["model-policy:trust:read", "model-policy:trust:approve"]
   model-policy-webauthn:
     rp-id: ${APP_MODEL_POLICY_WEBAUTHN_RP_ID:localhost}
     origin: ${APP_MODEL_POLICY_WEBAUTHN_ORIGIN:http://localhost:4173}

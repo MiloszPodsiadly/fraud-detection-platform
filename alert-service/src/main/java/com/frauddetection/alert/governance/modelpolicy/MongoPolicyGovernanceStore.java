@@ -4,6 +4,7 @@ import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionPolicyDraft;
 import com.mongodb.MongoException;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.MongoTransactionManager;
@@ -21,6 +22,10 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -29,11 +34,13 @@ import java.util.function.Supplier;
 @Repository
 public class MongoPolicyGovernanceStore {
     private static final int MAX_TRANSIENT_ATTEMPTS = 3;
+    private static final int LEGACY_HISTORY_LIMIT = 200;
 
     private final MongoTemplate mongo;
     private final TransactionTemplate transaction;
     private final Clock clock;
 
+    @Autowired
     public MongoPolicyGovernanceStore(MongoTemplate mongo, MongoTransactionManager transactionManager) {
         this(mongo, new TransactionTemplate(transactionManager), Clock.systemUTC());
     }
@@ -53,6 +60,10 @@ public class MongoPolicyGovernanceStore {
                 .on("draft.governanceScope.environment", Sort.Direction.ASC)
                 .on("draft.intendedUse", Sort.Direction.ASC)
                 .unique().named("model_policy_draft_identity_v1"));
+        mongo.indexOps(PolicyProposalDocument.class).ensureIndex(new Index()
+                .on("draft.governanceScope.environment", Sort.Direction.ASC)
+                .on("updatedAt", Sort.Direction.DESC).on("_id", Sort.Direction.DESC)
+                .named("model_policy_scoped_page_v1"));
         mongo.indexOps(PolicyGovernanceHistoryDocument.class).ensureIndex(new Index()
                 .on("proposalId", Sort.Direction.ASC).on("version", Sort.Direction.ASC)
                 .unique().named("model_policy_history_version_v1"));
@@ -75,6 +86,10 @@ public class MongoPolicyGovernanceStore {
         return mongo.findById(id, PolicyProposalDocument.class);
     }
 
+    public PolicyGovernanceOperationDocument operation(String operationId) {
+        return mongo.findById(operationId, PolicyGovernanceOperationDocument.class);
+    }
+
     public List<PolicyProposalDocument> list(int limit, boolean productionAllowed) {
         Query query = productionAllowed ? new Query()
                 : Query.query(Criteria.where("draft.governanceScope.environment").ne("PRODUCTION"));
@@ -82,9 +97,65 @@ public class MongoPolicyGovernanceStore {
                 .limit(limit), PolicyProposalDocument.class));
     }
 
+    public List<PolicyProposalDocument> page(int limit, boolean productionAllowed,
+            PolicyGovernanceState status, String policyIdPrefix, Instant beforeUpdatedAt, String beforeId) {
+        List<Criteria> filters = new ArrayList<>();
+        if (!productionAllowed) filters.add(Criteria.where("draft.governanceScope.environment").ne("PRODUCTION"));
+        if (status != null) filters.add(Criteria.where("status").is(status));
+        if (policyIdPrefix != null && !policyIdPrefix.isBlank()) {
+            filters.add(Criteria.where("draft.policyId").regex("^" + Pattern.quote(policyIdPrefix)));
+        }
+        if (beforeUpdatedAt != null) filters.add(new Criteria().orOperator(
+                Criteria.where("updatedAt").lt(beforeUpdatedAt),
+                new Criteria().andOperator(Criteria.where("updatedAt").is(beforeUpdatedAt),
+                        Criteria.where("_id").lt(beforeId))));
+        Query query = filters.isEmpty() ? new Query() : Query.query(new Criteria().andOperator(
+                filters.toArray(Criteria[]::new)));
+        return List.copyOf(mongo.find(query.with(Sort.by(Sort.Direction.DESC, "updatedAt", "_id"))
+                .limit(limit), PolicyProposalDocument.class));
+    }
+
+    public List<PolicyGovernanceHistoryDocument> historyPage(String id, int limit, Long afterVersion) {
+        Criteria criteria = Criteria.where("proposalId").is(id);
+        if (afterVersion != null) criteria.and("version").gt(afterVersion);
+        return List.copyOf(mongo.find(Query.query(criteria).with(Sort.by(Sort.Direction.ASC, "version"))
+                .limit(limit), PolicyGovernanceHistoryDocument.class));
+    }
+
     public List<PolicyGovernanceHistoryDocument> history(String id) {
         return List.copyOf(mongo.find(Query.query(Criteria.where("proposalId").is(id))
-                .with(Sort.by(Sort.Direction.ASC, "version")), PolicyGovernanceHistoryDocument.class));
+                .with(Sort.by(Sort.Direction.ASC, "version")).limit(LEGACY_HISTORY_LIMIT),
+                PolicyGovernanceHistoryDocument.class));
+    }
+
+    Map<String, String> reviewRationales(String proposalId, List<PolicyGovernanceHistoryDocument> events) {
+        List<PolicyGovernanceHistoryDocument> reviewEvents = events.stream()
+                .filter(event -> "REVIEW_APPROVE".equals(event.action()) || "REVIEW_REJECT".equals(event.action()))
+                .toList();
+        if (reviewEvents.isEmpty()) return Map.of();
+
+        List<String> challengeIds = reviewEvents.stream().map(event -> "action:" + event.operationId())
+                .distinct().toList();
+        List<PolicyWebAuthnChallenge> challenges = mongo.find(
+                Query.query(Criteria.where("_id").in(challengeIds)), PolicyWebAuthnChallenge.class);
+        Map<String, PolicyWebAuthnChallenge> byOperationId = new HashMap<>();
+        for (PolicyWebAuthnChallenge challenge : challenges) {
+            if (challenge.operationId() != null) byOperationId.put(challenge.operationId(), challenge);
+        }
+
+        Map<String, String> rationales = new HashMap<>();
+        for (PolicyGovernanceHistoryDocument event : reviewEvents) {
+            PolicyWebAuthnChallenge challenge = byOperationId.get(event.operationId());
+            if (challenge != null && challenge.used()
+                    && proposalId.equals(challenge.proposalId())
+                    && event.actorId().equals(challenge.actorId())
+                    && event.draftSha256().equals(challenge.draftSha256())
+                    && event.operationId().equals(challenge.operationId())
+                    && challenge.rationale() != null) {
+                rationales.put(event.operationId(), challenge.rationale());
+            }
+        }
+        return Map.copyOf(rationales);
     }
 
     void requireVerifiedApproval(PolicyProposalDocument proposal) {
@@ -174,7 +245,7 @@ public class MongoPolicyGovernanceStore {
                         "webauthn:" + submission.id(), next.submittedAt(),
                         next.reviewingActorId(), next.approvalEvidenceReference(), next.decidedAt(), actor,
                         next.updatedAt(), PolicyPublicationJobDocument.State.PENDING,
-                        null, null, 0, null, null, null));
+                        null, null, 0, null, null, null, 0, null));
             }
             return committed;
         });
@@ -189,7 +260,7 @@ public class MongoPolicyGovernanceStore {
             String actor, String operationId, String commandSha256, Instant now) {
         mongo.insert(new PolicyGovernanceHistoryDocument(UUID.randomUUID().toString(), state.id(), state.version(),
                 action, from, state.status(), actor, operationId, commandSha256, state.draftSha256(),
-                state.approvalEvidenceReference(), now));
+                state.approvalEvidenceReference(), now, null));
         mongo.insert(new PolicyGovernanceOperationDocument(operationId, state.id(), commandSha256, actor, state, now));
     }
 

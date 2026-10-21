@@ -420,6 +420,12 @@ class ModelPromotionHttpIntegrationTest extends AbstractIntegrationTest {
 
         @Bean
         @Primary
+        ModelPromotionPolicyApprovalEvidenceVerifier integrationPolicyApprovalEvidenceVerifier() {
+            return policy -> ModelPromotionPolicyApprovalEvidenceVerification.verified();
+        }
+
+        @Bean
+        @Primary
         ModelCardProvider integrationModelCardProvider(ObjectMapper objectMapper) {
             JsonNode shadow = fixture(objectMapper);
             VerifiedModelCardArtifact artifact = modelCardArtifact(objectMapper, shadow);

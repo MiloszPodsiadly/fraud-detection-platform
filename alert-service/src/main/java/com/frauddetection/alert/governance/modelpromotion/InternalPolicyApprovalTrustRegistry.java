@@ -68,6 +68,10 @@ final class InternalPolicyApprovalTrustRegistry {
         return generation;
     }
 
+    List<TrustedKey> keys() {
+        return keysById.values().stream().sorted(java.util.Comparator.comparing(TrustedKey::keyId)).toList();
+    }
+
     String canonicalSha256() {
         return canonicalSha256;
     }

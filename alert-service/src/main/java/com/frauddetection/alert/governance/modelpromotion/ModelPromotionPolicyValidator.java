@@ -141,9 +141,19 @@ public class ModelPromotionPolicyValidator {
         return GovernanceCanonicalJson.sha256(objectMapper, content);
     }
 
-    static boolean isNonWaivable(ModelPromotionCriterion criterion) {
+    public static boolean isNonWaivable(ModelPromotionCriterion criterion) {
         return NON_WAIVABLE_CRITERIA.contains(criterion);
     }
+
+    public static ThresholdDescription describeThreshold(String key) {
+        String unit = RATE_THRESHOLDS.contains(key) ? "ratio (0..1)"
+                : "maximumMilliseconds".equals(key) ? "milliseconds" : "count";
+        return new ThresholdDescription(key, unit, POSITIVE_THRESHOLDS.contains(key),
+                RATE_THRESHOLDS.contains(key) ? "1" : null, INTEGER_THRESHOLDS.contains(key));
+    }
+
+    public record ThresholdDescription(String key, String unit, boolean mustBePositive,
+            String maximumInclusive, boolean integer) { }
 
     private void validateThresholds(ModelPromotionPolicy.CriterionRule rule) {
         rule.thresholds().forEach((name, value) -> {

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.Set;
+import java.util.List;
 import java.util.HexFormat;
 import java.util.Base64;
 import java.util.stream.Collectors;
@@ -33,6 +34,10 @@ public class PolicyWebAuthnCredentialRepository implements CredentialRepository 
                 .named("policy_webauthn_owner_active_v1"));
         mongo.indexOps(PolicyWebAuthnCredential.class).ensureIndex(new Index()
                 .on("userHandle", Sort.Direction.ASC).named("policy_webauthn_handle_v1"));
+        mongo.indexOps(PolicyWebAuthnCredential.class).ensureIndex(new Index()
+                .on("actorId", Sort.Direction.ASC).on("issuer", Sort.Direction.ASC)
+                .on("subject", Sort.Direction.ASC).on("status", Sort.Direction.ASC)
+                .on("revoked", Sort.Direction.ASC).named("policy_webauthn_owner_identity_status_v1"));
     }
 
     @Override
@@ -50,7 +55,7 @@ public class PolicyWebAuthnCredentialRepository implements CredentialRepository 
     @Override
     public Optional<String> getUsernameForUserHandle(ByteArray userHandle) {
         PolicyWebAuthnCredential credential = mongo.findOne(Query.query(Criteria.where("userHandle")
-                .is(userHandle.getBase64Url()).and("revoked").is(false)), PolicyWebAuthnCredential.class);
+                .is(userHandle.getBase64Url()).and("revoked").is(false).and("status").is("ACTIVE")), PolicyWebAuthnCredential.class);
         return Optional.ofNullable(credential).map(PolicyWebAuthnCredential::actorId);
     }
 
@@ -58,7 +63,7 @@ public class PolicyWebAuthnCredentialRepository implements CredentialRepository 
     public Optional<RegisteredCredential> lookup(ByteArray credentialId, ByteArray userHandle) {
         PolicyWebAuthnCredential credential = mongo.findOne(Query.query(Criteria.where("_id")
                 .is(credentialId.getBase64Url()).and("userHandle").is(userHandle.getBase64Url())
-                .and("revoked").is(false)), PolicyWebAuthnCredential.class);
+                .and("revoked").is(false).and("status").is("ACTIVE")), PolicyWebAuthnCredential.class);
         return Optional.ofNullable(credential).map(this::registered);
     }
 
@@ -66,7 +71,7 @@ public class PolicyWebAuthnCredentialRepository implements CredentialRepository 
     public Set<RegisteredCredential> lookupAll(ByteArray credentialId) {
         PolicyWebAuthnCredential credential = mongo.findById(credentialId.getBase64Url(),
                 PolicyWebAuthnCredential.class);
-        return credential == null ? Set.of() : Set.of(registered(credential));
+        return credential == null || !credential.canSignNewAction() ? Set.of() : Set.of(registered(credential));
     }
 
     public PolicyWebAuthnCredential find(String credentialId) {
@@ -75,7 +80,12 @@ public class PolicyWebAuthnCredentialRepository implements CredentialRepository 
 
     public Set<PolicyWebAuthnCredential> activeForActor(String actorId) {
         return Set.copyOf(mongo.find(Query.query(Criteria.where("actorId").is(actorId)
-                .and("revoked").is(false)), PolicyWebAuthnCredential.class));
+                .and("revoked").is(false).and("status").is("ACTIVE")), PolicyWebAuthnCredential.class));
+    }
+
+    public List<PolicyWebAuthnCredential> allForActor(String actorId) {
+        return List.copyOf(mongo.find(Query.query(Criteria.where("actorId").is(actorId))
+                .with(Sort.by(Sort.Direction.DESC, "createdAt")).limit(50), PolicyWebAuthnCredential.class));
     }
 
     private RegisteredCredential registered(PolicyWebAuthnCredential credential) {

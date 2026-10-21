@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.GovernanceTimestampContract;
+import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -27,10 +28,13 @@ final class ModelPromotionTrustedIssuerRegistry {
     static final String VERSION = "model-promotion-issuer-registry-v1";
 
     private final long generation;
+    private final String canonicalSha256;
     private final Map<String, TrustedKey> keysById;
 
-    private ModelPromotionTrustedIssuerRegistry(long generation, Map<String, TrustedKey> keysById) {
+    private ModelPromotionTrustedIssuerRegistry(long generation, String canonicalSha256,
+            Map<String, TrustedKey> keysById) {
         this.generation = generation;
+        this.canonicalSha256 = canonicalSha256;
         this.keysById = Map.copyOf(keysById);
     }
 
@@ -64,11 +68,20 @@ final class ModelPromotionTrustedIssuerRegistry {
                 throw new IllegalStateException("Policy issuer public keys must be globally unique");
             }
         }
-        return new ModelPromotionTrustedIssuerRegistry(configuration.generation(), loaded);
+        return new ModelPromotionTrustedIssuerRegistry(configuration.generation(),
+                GovernanceCanonicalJson.sha256(new ObjectMapper(), configuration), loaded);
     }
 
     long generation() {
         return generation;
+    }
+
+    String canonicalSha256() {
+        return canonicalSha256;
+    }
+
+    List<TrustedKey> keys() {
+        return keysById.values().stream().sorted(java.util.Comparator.comparing(TrustedKey::keyId)).toList();
     }
 
     TrustedKey find(String issuerIdentity, String keyId) {
@@ -111,7 +124,7 @@ final class ModelPromotionTrustedIssuerRegistry {
     }
 
     static PublicKey publicKey(String spkiBase64, String expectedSha256) throws GeneralSecurityException {
-        if (spkiBase64 == null || spkiBase64.isBlank()) {
+        if (spkiBase64 == null || spkiBase64.isBlank() || spkiBase64.length() > 256) {
             throw new IllegalArgumentException("Ed25519 public key material is required");
         }
         byte[] encoded = Base64.getDecoder().decode(spkiBase64);

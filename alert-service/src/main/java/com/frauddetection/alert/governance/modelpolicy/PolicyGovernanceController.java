@@ -5,19 +5,23 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Arrays;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionCriterion;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionPolicyValidator;
+import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
+import org.springframework.security.access.AccessDeniedException;
 
 import static com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceContracts.*;
 
@@ -28,18 +32,24 @@ public class PolicyGovernanceController {
     private static final String ID = "^[A-Za-z0-9-]{1,128}$";
     private final PolicyGovernanceService service;
     private final PolicyWebAuthnService webAuthn;
-    private final MongoTemplate mongo;
 
-    public PolicyGovernanceController(PolicyGovernanceService service, PolicyWebAuthnService webAuthn,
-            MongoTemplate mongo) {
+    public PolicyGovernanceController(PolicyGovernanceService service, PolicyWebAuthnService webAuthn) {
         this.service = service;
         this.webAuthn = webAuthn;
-        this.mongo = mongo;
     }
 
     @GetMapping
     public List<PolicyProposalDocument> list(Authentication authentication) {
         return service.list(PolicyGovernanceActor.from(authentication));
+    }
+
+    @GetMapping("/page")
+    public PolicyGovernanceService.ProposalPage page(Authentication authentication,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) PolicyGovernanceState status,
+            @RequestParam(required = false) String policyIdPrefix) {
+        return service.page(PolicyGovernanceActor.from(authentication), size, cursor, status, policyIdPrefix);
     }
 
     @GetMapping("/me")
@@ -52,6 +62,32 @@ public class PolicyGovernanceController {
 
     public record ActorCapabilities(String actorId, List<String> authorities) { }
 
+    @GetMapping("/schema")
+    public List<CriterionSchema> schema(Authentication authentication) {
+        var actor = PolicyGovernanceActor.from(authentication);
+        if (!actor.authorities().contains(ModelPolicyAuthority.READ)) {
+            throw new AccessDeniedException("Policy read mandate required");
+        }
+        return Arrays.stream(ModelPromotionCriterion.values()).map(criterion -> new CriterionSchema(
+                criterion.name(), criterion.evidenceSource(), criterion.metricSemantics(),
+                criterion.populationDefinition(), criterion.denominatorDefinition(),
+                criterion.requiredThresholdKeys().stream().sorted().toList(),
+                criterion.requiredThresholdKeys().stream().sorted()
+                        .map(ModelPromotionPolicyValidator::describeThreshold).toList(),
+                ModelPromotionPolicyValidator.isNonWaivable(criterion))).toList();
+    }
+
+    public record CriterionSchema(String criterion, String evidenceSource, String metricSemantics,
+            String populationDefinition, String denominatorDefinition,
+            List<String> requiredThresholdKeys,
+            List<ModelPromotionPolicyValidator.ThresholdDescription> thresholds,
+            boolean nonWaivable) { }
+
+    @GetMapping("/operations/{operationId}")
+    public PolicyProposalDocument operation(Authentication authentication, @PathVariable String operationId) {
+        return service.operation(PolicyGovernanceActor.from(authentication), operationId);
+    }
+
     @GetMapping("/{id}")
     public PolicyProposalDocument get(Authentication authentication,
             @PathVariable @NotBlank @Pattern(regexp = ID) String id) {
@@ -61,19 +97,15 @@ public class PolicyGovernanceController {
     @GetMapping("/{id}/history")
     public List<PolicyGovernanceHistoryDocument> history(Authentication authentication,
             @PathVariable @NotBlank @Pattern(regexp = ID) String id) {
-        return service.history(PolicyGovernanceActor.from(authentication), id).stream().map(event -> {
-            if (!"REVIEW_APPROVE".equals(event.action()) && !"REVIEW_REJECT".equals(event.action())) {
-                return event;
-            }
-            PolicyWebAuthnChallenge challenge = mongo.findById("action:" + event.operationId(),
-                    PolicyWebAuthnChallenge.class);
-            return event.withRationale(challenge != null && challenge.used()
-                    && id.equals(challenge.proposalId())
-                    && event.actorId().equals(challenge.actorId())
-                    && event.draftSha256().equals(challenge.draftSha256())
-                    && event.operationId().equals(challenge.operationId())
-                    ? challenge.rationale() : null);
-        }).toList();
+        return service.history(PolicyGovernanceActor.from(authentication), id);
+    }
+
+    @GetMapping("/{id}/history/page")
+    public PolicyGovernanceService.HistoryPage historyPage(Authentication authentication,
+            @PathVariable @NotBlank @Pattern(regexp = ID) String id,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) Long afterVersion) {
+        return service.historyPage(PolicyGovernanceActor.from(authentication), id, size, afterVersion);
     }
 
     @PostMapping("/drafts")
@@ -105,8 +137,9 @@ public class PolicyGovernanceController {
     }
 
     @PostMapping("/webauthn/registrations")
-    public PolicyWebAuthnService.CeremonyOptions startRegistration(Authentication authentication) {
-        return webAuthn.startRegistration(PolicyGovernanceActor.fromOidcSession(authentication));
+    public PolicyWebAuthnService.CeremonyOptions startRegistration(Authentication authentication,
+            @RequestBody PolicyWebAuthnService.RegistrationIntent request) {
+        return webAuthn.startRegistration(PolicyGovernanceActor.fromOidcSession(authentication), request);
     }
 
     @PostMapping("/webauthn/registrations/complete")
@@ -120,10 +153,41 @@ public class PolicyGovernanceController {
         return webAuthn.credentials(PolicyGovernanceActor.fromOidcSession(authentication));
     }
 
-    @DeleteMapping("/webauthn/credentials/{credentialId}")
+    @GetMapping("/webauthn/security-events")
+    public List<PolicyCredentialSecurityEventDocument> credentialSecurityEvents(Authentication authentication) {
+        return webAuthn.securityEvents(PolicyGovernanceActor.fromOidcSession(authentication));
+    }
+
+    @PutMapping("/webauthn/credentials/{credentialId}/label")
+    public PolicyWebAuthnService.CredentialSummary renameCredential(Authentication authentication,
+            @PathVariable String credentialId, @RequestBody CredentialLabel request) {
+        return webAuthn.renameCredential(PolicyGovernanceActor.fromOidcSession(authentication),
+                credentialId, request.label());
+    }
+
+    public record CredentialLabel(String label) { }
+
+    @PostMapping("/webauthn/credentials/{credentialId}/revocation-challenges")
+    public PolicyWebAuthnService.CeremonyOptions startCredentialRevocation(Authentication authentication,
+            @PathVariable String credentialId,
+            @RequestBody PolicyWebAuthnService.CredentialActionIntent request) {
+        return webAuthn.startCredentialRevocation(PolicyGovernanceActor.fromOidcSession(authentication),
+                credentialId, request);
+    }
+
+    @PostMapping("/webauthn/credentials/{credentialId}/revoke")
     public ResponseEntity<Void> revokeCredential(Authentication authentication,
-            @PathVariable String credentialId) {
-        webAuthn.revoke(PolicyGovernanceActor.fromOidcSession(authentication), credentialId);
+            @PathVariable String credentialId, @RequestBody PolicyWebAuthnService.FinishAction request) {
+        webAuthn.finishCredentialRevocation(PolicyGovernanceActor.fromOidcSession(authentication),
+                credentialId, request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/webauthn/credentials/{credentialId}/protected-revoke")
+    public ResponseEntity<Void> protectedCredentialRevocation(Authentication authentication,
+            @PathVariable String credentialId, @RequestBody PolicyWebAuthnService.ProtectedRevocation request) {
+        webAuthn.protectedCredentialRevocation(PolicyGovernanceActor.fromOidcSession(authentication),
+                credentialId, request);
         return ResponseEntity.noContent().build();
     }
 

@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -88,6 +89,21 @@ final class OnlinePolicyActorTrustRegistry {
     long generation() { return generation; }
     String canonicalSha256() { return canonicalSha256; }
 
+    List<Actor> entries() {
+        return actors.values().stream().sorted(java.util.Comparator.comparing(Actor::actorId)).toList();
+    }
+
+    List<Actor> eligibleApprovers(ModelGovernanceScope scope, ModelPromotionIntendedUse use, Instant now) {
+        return actors.values().stream().filter(actor -> actor.status() == Status.ACTIVE
+                && actor.roles().contains(Role.POLICY_APPROVER)
+                && actor.institutionalScopes().contains(scope.institutionalScope())
+                && actor.environments().contains(scope.environment())
+                && actor.intendedUses().contains(use)
+                && !now.isBefore(Instant.parse(actor.validFrom()))
+                && now.isBefore(Instant.parse(actor.validUntil())))
+                .sorted(java.util.Comparator.comparing(Actor::actorId)).toList();
+    }
+
     private static String actorId(String issuer, String subject) {
         try {
             return "oidc:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
@@ -100,7 +116,15 @@ final class OnlinePolicyActorTrustRegistry {
     record Configuration(String version, long generation, List<Actor> actors) { }
     record Actor(String actorId, String issuer, String subject, List<Role> roles,
             List<String> institutionalScopes, List<ModelGovernanceEnvironment> environments,
-            List<ModelPromotionIntendedUse> intendedUses, String validFrom, String validUntil, Status status) { }
+            List<ModelPromotionIntendedUse> intendedUses, String validFrom, String validUntil, Status status,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String displayName) {
+        Actor(String actorId, String issuer, String subject, List<Role> roles,
+                List<String> institutionalScopes, List<ModelGovernanceEnvironment> environments,
+                List<ModelPromotionIntendedUse> intendedUses, String validFrom, String validUntil, Status status) {
+            this(actorId, issuer, subject, roles, institutionalScopes, environments,
+                    intendedUses, validFrom, validUntil, status, null);
+        }
+    }
     enum Role { POLICY_AUTHOR, POLICY_APPROVER }
     enum Status { ACTIVE, REVOKED }
 }

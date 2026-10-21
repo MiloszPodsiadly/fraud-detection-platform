@@ -164,6 +164,10 @@ public class ModelPromotionWorkflowService {
     }
 
     public ModelPromotionProposalResult reviewProposal(ReviewRequest request) {
+        return reviewProposal(request, null);
+    }
+
+    ModelPromotionProposalResult reviewProposal(ReviewRequest request, Runnable signedProofInTransaction) {
         Objects.requireNonNull(request, "request is required");
         ModelPromotionProposalDocument proposal = store.findProposal(request.proposalId())
                 .orElseThrow(() -> new ModelPromotionWorkflowBlockedException(
@@ -185,6 +189,11 @@ public class ModelPromotionWorkflowService {
                     "A model promotion proposer cannot review their own proposal"
             );
         }
+        if (proposal.transition().governanceScope().environment() == ModelGovernanceEnvironment.PRODUCTION
+                && signedProofInTransaction == null && !isEmergencyRetirement(request, proposal)) {
+            throw new ModelPromotionPersistenceConflictException(
+                    "Production model promotion review requires a bound WebAuthn assertion");
+        }
         ModelPromotionProposalReview review = new ModelPromotionProposalReview(
                 proposal.proposalId(),
                 new ModelPromotionApproval(
@@ -203,12 +212,27 @@ public class ModelPromotionWorkflowService {
                 ),
                 actor.operationContext()
         );
-        return store.reviewProposal(review, () -> revalidateReviewPreconditions(
+        Runnable revalidate = () -> revalidateReviewPreconditions(
                 proposal,
                 requiredAuthority,
                 actor.operationContext(),
                 request.outcome()
-        ));
+        );
+        return signedProofInTransaction == null
+                ? store.reviewProposal(review, revalidate)
+                : store.reviewProposal(review, revalidate, signedProofInTransaction);
+    }
+
+    private boolean isEmergencyRetirement(ReviewRequest request, ModelPromotionProposalDocument proposal) {
+        if (proposal.transition().requestedTargetState() != ModelPromotionLifecycleState.RETIRED
+                || request.outcome() != ModelPromotionApproval.Outcome.APPROVED
+                || request.rationale() == null
+                || !request.rationale().matches("(?s)^BREAK_GLASS:[A-Za-z0-9._-]{6,64}:.{20,}$")) {
+            return false;
+        }
+        authorization.requireAuthority(AnalystAuthority.MODEL_PROMOTION_RETIRE,
+                proposal.transition().governanceScope());
+        return true;
     }
 
     public Optional<ModelPromotionAggregate> currentState(StateRequest request) {

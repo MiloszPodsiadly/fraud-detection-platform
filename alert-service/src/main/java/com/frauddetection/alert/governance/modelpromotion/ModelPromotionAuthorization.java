@@ -29,6 +29,10 @@ class ModelPromotionAuthorization {
         requirePrincipal(requiredAuthority, governanceScope);
     }
 
+    String requireActor(String requiredAuthority, ModelGovernanceScope governanceScope) {
+        return requirePrincipal(requiredAuthority, governanceScope).userId();
+    }
+
     boolean canReadRationale(ModelGovernanceScope governanceScope) {
         AnalystPrincipal principal = currentAnalystUser.get().orElseThrow(() -> new ModelPromotionWorkflowBlockedException(
                 ModelPromotionWorkflowBlockedException.Reason.UNAUTHENTICATED,

@@ -156,6 +156,14 @@ public class MongoModelPromotionStore {
             ModelPromotionProposalReview review,
             Runnable preconditionRevalidation
     ) {
+        return reviewProposal(review, preconditionRevalidation, null);
+    }
+
+    ModelPromotionProposalResult reviewProposal(
+            ModelPromotionProposalReview review,
+            Runnable preconditionRevalidation,
+            Runnable signedProofInTransaction
+    ) {
         requireTransactions();
         Objects.requireNonNull(review, "review is required");
         Objects.requireNonNull(preconditionRevalidation, "preconditionRevalidation is required");
@@ -169,7 +177,8 @@ public class MongoModelPromotionStore {
         return executeProposalReviewWithRetry(
                 review,
                 reviewCommandSha256,
-                () -> reviewProposalWithinTransaction(review, reviewCommandSha256, preconditionRevalidation)
+                () -> reviewProposalWithinTransaction(review, reviewCommandSha256,
+                        preconditionRevalidation, signedProofInTransaction)
         );
     }
 
@@ -262,7 +271,8 @@ public class MongoModelPromotionStore {
     private ModelPromotionProposalResult reviewProposalWithinTransaction(
             ModelPromotionProposalReview review,
             String reviewCommandSha256,
-            Runnable preconditionRevalidation
+            Runnable preconditionRevalidation,
+            Runnable signedProofInTransaction
     ) {
         ModelPromotionProposalDocument proposal = mongoTemplate.findById(
                 review.proposalId(), ModelPromotionProposalDocument.class
@@ -299,10 +309,13 @@ public class MongoModelPromotionStore {
                 ModelPromotionOperationClaimDocument.OperationType.REVIEW_PROPOSAL
         );
         preconditionRevalidation.run();
+        if (signedProofInTransaction != null) signedProofInTransaction.run();
 
         Instant reviewedAt = clock.instant();
-        if (review.approval().outcome() == ModelPromotionApproval.Outcome.APPROVED) {
-            DurableModelPromotionTransitionCommand transition = approvedTransition(proposal, review);
+        ModelPromotionProposalReview committedReview = signedProofInTransaction == null
+                ? review : acceptedReview(review, reviewedAt);
+        if (committedReview.approval().outcome() == ModelPromotionApproval.Outcome.APPROVED) {
+            DurableModelPromotionTransitionCommand transition = approvedTransition(proposal, committedReview);
             decisionValidator.validate(transition);
             String operationKey = ModelPromotionPersistenceKey.operation(
                     proposal.aggregateKey(), review.operationContext().operationId()
@@ -315,22 +328,36 @@ public class MongoModelPromotionStore {
             );
             return completeProposalReview(
                     proposal,
-                    review,
+                    committedReview,
                     reviewCommandSha256,
                     ModelPromotionProposalDocument.ReviewStatus.APPROVED,
-                    "APPROVE_MODEL_PROMOTION_PROPOSAL",
+                    signedProofInTransaction == null
+                            && proposal.transition().governanceScope().environment()
+                                    == ModelGovernanceEnvironment.PRODUCTION
+                            && proposal.transition().requestedTargetState() == ModelPromotionLifecycleState.RETIRED
+                            ? "BREAK_GLASS_RETIRE_MODEL_PROMOTION_PROPOSAL"
+                            : "APPROVE_MODEL_PROMOTION_PROPOSAL",
                     reviewedAt
             );
         }
-        recordProposalRejection(proposal, review, reviewCommandSha256, reviewedAt);
+        recordProposalRejection(proposal, committedReview, reviewCommandSha256, reviewedAt);
         return completeProposalReview(
                 proposal,
-                review,
+                committedReview,
                 reviewCommandSha256,
                 ModelPromotionProposalDocument.ReviewStatus.REJECTED,
                 "REJECT_MODEL_PROMOTION_PROPOSAL",
                 reviewedAt
         );
+    }
+
+    private ModelPromotionProposalReview acceptedReview(ModelPromotionProposalReview review, Instant acceptedAt) {
+        var old = review.approval();
+        var context = review.operationContext();
+        return new ModelPromotionProposalReview(review.proposalId(), new ModelPromotionApproval(
+                old.approvalId(), old.proposalId(), old.outcome(), old.approvedBy(), acceptedAt,
+                old.rationale()), new ModelPromotionOperationContext(context.operationId(), context.actorId(),
+                context.authorizationFingerprint(), acceptedAt));
     }
 
     private void recordProposalRejection(

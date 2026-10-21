@@ -8,6 +8,7 @@ import com.frauddetection.alert.governance.modelpolicy.PolicyProposalDocument;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnChallenge;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnCredential;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnEvidence;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnActionContract;
 import com.yubico.webauthn.AssertionRequest;
 import com.yubico.webauthn.CredentialRepository;
 import com.yubico.webauthn.FinishAssertionOptions;
@@ -26,8 +27,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -35,7 +34,6 @@ import java.util.Set;
 
 /** Shared verification of real WebAuthn assertions and current deployment-owned mandates. */
 final class OnlinePolicyApprovalVerifier {
-    private static final String ACTION_DOMAIN = "com.frauddetection.model-policy.webauthn-action.v1";
     private final MongoTemplate mongo;
     private final ObjectMapper mapper;
     private final Clock clock;
@@ -56,7 +54,14 @@ final class OnlinePolicyApprovalVerifier {
         this.approvalTrust = Objects.requireNonNull(approvalTrust);
     }
 
+    OnlinePolicyActorTrustRegistry loadedActorTrust() { return actors; }
+
     Verified verify(PolicyPublicationJobDocument job) {
+        return verify(job, null, true);
+    }
+
+    private Verified verify(PolicyPublicationJobDocument job, OnlinePolicyApprovalArtifact retained,
+            boolean newPublication) {
         try {
             Instant now = clock.instant();
             if (job == null || job.draft() == null || job.decidedAt() == null
@@ -72,10 +77,12 @@ final class OnlinePolicyApprovalVerifier {
             }
             OnlinePolicyApprovalArtifact.ActionProof submitted = verifyAction(job,
                     job.submissionEvidenceReference(), "POLICY_SUBMIT", "SUBMITTED", job.authorActorId(),
-                    job.submittedAt(), job.proposalVersion() - 3);
+                    job.submittedAt(), job.proposalVersion() - 3,
+                    retained == null ? null : retained.submission(), newPublication);
             OnlinePolicyApprovalArtifact.ActionProof approved = verifyAction(job,
                     job.approvalEvidenceReference(), "POLICY_APPROVE", "APPROVED", job.approverActorId(),
-                    job.decidedAt(), job.proposalVersion() - 2);
+                    job.decidedAt(), job.proposalVersion() - 2,
+                    retained == null ? null : retained.approval(), newPublication);
             if (submitted.evidence().credentialId().equals(approved.evidence().credentialId())
                     || submitted.publicKeyCose().equals(approved.publicKeyCose())) {
                 throw new SecurityException("Author and approver cannot share an authenticator credential");
@@ -146,8 +153,11 @@ final class OnlinePolicyApprovalVerifier {
                 || !job.approvalEvidenceReference().equals(history.approvalEvidenceReference())) {
             throw new SecurityException("Publication proposal or history linkage is invalid");
         }
-        Verified verified = verify(job);
+        Verified verified = verify(job, storedProof, false);
         var authorization = verified.authorization();
+        if (authorization.approvalTrustGeneration() < evidence.approvalTrustGeneration()) {
+            throw new SecurityException("Current approval trust generation rolled back");
+        }
         String key = ModelPromotionPolicyDocument.policyKey(policy.content().governanceScope(),
                 policy.content().intendedUse(), policy.content().policyId(), policy.content().revision());
         if (!storedProof.equals(verified.artifact())
@@ -175,7 +185,8 @@ final class OnlinePolicyApprovalVerifier {
 
     private OnlinePolicyApprovalArtifact.ActionProof verifyAction(PolicyPublicationJobDocument job,
             String reference, String action, String decision, String actorId, Instant acceptedAt,
-            long expectedVersion) throws Exception {
+            long expectedVersion, OnlinePolicyApprovalArtifact.ActionProof retained,
+            boolean newPublication) throws Exception {
         if (!reference.startsWith("webauthn:action:")) {
             throw new SecurityException("Action proof reference is not WebAuthn");
         }
@@ -206,11 +217,19 @@ final class OnlinePolicyApprovalVerifier {
         }
         PolicyWebAuthnCredential credential = mongo.findById(evidence.credentialId(),
                 PolicyWebAuthnCredential.class);
-        if (credential == null || credential.revoked() || !actorId.equals(credential.actorId())
+        if (credential == null || !actorId.equals(credential.actorId())
                 || !evidence.issuer().equals(credential.issuer())
                 || !evidence.subject().equals(credential.subject())
-                || credential.signatureCount() < evidence.signatureCount()) {
+                || credential.signatureCount() < evidence.signatureCount()
+                || (newPublication && !credential.canSignNewAction())
+                || (!newPublication && !credential.canSupportPublishedApproval())) {
             throw new SecurityException("Current WebAuthn credential is unavailable");
+        }
+        if (retained != null && (!retained.challenge().equals(challenge)
+                || !retained.evidence().equals(evidence)
+                || !retained.publicKeyCose().equals(credential.publicKeyCose())
+                || !retained.userHandle().equals(credential.userHandle()))) {
+            throw new SecurityException("Retained WebAuthn approval material changed");
         }
         String expectedChallenge = GovernanceCanonicalJson.sha256(mapper, contract(job, challenge, evidence));
         AssertionRequest request = AssertionRequest.fromJson(challenge.requestJson());
@@ -237,27 +256,12 @@ final class OnlinePolicyApprovalVerifier {
 
     private Map<String, Object> contract(PolicyPublicationJobDocument job,
             PolicyWebAuthnChallenge challenge, PolicyWebAuthnEvidence evidence) {
-        Map<String, Object> contract = new LinkedHashMap<>();
-        contract.put("domain", ACTION_DOMAIN);
-        contract.put("challengeId", challenge.id());
-        contract.put("nonce", challenge.nonce());
-        contract.put("expiresAt", challenge.expiresAt().toString());
-        contract.put("issuer", evidence.issuer());
-        contract.put("subject", evidence.subject());
-        contract.put("actorId", evidence.actorId());
-        contract.put("operationId", evidence.operationId());
-        contract.put("action", evidence.action());
-        contract.put("decision", challenge.decision());
-        if (challenge.rationale() != null) contract.put("rationale", challenge.rationale());
-        contract.put("proposalId", job.proposalId());
-        contract.put("expectedVersion", challenge.expectedVersion());
-        contract.put("draftSha256", job.draftSha256());
-        contract.put("policyId", job.draft().policyId());
-        contract.put("revision", job.draft().revision());
-        contract.put("institutionalScope", job.draft().governanceScope().institutionalScope());
-        contract.put("environment", job.draft().governanceScope().environment().name());
-        contract.put("intendedUse", job.draft().intendedUse().name());
-        return contract;
+        return PolicyWebAuthnActionContract.build(challenge.id(), challenge.nonce(), challenge.expiresAt(),
+                evidence.issuer(), evidence.subject(), evidence.actorId(), evidence.operationId(),
+                evidence.action(), challenge.decision(), challenge.rationale(), job.proposalId(),
+                challenge.expectedVersion(), job.draftSha256(), job.draft().policyId(),
+                job.draft().revision(), job.draft().governanceScope().institutionalScope(),
+                job.draft().governanceScope().environment().name(), job.draft().intendedUse().name());
     }
 
     private InternalPolicyApprovalTrustRegistry.TrustedKey mandate(String identity, String keyId,

@@ -33,8 +33,10 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -58,12 +60,12 @@ import static com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceCo
 /** OIDC-bound WebAuthn ceremonies. The assertion and policy transition commit in one Mongo transaction. */
 @Service
 public class PolicyWebAuthnService {
-    private static final String ACTION_DOMAIN = "com.frauddetection.model-policy.webauthn-action.v1";
     private static final int CHALLENGE_SECONDS = 120;
     private static final int MAX_RESPONSE_JSON = 65536;
     private final MongoTemplate mongo;
     private final TransactionTemplate transaction;
     private final PolicyWebAuthnCredentialRepository credentials;
+    private final PolicyCredentialEnrollmentGrantService enrollmentGrants;
     private final PolicyGovernanceService governance;
     private final MongoPolicyGovernanceStore governanceStore;
     private final ObjectMapper mapper;
@@ -72,12 +74,14 @@ public class PolicyWebAuthnService {
 
     public PolicyWebAuthnService(MongoTemplate mongo, MongoTransactionManager manager,
             PolicyWebAuthnCredentialRepository credentials, PolicyGovernanceService governance,
-            MongoPolicyGovernanceStore governanceStore, ObjectMapper mapper, Environment environment,
+            MongoPolicyGovernanceStore governanceStore, PolicyCredentialEnrollmentGrantService enrollmentGrants,
+            ObjectMapper mapper, Environment environment,
             @Value("${app.model-policy-webauthn.rp-id:localhost}") String rpId,
             @Value("${app.model-policy-webauthn.origin:http://localhost:4173}") String origin) {
         this.mongo = mongo;
         this.transaction = new TransactionTemplate(manager);
         this.credentials = credentials;
+        this.enrollmentGrants = enrollmentGrants;
         this.governance = governance;
         this.governanceStore = governanceStore;
         this.mapper = mapper;
@@ -96,14 +100,28 @@ public class PolicyWebAuthnService {
         mongo.indexOps(PolicyWebAuthnChallenge.class).ensureIndex(new Index()
                 .on("actorId", Sort.Direction.ASC).on("expiresAt", Sort.Direction.ASC)
                 .named("policy_webauthn_challenge_lookup_v1"));
+        mongo.indexOps(PolicyWebAuthnChallenge.class).ensureIndex(new Index()
+                .on("used", Sort.Direction.ASC).on("expiresAt", Sort.Direction.ASC)
+                .named("policy_webauthn_unused_retention_v1"));
         mongo.indexOps(PolicyWebAuthnEvidence.class).ensureIndex(new Index()
                 .on("operationId", Sort.Direction.ASC).unique()
                 .named("policy_webauthn_evidence_operation_v1"));
     }
 
-    public CeremonyOptions startRegistration(PolicyGovernanceActor actor) {
+    /** Never TTL committed ceremonies: their challenge is part of the published approval proof. */
+    @Scheduled(cron = "${app.model-policy-webauthn.unused-challenge-cleanup-cron:0 17 3 * * *}")
+    void pruneExpiredUnusedChallenges() {
+        mongo.remove(Query.query(Criteria.where("used").is(false)
+                .and("expiresAt").lt(now().minusSeconds(7 * 24 * 3600))),
+                PolicyWebAuthnChallenge.class);
+    }
+
+    public CeremonyOptions startRegistration(PolicyGovernanceActor actor, RegistrationIntent intent) {
         require(actor, ModelPolicyAuthority.CREDENTIAL_ENROLL);
         requireInstitutionalIdentity(actor);
+        if (intent == null) throw new AccessDeniedException("Protected enrollment grant required");
+        var purpose = enrollmentPurpose(actor);
+        var grant = enrollmentGrants.validate(actor, intent.grantToken(), purpose);
         UserIdentity user = UserIdentity.builder().name(actor.id()).displayName("Policy operator")
                 .id(userHandle(actor)).build();
         var selection = AuthenticatorSelectionCriteria.builder()
@@ -115,7 +133,8 @@ public class PolicyWebAuthnService {
             Instant expiresAt = now().plusSeconds(CHALLENGE_SECONDS);
             mongo.insert(new PolicyWebAuthnChallenge(id, "REGISTER", actor.id(), actor.issuer(),
                     actor.subject(), null, null, 0, null, null, 0, null, null, null, null,
-                    nonce(), options.toJson(), expiresAt, false, null));
+                    nonce(), options.toJson(), expiresAt, false, null, grant.id(),
+                    grant.purpose().name(), sha256(intent.grantToken())));
             return new CeremonyOptions(id, options.toCredentialsCreateJson(), expiresAt);
         } catch (Exception failure) {
             throw new IllegalStateException("Cannot create WebAuthn registration options", failure);
@@ -126,9 +145,17 @@ public class PolicyWebAuthnService {
         require(actor, ModelPolicyAuthority.CREDENTIAL_ENROLL);
         requireInstitutionalIdentity(actor);
         validateCeremonyCommand(command);
+        var purpose = enrollmentPurpose(actor);
+        var grant = enrollmentGrants.validate(actor, command.grantToken(), purpose);
         try {
             return transaction.execute(ignored -> {
                 PolicyWebAuthnChallenge challenge = requireChallenge(command.challengeId(), actor, "REGISTER");
+                if (!grant.id().equals(challenge.registrationGrantId())
+                        || !purpose.name().equals(challenge.registrationGrantPurpose())
+                        || !sha256(command.grantToken()).equals(challenge.registrationGrantSha256())
+                        || enrollmentPurpose(actor) != purpose) {
+                    throw new AccessDeniedException("Enrollment authorization or credential state changed");
+                }
                 try {
                     var options = PublicKeyCredentialCreationOptions.fromJson(challenge.requestJson());
                     var response = PublicKeyCredential.parseRegistrationResponseJson(command.responseJson());
@@ -140,12 +167,16 @@ public class PolicyWebAuthnService {
                     if (!acceptedAt.isBefore(challenge.expiresAt())) {
                         throw new PolicyGovernanceConflictException("WebAuthn registration challenge expired");
                     }
+                    String label = "Passkey " + credentialId.substring(0, Math.min(8, credentialId.length()));
                     consume(challenge);
+                    enrollmentGrants.consume(grant, credentialId, sha256(command.responseJson()), acceptedAt);
                     mongo.insert(new PolicyWebAuthnCredential(credentialId, actor.id(), actor.issuer(),
                             actor.subject(), userHandle(actor).getBase64Url(),
                             result.getPublicKeyCose().getBase64Url(), result.getSignatureCount(), false,
-                            acceptedAt, acceptedAt));
-                    return new CredentialSummary(credentialId, acceptedAt);
+                            acceptedAt, acceptedAt, "ACTIVE", purpose.name(), grant.id(),
+                            grant.approvedBy(), grant.caseReference(), label));
+                    return new CredentialSummary(credentialId, acceptedAt, acceptedAt,
+                            "ACTIVE", label);
                 } catch (AccessDeniedException | PolicyGovernanceConflictException failure) {
                     throw failure;
                 } catch (Exception failure) {
@@ -157,22 +188,327 @@ public class PolicyWebAuthnService {
         }
     }
 
+    private PolicyCredentialEnrollmentGrantDocument.Purpose enrollmentPurpose(PolicyGovernanceActor actor) {
+        if (!mongo.exists(Query.query(Criteria.where("actorId").is(actor.id())
+                .and("issuer").is(actor.issuer()).and("subject").is(actor.subject())),
+                PolicyWebAuthnCredential.class)) {
+            return PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST;
+        }
+        if (mongo.exists(Query.query(Criteria.where("actorId").is(actor.id())
+                .and("issuer").is(actor.issuer()).and("subject").is(actor.subject())
+                .and("revoked").is(false).and("status").is("ACTIVE")), PolicyWebAuthnCredential.class)) {
+            return PolicyCredentialEnrollmentGrantDocument.Purpose.ADDITIONAL;
+        }
+        return mongo.exists(Query.query(Criteria.where("actorId").is(actor.id())
+                .and("issuer").is(actor.issuer()).and("subject").is(actor.subject())
+                .and("status").is("COMPROMISED")), PolicyWebAuthnCredential.class)
+                ? PolicyCredentialEnrollmentGrantDocument.Purpose.COMPROMISE_RECOVERY
+                : PolicyCredentialEnrollmentGrantDocument.Purpose.LOST_DEVICE_RECOVERY;
+    }
+
     public List<CredentialSummary> credentials(PolicyGovernanceActor actor) {
         require(actor, ModelPolicyAuthority.CREDENTIAL_ENROLL);
-        return credentials.activeForActor(actor.id()).stream()
-                .map(credential -> new CredentialSummary(credential.id(), credential.createdAt()))
+        return credentials.allForActor(actor.id()).stream()
+                .map(credential -> new CredentialSummary(credential.id(), credential.createdAt(),
+                        credential.updatedAt(), credential.status(), credential.label()))
                 .sorted((left, right) -> left.credentialId().compareTo(right.credentialId()))
                 .toList();
     }
 
-    public void revoke(PolicyGovernanceActor actor, String credentialId) {
+    public List<PolicyCredentialSecurityEventDocument> securityEvents(PolicyGovernanceActor actor) {
         require(actor, ModelPolicyAuthority.CREDENTIAL_ENROLL);
-        var query = Query.query(Criteria.where("_id").is(credentialId).and("actorId").is(actor.id())
-                .and("issuer").is(actor.issuer()).and("subject").is(actor.subject())
-                .and("revoked").is(false));
-        var updated = mongo.findAndModify(query, new Update().set("revoked", true).set("updatedAt", now()),
-                FindAndModifyOptions.options().returnNew(true), PolicyWebAuthnCredential.class);
-        if (updated == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Active credential not found");
+        requireInstitutionalIdentity(actor);
+        return List.copyOf(mongo.find(Query.query(Criteria.where("targetActorId").is(actor.id()))
+                .with(Sort.by(Sort.Direction.DESC, "occurredAt")).limit(25),
+                PolicyCredentialSecurityEventDocument.class));
+    }
+
+    public CredentialSummary renameCredential(PolicyGovernanceActor actor, String credentialId, String label) {
+        require(actor, ModelPolicyAuthority.CREDENTIAL_ENROLL);
+        requireInstitutionalIdentity(actor);
+        if (label == null || !label.matches("^[\\p{L}\\p{N} ._-]{1,64}$")) {
+            throw new IllegalArgumentException("Credential label must be 1-64 readable characters");
+        }
+        return transaction.execute(ignored -> {
+            var credential = credentials.find(credentialId);
+            if (credential == null || !actor.id().equals(credential.actorId())
+                    || !actor.issuer().equals(credential.issuer())
+                    || !actor.subject().equals(credential.subject())) {
+                throw new AccessDeniedException("Credential belongs to another actor");
+            }
+            Instant changedAt = now();
+            var changed = mongo.findAndModify(Query.query(Criteria.where("_id").is(credentialId)
+                            .and("actorId").is(actor.id()).and("updatedAt").is(credential.updatedAt())),
+                    new Update().set("label", label.trim()).set("updatedAt", changedAt),
+                    FindAndModifyOptions.options().returnNew(true), PolicyWebAuthnCredential.class);
+            if (changed == null) throw new PolicyGovernanceConflictException("Credential changed concurrently");
+            mongo.insert(new PolicyCredentialSecurityEventDocument("credential-label:" + UUID.randomUUID(),
+                    "CREDENTIAL_LABEL_UPDATED", actor.id(), actor.issuer(), actor.subject(),
+                    actor.id(), null, null, credentialId, changedAt));
+            return new CredentialSummary(changed.id(), changed.createdAt(), changed.updatedAt(),
+                    changed.status(), changed.label());
+        });
+    }
+
+    public CeremonyOptions startCredentialRevocation(PolicyGovernanceActor actor, String credentialId,
+            CredentialActionIntent intent) {
+        require(actor, ModelPolicyAuthority.CREDENTIAL_ENROLL);
+        requireInstitutionalIdentity(actor);
+        if (intent == null || intent.operationId() == null
+                || !intent.operationId().matches("^[A-Za-z0-9._:-]{1,128}$")) {
+            throw new IllegalArgumentException("Valid credential operation ID required");
+        }
+        requireOwnedActiveCredential(actor, credentialId);
+        String id = "credential-revoke:" + intent.operationId();
+        Instant expiresAt = now().plusSeconds(CHALLENGE_SECONDS);
+        String nonce = nonce();
+        String digest = GovernanceCanonicalJson.sha256(mapper,
+                credentialActionContract(id, nonce, expiresAt, actor, credentialId));
+        var initial = relyingParty.startAssertion(StartAssertionOptions.builder()
+                .username(actor.id()).userVerification(UserVerificationRequirement.REQUIRED)
+                .timeout(CHALLENGE_SECONDS * 1000L).build());
+        var request = initial.toBuilder().publicKeyCredentialRequestOptions(initial
+                .getPublicKeyCredentialRequestOptions().toBuilder()
+                .challenge(new ByteArray(HexFormat.of().parseHex(digest))).build()).build();
+        try {
+            mongo.insert(new PolicyWebAuthnChallenge(id, "CREDENTIAL_REVOKE", actor.id(), actor.issuer(),
+                    actor.subject(), intent.operationId(), credentialId, 0, null, null, 0, null, null,
+                    null, null, nonce, request.toJson(), expiresAt, false, null, null, null, null));
+            return new CeremonyOptions(id, request.toCredentialsGetJson(), expiresAt);
+        } catch (DuplicateKeyException duplicate) {
+            throw new PolicyGovernanceConflictException("Credential operation ID already reserved");
+        } catch (Exception failure) {
+            throw new IllegalStateException("Cannot create credential revocation challenge", failure);
+        }
+    }
+
+    public void finishCredentialRevocation(PolicyGovernanceActor actor, String credentialId,
+            FinishAction command) {
+        require(actor, ModelPolicyAuthority.CREDENTIAL_ENROLL);
+        requireInstitutionalIdentity(actor);
+        if (command == null || command.operationId() == null
+                || !command.operationId().matches("^[A-Za-z0-9._:-]{1,128}$")
+                || !Objects.equals(command.challengeId(), "credential-revoke:" + command.operationId())
+                || command.responseJson() == null || command.responseJson().isBlank()
+                || command.responseJson().length() > MAX_RESPONSE_JSON) {
+            throw new IllegalArgumentException("Complete credential revocation assertion required");
+        }
+        transaction.executeWithoutResult(ignored -> {
+            var challenge = requireChallenge(command.challengeId(), actor, "CREDENTIAL_REVOKE");
+            if (!credentialId.equals(challenge.proposalId())
+                    || !command.operationId().equals(challenge.operationId())) {
+                throw new AccessDeniedException("Credential revocation target changed");
+            }
+            try {
+                var request = AssertionRequest.fromJson(challenge.requestJson());
+                String digest = GovernanceCanonicalJson.sha256(mapper, credentialActionContract(challenge.id(),
+                        challenge.nonce(), challenge.expiresAt(), actor, credentialId));
+                if (!digest.equals(request.getPublicKeyCredentialRequestOptions().getChallenge().getHex())) {
+                    throw new PolicyGovernanceConflictException("Credential revocation contract changed");
+                }
+                var response = PublicKeyCredential.parseAssertionResponseJson(command.responseJson());
+                var result = relyingParty.finishAssertion(FinishAssertionOptions.builder()
+                        .request(request).response(response).build());
+                if (!result.isSuccess() || !result.isUserVerified()
+                        || !result.isSignatureCounterValid() || !actor.id().equals(result.getUsername())
+                        || !userHandle(actor).equals(result.getUserHandle())) {
+                    throw new AccessDeniedException("Trusted authenticator assertion required");
+                }
+                String provingId = result.getCredentialId().getBase64Url();
+                var proving = requireOwnedActiveCredential(actor, provingId);
+                requireOwnedActiveCredential(actor, credentialId);
+                Instant acceptedAt = now();
+                if (!acceptedAt.isBefore(challenge.expiresAt())) {
+                    throw new PolicyGovernanceConflictException("Credential revocation challenge expired");
+                }
+                consume(challenge);
+                var query = Query.query(Criteria.where("_id").is(provingId).and("actorId").is(actor.id())
+                        .and("revoked").is(false).and("signatureCount").is(proving.signatureCount()));
+                var update = new Update().set("signatureCount", result.getSignatureCount())
+                        .set("updatedAt", acceptedAt);
+                if (provingId.equals(credentialId)) update.set("revoked", true).set("status", "REVOKED");
+                if (mongo.findAndModify(query, update, FindAndModifyOptions.options().returnNew(true),
+                        PolicyWebAuthnCredential.class) == null) {
+                    throw new PolicyGovernanceConflictException("Proving credential changed");
+                }
+                if (!provingId.equals(credentialId)) {
+                    var targetQuery = Query.query(Criteria.where("_id").is(credentialId)
+                            .and("actorId").is(actor.id()).and("revoked").is(false));
+                    if (mongo.findAndModify(targetQuery, new Update().set("revoked", true)
+                            .set("status", "REVOKED").set("updatedAt", acceptedAt),
+                            FindAndModifyOptions.options().returnNew(true),
+                            PolicyWebAuthnCredential.class) == null) {
+                        throw new PolicyGovernanceConflictException("Target credential changed");
+                    }
+                }
+                mongo.insert(new PolicyCredentialSecurityEventDocument("credential-revoke:" + command.operationId(),
+                        "CREDENTIAL_REVOKED", actor.id(), actor.issuer(), actor.subject(), actor.id(), null,
+                        challenge.id(), credentialId, acceptedAt));
+            } catch (AccessDeniedException | PolicyGovernanceConflictException failure) {
+                throw failure;
+            } catch (Exception failure) {
+                throw new IllegalArgumentException("Invalid credential revocation assertion", failure);
+            }
+        });
+    }
+
+    public void protectedCredentialRevocation(PolicyGovernanceActor actor, String credentialId,
+            ProtectedRevocation command) {
+        require(actor, ModelPolicyAuthority.CREDENTIAL_ENROLL);
+        requireInstitutionalIdentity(actor);
+        if (command == null || command.grantToken() == null) {
+            throw new AccessDeniedException("Independent revocation authorization required");
+        }
+        var purpose = command.compromised()
+                ? PolicyCredentialEnrollmentGrantDocument.Purpose.COMPROMISE_REVOCATION
+                : PolicyCredentialEnrollmentGrantDocument.Purpose.LOST_DEVICE_REVOCATION;
+        var grant = enrollmentGrants.validate(actor, command.grantToken(), purpose);
+        transaction.executeWithoutResult(ignored -> {
+            requireOwnedActiveCredential(actor, credentialId);
+            var current = enrollmentGrants.validate(actor, command.grantToken(), purpose);
+            if (!grant.id().equals(current.id())) {
+                throw new AccessDeniedException("Revocation grant changed");
+            }
+            Instant acceptedAt = now();
+            var query = Query.query(Criteria.where("_id").is(credentialId).and("actorId").is(actor.id())
+                    .and("issuer").is(actor.issuer()).and("subject").is(actor.subject())
+                    .and("revoked").is(false));
+            var updated = mongo.findAndModify(query, new Update().set("revoked", true)
+                    .set("status", command.compromised() ? "COMPROMISED" : "LOST")
+                    .set("updatedAt", acceptedAt), FindAndModifyOptions.options().returnNew(true),
+                    PolicyWebAuthnCredential.class);
+            if (updated == null) throw new PolicyGovernanceConflictException("Credential already revoked");
+            enrollmentGrants.consumeRevocation(current, credentialId, acceptedAt);
+        });
+    }
+
+    public CeremonyOptions startBoundAssertion(PolicyGovernanceActor actor, String namespace,
+            String operationId, Map<String, Object> baseContract) {
+        requireInstitutionalIdentity(actor);
+        if (namespace == null || !namespace.matches("^[a-z-]{1,40}$")
+                || operationId == null || !operationId.matches("^[A-Za-z0-9._:-]{1,128}$")
+                || baseContract == null || !baseContract.containsKey("domain")
+                || credentials.activeForActor(actor.id()).isEmpty()) {
+            throw new AccessDeniedException("Bound assertion requires a trusted registered authenticator");
+        }
+        String id = namespace + ":" + operationId;
+        String nonce = nonce();
+        Instant expiresAt = now().plusSeconds(CHALLENGE_SECONDS);
+        String digest = GovernanceCanonicalJson.sha256(mapper,
+                boundContract(id, nonce, expiresAt, actor, baseContract));
+        var initial = relyingParty.startAssertion(StartAssertionOptions.builder().username(actor.id())
+                .userVerification(UserVerificationRequirement.REQUIRED)
+                .timeout(CHALLENGE_SECONDS * 1000L).build());
+        var request = initial.toBuilder().publicKeyCredentialRequestOptions(initial
+                .getPublicKeyCredentialRequestOptions().toBuilder()
+                .challenge(new ByteArray(HexFormat.of().parseHex(digest))).build()).build();
+        try {
+            mongo.insert(new GovernanceWebAuthnBoundChallenge(id, namespace, actor.id(), actor.issuer(),
+                    actor.subject(), digest, nonce, request.toJson(), expiresAt, false));
+            return new CeremonyOptions(id, request.toCredentialsGetJson(), expiresAt);
+        } catch (DuplicateKeyException duplicate) {
+            throw new PolicyGovernanceConflictException("Bound action operation ID already reserved");
+        } catch (Exception failure) {
+            throw new IllegalStateException("Cannot create bound WebAuthn assertion", failure);
+        }
+    }
+
+    /** Must be called inside the caller's Mongo transaction, together with its domain mutation and audit. */
+    public VerifiedBoundAssertion acceptBoundAssertion(PolicyGovernanceActor actor, String namespace,
+            String challengeId, String responseJson, Map<String, Object> baseContract) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Bound assertion must commit with its governance mutation");
+        }
+        requireInstitutionalIdentity(actor);
+        if (responseJson == null || responseJson.isBlank() || responseJson.length() > MAX_RESPONSE_JSON) {
+            throw new IllegalArgumentException("Complete WebAuthn assertion required");
+        }
+        var challenge = mongo.findById(challengeId, GovernanceWebAuthnBoundChallenge.class);
+        if (challenge == null || challenge.used() || !namespace.equals(challenge.namespace())
+                || !actor.id().equals(challenge.actorId()) || !actor.issuer().equals(challenge.issuer())
+                || !actor.subject().equals(challenge.subject()) || !now().isBefore(challenge.expiresAt())) {
+            throw new AccessDeniedException("Bound assertion challenge unavailable for this actor");
+        }
+        String digest = GovernanceCanonicalJson.sha256(mapper,
+                boundContract(challenge.id(), challenge.nonce(), challenge.expiresAt(), actor, baseContract));
+        if (!digest.equals(challenge.contractSha256())) {
+            throw new PolicyGovernanceConflictException("Bound action contract changed");
+        }
+        try {
+            var request = AssertionRequest.fromJson(challenge.requestJson());
+            if (!digest.equals(request.getPublicKeyCredentialRequestOptions().getChallenge().getHex())) {
+                throw new PolicyGovernanceConflictException("Bound assertion challenge changed");
+            }
+            var response = PublicKeyCredential.parseAssertionResponseJson(responseJson);
+            var result = relyingParty.finishAssertion(FinishAssertionOptions.builder()
+                    .request(request).response(response).build());
+            if (!result.isSuccess() || !result.isUserVerified() || !result.isSignatureCounterValid()
+                    || !actor.id().equals(result.getUsername()) || !userHandle(actor).equals(result.getUserHandle())) {
+                throw new AccessDeniedException("WebAuthn assertion does not prove this action");
+            }
+            String credentialId = result.getCredentialId().getBase64Url();
+            var credential = requireOwnedActiveCredential(actor, credentialId);
+            Instant acceptedAt = now();
+            if (!acceptedAt.isBefore(challenge.expiresAt())) {
+                throw new PolicyGovernanceConflictException("Bound assertion challenge expired");
+            }
+            var claim = Query.query(Criteria.where("_id").is(challenge.id()).and("used").is(false));
+            if (mongo.findAndModify(claim, new Update().set("used", true),
+                    FindAndModifyOptions.options().returnNew(true), GovernanceWebAuthnBoundChallenge.class) == null) {
+                throw new PolicyGovernanceConflictException("Bound assertion challenge already used");
+            }
+            var counter = Query.query(Criteria.where("_id").is(credentialId).and("actorId").is(actor.id())
+                    .and("revoked").is(false).and("signatureCount").is(credential.signatureCount()));
+            if (mongo.findAndModify(counter, new Update().set("signatureCount", result.getSignatureCount())
+                    .set("updatedAt", acceptedAt), FindAndModifyOptions.options().returnNew(true),
+                    PolicyWebAuthnCredential.class) == null) {
+                throw new PolicyGovernanceConflictException("Credential revoked or counter changed");
+            }
+            return new VerifiedBoundAssertion(challenge.id(), credentialId, digest,
+                    sha256(responseJson), result.getSignatureCount(), acceptedAt);
+        } catch (AccessDeniedException | PolicyGovernanceConflictException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw new IllegalArgumentException("Invalid bound WebAuthn assertion", failure);
+        }
+    }
+
+    private Map<String, Object> boundContract(String id, String nonce, Instant expiresAt,
+            PolicyGovernanceActor actor, Map<String, Object> base) {
+        Map<String, Object> contract = new LinkedHashMap<>(base);
+        contract.put("challengeId", id);
+        contract.put("nonce", nonce);
+        contract.put("expiresAt", expiresAt.toString());
+        contract.put("actorId", actor.id());
+        contract.put("issuer", actor.issuer());
+        contract.put("subject", actor.subject());
+        return contract;
+    }
+
+    private PolicyWebAuthnCredential requireOwnedActiveCredential(PolicyGovernanceActor actor, String id) {
+        var credential = id == null ? null : credentials.find(id);
+        if (credential == null || !credential.canSignNewAction() || !actor.id().equals(credential.actorId())
+                || !actor.issuer().equals(credential.issuer())
+                || !actor.subject().equals(credential.subject())
+                || !userHandle(actor).getBase64Url().equals(credential.userHandle())) {
+            throw new AccessDeniedException("Active credential belonging to this identity required");
+        }
+        return credential;
+    }
+
+    private Map<String, Object> credentialActionContract(String id, String nonce, Instant expiresAt,
+            PolicyGovernanceActor actor, String credentialId) {
+        Map<String, Object> contract = new LinkedHashMap<>();
+        contract.put("domain", "com.frauddetection.model-policy.credential-revoke.v1");
+        contract.put("challengeId", id);
+        contract.put("nonce", nonce);
+        contract.put("expiresAt", expiresAt.toString());
+        contract.put("actorId", actor.id());
+        contract.put("issuer", actor.issuer());
+        contract.put("subject", actor.subject());
+        contract.put("credentialId", credentialId);
+        contract.put("action", "CREDENTIAL_REVOKE");
+        return contract;
     }
 
     public CeremonyOptions startAction(PolicyGovernanceActor actor, String proposalId,
@@ -219,7 +555,7 @@ public class PolicyWebAuthnService {
                     proposal.draft().governanceScope().institutionalScope(),
                     proposal.draft().governanceScope().environment().name(),
                     proposal.draft().intendedUse().name(), decisionFor(action), nonce,
-                    request.toJson(), expiresAt, false, rationale));
+                    request.toJson(), expiresAt, false, rationale, null, null, null));
             return new CeremonyOptions(id, request.toCredentialsGetJson(), expiresAt);
         } catch (DuplicateKeyException duplicate) {
             throw new PolicyGovernanceConflictException("Operation ID already reserved");
@@ -289,7 +625,7 @@ public class PolicyWebAuthnService {
             }
             String credentialId = result.getCredentialId().getBase64Url();
             PolicyWebAuthnCredential credential = credentials.find(credentialId);
-            if (credential == null || credential.revoked() || !actor.id().equals(credential.actorId())
+            if (credential == null || !credential.canSignNewAction() || !actor.id().equals(credential.actorId())
                     || !actor.issuer().equals(credential.issuer())
                     || !actor.subject().equals(credential.subject())
                     || !userHandle(actor).getBase64Url().equals(credential.userHandle())) {
@@ -317,13 +653,17 @@ public class PolicyWebAuthnService {
                     result.getSignatureCount(), acceptedAt));
             if ("POLICY_SUBMIT".equals(action)) {
                 return governance.submit(actor, proposalId,
-                        new TransitionCommand(challenge.operationId(), challenge.expectedVersion()), acceptedAt);
+                        new TransitionCommand(challenge.operationId(), challenge.expectedVersion()),
+                        new VerifiedPolicyAction(actor.id(), proposalId, challenge.operationId(),
+                                challenge.expectedVersion(), action, acceptedAt));
             }
             ReviewDecision decision = "POLICY_APPROVE".equals(action)
                     ? ReviewDecision.APPROVE : ReviewDecision.REJECT;
             return governance.review(actor, proposalId,
                     new ReviewCommand(challenge.operationId(), challenge.expectedVersion(), decision,
-                            "webauthn:" + challenge.id()), acceptedAt);
+                            "webauthn:" + challenge.id()),
+                    new VerifiedPolicyAction(actor.id(), proposalId, challenge.operationId(),
+                            challenge.expectedVersion(), action, acceptedAt));
         } catch (AccessDeniedException | PolicyGovernanceConflictException failure) {
             throw failure;
         } catch (Exception failure) {
@@ -344,8 +684,8 @@ public class PolicyWebAuthnService {
             throw new PolicyGovernanceConflictException("Challenge replay has different intent or assertion");
         }
         PolicyWebAuthnCredential credential = credentials.find(evidence.credentialId());
-        if (credential == null || credential.revoked() || !actor.id().equals(credential.actorId())) {
-            throw new AccessDeniedException("Credential revoked or unavailable");
+        if (credential == null || !actor.id().equals(credential.actorId())) {
+            throw new AccessDeniedException("Committed credential ownership unavailable");
         }
         PolicyGovernanceOperationDocument operation = mongo.findById(challenge.operationId(),
                 PolicyGovernanceOperationDocument.class);
@@ -425,27 +765,12 @@ public class PolicyWebAuthnService {
     private Map<String, Object> contract(String id, String nonce, Instant expiresAt,
             PolicyGovernanceActor actor, PolicyProposalDocument proposal, String operationId, String action,
             String rationale) {
-        Map<String, Object> contract = new LinkedHashMap<>();
-        contract.put("domain", ACTION_DOMAIN);
-        contract.put("challengeId", id);
-        contract.put("nonce", nonce);
-        contract.put("expiresAt", expiresAt.toString());
-        contract.put("issuer", actor.issuer());
-        contract.put("subject", actor.subject());
-        contract.put("actorId", actor.id());
-        contract.put("operationId", operationId);
-        contract.put("action", action);
-        contract.put("decision", decisionFor(action));
-        if (rationale != null) contract.put("rationale", rationale);
-        contract.put("proposalId", proposal.id());
-        contract.put("expectedVersion", proposal.version());
-        contract.put("draftSha256", proposal.draftSha256());
-        contract.put("policyId", proposal.draft().policyId());
-        contract.put("revision", proposal.draft().revision());
-        contract.put("institutionalScope", proposal.draft().governanceScope().institutionalScope());
-        contract.put("environment", proposal.draft().governanceScope().environment().name());
-        contract.put("intendedUse", proposal.draft().intendedUse().name());
-        return contract;
+        return PolicyWebAuthnActionContract.build(id, nonce, expiresAt, actor.issuer(), actor.subject(),
+                actor.id(), operationId, action, decisionFor(action), rationale, proposal.id(),
+                proposal.version(), proposal.draftSha256(), proposal.draft().policyId(),
+                proposal.draft().revision(), proposal.draft().governanceScope().institutionalScope(),
+                proposal.draft().governanceScope().environment().name(),
+                proposal.draft().intendedUse().name());
     }
 
     private String action(String route, ReviewDecision decision) {
@@ -549,13 +874,46 @@ public class PolicyWebAuthnService {
     }
 
     public record CeremonyOptions(String challengeId, String optionsJson, Instant expiresAt) { }
-    public record CredentialSummary(String credentialId, Instant createdAt) { }
-    public record FinishCeremony(String challengeId, String responseJson) { }
-    public record ActionIntent(String operationId, long expectedVersion, ReviewDecision decision,
-            String rationale) {
-        public ActionIntent(String operationId, long expectedVersion, ReviewDecision decision) {
-            this(operationId, expectedVersion, decision, null);
+    public record CredentialSummary(String credentialId, Instant createdAt, Instant updatedAt,
+            String status, String label) { }
+    public record RegistrationIntent(String grantToken) { }
+    public record CredentialActionIntent(String operationId) { }
+    public record ProtectedRevocation(String grantToken, boolean compromised) { }
+    public record VerifiedBoundAssertion(String challengeId, String credentialId, String contractSha256,
+            String assertionSha256, long signatureCount, Instant acceptedAt) { }
+
+    /** Unforgeable in production call sites; created only after assertion and evidence commit preparation. */
+    public static final class VerifiedPolicyAction {
+        private final String actorId;
+        private final String proposalId;
+        private final String operationId;
+        private final long expectedVersion;
+        private final String action;
+        private final Instant acceptedAt;
+
+        private VerifiedPolicyAction(String actorId, String proposalId, String operationId,
+                long expectedVersion, String action, Instant acceptedAt) {
+            this.actorId = actorId;
+            this.proposalId = proposalId;
+            this.operationId = operationId;
+            this.expectedVersion = expectedVersion;
+            this.action = action;
+            this.acceptedAt = acceptedAt;
         }
+
+        void require(PolicyGovernanceActor actor, String proposalId, String operationId,
+                long expectedVersion, String action) {
+            if (!this.actorId.equals(actor.id()) || !this.proposalId.equals(proposalId)
+                    || !this.operationId.equals(operationId) || this.expectedVersion != expectedVersion
+                    || !this.action.equals(action) || acceptedAt == null) {
+                throw new AccessDeniedException("Verified policy action does not bind this transition");
+            }
+        }
+
+        Instant acceptedAt() { return acceptedAt; }
     }
+    public record FinishCeremony(String challengeId, String responseJson, String grantToken) { }
+    public record ActionIntent(String operationId, long expectedVersion, ReviewDecision decision,
+            String rationale) { }
     public record FinishAction(String operationId, String challengeId, String responseJson) { }
 }

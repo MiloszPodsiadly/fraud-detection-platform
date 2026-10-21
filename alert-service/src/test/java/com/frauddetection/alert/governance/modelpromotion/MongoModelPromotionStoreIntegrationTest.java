@@ -928,7 +928,8 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
 
         assertThatThrownBy(() -> failing.reviewProposal(
                 review("proposal-review-audit-failure", "review-audit-failure", "independent-reviewer"), () -> {
-                }
+                }, () -> mongoTemplate.insert(new org.bson.Document("_id", "signed-proof-review-audit-failure"),
+                        "model_promotion_signed_review_rollback_probe")
         )).hasMessageContaining("local review audit unavailable");
 
         assertThat(store.currentState(identity, scope, use()).orElseThrow().lifecycleState())
@@ -936,6 +937,8 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         ModelPromotionProposalDocument pending = store.findProposal("proposal-review-audit-failure").orElseThrow();
         assertThat(pending.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
         assertThat(pending.approval()).isNull();
+        assertThat(mongoTemplate.getCollection("model_promotion_signed_review_rollback_probe")
+                .countDocuments()).isZero();
         assertThat(store.history(identity, scope, use(), 10)).hasSize(1);
         assertThat(mongoTemplate.findById(
                 ModelPromotionPersistenceKey.operation(

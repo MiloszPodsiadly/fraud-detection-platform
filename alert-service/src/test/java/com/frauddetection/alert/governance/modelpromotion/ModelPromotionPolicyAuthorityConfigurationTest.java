@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
@@ -20,6 +21,7 @@ import java.util.HexFormat;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class ModelPromotionPolicyAuthorityConfigurationTest {
 
@@ -31,6 +33,7 @@ class ModelPromotionPolicyAuthorityConfigurationTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withBean(ObjectMapper.class, ObjectMapper::new)
+            .withBean(MongoTemplate.class, () -> mock(MongoTemplate.class))
             .withUserConfiguration(ModelPromotionPolicyAuthorityConfiguration.class);
 
     @Test

@@ -156,6 +156,10 @@ public class ModelPromotionApiService {
         ), false));
     }
 
+    public ProposalResponse fromSignedReviewResult(ModelPromotionProposalResult result) {
+        return proposal(result, false);
+    }
+
     private AssessmentResponse assessment(ModelPromotionAssessment assessment) {
         ModelPromotionAssessment.Content content = assessment.content();
         ModelPromotionAssessment.PolicyReference policy = content.policy();
