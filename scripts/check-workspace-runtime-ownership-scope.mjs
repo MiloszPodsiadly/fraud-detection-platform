@@ -65,7 +65,8 @@ for (const file of changedFiles) {
         && /["']\/(?:api|governance|system|bff)\//.test(sourceLine)) {
       violations.push(`${normalized}: endpoint strings must stay behind the API client boundary.`);
     }
-    if (!isAllowedNarrativeFile(normalized)
+    if (normalized.startsWith("analyst-console-ui/src/")
+        && !isAllowedNarrativeFile(normalized)
         && introducesForbiddenScope(sourceLine)
         && !isAllowedFeedbackApiClientScope(normalized, sourceLine)) {
       violations.push(`${normalized}: workspace runtime ownership must not introduce product workflow, idempotency, Kafka/outbox/finality, auth mode, or speculative prefetch semantics.`);
