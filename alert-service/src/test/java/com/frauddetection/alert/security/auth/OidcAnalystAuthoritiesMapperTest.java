@@ -3,6 +3,7 @@ package com.frauddetection.alert.security.auth;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.GrantedAuthority;
@@ -104,5 +105,29 @@ class OidcAnalystAuthoritiesMapperTest {
         assertThat(mapper.mapAuthorities(List.of(new OidcUserAuthority(idToken))).stream()
                 .map(GrantedAuthority::getAuthority))
                 .contains(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+    }
+
+    @Test
+    void policyApprovalAndProductionAreIndependentExplicitOidcGrants() {
+        JwtSecurityProperties properties = new JwtSecurityProperties(true, false,
+                "https://issuer.example/realm", "", "sub", "groups",
+                Map.of("fraud-reviewer", AnalystRole.REVIEWER,
+                        "fraud-ops-admin", AnalystRole.FRAUD_OPS_ADMIN), Set.of());
+        OidcAnalystAuthoritiesMapper mapper = new OidcAnalystAuthoritiesMapper(properties, null,
+                new ModelPolicyIamMapping(Map.of(
+                        "policy-approver", Set.of(ModelPolicyAuthority.APPROVE),
+                        "policy-production", Set.of(ModelPolicyAuthority.PRODUCTION))));
+        OidcIdToken ordinary = token(List.of("fraud-reviewer", "fraud-ops-admin"));
+        OidcIdToken granted = token(List.of("policy-approver"));
+        assertThat(mapper.mapAuthorities(List.of(new OidcUserAuthority(ordinary))).stream()
+                .map(GrantedAuthority::getAuthority)).doesNotContain(ModelPolicyAuthority.APPROVE);
+        assertThat(mapper.mapAuthorities(List.of(new OidcUserAuthority(granted))).stream()
+                .map(GrantedAuthority::getAuthority)).contains(ModelPolicyAuthority.APPROVE)
+                .doesNotContain(ModelPolicyAuthority.PRODUCTION);
+    }
+
+    private OidcIdToken token(List<String> groups) {
+        return new OidcIdToken("id-token-value", Instant.now(), Instant.now().plusSeconds(300),
+                Map.of("sub", "operator-1", "groups", groups));
     }
 }

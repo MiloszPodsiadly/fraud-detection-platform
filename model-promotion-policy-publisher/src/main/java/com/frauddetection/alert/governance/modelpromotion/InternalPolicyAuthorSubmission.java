@@ -4,7 +4,7 @@ import java.util.Objects;
 
 /** Portable review hand-off: exact draft plus the author's signed digest statement. */
 record InternalPolicyAuthorSubmission(
-        ModelPromotionPolicyPublisher.UnsignedPolicy policy,
+        ModelPromotionPolicyPublisher.Draft policy,
         InternalPolicyApprovalArtifact.AuthorStatement authorStatement,
         String authorSignature
 ) {

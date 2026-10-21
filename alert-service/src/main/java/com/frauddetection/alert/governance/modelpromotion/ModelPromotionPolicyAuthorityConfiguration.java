@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Path;
@@ -46,5 +47,39 @@ class ModelPromotionPolicyAuthorityConfiguration {
         }
         return new Ed25519ModelPromotionPolicyAuthorityVerifier(objectMapper, registry,
                 clocks.getIfAvailable(Clock::systemUTC), meterRegistry);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(ModelPromotionPolicyApprovalEvidenceVerifier.class)
+    ModelPromotionPolicyApprovalEvidenceVerifier modelPromotionPolicyApprovalEvidenceVerifier(
+            MongoTemplate mongo, ObjectMapper mapper,
+            @Value("${app.model-promotion.approval-trust.path:}") String approvalPath,
+            @Value("${app.model-promotion.approval-trust.minimum-generation:1}") long approvalFloor,
+            @Value("${app.model-promotion.online-actor-trust.path:}") String actorPath,
+            @Value("${app.model-promotion.online-actor-trust.minimum-generation:1}") long actorFloor,
+            @Value("${app.model-policy-webauthn.rp-id:localhost}") String rpId,
+            @Value("${app.model-policy-webauthn.origin:http://localhost:4173}") String origin,
+            org.springframework.beans.factory.ObjectProvider<Clock> clocks) {
+        if (approvalPath == null || approvalPath.isBlank()) {
+            return policy -> ModelPromotionPolicyApprovalEvidenceVerification.unavailable(
+                    ModelPromotionPolicyApprovalEvidenceVerification.Reason.TRUST_UNAVAILABLE);
+        }
+        InternalPolicyApprovalTrustRegistry approval = InternalPolicyApprovalTrustRegistry.load(
+                mapper, Path.of(approvalPath), approvalFloor);
+        Clock clock = clocks.getIfAvailable(Clock::systemUTC);
+        OnlinePolicyApprovalVerifier online = null;
+        if (actorPath != null && !actorPath.isBlank()) {
+            OnlinePolicyActorTrustRegistry actors = OnlinePolicyActorTrustRegistry.load(
+                    mapper, Path.of(actorPath), actorFloor);
+            online = new OnlinePolicyApprovalVerifier(mongo, mapper, clock, rpId, origin, actors, approval);
+        }
+        return new MongoModelPromotionPolicyApprovalEvidenceVerifier(mongo, mapper, clock, approval, online);
+    }
+
+    @Bean
+    ModelPromotionPolicyFullTrustVerifier modelPromotionPolicyFullTrustVerifier(
+            ModelPromotionPolicyAuthorityVerifier signatures,
+            ModelPromotionPolicyApprovalEvidenceVerifier approvals) {
+        return new ModelPromotionPolicyFullTrustVerifier(signatures, approvals);
     }
 }

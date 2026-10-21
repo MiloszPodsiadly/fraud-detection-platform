@@ -278,6 +278,38 @@ test("hardened model-promotion trust mount exposes only the public registry", ()
     "a Compose renderer may omit an explicit false field, while the source overlay and file preflight remain authoritative");
 });
 
+test("publisher signing keys stay in the isolated read-only worker", () => {
+  const resolved = resolveHardenedCompose();
+  assert.equal(resolved.status, 0, resolved.stderr || resolved.error?.message);
+  const config = JSON.parse(resolved.stdout);
+  assert.equal(runChecker(config, "security-hardened").status, 0);
+  const mutations = [
+    ["writable issuer key", (value) => {
+      value.services["model-promotion-policy-publisher"].volumes.find(
+        ({ target }) => target === "/run/policy-publication/issuer.private-key.pkcs8.base64"
+      ).read_only = false;
+    }],
+    ["missing publisher key", (value) => {
+      value.services["model-promotion-policy-publisher"].volumes =
+        value.services["model-promotion-policy-publisher"].volumes.filter(
+          ({ target }) => target !== "/run/policy-publication/publisher.private-key.pkcs8.base64"
+        );
+    }],
+    ["issuer key leaked to alert service", (value) => {
+      value.services["alert-service"].volumes.push({
+        ...value.services["model-promotion-policy-publisher"].volumes.find(
+          ({ target }) => target === "/run/policy-publication/issuer.private-key.pkcs8.base64"
+        ), target: "/tmp/issuer-key"
+      });
+    }]
+  ];
+  for (const [label, mutate] of mutations) {
+    const candidate = structuredClone(config);
+    mutate(candidate);
+    assert.notEqual(runChecker(candidate, "security-hardened").status, 0, `${label} unexpectedly passed`);
+  }
+});
+
 test("model-promotion public registry rejects missing and symbolic-link sources", () => {
   const resolved = resolveHardenedCompose();
   assert.equal(resolved.status, 0, resolved.stderr || resolved.error?.message);
@@ -314,7 +346,7 @@ test("model-promotion public registry rejects missing and symbolic-link sources"
       "utf8");
     const unsafeDeclaration = runChecker(missing, "security-hardened", temporary);
     assert.notEqual(unsafeDeclaration.status, 0);
-    assert.match(unsafeDeclaration.stderr, /model-promotion trust overlay must declare one exact read-only public file bind/);
+    assert.match(unsafeDeclaration.stderr, /model-promotion trust overlay must declare only three exact read-only public file binds/);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
@@ -338,7 +370,7 @@ test("model-promotion checker detects a private source hidden behind an external
     });
     const checked = runChecker(config, "security-hardened");
     assert.notEqual(checked.status, 0);
-    assert.match(checked.stderr, /alert-service must mount only the model-promotion public registry/);
+    assert.match(checked.stderr, /alert-service must mount exactly three public model-promotion registries/);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

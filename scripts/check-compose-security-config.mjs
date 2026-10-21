@@ -134,6 +134,7 @@ function assertHardening() {
     "feature-enricher-service",
     "fraud-scoring-service",
     "alert-service",
+    "model-promotion-policy-publisher",
     "ml-inference-service",
     "analyst-console-ui",
   ];
@@ -168,56 +169,109 @@ function assertModelPromotionPolicyTrustMount() {
   const serviceName = "alert-service";
   const sourceRoot = path.resolve("deployment", ".local", "model-promotion-policy");
   const realSourceRoot = realPathIfPresent(sourceRoot);
-  const expectedSource = path.join(sourceRoot, "trusted-issuers.json");
   const targetRoot = "/run/model-promotion-policy";
-  const expectedTarget = `${targetRoot}/trusted-issuers.json`;
+  const expected = new Map([
+    [`${targetRoot}/trusted-issuers.json`, path.join(sourceRoot, "trusted-issuers.json")],
+    [`${targetRoot}/trusted-approvals.json`, path.join(sourceRoot, "approval", "trusted-approvals.json")],
+    [`${targetRoot}/online-actor-trust.json`, path.join(sourceRoot, "approval", "online-actor-trust.json")]
+  ]);
   assertDeclarativeModelPromotionPolicyTrustMount();
   expectEqual("model-promotion trusted issuer path",
-    env(serviceName, "MODEL_PROMOTION_TRUSTED_ISSUERS_PATH"), expectedTarget);
+    env(serviceName, "MODEL_PROMOTION_TRUSTED_ISSUERS_PATH"), `${targetRoot}/trusted-issuers.json`);
   expectEqual("model-promotion minimum trust generation",
     env(serviceName, "MODEL_PROMOTION_TRUST_MIN_GENERATION"), "1");
+  expectEqual("model-promotion approval trust path",
+    env(serviceName, "MODEL_PROMOTION_APPROVAL_TRUST_PATH"), `${targetRoot}/trusted-approvals.json`);
+  expectEqual("model-promotion actor trust path",
+    env(serviceName, "MODEL_PROMOTION_ONLINE_ACTOR_TRUST_PATH"), `${targetRoot}/online-actor-trust.json`);
   const mounts = (service(serviceName).volumes ?? []).filter((mount) => {
     if (mount?.type !== "bind") return pathsOverlap(String(mount?.target ?? ""), targetRoot);
     return pathsOverlap(String(mount.source ?? ""), sourceRoot)
       || pathsOverlap(realPathIfPresent(String(mount.source ?? "")), realSourceRoot)
       || pathsOverlap(String(mount.target ?? ""), targetRoot);
   });
-  if (mounts.length !== 1) {
-    fail("alert-service must mount only the model-promotion public registry, never its private key or directory");
-    return;
+  if (mounts.length !== expected.size) {
+    fail("alert-service must mount exactly three public model-promotion registries, never a private key or directory");
   }
-  const mount = mounts[0];
-  const createHostPath = mount.bind?.create_host_path;
-  if (normalizeComparablePath(mount.source) !== normalizeComparablePath(expectedSource)
-      || normalizeContainerPath(mount.target) !== expectedTarget
-      || mount.read_only !== true || (createHostPath !== false && createHostPath !== undefined)) {
-    fail("alert-service model-promotion trust mount must be the exact read-only public registry file"
-      + ` (source=${String(mount.source)}, target=${String(mount.target)},`
-      + ` read_only=${String(mount.read_only)}, create_host_path=${String(createHostPath)})`);
-  }
-  let candidate = expectedSource;
-  while (true) {
-    try {
-      const stat = fs.lstatSync(candidate);
-      if (stat.isSymbolicLink()) {
-        fail(`model-promotion public registry source must not traverse symbolic link ${candidate}`);
+  const seen = new Set();
+  for (const mount of mounts) {
+    const target = normalizeContainerPath(mount.target);
+    const expectedSource = expected.get(target);
+    if (seen.has(target)) fail(`duplicate model-promotion public registry mount ${target}`);
+    seen.add(target);
+    if (!expectedSource || mount.type !== "bind" || mount.read_only !== true
+        || normalizeComparablePath(mount.source) !== normalizeComparablePath(expectedSource)
+        || (mount.bind?.create_host_path !== false && mount.bind?.create_host_path !== undefined)) {
+      fail(`alert-service model-promotion registry mount ${target} must be the exact read-only public file`);
+      continue;
+    }
+    let candidate = expectedSource;
+    while (true) {
+      try {
+        const stat = fs.lstatSync(candidate);
+        if (stat.isSymbolicLink()) {
+          fail(`model-promotion public registry source must not traverse symbolic link ${candidate}`);
+          break;
+        }
+        if (candidate === expectedSource && !stat.isFile()) {
+          fail("model-promotion public registry source must be a regular file");
+        }
+      } catch (error) {
+        if (error?.code === "ENOENT") {
+          fail(`model-promotion public registry source is missing: ${candidate}`);
+        } else {
+          fail(`model-promotion public registry source cannot be inspected: ${error.message}`);
+        }
         break;
       }
-      if (candidate === expectedSource && !stat.isFile()) {
-        fail("model-promotion public registry source must be a regular file");
-      }
-    } catch (error) {
-      if (error?.code === "ENOENT") {
-        fail(`model-promotion public registry source is missing: ${candidate}`);
-        break;
-      } else {
-        fail(`model-promotion public registry source cannot be inspected: ${error.message}`);
-        break;
+      const parent = path.dirname(candidate);
+      if (parent === candidate) break;
+      candidate = parent;
+    }
+  }
+  for (const target of expected.keys()) {
+    if (!seen.has(target)) fail(`alert-service is missing model-promotion registry ${target}`);
+  }
+}
+
+function assertModelPromotionPublisherIsolation() {
+  const name = "model-promotion-policy-publisher";
+  const root = path.resolve("deployment", ".local", "model-promotion-policy");
+  const expected = new Map([
+    ["/run/policy-publication/trusted-approvals.json", path.join(root, "approval", "trusted-approvals.json")],
+    ["/run/policy-publication/online-actor-trust.json", path.join(root, "approval", "online-actor-trust.json")],
+    ["/run/policy-publication/trusted-issuers.json", path.join(root, "trusted-issuers.json")],
+    ["/run/policy-publication/publisher.private-key.pkcs8.base64", path.join(root, "approval", "publisher.private-key.pkcs8.base64")],
+    ["/run/policy-publication/issuer.private-key.pkcs8.base64", path.join(root, "private-key.pkcs8.base64")]
+  ]);
+  const mounts = service(name).volumes ?? [];
+  if (mounts.length !== expected.size || (service(name).ports ?? []).length) {
+    fail("publisher must have exactly five file mounts and no published port");
+  }
+  const seen = new Set();
+  for (const mount of mounts) {
+    const target = normalizeContainerPath(mount.target);
+    if (seen.has(target)) fail(`publisher has duplicate mount ${target}`);
+    seen.add(target);
+    const source = expected.get(target);
+    if (!source || mount.type !== "bind" || mount.read_only !== true
+        || normalizeComparablePath(mount.source) !== normalizeComparablePath(source)
+        || (mount.bind?.create_host_path !== false && mount.bind?.create_host_path !== undefined)) {
+      fail(`publisher mount ${target} must be the exact read-only fixture file`);
+    }
+  }
+  for (const target of expected.keys()) {
+    if (!seen.has(target)) fail(`publisher is missing mount ${target}`);
+  }
+  for (const [otherName, definition] of Object.entries(services)) {
+    if (otherName === name) continue;
+    for (const mount of definition.volumes ?? []) {
+      const source = normalizeComparablePath(mount.source);
+      if (source === normalizeComparablePath(path.join(root, "private-key.pkcs8.base64"))
+          || source === normalizeComparablePath(path.join(root, "approval", "publisher.private-key.pkcs8.base64"))) {
+        fail(`${otherName} must not mount a model-promotion private signing key`);
       }
     }
-    const parent = path.dirname(candidate);
-    if (parent === candidate) break;
-    candidate = parent;
   }
 }
 
@@ -240,11 +294,15 @@ function assertDeclarativeModelPromotionPolicyTrustMount() {
     : undefined;
   if (!volumesBlock) return;
   const mounts = longSyntaxSequence(lines, volumesBlock.start, volumesBlock.end, 6);
-  if (mounts.length !== 1 || mounts[0].type !== "bind"
-      || mounts[0].source !== "./.local/model-promotion-policy/trusted-issuers.json"
-      || mounts[0].target !== "/run/model-promotion-policy/trusted-issuers.json"
-      || mounts[0].read_only !== true || mounts[0].bind?.create_host_path !== false) {
-    fail("model-promotion trust overlay must declare one exact read-only public file bind without host-path creation");
+  const expected = new Map([
+    ["/run/model-promotion-policy/trusted-issuers.json", "./.local/model-promotion-policy/trusted-issuers.json"],
+    ["/run/model-promotion-policy/trusted-approvals.json", "./.local/model-promotion-policy/approval/trusted-approvals.json"],
+    ["/run/model-promotion-policy/online-actor-trust.json", "./.local/model-promotion-policy/approval/online-actor-trust.json"]
+  ]);
+  if (mounts.length !== expected.size || mounts.some((mount) => mount.type !== "bind"
+      || expected.get(mount.target) !== mount.source
+      || mount.read_only !== true || mount.bind?.create_host_path !== false)) {
+    fail("model-promotion trust overlay must declare only three exact read-only public file binds");
   }
 }
 
@@ -672,6 +730,7 @@ if (variant === "security-hardened" || variant === "security-hardened-model-shad
   assertGeneratedIdentityMount("alert-service", "/run/service-identity/alert-service-private.pem", "/deployment/.local/service-identity/alert-service-private.pem");
   assertGeneratedIdentityMount("audit-trust-authority", "/run/service-identity/jwks.json", "/deployment/.local/service-identity/jwks.json");
   assertModelPromotionPolicyTrustMount();
+  assertModelPromotionPublisherIsolation();
   assertLocalBindings();
   assertUiLocalPort();
   assertHardening();

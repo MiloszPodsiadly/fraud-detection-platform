@@ -212,7 +212,9 @@ final class ModelPromotionAssessmentTestFixtures {
                 new ModelPromotionPolicyResolver(
                         store,
                         policyValidator(),
-                        policy -> ModelPromotionPolicyAuthorityVerification.verified()
+                        new ModelPromotionPolicyFullTrustVerifier(
+                                policy -> ModelPromotionPolicyAuthorityVerification.verified(),
+                                policy -> ModelPromotionPolicyApprovalEvidenceVerification.verified())
                 ),
                 OBJECT_MAPPER
         );

@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.Optional;
 
 /**
- * Trusted boundary for independently verified policy approval AND authenticated publisher mandate.
+ * Shared authorization result for independently verified approval and publisher mandate.
  * Implementations must not derive authority from the proposed policy, an arbitrary CLI argument, or MongoDB.
  */
 public interface InstitutionalPolicyPublicationAuthorization {

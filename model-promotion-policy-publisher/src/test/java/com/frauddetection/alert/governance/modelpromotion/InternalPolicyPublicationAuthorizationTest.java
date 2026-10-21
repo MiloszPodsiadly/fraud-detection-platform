@@ -73,14 +73,10 @@ class InternalPolicyPublicationAuthorizationTest {
         ModelPromotionPolicy.Content self = content(AUTHOR, AUTHOR, "approval-1", 1,
                 scope(ModelGovernanceEnvironment.PRODUCTION), "2026-07-01T00:00:00Z",
                 "2026-10-01T00:00:00Z", BigDecimal.ONE);
-        InternalPolicyApprovalArtifact sameActor = proof(self, authorPair, approverPair,
-                AUTHOR, AUTHOR_KEY, AUTHOR, APPROVER_KEY, "2026-06-15T00:00:00Z");
-        assertThat(authorization(sameActor, registry(List.of(
-                key(AUTHOR, AUTHOR_KEY, authorPair, InternalPolicyApprovalTrustRegistry.Role.POLICY_AUTHOR),
-                key(AUTHOR, APPROVER_KEY, approverPair, InternalPolicyApprovalTrustRegistry.Role.POLICY_APPROVER),
-                key(PUBLISHER, PUBLISHER_KEY, publisherPair, InternalPolicyApprovalTrustRegistry.Role.POLICY_PUBLISHER),
-                key(ISSUER, ISSUER_KEY, issuerPair, InternalPolicyApprovalTrustRegistry.Role.POLICY_ISSUER))),
-                publisherPair.getPrivate()).authorize(self, digest(self))).isEmpty();
+        assertThatThrownBy(() -> proof(self, authorPair, approverPair,
+                AUTHOR, AUTHOR_KEY, AUTHOR, APPROVER_KEY, "2026-06-15T00:00:00Z"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("distinct actors");
 
         assertThatThrownBy(() -> registry(List.of(
                 key(AUTHOR, AUTHOR_KEY, authorPair, InternalPolicyApprovalTrustRegistry.Role.POLICY_AUTHOR),
@@ -109,7 +105,12 @@ class InternalPolicyPublicationAuthorizationTest {
                 content(AUTHOR, APPROVER, "forged-reference", 1, scope(ModelGovernanceEnvironment.PRODUCTION),
                         "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z", BigDecimal.ONE),
                 content(AUTHOR, APPROVER, "approval-1", 2, scope(ModelGovernanceEnvironment.PRODUCTION),
-                        "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z", BigDecimal.ONE));
+                        "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z", BigDecimal.ONE),
+                new ModelPromotionPolicy.Content(content.policyVersion(), content.policyId(), content.revision(),
+                        content.governanceScope(), content.intendedUse(),
+                        new ModelPromotionPolicy.PolicyProvenance(content.provenance().authority(),
+                                AUTHOR, APPROVER, "2026-05-21T00:00:00Z", "approval-1"),
+                        content.effectiveFromInclusive(), content.effectiveToExclusive(), content.criteria()));
         for (ModelPromotionPolicy.Content other : changed) {
             assertThat(authorization(proof, trust, publisherPair.getPrivate())
                     .authorize(other, digest(other))).isEmpty();
@@ -209,10 +210,13 @@ class InternalPolicyPublicationAuthorizationTest {
     private InternalPolicyApprovalArtifact proof(ModelPromotionPolicy.Content policy,
             KeyPair authorSigner, KeyPair approverSigner, String authorIdentity, String authorKeyId,
             String approverIdentity, String approverKeyId, String expiresAt) throws Exception {
+        ModelPromotionPolicyDraft draft = ModelPromotionPolicyDraft.fromApprovedContent(
+                policy, PUBLISHER, PUBLISHER_KEY, ISSUER, ISSUER_KEY);
         InternalPolicyApprovalArtifact.AuthorStatement author = new InternalPolicyApprovalArtifact.AuthorStatement(
                 InternalPolicyApprovalArtifact.VERSION, InternalPolicyApprovalArtifact.AUTHOR_PURPOSE,
-                policy.policyId(), policy.revision(), digest(policy), policy.governanceScope(), policy.intendedUse(),
-                policy.effectiveFromInclusive(), policy.effectiveToExclusive(), authorIdentity, authorKeyId,
+                policy.policyId(), policy.revision(), draft.canonicalSha256(mapper), policy.governanceScope(), policy.intendedUse(),
+                policy.effectiveFromInclusive(), policy.effectiveToExclusive(), policy.provenance().approvalReference(),
+                authorIdentity, authorKeyId,
                 PUBLISHER, PUBLISHER_KEY, ISSUER, ISSUER_KEY, "2026-05-19T00:00:00Z");
         InternalPolicyApprovalArtifact.ApprovalDecision decision = new InternalPolicyApprovalArtifact.ApprovalDecision(
                 InternalPolicyApprovalArtifact.VERSION, InternalPolicyApprovalArtifact.APPROVER_PURPOSE,

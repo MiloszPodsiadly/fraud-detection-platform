@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.net.URL;
 import java.util.stream.Collectors;
 
 @Component
@@ -21,13 +22,21 @@ public class JwtAnalystAuthenticationConverter {
 
     private final JwtSecurityProperties properties;
     private final AnalystAuthenticationFactory authenticationFactory;
+    private final ModelPolicyIamMapping policyIamMapping;
 
     public JwtAnalystAuthenticationConverter(
             JwtSecurityProperties properties,
-            AnalystAuthenticationFactory authenticationFactory
+            AnalystAuthenticationFactory authenticationFactory,
+            ModelPolicyIamMapping policyIamMapping
     ) {
         this.properties = properties;
         this.authenticationFactory = authenticationFactory;
+        this.policyIamMapping = policyIamMapping;
+    }
+
+    JwtAnalystAuthenticationConverter(JwtSecurityProperties properties,
+            AnalystAuthenticationFactory authenticationFactory) {
+        this(properties, authenticationFactory, new ModelPolicyIamMapping(Map.of()));
     }
 
     public UsernamePasswordAuthenticationToken convert(Jwt jwt) {
@@ -40,7 +49,14 @@ public class JwtAnalystAuthenticationConverter {
         if (externalAccessValues.stream().anyMatch(properties::grantsProductionPromotionAccess)) {
             authorities.add(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
         }
-        AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities);
+        authorities.addAll(policyIamMapping.authorities(externalAccessValues));
+        URL issuer = jwt.getIssuer();
+        String subject = jwt.getSubject();
+        String stableActor = issuer == null || !StringUtils.hasText(subject)
+                || !StringUtils.hasText(properties.issuerUri())
+                || !properties.issuerUri().trim().equals(issuer.toString())
+                ? null : issuer + "#" + subject;
+        AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities, stableActor);
         return (UsernamePasswordAuthenticationToken) authenticationFactory.authenticated(principal);
     }
 

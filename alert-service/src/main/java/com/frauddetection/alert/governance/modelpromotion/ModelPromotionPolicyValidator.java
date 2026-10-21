@@ -8,6 +8,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 
 import static com.frauddetection.alert.governance.modelpromotion.ModelPromotionPolicyResolution.Reason;
@@ -80,7 +81,18 @@ public class ModelPromotionPolicyValidator {
                 throw invalid(Reason.POLICY_CONTRACT_INVALID);
             }
         }
-        validateCriteria(content);
+        validateCriteria(content.criteria());
+    }
+
+    /** Validates the frozen review input without inventing an approval timestamp. */
+    public void validateDraftForPublication(ModelPromotionPolicyDraft draft, String claimedDigest) {
+        if (draft == null || claimedDigest == null || !draft.canonicalSha256(objectMapper).equals(claimedDigest)
+                || !timestamp(draft.effectiveFromInclusive()).isBefore(timestamp(draft.effectiveToExclusive()))
+                || !mongoDatePrecision(timestamp(draft.effectiveFromInclusive()))
+                || !mongoDatePrecision(timestamp(draft.effectiveToExclusive()))) {
+            throw invalid(Reason.POLICY_CONTRACT_INVALID);
+        }
+        validateCriteria(draft.criteria());
     }
 
     /** Validates the proposed institutional content before approval evidence and a signature are attached. */
@@ -93,15 +105,20 @@ public class ModelPromotionPolicyValidator {
         Instant effectiveTo = timestamp(content.effectiveToExclusive());
         Instant approvedAt = timestamp(content.provenance().approvedAt());
         if (!effectiveFrom.isBefore(effectiveTo) || approvedAt.isAfter(effectiveFrom)
+                || !mongoDatePrecision(effectiveFrom) || !mongoDatePrecision(effectiveTo)
                 || content.provenance().authorIdentity().equals(content.provenance().approvingAuthority())) {
             throw invalid(Reason.POLICY_CONTRACT_INVALID);
         }
-        validateCriteria(content);
+        validateCriteria(content.criteria());
     }
 
-    private void validateCriteria(ModelPromotionPolicy.Content content) {
+    private boolean mongoDatePrecision(Instant time) {
+        return time.getNano() % 1_000_000 == 0;
+    }
+
+    private void validateCriteria(List<ModelPromotionPolicy.CriterionRule> criteria) {
         EnumSet<ModelPromotionCriterion> observed = EnumSet.noneOf(ModelPromotionCriterion.class);
-        for (ModelPromotionPolicy.CriterionRule rule : content.criteria()) {
+        for (ModelPromotionPolicy.CriterionRule rule : criteria) {
             if (!observed.add(rule.criterion())) {
                 throw invalid(Reason.POLICY_CONTRACT_INVALID);
             }

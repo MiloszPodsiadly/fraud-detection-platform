@@ -28,6 +28,7 @@ COPY feature-enricher-service/src feature-enricher-service/src
 COPY fraud-scoring-service/src fraud-scoring-service/src
 COPY alert-service/src alert-service/src
 COPY audit-trust-authority/src audit-trust-authority/src
+COPY model-promotion-policy-publisher/src model-promotion-policy-publisher/src
 
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -pl "${MODULE_NAME}" -am -Dmaven.test.skip=true package

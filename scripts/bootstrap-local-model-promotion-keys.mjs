@@ -17,6 +17,12 @@ const issuerIdentity = "local-dev-model-promotion-issuer";
 const keyId = "local-dev-model-promotion-key-1";
 const approvalDir = join(outputDir, "approval");
 const approvalRegistryPath = join(approvalDir, "trusted-approvals.json");
+const onlineActorTrustPath = join(approvalDir, "online-actor-trust.json");
+const onlineIssuer = "http://localhost:8086/realms/fraud-detection";
+const onlineActors = [
+  ["b15b1124-74f3-4abd-8c53-377972316734", "POLICY_AUTHOR"],
+  ["bf7fd870-5c5f-445e-8707-a77652813c6e", "POLICY_APPROVER"]
+];
 const localActors = [
   ["local-dev-policy-author-a", "local-dev-author-a-key-1", "POLICY_AUTHOR", "author-a.private-key.pkcs8.base64"],
   ["local-dev-policy-approver-b", "local-dev-approver-b-key-1", "POLICY_APPROVER", "approver-b.private-key.pkcs8.base64"],
@@ -141,6 +147,39 @@ function validateExisting() {
   }
 }
 
+function actorId(subject) {
+  return `oidc:${createHash("sha256").update(`${onlineIssuer}#${subject}`).digest("hex")}`;
+}
+
+function ensureOnlineActorTrust() {
+  if (!existsSync(onlineActorTrustPath)) {
+    if (mode === "--check") throw new Error("Local online actor mandates are missing");
+    const issuer = JSON.parse(readFileSync(registryPath, "utf8")).keys[0];
+    const actors = onlineActors.map(([subject, role]) => ({
+      actorId: actorId(subject), issuer: onlineIssuer, subject, roles: [role],
+      institutionalScopes: ["CURRENT_INSTITUTION"], environments: ["DEVELOPMENT", "TEST"],
+      intendedUses: ["FRAUD_RISK_SCORING"], validFrom: issuer.validFrom,
+      validUntil: issuer.validUntil, status: "ACTIVE"
+    }));
+    writeFileSync(onlineActorTrustPath,
+      `${JSON.stringify({ version: "model-policy-online-actor-trust-v1", generation: 1, actors }, null, 2)}\n`,
+      { mode: 0o444, flag: "wx" });
+  }
+  const registry = JSON.parse(readFileSync(onlineActorTrustPath, "utf8"));
+  if (registry.version !== "model-policy-online-actor-trust-v1" || registry.generation !== 1
+      || registry.actors?.length !== onlineActors.length) {
+    throw new Error("Local online actor mandates are invalid");
+  }
+  for (const [subject, role] of onlineActors) {
+    const actor = registry.actors.find(entry => entry.subject === subject);
+    if (actor?.actorId !== actorId(subject) || actor.issuer !== onlineIssuer
+        || JSON.stringify(actor.roles) !== JSON.stringify([role]) || actor.status !== "ACTIVE"
+        || Date.parse(actor.validFrom) > Date.now() || Date.parse(actor.validUntil) <= Date.now()) {
+      throw new Error(`Local online actor mandate is invalid: ${subject}`);
+    }
+  }
+}
+
 if (existsSync(outputDir)) {
   validateExisting();
   if (mode === "--ensure") chmodSync(registryPath, 0o444);
@@ -187,3 +226,4 @@ if (existsSync(outputDir)) {
   console.log("Generated separate local-only model-promotion Ed25519 key and public registry in deployment/.local/model-promotion-policy/.");
 }
 ensureApproval();
+ensureOnlineActorTrust();

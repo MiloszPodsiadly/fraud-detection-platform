@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Deployment-owned public mandates, separate from policy documents and issuer signing material. */
+/** Deployment-owned public mandates, shared by publication and read-side verification. */
 final class InternalPolicyApprovalTrustRegistry {
 
     static final String VERSION = "model-promotion-approval-trust-v1";

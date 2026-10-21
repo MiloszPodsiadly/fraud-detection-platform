@@ -1476,7 +1476,9 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
             super(
                     objectMapper,
                     new ModelPromotionPolicyValidator(objectMapper),
-                    policy -> ModelPromotionPolicyAuthorityVerification.verified()
+                    new ModelPromotionPolicyFullTrustVerifier(
+                            policy -> ModelPromotionPolicyAuthorityVerification.verified(),
+                            policy -> ModelPromotionPolicyApprovalEvidenceVerification.verified())
             );
         }
 

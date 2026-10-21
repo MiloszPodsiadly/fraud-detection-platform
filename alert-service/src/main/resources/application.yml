@@ -77,6 +77,12 @@ app:
     trusted-issuers:
       path: ${MODEL_PROMOTION_TRUSTED_ISSUERS_PATH:}
       minimum-generation: ${MODEL_PROMOTION_TRUST_MIN_GENERATION:1}
+    approval-trust:
+      path: ${MODEL_PROMOTION_APPROVAL_TRUST_PATH:}
+      minimum-generation: ${MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION:1}
+    online-actor-trust:
+      path: ${MODEL_PROMOTION_ONLINE_ACTOR_TRUST_PATH:}
+      minimum-generation: ${MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION:1}
     persistence:
       enabled: ${MODEL_PROMOTION_PERSISTENCE_ENABLED:true}
     api:
@@ -194,6 +200,18 @@ app:
         fraud-analyst: ANALYST
         fraud-reviewer: REVIEWER
         fraud-ops-admin: FRAUD_OPS_ADMIN
+    model-policy:
+      # Policy mandates are independent of REVIEWER and FRAUD_OPS_ADMIN.
+      # Bind these group names only to trusted IdP groups in the deployment.
+      group-mapping:
+        model-policy-reader: ["model-policy:read", "model-policy:audit:read"]
+        model-policy-author: ["model-policy:read", "model-policy:create", "model-policy:submit", "model-policy:credential:enroll"]
+        model-policy-approver: ["model-policy:read", "model-policy:approve", "model-policy:reject", "model-policy:credential:enroll"]
+        model-policy-publisher: ["model-policy:read", "model-policy:publish:request"]
+        model-policy-production: ["model-policy:scope:production"]
+  model-policy-webauthn:
+    rp-id: ${APP_MODEL_POLICY_WEBAUTHN_RP_ID:localhost}
+    origin: ${APP_MODEL_POLICY_WEBAUTHN_ORIGIN:http://localhost:4173}
   internal-auth:
     client:
       enabled: ${INTERNAL_AUTH_CLIENT_ENABLED:false}

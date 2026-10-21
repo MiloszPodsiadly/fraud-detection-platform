@@ -30,6 +30,9 @@ services:
   alert-service:
     <<: *java-hardening
 
+  model-promotion-policy-publisher:
+    <<: *java-hardening
+
   ml-inference-service:
     read_only: true
     cap_drop:

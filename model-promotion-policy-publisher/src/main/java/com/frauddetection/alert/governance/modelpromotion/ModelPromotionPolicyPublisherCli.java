@@ -36,16 +36,16 @@ public final class ModelPromotionPolicyPublisherCli {
     private static final Set<String> VALUE_OPTIONS = Set.of("--policy", "--content", "--approval", "--submission",
             "--approval-trust", "--trusted-issuers", "--author-private-key", "--approver-private-key",
             "--publisher-private-key", "--issuer-private-key", "--author-identity", "--author-key-id",
-            "--approver-identity", "--approver-key-id", "--publisher-identity", "--publisher-key-id",
-            "--issuer", "--key-id", "--decision", "--expires-at", "--policy-id", "--review-at",
-            "--approval-reference", "--out", "--signed-policy");
+            "--approver-identity", "--approver-key-id", "--decision", "--expires-at", "--policy-id", "--effective-from",
+            "--approval-reference", "--out", "--signed-policy", "--online-actor-trust",
+            "--webauthn-rp-id", "--webauthn-origin");
 
     private ModelPromotionPolicyPublisherCli() {
     }
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            throw new IllegalArgumentException("First argument must be help, prepare, demo-draft, author, approve, publish, trust-check or inspect-policy");
+            throw new IllegalArgumentException("First argument must be help, prepare, demo-draft, author, approve, publish, worker, trust-check or inspect-policy");
         }
         Map<String, String> options = options(Arrays.copyOfRange(args, 1, args.length));
         ObjectMapper mapper = new ObjectMapper();
@@ -56,6 +56,7 @@ public final class ModelPromotionPolicyPublisherCli {
             case "author" -> author(mapper, options);
             case "approve" -> approve(mapper, options);
             case "publish" -> publish(mapper, options);
+            case "worker" -> worker(mapper, options);
             case "trust-check" -> trustCheck(mapper, options);
             case "inspect-policy" -> inspectPolicy(mapper, options);
             default -> throw new IllegalArgumentException("Unknown workflow command: " + args[0]);
@@ -63,7 +64,8 @@ public final class ModelPromotionPolicyPublisherCli {
     }
 
     private static void help() {
-        System.out.println("Commands: prepare, demo-draft, author, approve, publish, trust-check, inspect-policy");
+        System.out.println("Commands: prepare, demo-draft, author, approve, publish, worker, trust-check, inspect-policy");
+        System.out.println("worker --approval-trust <public-registry> --online-actor-trust <public-mandates> --trusted-issuers <public-registry> --publisher-private-key <key> --issuer-private-key <key> --webauthn-rp-id <rp> --webauthn-origin <origin> [--once]");
         System.out.println("trust-check --approval-trust <public-registry.json> --trusted-issuers <public-registry.json>");
         System.out.println("inspect-policy --signed-policy <signed-policy.json> --trusted-issuers <public-registry.json>");
         System.out.println("Both commands enforce MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION / MODEL_PROMOTION_TRUST_MIN_GENERATION when applicable.");
@@ -104,19 +106,19 @@ public final class ModelPromotionPolicyPublisherCli {
     }
 
     private static void prepare(ObjectMapper mapper, Map<String, String> options) throws Exception {
-        ModelPromotionPolicy.Content content = read(mapper, options, "--content", ModelPromotionPolicy.Content.class);
-        String sha256 = new ModelPromotionPolicyValidator(mapper).canonicalSha256(content);
-        new ModelPromotionPolicyValidator(mapper).validateUnsignedForPublication(content, sha256);
-        write(mapper, options, new ModelPromotionPolicyPublisher.UnsignedPolicy(content, sha256));
-        System.out.println("Prepared policy SHA-256 " + sha256);
+        ModelPromotionPolicyDraft content = read(mapper, options, "--content", ModelPromotionPolicyDraft.class);
+        String sha256 = content.canonicalSha256(mapper);
+        new ModelPromotionPolicyValidator(mapper).validateDraftForPublication(content, sha256);
+        write(mapper, options, new ModelPromotionPolicyPublisher.Draft(content, sha256));
+        System.out.println("Prepared immutable policy draft SHA-256 " + sha256);
     }
 
     private static void demoDraft(ObjectMapper mapper, Map<String, String> options) throws Exception {
-        Instant reviewAt = Instant.parse(required(options, "--review-at"));
-        if (!reviewAt.equals(reviewAt.truncatedTo(ChronoUnit.SECONDS))
-                || !reviewAt.toString().equals(required(options, "--review-at"))
-                || !reviewAt.isAfter(CLOCK.instant().plusSeconds(30))) {
-            throw new IllegalArgumentException("--review-at must be canonical UTC and at least 30 seconds in the future");
+        Instant effectiveFrom = Instant.parse(required(options, "--effective-from"));
+        if (!effectiveFrom.equals(effectiveFrom.truncatedTo(ChronoUnit.SECONDS))
+                || !effectiveFrom.toString().equals(required(options, "--effective-from"))
+                || !effectiveFrom.isAfter(CLOCK.instant().plusSeconds(30))) {
+            throw new IllegalArgumentException("--effective-from must be canonical UTC and at least 30 seconds in the future");
         }
         List<ModelPromotionPolicy.CriterionRule> rules = Arrays.stream(ModelPromotionCriterion.values())
                 .map(criterion -> new ModelPromotionPolicy.CriterionRule(criterion,
@@ -124,24 +126,25 @@ public final class ModelPromotionPolicyPublisherCli {
                         criterion.requiredThresholdKeys().stream().collect(Collectors.toMap(k -> k, k -> BigDecimal.ONE)),
                         86400, "VERIFIED", criterion.evidenceSource(), criterion.metricSemantics(),
                         criterion.populationDefinition(), criterion.denominatorDefinition(), null)).toList();
-        ModelPromotionPolicy.Content content = new ModelPromotionPolicy.Content(ModelPromotionPolicy.CURRENT_VERSION,
+        ModelPromotionPolicyDraft content = new ModelPromotionPolicyDraft(ModelPromotionPolicyDraft.VERSION,
                 required(options, "--policy-id"), 1,
                 new ModelGovernanceScope(ModelGovernanceScope.CURRENT_INSTITUTION,
                         ModelGovernanceEnvironment.DEVELOPMENT), ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
-                new ModelPromotionPolicy.PolicyProvenance(ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED,
-                        "local-dev-policy-author-a", "local-dev-policy-approver-b", reviewAt.toString(),
-                        required(options, "--approval-reference")),
-                reviewAt.plus(1, ChronoUnit.DAYS).toString(), reviewAt.plus(31, ChronoUnit.DAYS).toString(), rules);
-        String sha256 = new ModelPromotionPolicyValidator(mapper).canonicalSha256(content);
-        new ModelPromotionPolicyValidator(mapper).validateUnsignedForPublication(content, sha256);
-        write(mapper, options, new ModelPromotionPolicyPublisher.UnsignedPolicy(content, sha256));
-        System.out.println("Prepared local demo policy SHA-256 " + sha256 + "; no approval was created");
+                "local-dev-policy-author-a", "local-dev-policy-approver-b",
+                required(options, "--approval-reference"), "local-dev-policy-publisher",
+                "local-dev-publisher-key-1", "local-dev-model-promotion-issuer",
+                "local-dev-model-promotion-key-1", effectiveFrom.toString(),
+                effectiveFrom.plus(30, ChronoUnit.DAYS).toString(), rules);
+        String sha256 = content.canonicalSha256(mapper);
+        new ModelPromotionPolicyValidator(mapper).validateDraftForPublication(content, sha256);
+        write(mapper, options, new ModelPromotionPolicyPublisher.Draft(content, sha256));
+        System.out.println("Prepared local demo draft SHA-256 " + sha256 + "; no approval was created");
     }
 
     private static void author(ObjectMapper mapper, Map<String, String> options) throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy policy = read(mapper, options, "--policy",
-                ModelPromotionPolicyPublisher.UnsignedPolicy.class);
-        new ModelPromotionPolicyValidator(mapper).validateUnsignedForPublication(
+        ModelPromotionPolicyPublisher.Draft policy = read(mapper, options, "--policy",
+                ModelPromotionPolicyPublisher.Draft.class);
+        new ModelPromotionPolicyValidator(mapper).validateDraftForPublication(
                 policy.content(), policy.canonicalSha256());
         InternalPolicyApprovalTrustRegistry trust = approvalTrust(mapper, options);
         String identity = required(options, "--author-identity");
@@ -155,32 +158,37 @@ public final class ModelPromotionPolicyPublisherCli {
                 policy.content().policyId(), policy.content().revision(), policy.canonicalSha256(),
                 policy.content().governanceScope(), policy.content().intendedUse(),
                 policy.content().effectiveFromInclusive(), policy.content().effectiveToExclusive(),
-                identity, keyId, required(options, "--publisher-identity"),
-                required(options, "--publisher-key-id"), required(options, "--issuer"),
-                required(options, "--key-id"), now.toString());
-        if (!identity.equals(policy.content().provenance().authorIdentity())) {
+                policy.content().approvalReference(), identity, keyId,
+                policy.content().publisherIdentity(), policy.content().publisherKeyId(),
+                policy.content().issuerIdentity(), policy.content().issuerKeyId(), now.toString());
+        if (!identity.equals(policy.content().authorIdentity())) {
             throw new SecurityException("Author credential does not match policy provenance");
         }
         String signature = sign(key, InternalPolicyApprovalArtifact.authorSigningBytes(mapper, statement));
         write(mapper, options, new InternalPolicyAuthorSubmission(policy, statement, signature));
-        System.out.println("Author signed policy SHA-256 " + policy.canonicalSha256());
+        System.out.println("Author signed draft SHA-256 " + policy.canonicalSha256());
     }
 
     private static void approve(ObjectMapper mapper, Map<String, String> options) throws Exception {
         InternalPolicyAuthorSubmission submission = read(mapper, options, "--submission",
                 InternalPolicyAuthorSubmission.class);
-        ModelPromotionPolicyPublisher.UnsignedPolicy policy = submission.policy();
-        new ModelPromotionPolicyValidator(mapper).validateUnsignedForPublication(
+        ModelPromotionPolicyPublisher.Draft policy = submission.policy();
+        new ModelPromotionPolicyValidator(mapper).validateDraftForPublication(
                 policy.content(), policy.canonicalSha256());
         InternalPolicyApprovalArtifact.AuthorStatement author = submission.authorStatement();
-        if (!author.policyCanonicalSha256().equals(policy.canonicalSha256())
+        if (!author.draftCanonicalSha256().equals(policy.canonicalSha256())
                 || !author.policyId().equals(policy.content().policyId())
                 || author.revision() != policy.content().revision()
-                || !author.authorIdentity().equals(policy.content().provenance().authorIdentity())
+                || !author.authorIdentity().equals(policy.content().authorIdentity())
                 || !author.governanceScope().equals(policy.content().governanceScope())
                 || author.intendedUse() != policy.content().intendedUse()
                 || !author.effectiveFromInclusive().equals(policy.content().effectiveFromInclusive())
-                || !author.effectiveToExclusive().equals(policy.content().effectiveToExclusive())) {
+                || !author.effectiveToExclusive().equals(policy.content().effectiveToExclusive())
+                || !author.approvalReference().equals(policy.content().approvalReference())
+                || !author.publisherIdentity().equals(policy.content().publisherIdentity())
+                || !author.publisherKeyId().equals(policy.content().publisherKeyId())
+                || !author.issuerIdentity().equals(policy.content().issuerIdentity())
+                || !author.issuerKeyId().equals(policy.content().issuerKeyId())) {
             throw new SecurityException("Author statement does not match the reviewed policy");
         }
         InternalPolicyApprovalTrustRegistry trust = approvalTrust(mapper, options);
@@ -192,7 +200,7 @@ public final class ModelPromotionPolicyPublisherCli {
         String keyId = required(options, "--approver-key-id");
         PrivateKey key = privateKey(options, "--approver-private-key");
         if (identity.equals(author.authorIdentity())
-                || !identity.equals(policy.content().provenance().approvingAuthority())) {
+                || !identity.equals(policy.content().approverIdentity())) {
             throw new SecurityException("Review must use the independent named approver");
         }
         InternalPolicyApprovalTrustRegistry.TrustedKey authorKey = trust.find(author.authorIdentity(),
@@ -211,12 +219,12 @@ public final class ModelPromotionPolicyPublisherCli {
         }
         InternalPolicyApprovalArtifact.Decision decision = InternalPolicyApprovalArtifact.Decision.valueOf(
                 required(options, "--decision"));
-        String decidedAt = decision == InternalPolicyApprovalArtifact.Decision.APPROVED
-                ? policy.content().provenance().approvedAt()
-                : CLOCK.instant().truncatedTo(ChronoUnit.SECONDS).toString();
-        Instant decisionTime = Instant.parse(decidedAt);
-        if (decisionTime.isBefore(authored) || decisionTime.isAfter(CLOCK.instant())) {
-            throw new SecurityException("Predeclared policy approval time is outside the review window");
+        Instant decisionTime = CLOCK.instant();
+        String decidedAt = decisionTime.toString();
+        if (decisionTime.isBefore(authored)
+                || (decision == InternalPolicyApprovalArtifact.Decision.APPROVED
+                    && !decisionTime.isBefore(Instant.parse(policy.content().effectiveFromInclusive())))) {
+            throw new SecurityException("Decision time is outside the draft review window");
         }
         String expiresAt = required(options, "--expires-at");
         if (!Instant.parse(expiresAt).isAfter(CLOCK.instant())
@@ -226,18 +234,18 @@ public final class ModelPromotionPolicyPublisherCli {
         InternalPolicyApprovalArtifact.ApprovalDecision review = new InternalPolicyApprovalArtifact.ApprovalDecision(
                 InternalPolicyApprovalArtifact.VERSION, InternalPolicyApprovalArtifact.APPROVER_PURPOSE,
                 InternalPolicyApprovalArtifact.authorStatementSha256(mapper, author), identity, keyId, decision,
-                decidedAt, expiresAt, policy.content().provenance().approvalReference());
+                decidedAt, expiresAt, policy.content().approvalReference());
         InternalPolicyApprovalArtifact proof = new InternalPolicyApprovalArtifact(author,
                 submission.authorSignature(), review,
                 sign(key, InternalPolicyApprovalArtifact.approverSigningBytes(mapper, review)));
         write(mapper, options, proof);
-        System.out.println("Recorded " + decision + " for policy SHA-256 " + policy.canonicalSha256()
+        System.out.println("Recorded " + decision + " for draft SHA-256 " + policy.canonicalSha256()
                 + "; proof SHA-256 " + InternalPolicyApprovalArtifact.proofSha256(mapper, proof));
     }
 
     private static void publish(ObjectMapper mapper, Map<String, String> options) throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy policy = read(mapper, options, "--policy",
-                ModelPromotionPolicyPublisher.UnsignedPolicy.class);
+        ModelPromotionPolicyPublisher.Draft policy = read(mapper, options, "--policy",
+                ModelPromotionPolicyPublisher.Draft.class);
         InternalPolicyApprovalArtifact proof = read(mapper, options, "--approval",
                 InternalPolicyApprovalArtifact.class);
         InternalPolicyApprovalTrustRegistry trust = approvalTrust(mapper, options);
@@ -255,7 +263,8 @@ public final class ModelPromotionPolicyPublisherCli {
         ModelPromotionPolicyPublisher.PreparedPublication prepared = publisher.prepare(policy, issuerKey, issuer, keyId);
         if (options.containsKey("--dry-run")) {
             System.out.println(mapper.writeValueAsString(Map.of("validated", true, "published", false,
-                    "policyCanonicalSha256", policy.canonicalSha256(),
+                    "draftCanonicalSha256", policy.canonicalSha256(),
+                    "policyCanonicalSha256", prepared.policy().canonicalSha256(),
                     "approvalProofSha256", InternalPolicyApprovalArtifact.proofSha256(mapper, proof))));
             return;
         }
@@ -274,6 +283,43 @@ public final class ModelPromotionPolicyPublisherCli {
         }
     }
 
+    private static void worker(ObjectMapper mapper, Map<String, String> options) throws Exception {
+        String mongoUri = System.getenv("MODEL_PROMOTION_PUBLISH_MONGODB_URI");
+        if (mongoUri == null || mongoUri.isBlank()) {
+            throw new IllegalStateException("MODEL_PROMOTION_PUBLISH_MONGODB_URI is required for the worker");
+        }
+        InternalPolicyApprovalTrustRegistry approvalTrust = approvalTrust(mapper, options);
+        OnlinePolicyActorTrustRegistry actorTrust = OnlinePolicyActorTrustRegistry.load(mapper,
+                Path.of(required(options, "--online-actor-trust")),
+                generationFloor("MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION"));
+        ModelPromotionTrustedIssuerRegistry issuers = ModelPromotionTrustedIssuerRegistry.load(mapper,
+                Path.of(required(options, "--trusted-issuers")),
+                generationFloor("MODEL_PROMOTION_TRUST_MIN_GENERATION"));
+        PrivateKey publisherKey = privateKey(options, "--publisher-private-key");
+        PrivateKey issuerKey = privateKey(options, "--issuer-private-key");
+        SimpleMongoClientDatabaseFactory factory = new SimpleMongoClientDatabaseFactory(mongoUri);
+        try {
+            MongoTemplate mongo = new MongoTemplate(factory);
+            TransactionTemplate transactions = new TransactionTemplate(new MongoTransactionManager(factory));
+            var verifier = new Ed25519ModelPromotionPolicyAuthorityVerifier(mapper, issuers, CLOCK);
+            var publicationStore = new MongoModelPromotionPolicyPublicationStore(mongo, transactions);
+            var publisher = new ModelPromotionPolicyPublisher(mapper, new ModelPromotionPolicyValidator(mapper),
+                    verifier, publicationStore, CLOCK);
+            var approval = new OnlinePolicyApprovalVerifier(mongo, mapper, CLOCK,
+                    required(options, "--webauthn-rp-id"), required(options, "--webauthn-origin"),
+                    actorTrust, approvalTrust);
+            var worker = new PolicyPublicationWorker(mongo, transactions, publisher, approval, verifier,
+                    issuerKey, publisherKey, approvalTrust, CLOCK, mapper, java.util.UUID.randomUUID().toString());
+            do {
+                boolean worked = worker.runOnce();
+                if (options.containsKey("--once")) break;
+                if (!worked) Thread.sleep(30_000);
+            } while (!Thread.currentThread().isInterrupted());
+        } finally {
+            factory.destroy();
+        }
+    }
+
     private static InternalPolicyApprovalTrustRegistry approvalTrust(ObjectMapper mapper, Map<String, String> options) {
         return InternalPolicyApprovalTrustRegistry.load(mapper, Path.of(required(options, "--approval-trust")),
                 generationFloor("MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION"));
@@ -285,7 +331,7 @@ public final class ModelPromotionPolicyPublisherCli {
 
     private static InternalPolicyApprovalTrustRegistry.TrustedKey requireCredential(
             InternalPolicyApprovalTrustRegistry trust, String identity, String keyId,
-            InternalPolicyApprovalTrustRegistry.Role role, ModelPromotionPolicy.Content content,
+            InternalPolicyApprovalTrustRegistry.Role role, ModelPromotionPolicyDraft content,
             PrivateKey credential, Instant at) throws Exception {
         InternalPolicyApprovalTrustRegistry.TrustedKey key = requireMandate(trust, identity, keyId, role, content, at);
         byte[] challenge = new byte[32];
@@ -297,7 +343,7 @@ public final class ModelPromotionPolicyPublisherCli {
     }
 
     private static void requireSignedActor(InternalPolicyApprovalTrustRegistry trust, String identity, String keyId,
-            InternalPolicyApprovalTrustRegistry.Role role, ModelPromotionPolicy.Content content, Instant at,
+            InternalPolicyApprovalTrustRegistry.Role role, ModelPromotionPolicyDraft content, Instant at,
             byte[] statement, String signature) throws Exception {
         InternalPolicyApprovalTrustRegistry.TrustedKey key = requireMandate(trust, identity, keyId, role, content, at);
         if (!verify(key.publicKey(), statement, signature)) {
@@ -307,7 +353,7 @@ public final class ModelPromotionPolicyPublisherCli {
 
     private static InternalPolicyApprovalTrustRegistry.TrustedKey requireMandate(
             InternalPolicyApprovalTrustRegistry trust, String identity, String keyId,
-            InternalPolicyApprovalTrustRegistry.Role role, ModelPromotionPolicy.Content content, Instant at) {
+            InternalPolicyApprovalTrustRegistry.Role role, ModelPromotionPolicyDraft content, Instant at) {
         InternalPolicyApprovalTrustRegistry.TrustedKey key = trust.find(identity, keyId);
         Instant now = CLOCK.instant();
         if (key == null || key.status() != ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE
@@ -355,7 +401,7 @@ public final class ModelPromotionPolicyPublisherCli {
         Map<String, String> result = new HashMap<>();
         for (int index = 0; index < args.length; index++) {
             String option = args[index];
-            if ("--dry-run".equals(option)) {
+            if ("--dry-run".equals(option) || "--once".equals(option)) {
                 if (result.putIfAbsent(option, "true") != null) throw new IllegalArgumentException("Duplicate " + option);
             } else if (VALUE_OPTIONS.contains(option) && index + 1 < args.length) {
                 if (result.putIfAbsent(option, args[++index]) != null) throw new IllegalArgumentException("Duplicate " + option);

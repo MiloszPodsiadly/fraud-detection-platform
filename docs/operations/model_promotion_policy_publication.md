@@ -1,7 +1,18 @@
 # Local internal policy approval and publication
 
-This is an explicit offline workflow for the `DEVELOPMENT`/`TEST` local trust fixture. `make up` creates keys, not
-policies or approval decisions. The author and approver must be different people controlling different private keys.
+The normal local path is the online governance workflow in `alert-service`, followed by the isolated
+`model-promotion-policy-publisher` worker. `make up` creates local keys and starts that worker, but creates no
+policy or approval decision. A policy author and a different policy approver must each complete a fresh WebAuthn
+ceremony through the [governance API](model_policy_governance_workflow.md). A separately authorized requester then
+creates a durable publication request. The worker verifies the frozen draft, public credential assertions, current
+actor mandates and publisher/issuer keys independently before signing and atomically publishing the policy and its
+approval evidence. `GET /api/v1/governance/model-policies/{id}/publication` shows job state and the current policy
+signature result; `PENDING`, `RETRYABLE` and `BLOCKED` do not imply `VERIFIED`. Lease takeover and immutable-receipt
+reconciliation handle process restarts and uncertain commit acknowledgement. The local worker uses the shared Mongo
+replica set; production needs separately scoped database credentials and independently managed trust material.
+
+The commands below are a controlled **offline emergency/fixture path** for `DEVELOPMENT`/`TEST`, not the normal
+online approval route. Its author and approver must be different people controlling different private keys.
 The demo key files are **not production credentials**. Run from the repository root; Java 21, Maven, Node.js and a
 running local Docker Compose Mongo replica set are prerequisites for live publication. The launcher builds an
 executable JAR with `-exec.jar`; the plain `.jar` is not executable.
@@ -10,12 +21,15 @@ For provisioning, rotation, revocation, protected generation floors and recovery
 `.\scripts\model-promotion-trust-check.ps1` on Windows) checks the local public registries without issuing an approval
 or publishing a policy.
 
-`approvedAt` is part of the exact policy digest. Choose a future review time before the author signs, and have B
-review the signed author submission and make the real decision at or after that time. The CLI refuses early
-`APPROVED` decisions; it never chooses `APPROVED` for B. A `REJECTED` decision can be made immediately. Actor-signed
-times are claims, not independently certified timestamps. If the planned time or any policy field must change,
-prepare and author-sign a new exact digest. Outputs use `CREATE_NEW` so existing proofs cannot be overwritten by
-these commands.
+The versioned draft SHA-256 contains all reviewable policy semantics and intended publisher/issuer identities, but
+**no** `approvedAt`. B reviews that exact draft; the offline CLI samples its own UTC clock when B accepts or rejects,
+and B's Ed25519 decision signs that actual sampled time. Publication derives final content from the frozen draft and
+signed decision, then computes a different final policy SHA-256 for the issuer signature. The effective start is the
+approval/publication deadline, not a scheduled approval timestamp. Actor-signed times are claims by the offline
+operator host, not independently certified timestamps; the separate online governance workflow records its decision time from the backend clock.
+Outputs use `CREATE_NEW` so existing proofs cannot be overwritten. Old v1 pending approval proofs are not accepted
+under the v2 draft contract and must be re-authored and re-approved; already published v1 policy signatures retain
+their existing verification contract and immutable Mongo history.
 
 ## PowerShell (Windows)
 
@@ -27,11 +41,11 @@ $fixture = 'deployment/.local/model-promotion-policy'
 $stamp = Get-Date -Format 'yyyyMMddHHmmss'
 $run = "$fixture/review-$stamp"
 New-Item -ItemType Directory -Path $run | Out-Null
-$reviewAt = (Get-Date).ToUniversalTime().AddMinutes(15).ToString('yyyy-MM-ddTHH:mm:ssZ')
+$effectiveFrom = (Get-Date).ToUniversalTime().AddDays(1).ToString('yyyy-MM-ddTHH:mm:ssZ')
 $expiresAt = (Get-Date).ToUniversalTime().AddDays(7).ToString('yyyy-MM-ddTHH:mm:ssZ')
-java -jar $jar demo-draft --review-at $reviewAt --policy-id "local-demo-$stamp" --approval-reference "review-$stamp" --out "$run/policy.json"
-java -jar $jar author --policy "$run/policy.json" --approval-trust "$fixture/approval/trusted-approvals.json" --author-private-key "$fixture/approval/author-a.private-key.pkcs8.base64" --author-identity local-dev-policy-author-a --author-key-id local-dev-author-a-key-1 --publisher-identity local-dev-policy-publisher --publisher-key-id local-dev-publisher-key-1 --issuer local-dev-model-promotion-issuer --key-id local-dev-model-promotion-key-1 --out "$run/author.json"
-# B: inspect policy.json, author.json and the printed SHA-256. Wait until $reviewAt; choose APPROVED or REJECTED.
+java -jar $jar demo-draft --effective-from $effectiveFrom --policy-id "local-demo-$stamp" --approval-reference "review-$stamp" --out "$run/policy.json"
+java -jar $jar author --policy "$run/policy.json" --approval-trust "$fixture/approval/trusted-approvals.json" --author-private-key "$fixture/approval/author-a.private-key.pkcs8.base64" --author-identity local-dev-policy-author-a --author-key-id local-dev-author-a-key-1 --out "$run/author.json"
+# B: inspect the frozen draft, author submission and SHA-256; choose APPROVED or REJECTED before $effectiveFrom.
 java -jar $jar approve --submission "$run/author.json" --approval-trust "$fixture/approval/trusted-approvals.json" --approver-private-key "$fixture/approval/approver-b.private-key.pkcs8.base64" --approver-identity local-dev-policy-approver-b --approver-key-id local-dev-approver-b-key-1 --decision APPROVED --expires-at $expiresAt --out "$run/decision.json"
 java -jar $jar publish --policy "$run/policy.json" --approval "$run/decision.json" --approval-trust "$fixture/approval/trusted-approvals.json" --trusted-issuers "$fixture/trusted-issuers.json" --publisher-private-key "$fixture/approval/publisher.private-key.pkcs8.base64" --issuer-private-key "$fixture/private-key.pkcs8.base64" --dry-run
 $env:MODEL_PROMOTION_PUBLISH_MONGODB_URI = 'mongodb://127.0.0.1:27017/fraud_alerts?directConnection=true&replicaSet=rs0'
@@ -48,20 +62,21 @@ fixture=deployment/.local/model-promotion-policy
 stamp=$(date -u +%Y%m%d%H%M%S)
 run="$fixture/review-$stamp"
 mkdir "$run"
-review_at=$(date -u -d '+15 minutes' +%Y-%m-%dT%H:%M:%SZ)
+effective_from=$(date -u -d '+1 day' +%Y-%m-%dT%H:%M:%SZ)
 expires_at=$(date -u -d '+7 days' +%Y-%m-%dT%H:%M:%SZ)
-java -jar "$jar" demo-draft --review-at "$review_at" --policy-id "local-demo-$stamp" --approval-reference "review-$stamp" --out "$run/policy.json"
-java -jar "$jar" author --policy "$run/policy.json" --approval-trust "$fixture/approval/trusted-approvals.json" --author-private-key "$fixture/approval/author-a.private-key.pkcs8.base64" --author-identity local-dev-policy-author-a --author-key-id local-dev-author-a-key-1 --publisher-identity local-dev-policy-publisher --publisher-key-id local-dev-publisher-key-1 --issuer local-dev-model-promotion-issuer --key-id local-dev-model-promotion-key-1 --out "$run/author.json"
-# B: inspect the exact content and digest; at or after review_at choose APPROVED or REJECTED.
+java -jar "$jar" demo-draft --effective-from "$effective_from" --policy-id "local-demo-$stamp" --approval-reference "review-$stamp" --out "$run/policy.json"
+java -jar "$jar" author --policy "$run/policy.json" --approval-trust "$fixture/approval/trusted-approvals.json" --author-private-key "$fixture/approval/author-a.private-key.pkcs8.base64" --author-identity local-dev-policy-author-a --author-key-id local-dev-author-a-key-1 --out "$run/author.json"
+# B: inspect the exact frozen draft and digest; choose APPROVED or REJECTED before effective_from.
 java -jar "$jar" approve --submission "$run/author.json" --approval-trust "$fixture/approval/trusted-approvals.json" --approver-private-key "$fixture/approval/approver-b.private-key.pkcs8.base64" --approver-identity local-dev-policy-approver-b --approver-key-id local-dev-approver-b-key-1 --decision APPROVED --expires-at "$expires_at" --out "$run/decision.json"
 java -jar "$jar" publish --policy "$run/policy.json" --approval "$run/decision.json" --approval-trust "$fixture/approval/trusted-approvals.json" --trusted-issuers "$fixture/trusted-issuers.json" --publisher-private-key "$fixture/approval/publisher.private-key.pkcs8.base64" --issuer-private-key "$fixture/private-key.pkcs8.base64" --dry-run
 MODEL_PROMOTION_PUBLISH_MONGODB_URI='mongodb://127.0.0.1:27017/fraud_alerts?directConnection=true&replicaSet=rs0' java -jar "$jar" publish --policy "$run/policy.json" --approval "$run/decision.json" --approval-trust "$fixture/approval/trusted-approvals.json" --trusted-issuers "$fixture/trusted-issuers.json" --publisher-private-key "$fixture/approval/publisher.private-key.pkcs8.base64" --issuer-private-key "$fixture/private-key.pkcs8.base64"
 ```
 
-For a real policy instead of a demo draft, author a `ModelPromotionPolicy.Content` JSON and run
-`java -jar <exec-jar> prepare --content <content.json> --out <unsigned-policy.json>`. This validates the full
-content and computes its canonical SHA-256; then substitute that unsigned-policy path in the author and publish
-commands. Any `REJECTED`, tampered, expired, unknown-key or self-approved proof is refused by the publisher.
+For a real policy instead of a demo draft, author a `ModelPromotionPolicyDraft` JSON and run
+`java -jar <exec-jar> prepare --content <draft-content.json> --out <draft.json>`. The draft includes all criterion
+rules, scope, revision, author and intended approver, publisher and issuer key IDs, approval reference and effective
+interval, but no approval time. Substitute that draft path in the author and publish commands. Any `REJECTED`,
+tampered, expired, unknown-key or self-approved proof is refused by the publisher.
 
 The publication transaction binds the signed policy to the original proof and its SHA-256 in
 `model_promotion_policy_approval_evidence`. It also stores approving and publisher key IDs, issuer/key, signed
@@ -71,8 +86,12 @@ update/delete evidence command. Restrict direct Mongo privileges and backups sep
 is not independently operated WORM storage. `MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION` and
 `MODEL_PROMOTION_TRUST_MIN_GENERATION` are separately protected registry floors, defaulting to `1` only locally.
 
-After publication, the production verifier can report the signature as `VERIFIED` only for a matching active trusted
-issuer and scope. Log in to Model Promotion as model-governance actor C, register the exact artifact SHA and submit a
+After publication, `VERIFIED` reports only the current issuer signature. New institutional policy reads and model
+decisions require `FULLY_AUTHORIZED`: the exact stored policy, issuer signature and separately stored approval proof
+must all verify against current public issuer, approval and (for online proofs) actor mandates. Missing or changed
+evidence and revoked authority block new decisions; they do not rewrite historical model decisions. The publication
+status API reports signature and approval-evidence results separately. Log in to Model Promotion as model-governance
+actor C, register the exact artifact SHA and submit a
 `CANDIDATE → CHALLENGER` proposal; a distinct authorized reviewer D must approve it. The committed model decision is
 separate from the policy approval. The runnable
 `ModelPromotionPolicyPublisherMongoIntegrationTest#realApprovedSignedPolicyAndIndependentModelReviewCommitThroughOneMongoBoundary`

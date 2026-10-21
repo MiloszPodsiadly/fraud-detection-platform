@@ -10,16 +10,16 @@ public class ModelPromotionPolicyResolver {
 
     private final ModelPromotionPolicyStore policyStore;
     private final ModelPromotionPolicyValidator validator;
-    private final ModelPromotionPolicyAuthorityVerifier authorityVerifier;
+    private final ModelPromotionPolicyFullTrustVerifier fullTrustVerifier;
 
     public ModelPromotionPolicyResolver(
             ModelPromotionPolicyStore policyStore,
             ModelPromotionPolicyValidator validator,
-            ModelPromotionPolicyAuthorityVerifier authorityVerifier
+            ModelPromotionPolicyFullTrustVerifier fullTrustVerifier
     ) {
         this.policyStore = Objects.requireNonNull(policyStore);
         this.validator = Objects.requireNonNull(validator);
-        this.authorityVerifier = Objects.requireNonNull(authorityVerifier);
+        this.fullTrustVerifier = Objects.requireNonNull(fullTrustVerifier);
     }
 
     public ModelPromotionPolicyResolution resolve(
@@ -39,13 +39,9 @@ public class ModelPromotionPolicyResolver {
             validator.validate(policy, governanceScope, intendedUse, assessmentTime);
             if (policy.content().provenance().authority()
                     == ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED) {
-                ModelPromotionPolicyAuthorityVerification verification = authorityVerifier.verify(policy);
-                if (verification.status() != ModelPromotionPolicyAuthorityVerification.Status.VERIFIED) {
-                    return ModelPromotionPolicyResolution.unavailable(
-                            verification.status() == ModelPromotionPolicyAuthorityVerification.Status.UNAVAILABLE
-                                    ? ModelPromotionPolicyResolution.Reason.POLICY_AUTHORITY_UNAVAILABLE
-                                    : ModelPromotionPolicyResolution.Reason.POLICY_AUTHORITY_UNVERIFIED
-                    );
+                ModelPromotionPolicyTrustVerification verification = fullTrustVerifier.verify(policy);
+                if (verification.status() != ModelPromotionPolicyTrustVerification.Status.FULLY_AUTHORIZED) {
+                    return ModelPromotionPolicyResolution.unavailable(trustFailureReason(verification));
                 }
             }
             return ModelPromotionPolicyResolution.available(policy);
@@ -56,5 +52,19 @@ public class ModelPromotionPolicyResolver {
                     ModelPromotionPolicyResolution.Reason.POLICY_STORE_UNAVAILABLE
             );
         }
+    }
+
+    private static ModelPromotionPolicyResolution.Reason trustFailureReason(
+            ModelPromotionPolicyTrustVerification verification) {
+        if (verification.signature().status() == ModelPromotionPolicyAuthorityVerification.Status.UNAVAILABLE) {
+            return ModelPromotionPolicyResolution.Reason.POLICY_AUTHORITY_UNAVAILABLE;
+        }
+        if (verification.signature().status() != ModelPromotionPolicyAuthorityVerification.Status.VERIFIED) {
+            return ModelPromotionPolicyResolution.Reason.POLICY_AUTHORITY_UNVERIFIED;
+        }
+        return verification.approvalEvidence().status()
+                == ModelPromotionPolicyApprovalEvidenceVerification.Status.UNAVAILABLE
+                ? ModelPromotionPolicyResolution.Reason.POLICY_APPROVAL_EVIDENCE_UNAVAILABLE
+                : ModelPromotionPolicyResolution.Reason.POLICY_APPROVAL_EVIDENCE_UNVERIFIED;
     }
 }

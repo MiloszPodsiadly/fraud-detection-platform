@@ -41,10 +41,9 @@ class InternalPolicyWorkflowCliTest {
         ModelPromotionPolicyPublisherCli.main(new String[] {"author", "--policy", fixture.policy().toString(),
                 "--approval-trust", fixture.approvalTrust().toString(), "--author-private-key",
                 fixture.authorPrivate().toString(), "--author-identity", "local-author-a", "--author-key-id",
-                "author-key", "--publisher-identity", "local-publisher", "--publisher-key-id", "publisher-key",
-                "--issuer", "local-issuer", "--key-id", "issuer-key", "--out", submission.toString()});
+                "author-key", "--out", submission.toString()});
         assertThat(Files.readString(submission)).contains("authorSignature");
-        awaitDeclaredReviewTime(fixture.policy());
+        Instant beforeReview = Instant.now();
         ModelPromotionPolicyPublisherCli.main(new String[] {"approve", "--submission", submission.toString(),
                 "--approval-trust", fixture.approvalTrust().toString(), "--approver-private-key",
                 fixture.approverPrivate().toString(), "--approver-identity", "local-approver-b",
@@ -54,24 +53,28 @@ class InternalPolicyWorkflowCliTest {
         InternalPolicyApprovalArtifact proof = mapper.readValue(Files.readString(approval),
                 InternalPolicyApprovalArtifact.class);
         assertThat(proof.approvalDecision().decision()).isEqualTo(InternalPolicyApprovalArtifact.Decision.APPROVED);
+        assertThat(Instant.parse(proof.approvalDecision().decidedAt())).isBetween(beforeReview, Instant.now());
         ModelPromotionPolicyPublisherCli.main(new String[] {"publish", "--policy", fixture.policy().toString(),
                 "--approval", approval.toString(), "--approval-trust", fixture.approvalTrust().toString(),
                 "--trusted-issuers", fixture.issuerTrust().toString(), "--publisher-private-key",
                 fixture.publisherPrivate().toString(), "--issuer-private-key", fixture.issuerPrivate().toString(),
                 "--dry-run"});
 
-        ModelPromotionPolicyPublisher.UnsignedPolicy unsigned = mapper.readValue(Files.readString(fixture.policy()),
-                ModelPromotionPolicyPublisher.UnsignedPolicy.class);
-        String issuedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS).toString();
+        ModelPromotionPolicyPublisher.Draft draft = mapper.readValue(Files.readString(fixture.policy()),
+                ModelPromotionPolicyPublisher.Draft.class);
+        ModelPromotionPolicy.Content content = draft.content().approvedContent(
+                Instant.parse(proof.approvalDecision().decidedAt()));
+        String finalDigest = new ModelPromotionPolicyValidator(mapper).canonicalSha256(content);
+        String issuedAt = Instant.now().toString();
         Signature signer = Signature.getInstance("Ed25519");
         signer.initSign(KeyFactory.getInstance("Ed25519").generatePrivate(new PKCS8EncodedKeySpec(
                 Base64.getDecoder().decode(Files.readString(fixture.issuerPrivate())))));
-        signer.update(ModelPromotionPolicySignatureContract.signingBytes(mapper, unsigned.content(),
+        signer.update(ModelPromotionPolicySignatureContract.signingBytes(mapper, content,
                 "local-issuer", "issuer-key", issuedAt));
-        ModelPromotionPolicy signed = new ModelPromotionPolicy(unsigned.content(), unsigned.canonicalSha256(),
+        ModelPromotionPolicy signed = new ModelPromotionPolicy(content, finalDigest,
                 new ModelPromotionPolicy.PolicyAuthorizationEvidence("local-issuer", "issuer-key",
                         ModelPromotionPolicySignatureContract.encodeSignature(signer.sign()),
-                        unsigned.canonicalSha256(), issuedAt));
+                        finalDigest, issuedAt));
         Path signedFile = directory.resolve("signed-policy.json");
         Files.writeString(signedFile, mapper.writeValueAsString(signed));
         String current = capture(() -> ModelPromotionPolicyPublisherCli.main(new String[] {"inspect-policy",
@@ -102,8 +105,7 @@ class InternalPolicyWorkflowCliTest {
         ModelPromotionPolicyPublisherCli.main(new String[] {"author", "--policy", fixture.policy().toString(),
                 "--approval-trust", fixture.approvalTrust().toString(), "--author-private-key",
                 fixture.authorPrivate().toString(), "--author-identity", "local-author-a", "--author-key-id",
-                "author-key", "--publisher-identity", "local-publisher", "--publisher-key-id", "publisher-key",
-                "--issuer", "local-issuer", "--key-id", "issuer-key", "--out", submission.toString()});
+                "author-key", "--out", submission.toString()});
         ModelPromotionPolicyPublisherCli.main(new String[] {"approve", "--submission", submission.toString(),
                 "--approval-trust", fixture.approvalTrust().toString(), "--approver-private-key",
                 fixture.approverPrivate().toString(), "--approver-identity", "local-approver-b",
@@ -136,14 +138,16 @@ class InternalPolicyWorkflowCliTest {
                         criterion.requiredThresholdKeys().stream().collect(Collectors.toMap(k -> k, k -> BigDecimal.ONE)),
                         86400, "VERIFIED", criterion.evidenceSource(), criterion.metricSemantics(),
                         criterion.populationDefinition(), criterion.denominatorDefinition(), null)).toList();
-        ModelPromotionPolicy.Content content = new ModelPromotionPolicy.Content(ModelPromotionPolicy.CURRENT_VERSION,
+        ModelPromotionPolicyDraft content = new ModelPromotionPolicyDraft(ModelPromotionPolicyDraft.VERSION,
                 "local-cli-policy", 1, scope, ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
-                new ModelPromotionPolicy.PolicyProvenance(ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED,
-                        "local-author-a", "local-approver-b", now.plusSeconds(5).toString(), "local-review-1"),
+                "local-author-a", "local-approver-b", "local-review-1", "local-publisher", "publisher-key",
+                "local-issuer", "issuer-key",
                 now.plus(1, ChronoUnit.DAYS).toString(), now.plus(31, ChronoUnit.DAYS).toString(), rules);
+        Path draftContent = directory.resolve("draft-content.json");
+        Files.writeString(draftContent, mapper.writeValueAsString(content));
         Path policy = directory.resolve("policy.json");
-        Files.writeString(policy, mapper.writeValueAsString(new ModelPromotionPolicyPublisher.UnsignedPolicy(content,
-                new ModelPromotionPolicyValidator(mapper).canonicalSha256(content))));
+        ModelPromotionPolicyPublisherCli.main(new String[] {"prepare", "--content", draftContent.toString(),
+                "--out", policy.toString()});
         String from = now.minus(1, ChronoUnit.DAYS).toString();
         String until = now.plus(365, ChronoUnit.DAYS).toString();
         Path approvalTrust = directory.resolve("approval-trust.json");
@@ -169,14 +173,6 @@ class InternalPolicyWorkflowCliTest {
                         ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE)))));
         return new Fixture(policy, approvalTrust, issuerTrust, authorPrivate, approverPrivate,
                 publisherPrivate, issuerPrivate);
-    }
-
-    private void awaitDeclaredReviewTime(Path policyPath) throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy policy = mapper.readValue(Files.readString(policyPath),
-                ModelPromotionPolicyPublisher.UnsignedPolicy.class);
-        long remaining = java.time.Duration.between(Instant.now(),
-                Instant.parse(policy.content().provenance().approvedAt())).toMillis();
-        if (remaining > 0) Thread.sleep(remaining + 100);
     }
 
     private String capture(ThrowingCommand command) throws Exception {

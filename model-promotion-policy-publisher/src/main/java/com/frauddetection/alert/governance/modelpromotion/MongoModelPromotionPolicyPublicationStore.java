@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import com.mongodb.MongoException;
+import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import org.bson.Document;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
@@ -34,15 +35,29 @@ final class MongoModelPromotionPolicyPublicationStore {
     ModelPromotionPolicyPublicationReceipt publish(ModelPromotionPolicy policy, Instant publicationTime,
             InternalPolicyApprovalArtifact approvalProof,
             InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
+        return publish(policy, publicationTime, approvalProof, null, authorization);
+    }
+
+    ModelPromotionPolicyPublicationReceipt publishOnline(ModelPromotionPolicy policy, Instant publicationTime,
+            OnlinePolicyApprovalArtifact approvalProof,
+            InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
+        return publish(policy, publicationTime, null, approvalProof, authorization);
+    }
+
+    private ModelPromotionPolicyPublicationReceipt publish(ModelPromotionPolicy policy, Instant publicationTime,
+            InternalPolicyApprovalArtifact approvalProof, OnlinePolicyApprovalArtifact onlineProof,
+            InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
         Objects.requireNonNull(policy);
         Objects.requireNonNull(publicationTime);
-        Objects.requireNonNull(approvalProof);
+        if ((approvalProof == null) == (onlineProof == null)) {
+            throw new IllegalArgumentException("Exactly one verified approval proof is required");
+        }
         Objects.requireNonNull(authorization);
         ensureIndexes();
         for (int attempt = 1; attempt <= MAX_PUBLICATION_ATTEMPTS; attempt++) {
             try {
                 ModelPromotionPolicyPublicationReceipt receipt = transactions.execute(status -> publishWithinTransaction(
-                        policy, publicationTime, approvalProof, authorization));
+                        policy, publicationTime, approvalProof, onlineProof, authorization));
                 return Objects.requireNonNull(receipt, "Mongo publication transaction returned no receipt");
             } catch (PublicationConflictException exception) {
                 throw exception;
@@ -77,10 +92,12 @@ final class MongoModelPromotionPolicyPublicationStore {
 
     private ModelPromotionPolicyPublicationReceipt publishWithinTransaction(
             ModelPromotionPolicy policy, Instant publicationTime, InternalPolicyApprovalArtifact approvalProof,
+            OnlinePolicyApprovalArtifact onlineProof,
             InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
         ModelPromotionPolicyDocument proposed = ModelPromotionPolicyDocument.from(policy, publicationTime);
-        InternalPolicyApprovalEvidenceDocument evidence = evidence(proposed, approvalProof, authorization,
-                publicationTime);
+        InternalPolicyApprovalEvidenceDocument evidence = approvalProof != null
+                ? evidence(proposed, approvalProof, authorization, publicationTime)
+                : onlineEvidence(proposed, onlineProof, authorization, publicationTime);
         ModelPromotionPolicy.Content content = policy.content();
         ModelGovernanceScope scope = content.governanceScope();
         String fenceId = String.join(":", scope.institutionalScope(), scope.environment().name(),
@@ -101,8 +118,7 @@ final class MongoModelPromotionPolicyPublicationStore {
             if (saved == null || !sameEvidence(evidence, saved)
                     || !saved.policySignature().equals(existing.policy().authorizationEvidence().signature())
                     || !saved.publishedAt().equals(existing.publishedAt())
-                    || !saved.approvalProofSha256().equals(
-                        InternalPolicyApprovalArtifact.proofSha256(new ObjectMapper(), saved.approvalProof()))) {
+                    || !saved.approvalProofSha256().equals(proofSha256(saved))) {
                 throw new PublicationConflictException("Policy approval evidence is missing or differs");
             }
             return receipt(policy, existing.publishedAt() == null ? publicationTime : existing.publishedAt(), true);
@@ -126,9 +142,12 @@ final class MongoModelPromotionPolicyPublicationStore {
         ModelPromotionPolicy signed = policy.policy();
         InternalPolicyApprovalArtifact.AuthorStatement author = proof.authorStatement();
         InternalPolicyApprovalArtifact.ApprovalDecision decision = proof.approvalDecision();
-        if (!author.policyCanonicalSha256().equals(signed.canonicalSha256())
+        if (!author.draftCanonicalSha256().equals(ModelPromotionPolicyDraft.fromApprovedContent(
+                    signed.content(), author.publisherIdentity(), author.publisherKeyId(),
+                    author.issuerIdentity(), author.issuerKeyId()).canonicalSha256(new ObjectMapper()))
                 || !author.policyId().equals(signed.content().policyId())
                 || author.revision() != signed.content().revision()
+                || !decision.decidedAt().equals(signed.content().provenance().approvedAt())
                 || !author.issuerIdentity().equals(signed.authorizationEvidence().authorityIdentity())
                 || !author.issuerKeyId().equals(signed.authorizationEvidence().keyId())
                 || !authorization.canonicalSha256().equals(signed.canonicalSha256())
@@ -148,14 +167,59 @@ final class MongoModelPromotionPolicyPublicationStore {
                 InternalPolicyApprovalTrustRegistry.Role.POLICY_PUBLISHER, authorization.governanceScope(),
                 authorization.intendedUse(), author.issuerIdentity(), author.issuerKeyId(),
                 authorization.issuerPublicKeySha256(),
-                signed.authorizationEvidence().signature(), publishedAt);
+                signed.authorizationEvidence().signature(), publishedAt, "OFFLINE_ED25519_V2", null);
+    }
+
+    private InternalPolicyApprovalEvidenceDocument onlineEvidence(ModelPromotionPolicyDocument policy,
+            OnlinePolicyApprovalArtifact proof,
+            InstitutionalPolicyPublicationAuthorization.Authorization authorization, Instant publishedAt) {
+        ModelPromotionPolicy signed = policy.policy();
+        var submission = proof.submission().evidence();
+        var approval = proof.approval().evidence();
+        var content = signed.content();
+        if (!"POLICY_SUBMIT".equals(submission.action()) || !"POLICY_APPROVE".equals(approval.action())
+                || !proof.draftSha256().equals(proof.draft().canonicalSha256(new ObjectMapper()))
+                || !proof.draft().approvedContent(approval.acceptedAt()).equals(content)
+                || !proof.draftSha256().equals(submission.draftSha256())
+                || !proof.draftSha256().equals(approval.draftSha256())
+                || !submission.proposalId().equals(approval.proposalId())
+                || !submission.actorId().equals(content.provenance().authorIdentity())
+                || !approval.actorId().equals(content.provenance().approvingAuthority())
+                || !approval.acceptedAt().toString().equals(content.provenance().approvedAt())
+                || !authorization.canonicalSha256().equals(signed.canonicalSha256())
+                || !authorization.policyId().equals(content.policyId())
+                || authorization.revision() != content.revision()
+                || !authorization.governanceScope().equals(content.governanceScope())
+                || authorization.intendedUse() != content.intendedUse()
+                || !authorization.publisherIdentity().equals(proof.draft().publisherIdentity())
+                || !authorization.issuerIdentity().equals(signed.authorizationEvidence().authorityIdentity())
+                || !authorization.keyId().equals(signed.authorizationEvidence().keyId())) {
+            throw new PublicationConflictException("Online approval proof does not identify the signed policy");
+        }
+        return new InternalPolicyApprovalEvidenceDocument(policy.policyKey(), signed.canonicalSha256(),
+                GovernanceCanonicalJson.sha256(new ObjectMapper(), proof), null,
+                approval.actorId(), approval.credentialId(), authorization.approverPublicKeySha256(),
+                authorization.publisherIdentity(), proof.draft().publisherKeyId(),
+                authorization.publisherPublicKeySha256(), authorization.approvalTrustGeneration(),
+                authorization.approvalTrustSha256(), InternalPolicyApprovalTrustRegistry.Role.POLICY_PUBLISHER,
+                authorization.governanceScope(), authorization.intendedUse(), authorization.issuerIdentity(),
+                authorization.keyId(), authorization.issuerPublicKeySha256(),
+                signed.authorizationEvidence().signature(), publishedAt, OnlinePolicyApprovalArtifact.VERSION, proof);
+    }
+
+    private String proofSha256(InternalPolicyApprovalEvidenceDocument evidence) {
+        return evidence.onlineApprovalProof() == null
+                ? InternalPolicyApprovalArtifact.proofSha256(new ObjectMapper(), evidence.approvalProof())
+                : GovernanceCanonicalJson.sha256(new ObjectMapper(), evidence.onlineApprovalProof());
     }
 
     private boolean sameEvidence(InternalPolicyApprovalEvidenceDocument proposed,
             InternalPolicyApprovalEvidenceDocument saved) {
         return proposed.policyCanonicalSha256().equals(saved.policyCanonicalSha256())
                 && proposed.approvalProofSha256().equals(saved.approvalProofSha256())
-                && proposed.approvalProof().equals(saved.approvalProof())
+                && Objects.equals(proposed.approvalProof(), saved.approvalProof())
+                && Objects.equals(proposed.onlineApprovalProof(), saved.onlineApprovalProof())
+                && Objects.equals(proposed.proofKind(), saved.proofKind())
                 && proposed.approverIdentity().equals(saved.approverIdentity())
                 && proposed.approverKeyId().equals(saved.approverKeyId())
                 && proposed.approverPublicKeySha256().equals(saved.approverPublicKeySha256())

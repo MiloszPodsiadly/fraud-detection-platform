@@ -101,12 +101,15 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     @Test
     void realApprovedSignedPolicyAndIndependentModelReviewCommitThroughOneMongoBoundary() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy exactPolicy = proposal("policy-full-e2e", 1,
+        ModelPromotionPolicyPublisher.Draft exactPolicy = proposal("policy-full-e2e", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         InternalPolicyApprovalArtifact proof = firstPartyProof(exactPolicy);
         InternalPolicyPublicationAuthorization approval = new InternalPolicyPublicationAuthorization(
                 mapper, firstPartyTrust(), proof, publisherKey.getPrivate(), CLOCK);
-        assertThat(approval.authorize(exactPolicy.content(), exactPolicy.canonicalSha256())).isPresent();
+        ModelPromotionPolicy.Content approvedContent = exactPolicy.content().approvedContent(
+                Instant.parse("2026-05-01T00:00:00Z"));
+        assertThat(approval.authorize(approvedContent,
+                new ModelPromotionPolicyValidator(mapper).canonicalSha256(approvedContent))).isPresent();
         ModelPromotionPolicyPublisher.PreparedPublication prepared = publisher(approval, store)
                 .prepare(exactPolicy, issuerKey.getPrivate(), ISSUER, KEY_ID);
         assertThat(verifier.verify(prepared.policy()).status())
@@ -115,7 +118,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
         store.publish(prepared.policy(), CLOCK.instant(), proof, prepared.authorization());
 
         ModelPromotionPolicyResolver resolver = new ModelPromotionPolicyResolver(
-                new MongoModelPromotionPolicyStore(mongo), new ModelPromotionPolicyValidator(mapper), verifier);
+                new MongoModelPromotionPolicyStore(mongo), new ModelPromotionPolicyValidator(mapper), fullTrust());
         Instant decisionTime = Instant.parse("2026-08-01T00:00:00Z");
         ModelPromotionPolicyResolution resolved = resolver.resolve(scope(),
                 ModelPromotionIntendedUse.FRAUD_RISK_SCORING, decisionTime);
@@ -135,7 +138,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
         when(managerProvider.getIfAvailable()).thenReturn(new MongoTransactionManager(factory));
         MongoModelPromotionStore modelStore = new MongoModelPromotionStore(mongo,
                 new RegulatedMutationTransactionRunner("REQUIRED", managerProvider),
-                new ModelPromotionDecisionValidator(mapper, new ModelPromotionPolicyValidator(mapper), verifier),
+                new ModelPromotionDecisionValidator(mapper, new ModelPromotionPolicyValidator(mapper), fullTrust()),
                 new ModelPromotionLocalAuditFactory(), Clock.fixed(decisionTime, ZoneOffset.UTC));
         ModelCardProvider cards = mock(ModelCardProvider.class);
         ExactModelShadowPerformanceProvider shadow = mock(ExactModelShadowPerformanceProvider.class);
@@ -204,12 +207,15 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     @Test
     void approvedPolicyPublishesAndResolverRetrievesRealVerifiedPolicy() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy proposal = proposal("policy-1", 1,
+        ModelPromotionPolicyPublisher.Draft proposal = proposal("policy-1", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         ModelPromotionPolicyPublisher publisher = publisher(approval(proposal), store);
 
         ModelPromotionPolicyPublisher.PreparedPublication prepared = publisher.prepare(
                 proposal, issuerKey.getPrivate(), ISSUER, KEY_ID);
+        assertThat(prepared.policy().content()).isEqualTo(proposal.content().approvedContent(
+                Instant.parse("2026-05-01T00:00:00Z")));
+        assertThat(prepared.policy().canonicalSha256()).isNotEqualTo(proposal.canonicalSha256());
         assertThat(verifier.verify(prepared.policy()).status())
                 .isEqualTo(ModelPromotionPolicyAuthorityVerification.Status.VERIFIED);
         assertThat(mongo.count(new org.springframework.data.mongodb.core.query.Query(),
@@ -218,13 +224,13 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
         assertThat(receipt.policyId()).isEqualTo("policy-1");
         assertThat(receipt.revision()).isEqualTo(1);
-        assertThat(receipt.canonicalSha256()).isEqualTo(proposal.canonicalSha256());
+        assertThat(receipt.canonicalSha256()).isEqualTo(prepared.policy().canonicalSha256());
         assertThat(receipt.issuerIdentity()).isEqualTo(ISSUER);
         assertThat(receipt.keyId()).isEqualTo(KEY_ID);
         assertThat(receipt.publishedAt()).isEqualTo(CLOCK.instant());
         assertThat(receipt.alreadyPublished()).isFalse();
         ModelPromotionPolicyResolver resolver = new ModelPromotionPolicyResolver(
-                new MongoModelPromotionPolicyStore(mongo), new ModelPromotionPolicyValidator(mapper), verifier);
+                new MongoModelPromotionPolicyStore(mongo), new ModelPromotionPolicyValidator(mapper), fullTrust());
         ModelPromotionPolicyResolution resolved = resolver.resolve(scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
                 Instant.parse("2026-08-01T00:00:00Z"));
         assertThat(resolved.status()).isEqualTo(ModelPromotionPolicyResolution.Status.AVAILABLE);
@@ -232,13 +238,90 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
     }
 
     @Test
+    void validIssuerSignatureNeverSubstitutesForMissingOrChangedIndependentApproval() throws Exception {
+        ModelPromotionPolicyPublisher.Draft draft = proposal("policy-chain-check", 1,
+                "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
+        ModelPromotionPolicyPublisher publisher = publisher(approval(draft), store);
+        ModelPromotionPolicyPublisher.PreparedPublication prepared = publisher.prepare(
+                draft, issuerKey.getPrivate(), ISSUER, KEY_ID);
+        publisher.publishPrepared(prepared);
+        assertThat(verifier.verify(prepared.policy()).status())
+                .isEqualTo(ModelPromotionPolicyAuthorityVerification.Status.VERIFIED);
+        String key = ModelPromotionPolicyDocument.policyKey(scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
+                draft.content().policyId(), draft.content().revision());
+        var collection = mongo.getCollection(InternalPolicyApprovalEvidenceDocument.COLLECTION);
+        org.bson.Document filter = new org.bson.Document("_id", key);
+        org.bson.Document original = collection.find(filter).first();
+        assertThat(original).isNotNull();
+        collection.deleteOne(filter);
+        assertThat(fullTrust().verify(prepared.policy()).approvalEvidence().reason())
+                .isEqualTo(ModelPromotionPolicyApprovalEvidenceVerification.Reason.EVIDENCE_MISSING);
+        collection.insertOne(original);
+
+        List<String> changedFields = List.of(
+                "approvalProof.approverSignature",
+                "approvalProof.authorStatement.policyId",
+                "approvalProof.authorStatement.revision",
+                "approvalProof.authorStatement.governanceScope.environment",
+                "approvalProof.approvalDecision.decidedAt");
+        List<Object> changedValues = List.of("tampered", "another-policy", 2L, "TEST",
+                "2026-05-02T00:00:00Z");
+        for (int index = 0; index < changedFields.size(); index++) {
+            collection.updateOne(filter, new org.bson.Document("$set",
+                    new org.bson.Document(changedFields.get(index), changedValues.get(index))));
+            assertThat(fullTrust().verify(prepared.policy()).status())
+                    .as(changedFields.get(index))
+                    .isEqualTo(ModelPromotionPolicyTrustVerification.Status.UNVERIFIED);
+            collection.replaceOne(filter, original);
+        }
+        assertThat(fullTrust().verify(prepared.policy()).status())
+                .isEqualTo(ModelPromotionPolicyTrustVerification.Status.FULLY_AUTHORIZED);
+    }
+
+    @Test
+    void currentTrustRevocationAndUnavailableApprovalRegistryBlockNewUseWithoutChangingHistory() throws Exception {
+        ModelPromotionPolicyPublisher.Draft draft = proposal("policy-trust-rotation", 1,
+                "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
+        ModelPromotionPolicyPublisher publisher = publisher(approval(draft), store);
+        ModelPromotionPolicyPublisher.PreparedPublication prepared = publisher.prepare(
+                draft, issuerKey.getPrivate(), ISSUER, KEY_ID);
+        publisher.publishPrepared(prepared);
+        ModelPromotionPolicy policy = prepared.policy();
+        assertThat(fullTrust().verify(policy).status())
+                .isEqualTo(ModelPromotionPolicyTrustVerification.Status.FULLY_AUTHORIZED);
+
+        var revokedApprover = new ModelPromotionPolicyFullTrustVerifier(verifier,
+                new MongoModelPromotionPolicyApprovalEvidenceVerifier(mongo, mapper, CLOCK,
+                        firstPartyTrust(ModelPromotionTrustedIssuerRegistry.KeyStatus.REVOKED), null));
+        assertThat(revokedApprover.verify(policy).status())
+                .isEqualTo(ModelPromotionPolicyTrustVerification.Status.UNVERIFIED);
+        var missingApprovalRegistry = new ModelPromotionPolicyFullTrustVerifier(verifier,
+                ignored -> ModelPromotionPolicyApprovalEvidenceVerification.unavailable(
+                        ModelPromotionPolicyApprovalEvidenceVerification.Reason.TRUST_UNAVAILABLE));
+        assertThat(missingApprovalRegistry.verify(policy).approvalEvidence().reason())
+                .isEqualTo(ModelPromotionPolicyApprovalEvidenceVerification.Reason.TRUST_UNAVAILABLE);
+
+        var revokedIssuer = verifier(issuerKey, ModelPromotionTrustedIssuerRegistry.KeyStatus.REVOKED);
+        assertThat(revokedIssuer.verify(policy).status())
+                .isEqualTo(ModelPromotionPolicyAuthorityVerification.Status.REJECTED);
+        assertThat(revokedIssuer.inspectHistoricalIntegrity(policy).status())
+                .isEqualTo(ModelPromotionPolicyHistoricalIntegrity.Status.INTACT_REVOKED_KEY);
+        assertThat(mongo.findById(ModelPromotionPolicyDocument.policyKey(scope(),
+                ModelPromotionIntendedUse.FRAUD_RISK_SCORING, draft.content().policyId(), 1),
+                ModelPromotionPolicyDocument.class).policy()).isEqualTo(policy);
+    }
+
+    @Test
     void firstPartyProofAndPolicyCommitTogetherAndRemainAuditableAfterRestart() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy proposal = proposal("policy-first-party", 1,
+        ModelPromotionPolicyPublisher.Draft proposal = proposal("policy-first-party", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         InternalPolicyApprovalArtifact proof = firstPartyProof(proposal);
         InternalPolicyPublicationAuthorization approval = new InternalPolicyPublicationAuthorization(
                 mapper, firstPartyTrust(), proof, publisherKey.getPrivate(), CLOCK);
-        assertThat(approval.authorize(proposal.content(), proposal.canonicalSha256())).isPresent();
+        ModelPromotionPolicy.Content approvedContent = proposal.content().approvedContent(
+                Instant.parse("2026-05-01T00:00:00Z"));
+        assertThat(approval.authorize(approvedContent,
+                new ModelPromotionPolicyValidator(mapper).canonicalSha256(approvedContent))).isPresent();
         ModelPromotionPolicyPublisher.PreparedPublication prepared = publisher(approval, store)
                 .prepare(proposal, issuerKey.getPrivate(), ISSUER, KEY_ID);
         ModelPromotionPolicyPublicationReceipt first = store.publish(prepared.policy(), CLOCK.instant(), proof,
@@ -273,7 +356,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     @Test
     void failedEvidenceInsertRollsBackPolicyInsert() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy proposal = proposal("policy-rollback", 1,
+        ModelPromotionPolicyPublisher.Draft proposal = proposal("policy-rollback", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         InternalPolicyApprovalArtifact proof = firstPartyProof(proposal);
         InternalPolicyPublicationAuthorization approval = new InternalPolicyPublicationAuthorization(
@@ -290,7 +373,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     @Test
     void exactRepublishIsIdempotentAndKeepsOriginalPublicationTime() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy proposal = proposal("policy-1", 1,
+        ModelPromotionPolicyPublisher.Draft proposal = proposal("policy-1", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         ModelPromotionPolicyPublisher publisher = publisher(approval(proposal), store);
         ModelPromotionPolicyPublicationReceipt first = publisher.publish(proposal, issuerKey.getPrivate(), ISSUER, KEY_ID);
@@ -304,12 +387,12 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     @Test
     void conflictingRevisionAndOverlappingPeriodAreRejectedWithoutReplacingHistory() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy first = proposal("policy-1", 1,
+        ModelPromotionPolicyPublisher.Draft first = proposal("policy-1", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         publisher(approval(first), store).publish(first, issuerKey.getPrivate(), ISSUER, KEY_ID);
-        ModelPromotionPolicyPublisher.UnsignedPolicy changedRevision = proposal("policy-1", 1,
+        ModelPromotionPolicyPublisher.Draft changedRevision = proposal("policy-1", 1,
                 "2026-10-01T00:00:00Z", "2026-12-01T00:00:00Z");
-        ModelPromotionPolicyPublisher.UnsignedPolicy overlap = proposal("policy-2", 1,
+        ModelPromotionPolicyPublisher.Draft overlap = proposal("policy-2", 1,
                 "2026-09-01T00:00:00Z", "2026-12-01T00:00:00Z");
 
         assertThatThrownBy(() -> publisher(approval(changedRevision), store).publish(changedRevision,
@@ -324,9 +407,9 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     @Test
     void concurrentOverlappingWritersCannotBothCommit() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy first = proposal("policy-1", 1,
+        ModelPromotionPolicyPublisher.Draft first = proposal("policy-1", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
-        ModelPromotionPolicyPublisher.UnsignedPolicy second = proposal("policy-2", 1,
+        ModelPromotionPolicyPublisher.Draft second = proposal("policy-2", 1,
                 "2026-09-01T00:00:00Z", "2026-12-01T00:00:00Z");
         ModelPromotionPolicyPublisher.PreparedPublication preparedFirst = publisher(approval(first), store)
                 .prepare(first, issuerKey.getPrivate(), ISSUER, KEY_ID);
@@ -345,7 +428,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     @Test
     void invalidSignatureMissingApprovalChangedDigestAndUnauthorizedIssuerNeverInsert() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy proposal = proposal("policy-1", 1,
+        ModelPromotionPolicyPublisher.Draft proposal = proposal("policy-1", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         KeyPair wrongKey = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
         assertThatThrownBy(() -> publisher(approval(proposal), store).publish(proposal,
@@ -357,7 +440,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
                 mapper, firstPartyTrust(), unsigned, publisherKey.getPrivate(), CLOCK);
         assertThatThrownBy(() -> publisher(invalid, store).publish(proposal,
                 issuerKey.getPrivate(), ISSUER, KEY_ID)).isInstanceOf(SecurityException.class);
-        ModelPromotionPolicyPublisher.UnsignedPolicy modified = proposal("policy-1", 2,
+        ModelPromotionPolicyPublisher.Draft modified = proposal("policy-1", 2,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         assertThatThrownBy(() -> publisher(approval(proposal), store).publish(modified,
                 issuerKey.getPrivate(), ISSUER, KEY_ID)).isInstanceOf(SecurityException.class);
@@ -369,7 +452,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     @Test
     void mongoFailureCannotReportPublicationSuccessAndRestartPreservesInvariants() throws Exception {
-        ModelPromotionPolicyPublisher.UnsignedPolicy first = proposal("policy-1", 1,
+        ModelPromotionPolicyPublisher.Draft first = proposal("policy-1", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         ModelPromotionPolicyPublisher.PreparedPublication prepared = publisher(approval(first), store)
                 .prepare(first, issuerKey.getPrivate(), ISSUER, KEY_ID);
@@ -395,7 +478,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
             assertThat(restarted.publish(prepared.policy(), CLOCK.instant(), prepared.approvalArtifact(),
                     prepared.authorization())
                     .alreadyPublished()).isTrue();
-            ModelPromotionPolicyPublisher.UnsignedPolicy overlap = proposal("policy-2", 1,
+            ModelPromotionPolicyPublisher.Draft overlap = proposal("policy-2", 1,
                     "2026-09-01T00:00:00Z", "2026-12-01T00:00:00Z");
             ModelPromotionPolicyPublisher.PreparedPublication conflicting = publisher(approval(overlap), restarted)
                     .prepare(overlap, issuerKey.getPrivate(), ISSUER, KEY_ID);
@@ -431,7 +514,12 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
                 verifier, storage, CLOCK);
     }
 
-    private ModelPromotionPolicyAuthorityVerifier verifier(KeyPair pair) throws Exception {
+    private Ed25519ModelPromotionPolicyAuthorityVerifier verifier(KeyPair pair) throws Exception {
+        return verifier(pair, ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE);
+    }
+
+    private Ed25519ModelPromotionPolicyAuthorityVerifier verifier(KeyPair pair,
+            ModelPromotionTrustedIssuerRegistry.KeyStatus status) throws Exception {
         byte[] publicKey = pair.getPublic().getEncoded();
         ModelPromotionTrustedIssuerRegistry.ConfiguredKey key = new ModelPromotionTrustedIssuerRegistry.ConfiguredKey(
                 ISSUER, KEY_ID, Base64.getEncoder().encodeToString(publicKey),
@@ -439,34 +527,41 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
                 List.of(ModelGovernanceScope.CURRENT_INSTITUTION),
                 List.of(ModelGovernanceEnvironment.PRODUCTION), List.of(ModelPromotionIntendedUse.FRAUD_RISK_SCORING),
                 "2025-01-01T00:00:00Z", "2027-01-01T00:00:00Z",
-                ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE);
+                status);
         ModelPromotionTrustedIssuerRegistry registry = ModelPromotionTrustedIssuerRegistry.fromConfiguration(
                 new ModelPromotionTrustedIssuerRegistry.Configuration(ModelPromotionTrustedIssuerRegistry.VERSION,
                         1, List.of(key)), 1);
         return new Ed25519ModelPromotionPolicyAuthorityVerifier(mapper, registry, CLOCK);
     }
 
-    private InternalPolicyPublicationAuthorization approval(ModelPromotionPolicyPublisher.UnsignedPolicy proposal)
+    private InternalPolicyPublicationAuthorization approval(ModelPromotionPolicyPublisher.Draft proposal)
             throws Exception {
         return new InternalPolicyPublicationAuthorization(mapper, firstPartyTrust(), firstPartyProof(proposal),
                 publisherKey.getPrivate(), CLOCK);
     }
 
-    private InternalPolicyApprovalArtifact firstPartyProof(ModelPromotionPolicyPublisher.UnsignedPolicy proposal)
+    private ModelPromotionPolicyFullTrustVerifier fullTrust() throws Exception {
+        return new ModelPromotionPolicyFullTrustVerifier(verifier,
+                new MongoModelPromotionPolicyApprovalEvidenceVerifier(mongo, mapper, CLOCK,
+                        firstPartyTrust(), null));
+    }
+
+    private InternalPolicyApprovalArtifact firstPartyProof(ModelPromotionPolicyPublisher.Draft proposal)
             throws Exception {
-        ModelPromotionPolicy.Content content = proposal.content();
+        ModelPromotionPolicyDraft content = proposal.content();
         InternalPolicyApprovalArtifact.AuthorStatement statement = new InternalPolicyApprovalArtifact.AuthorStatement(
                 InternalPolicyApprovalArtifact.VERSION, InternalPolicyApprovalArtifact.AUTHOR_PURPOSE,
                 content.policyId(), content.revision(), proposal.canonicalSha256(), content.governanceScope(),
                 content.intendedUse(), content.effectiveFromInclusive(), content.effectiveToExclusive(),
+                content.approvalReference(),
                 "policy-author", "author-key-1", "policy-publisher", "publisher-key-1", ISSUER, KEY_ID,
                 "2026-04-01T00:00:00Z");
         InternalPolicyApprovalArtifact.ApprovalDecision decision = new InternalPolicyApprovalArtifact.ApprovalDecision(
                 InternalPolicyApprovalArtifact.VERSION, InternalPolicyApprovalArtifact.APPROVER_PURPOSE,
                 InternalPolicyApprovalArtifact.authorStatementSha256(mapper, statement), "risk-committee",
                 "approver-key-1", InternalPolicyApprovalArtifact.Decision.APPROVED,
-                content.provenance().approvedAt(), "2026-06-15T00:00:00Z",
-                content.provenance().approvalReference());
+                "2026-05-01T00:00:00Z", "2026-06-15T00:00:00Z",
+                content.approvalReference());
         return new InternalPolicyApprovalArtifact(statement,
                 sign(authorKey, InternalPolicyApprovalArtifact.authorSigningBytes(mapper, statement)), decision,
                 sign(approverKey, InternalPolicyApprovalArtifact.approverSigningBytes(mapper, decision)));
@@ -480,13 +575,18 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
     }
 
     private InternalPolicyApprovalTrustRegistry firstPartyTrust() throws Exception {
+        return firstPartyTrust(ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE);
+    }
+
+    private InternalPolicyApprovalTrustRegistry firstPartyTrust(
+            ModelPromotionTrustedIssuerRegistry.KeyStatus approverStatus) throws Exception {
         return InternalPolicyApprovalTrustRegistry.fromConfiguration(
                 new InternalPolicyApprovalTrustRegistry.Configuration(InternalPolicyApprovalTrustRegistry.VERSION,
                         1, List.of(
                         actor("policy-author", "author-key-1", authorKey,
                                 InternalPolicyApprovalTrustRegistry.Role.POLICY_AUTHOR),
                         actor("risk-committee", "approver-key-1", approverKey,
-                                InternalPolicyApprovalTrustRegistry.Role.POLICY_APPROVER),
+                                InternalPolicyApprovalTrustRegistry.Role.POLICY_APPROVER, approverStatus),
                         actor("policy-publisher", "publisher-key-1", publisherKey,
                                 InternalPolicyApprovalTrustRegistry.Role.POLICY_PUBLISHER),
                         actor(ISSUER, KEY_ID, issuerKey, InternalPolicyApprovalTrustRegistry.Role.POLICY_ISSUER))), 1);
@@ -494,6 +594,12 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
     private InternalPolicyApprovalTrustRegistry.ConfiguredKey actor(String identity, String keyId, KeyPair pair,
             InternalPolicyApprovalTrustRegistry.Role role) throws Exception {
+        return actor(identity, keyId, pair, role, ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE);
+    }
+
+    private InternalPolicyApprovalTrustRegistry.ConfiguredKey actor(String identity, String keyId, KeyPair pair,
+            InternalPolicyApprovalTrustRegistry.Role role,
+            ModelPromotionTrustedIssuerRegistry.KeyStatus status) throws Exception {
         byte[] encoded = pair.getPublic().getEncoded();
         return new InternalPolicyApprovalTrustRegistry.ConfiguredKey(identity, keyId,
                 Base64.getEncoder().encodeToString(encoded),
@@ -501,10 +607,10 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
                 List.of(role), List.of(ModelGovernanceScope.CURRENT_INSTITUTION),
                 List.of(ModelGovernanceEnvironment.PRODUCTION), List.of(ModelPromotionIntendedUse.FRAUD_RISK_SCORING),
                 "2025-01-01T00:00:00Z", "2027-01-01T00:00:00Z",
-                ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE);
+                status);
     }
 
-    private ModelPromotionPolicyPublisher.UnsignedPolicy proposal(String policyId, long revision,
+    private ModelPromotionPolicyPublisher.Draft proposal(String policyId, long revision,
             String effectiveFrom, String effectiveTo) {
         List<ModelPromotionPolicy.CriterionRule> rules = java.util.Arrays.stream(ModelPromotionCriterion.values())
                 .map(criterion -> new ModelPromotionPolicy.CriterionRule(criterion,
@@ -514,13 +620,12 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
                         86400, "VERIFIED", criterion.evidenceSource(), criterion.metricSemantics(),
                         criterion.populationDefinition(), criterion.denominatorDefinition(), null))
                 .toList();
-        ModelPromotionPolicy.Content content = new ModelPromotionPolicy.Content(ModelPromotionPolicy.CURRENT_VERSION,
+        ModelPromotionPolicyDraft content = new ModelPromotionPolicyDraft(ModelPromotionPolicyDraft.VERSION,
                 policyId, revision, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
-                new ModelPromotionPolicy.PolicyProvenance(ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED,
-                        "policy-author", "risk-committee", "2026-05-01T00:00:00Z", "approval-1"),
+                "policy-author", "risk-committee", "approval-1", "policy-publisher", "publisher-key-1",
+                ISSUER, KEY_ID,
                 effectiveFrom, effectiveTo, rules);
-        return new ModelPromotionPolicyPublisher.UnsignedPolicy(content,
-                new ModelPromotionPolicyValidator(mapper).canonicalSha256(content));
+        return new ModelPromotionPolicyPublisher.Draft(content, content.canonicalSha256(mapper));
     }
 
     private ModelGovernanceScope scope() {

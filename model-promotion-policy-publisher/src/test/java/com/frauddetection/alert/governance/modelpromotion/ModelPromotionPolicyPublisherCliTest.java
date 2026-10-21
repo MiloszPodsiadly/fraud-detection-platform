@@ -10,6 +10,6 @@ class ModelPromotionPolicyPublisherCliTest {
     void firstPartyWorkflowRequiresAnExplicitCommand() {
         assertThatThrownBy(() -> ModelPromotionPolicyPublisherCli.main(new String[0]))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("prepare, demo-draft, author, approve, publish, trust-check or inspect-policy");
+                .hasMessageContaining("prepare, demo-draft, author, approve, publish, worker, trust-check or inspect-policy");
     }
 }

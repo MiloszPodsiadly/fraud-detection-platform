@@ -4,6 +4,10 @@ services:
     environment:
       MODEL_PROMOTION_TRUSTED_ISSUERS_PATH: /run/model-promotion-policy/trusted-issuers.json
       MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
+      MODEL_PROMOTION_APPROVAL_TRUST_PATH: /run/model-promotion-policy/trusted-approvals.json
+      MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION: "1"
+      MODEL_PROMOTION_ONLINE_ACTOR_TRUST_PATH: /run/model-promotion-policy/online-actor-trust.json
+      MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION: "1"
     volumes:
       - type: bind
         source: ./.local/model-promotion-policy/trusted-issuers.json
@@ -11,3 +15,80 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/trusted-approvals.json
+        target: /run/model-promotion-policy/trusted-approvals.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/online-actor-trust.json
+        target: /run/model-promotion-policy/online-actor-trust.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+  model-promotion-policy-publisher:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+      args:
+        MODULE_NAME: model-promotion-policy-publisher
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MODEL_PROMOTION_PUBLISH_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
+      MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION: "1"
+      MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION: "1"
+    command:
+      - worker
+      - --approval-trust
+      - /run/policy-publication/trusted-approvals.json
+      - --online-actor-trust
+      - /run/policy-publication/online-actor-trust.json
+      - --trusted-issuers
+      - /run/policy-publication/trusted-issuers.json
+      - --publisher-private-key
+      - /run/policy-publication/publisher.private-key.pkcs8.base64
+      - --issuer-private-key
+      - /run/policy-publication/issuer.private-key.pkcs8.base64
+      - --webauthn-rp-id
+      - localhost
+      - --webauthn-origin
+      - http://localhost:4173
+    volumes:
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/trusted-approvals.json
+        target: /run/policy-publication/trusted-approvals.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/online-actor-trust.json
+        target: /run/policy-publication/online-actor-trust.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/trusted-issuers.json
+        target: /run/policy-publication/trusted-issuers.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/publisher.private-key.pkcs8.base64
+        target: /run/policy-publication/publisher.private-key.pkcs8.base64
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/private-key.pkcs8.base64
+        target: /run/policy-publication/issuer.private-key.pkcs8.base64
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - backend

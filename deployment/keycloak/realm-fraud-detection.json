@@ -139,6 +139,15 @@
     },
     {
       "name": "fraud-ops-admin"
+    },
+    {
+      "name": "model-policy-author"
+    },
+    {
+      "name": "model-policy-approver"
+    },
+    {
+      "name": "model-policy-publisher"
     }
   ],
   "users": [
@@ -217,6 +226,42 @@
       "groups": [
         "fraud-ops-admin"
       ]
+    },
+    {
+      "id": "b15b1124-74f3-4abd-8c53-377972316734",
+      "username": "policy-author",
+      "enabled": true,
+      "firstName": "Policy",
+      "lastName": "Author",
+      "email": "policy-author@example.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "policy-author", "temporary": false }],
+      "groups": ["model-policy-author"]
+    },
+    {
+      "id": "bf7fd870-5c5f-445e-8707-a77652813c6e",
+      "username": "policy-approver",
+      "enabled": true,
+      "firstName": "Policy",
+      "lastName": "Approver",
+      "email": "policy-approver@example.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "policy-approver", "temporary": false }],
+      "groups": ["model-policy-approver"]
+    },
+    {
+      "id": "cfc3ed82-cd6c-43fd-a946-a4345506d68b",
+      "username": "policy-requester",
+      "enabled": true,
+      "firstName": "Policy",
+      "lastName": "Requester",
+      "email": "policy-requester@example.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "policy-requester", "temporary": false }],
+      "groups": ["model-policy-publisher"]
     }
   ]
 }

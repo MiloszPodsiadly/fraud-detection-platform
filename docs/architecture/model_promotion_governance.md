@@ -49,6 +49,14 @@ Promotion policy is an immutable, digest-bound contract identified by policy id 
 use, author and approval provenance, effective interval, evidence freshness, verification level, criterion semantics and
 thresholds. The repository contains a first-party, independently signed author/approver/publisher publication path and
 an Ed25519 issuer verifier, but it does **not** provision production credentials or an active production policy.
+The v2 offline review input is `ModelPromotionPolicyDraft`: its versioned canonical SHA-256 covers all reviewable
+fields plus intended author, approver, publisher and issuer identities/keys, but excludes the not-yet-known
+`approvedAt`. The author signs that draft digest. The approver's separate v2 Ed25519 decision signs the author
+statement hash, decision, reference and the CLI clock time sampled when the action is accepted. The publisher derives
+the final `ModelPromotionPolicy.Content` from that frozen draft and decision time, recomputes its distinct final SHA-256,
+revalidates the proof and only then issues the unchanged v1 policy signature. The draft digest does not depend on the
+final policy digest, so there is no circular hash. The offline operator clock is not an independently attested backend
+commit time; the future online workflow must record its own trusted acceptance time and action evidence atomically.
 Without a configured public issuer registry the verifier returns `UNAVAILABLE`; an inserted Mongo policy alone cannot
 authorize a formal recommendation. Synthetic policies marked `NON_INSTITUTIONAL_TEST` cannot authorize **any**
 production quality-gated promotion, including `SHADOW_APPROVED`. The local Compose registry contains only
@@ -160,15 +168,16 @@ normal startup creates no decision or approved policy. Intentional rotation need
 and protected floor; do not use fixture regeneration as a production rotation procedure. This local signer alone does
 not establish independent institutional approval or make test policies production-approved.
 
-### Internal independent approval proof (v1)
+### Internal independent approval proof (v2)
 
 `InternalPolicyApprovalArtifact` is one versioned proof containing two separately signed statements. Its
-`AuthorStatement` includes contract version `model-promotion-internal-approval-v1`, purpose
-`MODEL_PROMOTION_POLICY_AUTHOR_V1`, exact policy ID/revision and canonical full-content SHA-256, scope/environment,
-intended use, effective interval, author identity/key ID, designated publisher identity/key ID, issuer identity/key
-ID and `authoredAt`. The author signs its recursively field-sorted canonical JSON UTF-8 bytes with one trailing LF.
+`AuthorStatement` includes contract version `model-promotion-internal-approval-v2`, purpose
+`MODEL_PROMOTION_POLICY_DRAFT_AUTHOR_V2`, exact policy ID/revision and canonical draft SHA-256, scope/environment,
+intended use, effective interval, approval reference, author identity/key ID, designated publisher identity/key ID,
+issuer identity/key ID and `authoredAt`. The author signs its recursively field-sorted canonical JSON UTF-8 bytes
+with one trailing LF.
 The `ApprovalDecision` includes the same contract version, distinct purpose
-`MODEL_PROMOTION_POLICY_APPROVER_V1`, SHA-256 of the exact author-signing bytes, approver identity/key ID, explicit
+`MODEL_PROMOTION_POLICY_DRAFT_APPROVER_V2`, SHA-256 of the exact author-signing bytes, approver identity/key ID, explicit
 `APPROVED` or `REJECTED`, `decidedAt`, `expiresAt` and approval reference. The independent approver signs that
 statement with the same canonical byte encoding. Both Ed25519 signatures use canonical unpadded base64url. The
 version and purpose are part of the signed bytes; neither signature can be substituted for the policy-issuer
@@ -183,7 +192,8 @@ an older registry unless that external floor is also rolled back. No private key
 from a policy, Mongo document, CLI identity string or `FRAUD_OPS_ADMIN` role. Only an operator controlling the
 deployment registry can grant or revoke these mandates.
 
-The first-party verifier recomputes the proposed policy digest, matches both statements and provenance, verifies
+The first-party verifier reconstructs the exact draft from the final policy and signed intended publisher/issuer,
+recomputes its SHA-256, matches both statements and final provenance, verifies
 both actor signatures, rejects self-approval and reuse of the same physical author/approver key, checks role and
 validity at signing and verification time, and rejects expired approval or non-`APPROVED` decisions. The executing
 publisher proves control of its separately mandated private key by signing a fresh random challenge containing
@@ -202,9 +212,10 @@ The exact local commands and review hand-off are in the
 ### Controlled offline publication
 
 `model-promotion-policy-publisher` is a separate Maven executable, not a dependency or Docker image component of
-`alert-service`. The publisher reads an unsigned policy (`content` plus `canonicalSha256`), validates its full
-contract, and calls the repository's `InternalPolicyPublicationAuthorization` implementation. It must independently
-verify an approval for the exact digest, policy ID/revision, scope, intended use and effective interval, and must
+`alert-service`. The publisher reads a frozen draft (`content` plus `canonicalSha256`), validates its full
+contract, derives final content using the accepted decision time, and calls the repository's
+`InternalPolicyPublicationAuthorization` implementation. It must independently verify an approval for the exact
+draft and derived policy digests, policy ID/revision, scope, intended use and effective interval, and must
 authenticate a publisher with the corresponding institutional mandate. The returned authorization is compared to
 every one of those policy fields, the author/approver identities, approval reference, issuer and key ID. Merely
 supplying policy JSON, an approver name, an environment variable, a Git signature or `FRAUD_OPS_ADMIN` does not
@@ -215,10 +226,10 @@ the first-party approval implementation as well as earlier isolated publication 
 After approval, the offline process loads a private Ed25519 key from a controlled file, signs the v1 envelope,
 re-verifies it against the same public-key registry as `alert-service`, then optionally publishes. `--dry-run`
 performs all validation and signing checks but never connects to MongoDB. The private key is never placed in the
-policy document or the alert-service image. `publish` requires the unsigned policy, signed approval artifact,
+policy document or the alert-service image. `publish` requires the frozen draft, signed approval artifact,
 separate approval and issuer public registries, publisher credential and issuer private key. Live publication
 additionally requires `MODEL_PROMOTION_PUBLISH_MONGODB_URI` (a replica-set URI supplied by the controlled execution
-environment). The unsigned policy must become effective no earlier than signature issuance.
+environment). The final policy must become effective no earlier than signature issuance.
 
 The publisher uses a mandatory Mongo transaction, independent of alert-service's configurable transaction mode.
 Within that transaction it increments one per-scope/environment/use fence document, checks immutable revision
@@ -376,3 +387,9 @@ indexes. Spring Data's global Mongo auto-index setting does not duplicate these 
 documents do not declare annotation-based indexes. The ledger is append-only through this application boundary; Mongo
 storage is not described as WORM or externally immutable, and external audit anchoring remains a separate verified
 guarantee.
+
+## Durable policy-governance workflow
+
+`alert-service` owns a separate `modelpolicy` application context for draft, submission, independent review and publication request. The Mongo proposal, operation receipt and append-only local history commit atomically with CAS. This does not add another policy evaluator or signed-policy store. Explicit `model-policy:*` IAM groups are separate from analyst roles; production additionally requires `model-policy:scope:production`. Submission and review require an OIDC login session, the matching explicit mandate and a fresh WebAuthn assertion over a domain-separated immutable draft/action contract. The registered public credential, one-use challenge, assertion evidence and backend acceptance time are handled transactionally with the decision; an opaque legacy approval reference cannot authorize a publication request. The authenticator does not sign the later backend acceptance timestamp, and neither `APPROVED` nor `PUBLICATION_PENDING` means that a policy is signed, published or already `VERIFIED`.
+
+The normal publication boundary is the isolated publisher worker. The online request freezes the approved draft and creates a unique durable job atomically with `PUBLICATION_PENDING`. The worker claims a bounded Mongo lease, independently replays the retained WebAuthn proofs against public credentials and current actor mandates, proves publisher-key control, and checks the current issuer mandate. It then signs the exact approved content with the separate Ed25519 issuer key and uses the existing transactional publication fence for immutable policy plus approval evidence. A second transaction acknowledges the job and proposal as `PUBLISHED`; a restarted worker reconciles an already committed policy/evidence pair before retrying. The scoped publication-status API reports job state, issuer signature and independent approval-evidence verification separately. New institutional policy reads and model decisions require both checks to pass under current mandates; issuer `VERIFIED` alone never grants `FULLY_AUTHORIZED`. The reader mounts only public issuer, approval and actor registries; only the publisher process receives private publisher and issuer keys. The local Compose worker shares the demo Mongo replica set and therefore does not establish production-grade database-credential isolation.

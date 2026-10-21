@@ -25,15 +25,22 @@ public class OidcAnalystAuthoritiesMapper implements GrantedAuthoritiesMapper {
 
     private final JwtSecurityProperties properties;
     private final AlertServiceMetrics metrics;
+    private final ModelPolicyIamMapping policyIamMapping;
 
     @Autowired
-    public OidcAnalystAuthoritiesMapper(JwtSecurityProperties properties, AlertServiceMetrics metrics) {
+    public OidcAnalystAuthoritiesMapper(JwtSecurityProperties properties, AlertServiceMetrics metrics,
+            ModelPolicyIamMapping policyIamMapping) {
         this.properties = properties;
         this.metrics = metrics;
+        this.policyIamMapping = policyIamMapping;
     }
 
     OidcAnalystAuthoritiesMapper(JwtSecurityProperties properties) {
-        this(properties, null);
+        this(properties, null, new ModelPolicyIamMapping(Map.of()));
+    }
+
+    OidcAnalystAuthoritiesMapper(JwtSecurityProperties properties, AlertServiceMetrics metrics) {
+        this(properties, metrics, new ModelPolicyIamMapping(Map.of()));
     }
 
     @Override
@@ -47,7 +54,8 @@ public class OidcAnalystAuthoritiesMapper implements GrantedAuthoritiesMapper {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         boolean hasUnmappedAccessValue = externalAccessValues.stream()
                 .anyMatch(accessValue -> !properties.roleMapping().containsKey(accessValue)
-                        && !properties.grantsProductionPromotionAccess(accessValue));
+                        && !properties.grantsProductionPromotionAccess(accessValue)
+                        && !policyIamMapping.groupMapping().containsKey(accessValue));
         if (hasUnmappedAccessValue && metrics != null) {
             metrics.recordOidcAuthorityMappingMiss(properties.accessClaim());
         }
@@ -57,6 +65,7 @@ public class OidcAnalystAuthoritiesMapper implements GrantedAuthoritiesMapper {
         if (externalAccessValues.stream().anyMatch(properties::grantsProductionPromotionAccess)) {
             mappedAuthorities.add(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
         }
+        mappedAuthorities.addAll(policyIamMapping.authorities(externalAccessValues));
         return mappedAuthorities.stream()
                 .map(SimpleGrantedAuthority::new)
                 .collect(Collectors.toCollection(LinkedHashSet::new));

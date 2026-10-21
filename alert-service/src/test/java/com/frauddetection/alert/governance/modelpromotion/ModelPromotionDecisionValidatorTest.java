@@ -18,7 +18,9 @@ class ModelPromotionDecisionValidatorTest {
     private final ModelPromotionDecisionValidator validator = new ModelPromotionDecisionValidator(
             objectMapper,
             policyValidator,
-            policy -> ModelPromotionPolicyAuthorityVerification.verified()
+            new ModelPromotionPolicyFullTrustVerifier(
+                    policy -> ModelPromotionPolicyAuthorityVerification.verified(),
+                    policy -> ModelPromotionPolicyApprovalEvidenceVerification.verified())
     );
 
     @Test
@@ -153,7 +155,9 @@ class ModelPromotionDecisionValidatorTest {
         ModelPromotionDecisionValidator unavailableAuthorityValidator = new ModelPromotionDecisionValidator(
                 objectMapper,
                 policyValidator,
-                ignored -> ModelPromotionPolicyAuthorityVerification.unavailable()
+                new ModelPromotionPolicyFullTrustVerifier(
+                        ignored -> ModelPromotionPolicyAuthorityVerification.unavailable(),
+                        ignored -> ModelPromotionPolicyApprovalEvidenceVerification.verified())
         );
 
         assertThatThrownBy(() -> unavailableAuthorityValidator.validate(command(

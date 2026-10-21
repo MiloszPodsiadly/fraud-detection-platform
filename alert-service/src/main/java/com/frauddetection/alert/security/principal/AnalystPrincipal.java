@@ -7,8 +7,13 @@ import java.util.Set;
 public record AnalystPrincipal(
         String userId,
         Set<AnalystRole> roles,
-        Set<String> authorities
+        Set<String> authorities,
+        String institutionalActorId
 ) {
+    public AnalystPrincipal(String userId, Set<AnalystRole> roles, Set<String> authorities) {
+        this(userId, roles, authorities, null);
+    }
+
     public AnalystPrincipal {
         roles = Set.copyOf(roles);
         authorities = Set.copyOf(authorities);

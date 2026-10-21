@@ -140,7 +140,8 @@ class ModelPromotionPolicyResolverTest {
         return new ModelPromotionPolicyResolver(
                 store,
                 policyValidator(),
-                authorityVerifier
+                new ModelPromotionPolicyFullTrustVerifier(authorityVerifier,
+                        policy -> ModelPromotionPolicyApprovalEvidenceVerification.verified())
         );
     }
 

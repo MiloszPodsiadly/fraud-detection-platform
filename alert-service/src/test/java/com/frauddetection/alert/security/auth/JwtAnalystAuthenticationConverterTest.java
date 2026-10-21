@@ -2,6 +2,7 @@ package com.frauddetection.alert.security.auth;
 
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -148,6 +149,29 @@ class JwtAnalystAuthenticationConverterTest {
 
         assertThat(ordinary.authorities()).doesNotContain(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
         assertThat(explicitlyGranted.authorities()).contains(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+    }
+
+    @Test
+    void modelPolicyMandateRequiresExplicitGroupAndValidatedIssuerSubject() {
+        JwtSecurityProperties governed = new JwtSecurityProperties(true, false,
+                "https://issuer.example.test/realm", "https://issuer.example.test/jwks", "sub", "groups",
+                Map.of("fraud-reviewer", AnalystRole.REVIEWER), Set.of());
+        JwtAnalystAuthenticationConverter governedConverter = new JwtAnalystAuthenticationConverter(
+                governed, new AnalystAuthenticationFactory(), new ModelPolicyIamMapping(Map.of(
+                        "policy-approver", Set.of(ModelPolicyAuthority.APPROVE))));
+        AnalystPrincipal reviewerOnly = (AnalystPrincipal) governedConverter.convert(jwt(Map.of(
+                "iss", "https://issuer.example.test/realm", "sub", "reviewer-1",
+                "groups", List.of("fraud-reviewer")))).getPrincipal();
+        AnalystPrincipal granted = (AnalystPrincipal) governedConverter.convert(jwt(Map.of(
+                "iss", "https://issuer.example.test/realm", "sub", "reviewer-1",
+                "groups", List.of("fraud-reviewer", "policy-approver")))).getPrincipal();
+        AnalystPrincipal wrongIssuer = (AnalystPrincipal) governedConverter.convert(jwt(Map.of(
+                "iss", "https://other.example.test/realm", "sub", "reviewer-1",
+                "groups", List.of("policy-approver")))).getPrincipal();
+        assertThat(reviewerOnly.authorities()).doesNotContain(ModelPolicyAuthority.APPROVE);
+        assertThat(granted.authorities()).contains(ModelPolicyAuthority.APPROVE);
+        assertThat(granted.institutionalActorId()).isEqualTo("https://issuer.example.test/realm#reviewer-1");
+        assertThat(wrongIssuer.institutionalActorId()).isNull();
     }
 
     private Jwt jwt(Map<String, Object> claims) {

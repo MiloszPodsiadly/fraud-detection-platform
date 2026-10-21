@@ -32,7 +32,7 @@ The platform is built around explicit service ownership and event-driven handoff
 | Fraud scoring | `fraud-scoring-service` | Rule scoring plus ML integration in rule, shadow, ML, or compare modes. |
 | ML runtime | `ml-inference-service` | Python model inference, governance snapshots, drift and advisory endpoints. |
 | Alert workflow | `alert-service` | Alerts, fraud cases, analyst decisions, RBAC, audit, recovery, and regulated mutation controls. |
-| Model-promotion policy publication | `model-promotion-policy-publisher` | Offline signing and immutable publication after independent policy approval; not a runtime service. |
+| Model-promotion policy publication | `model-promotion-policy-publisher` | Isolated worker verifies approvals, signs policies, and durably publishes evidence. |
 | Trust authority | `audit-trust-authority` | Local signing and verification authority for audit anchor material. |
 | Analyst UI | `analyst-console-ui` | React console for monitoring, alert review, case workflow, and security UX. |
 | Shared contracts | `common-events` | Kafka event contracts and shared value objects. |
@@ -140,13 +140,14 @@ currently provided by the repository. It:
 the local workstation. Ordinary startup preserves valid identity material; intentionally rotate service-identity
 fixtures with `make regenerate-local-runtime-fixtures`. The separate local model-promotion issuer key, author A,
 approver B and publisher credentials, plus their public registries, are created by
-`node scripts/bootstrap-local-model-promotion-keys.mjs --ensure`. Only the issuer's public registry is mounted into
-`alert-service`; private credentials stay outside its image. Startup never creates an approved policy. Follow the
+`node scripts/bootstrap-local-model-promotion-keys.mjs --ensure`. Only the public issuer, approval and actor registries
+are mounted into `alert-service`; private credentials stay outside its image. Startup never creates an approved policy. Follow the
 explicit [local approval and publication procedure](docs/operations/model_promotion_policy_publication.md).
 For separate production provisioning, fingerprint review, key rotation, revocation, protected generation floors and
 recovery, use [model-promotion trust operations](docs/operations/model_promotion_trust_operations.md). The local
 fixture keys and generation-1 Compose overlay are not production credentials or a production trust deployment.
-`VERIFIED` means the policy signature is trusted; model review, `CHAMPION`, and runtime deployment remain separate.
+`VERIFIED` confirms the issuer signature; new institutional decisions require the separate approval evidence too.
+Model review, `CHAMPION`, and runtime deployment remain separate.
 
 `make up` and `.\scripts\app.cmd up` generate the local Shadow Performance Summary artifact before starting
 Docker Compose. For manual inspection, the equivalent Compose startup after running
@@ -228,7 +229,7 @@ Expected resolved security-relevant values for this exact command:
 | `alert-service.APP_SECURITY_DEMO_AUTH_ENABLED` | `false` |
 | `alert-service.AUDIT_TRUST_AUTHORITY_ENABLED` | `true` |
 | `alert-service.AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED` | `true` |
-| `alert-service.MODEL_PROMOTION_TRUSTED_ISSUERS_PATH` | `/run/model-promotion-policy/trusted-issuers.json` (read-only public registry only) |
+| `alert-service.MODEL_PROMOTION_TRUSTED_ISSUERS_PATH` | `/run/model-promotion-policy/trusted-issuers.json` (issuer public registry; separate approval and actor registries are also mounted read-only) |
 | `alert-service.MODEL_PROMOTION_TRUST_MIN_GENERATION` | `1` (local fixture floor; production requires protected monotonic floor) |
 | `alert-service.ASSISTANT_MODE` | `DETERMINISTIC` |
 | `analyst-console-ui` build arg `VITE_AUTH_PROVIDER` | `bff` |
@@ -456,6 +457,7 @@ feature-enricher-service/        Redis-backed feature enrichment
 fraud-scoring-service/           Rule and ML-assisted scoring
 ml-inference-service/            Python model inference and governance API
 alert-service/                   Alerts, cases, audit, RBAC, recovery APIs
+model-promotion-policy-publisher/ Isolated policy publication worker and signing
 audit-trust-authority/           Local trust-signing authority
 analyst-console-ui/              React analyst console
 deployment/                      Docker Compose, service images, monitoring config

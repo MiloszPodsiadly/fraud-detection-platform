@@ -5,7 +5,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.Objects;
 
-/** Two independently signed statements; neither a policy signature nor a Mongo approval claim. */
+/** Immutable signatures over independent policy-author and approver statements. */
 public record InternalPolicyApprovalArtifact(
         AuthorStatement authorStatement,
         String authorSignature,
@@ -13,9 +13,9 @@ public record InternalPolicyApprovalArtifact(
         String approverSignature
 ) {
 
-    public static final String VERSION = "model-promotion-internal-approval-v1";
-    public static final String AUTHOR_PURPOSE = "MODEL_PROMOTION_POLICY_AUTHOR_V1";
-    public static final String APPROVER_PURPOSE = "MODEL_PROMOTION_POLICY_APPROVER_V1";
+    public static final String VERSION = "model-promotion-internal-approval-v2";
+    public static final String AUTHOR_PURPOSE = "MODEL_PROMOTION_POLICY_DRAFT_AUTHOR_V2";
+    public static final String APPROVER_PURPOSE = "MODEL_PROMOTION_POLICY_DRAFT_APPROVER_V2";
     static final String PUBLISHER_CHALLENGE_PURPOSE = "MODEL_PROMOTION_POLICY_PUBLISHER_CHALLENGE_V1";
 
     public InternalPolicyApprovalArtifact {
@@ -46,11 +46,12 @@ public record InternalPolicyApprovalArtifact(
             String purpose,
             String policyId,
             long revision,
-            String policyCanonicalSha256,
+            String draftCanonicalSha256,
             ModelGovernanceScope governanceScope,
             ModelPromotionIntendedUse intendedUse,
             String effectiveFromInclusive,
             String effectiveToExclusive,
+            String approvalReference,
             String authorIdentity,
             String authorKeyId,
             String publisherIdentity,
@@ -65,11 +66,12 @@ public record InternalPolicyApprovalArtifact(
             }
             identifier(policyId, "policyId");
             if (revision < 1) throw new IllegalArgumentException("revision must be positive");
-            sha256(policyCanonicalSha256);
+            sha256(draftCanonicalSha256);
             Objects.requireNonNull(governanceScope, "governanceScope is required");
             Objects.requireNonNull(intendedUse, "intendedUse is required");
             timestamp(effectiveFromInclusive, "effectiveFromInclusive");
             timestamp(effectiveToExclusive, "effectiveToExclusive");
+            identifier(approvalReference, "approvalReference");
             identifier(authorIdentity, "authorIdentity");
             identifier(authorKeyId, "authorKeyId");
             identifier(publisherIdentity, "publisherIdentity");

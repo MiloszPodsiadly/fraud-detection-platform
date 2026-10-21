@@ -12,16 +12,16 @@ class ModelPromotionDecisionValidator {
 
     private final ObjectMapper objectMapper;
     private final ModelPromotionPolicyValidator policyValidator;
-    private final ModelPromotionPolicyAuthorityVerifier authorityVerifier;
+    private final ModelPromotionPolicyFullTrustVerifier fullTrustVerifier;
 
     ModelPromotionDecisionValidator(
             ObjectMapper objectMapper,
             ModelPromotionPolicyValidator policyValidator,
-            ModelPromotionPolicyAuthorityVerifier authorityVerifier
+            ModelPromotionPolicyFullTrustVerifier fullTrustVerifier
     ) {
         this.objectMapper = objectMapper;
         this.policyValidator = policyValidator;
-        this.authorityVerifier = authorityVerifier;
+        this.fullTrustVerifier = fullTrustVerifier;
     }
 
     String canonicalSha256(Object value) {
@@ -257,8 +257,8 @@ class ModelPromotionDecisionValidator {
         }
         if (policy.content().provenance().authority()
                 == ModelPromotionPolicy.PolicyAuthority.INSTITUTIONAL_APPROVED
-                && authorityVerifier.verify(policy).status()
-                != ModelPromotionPolicyAuthorityVerification.Status.VERIFIED) {
+                && fullTrustVerifier.verify(policy).status()
+                != ModelPromotionPolicyTrustVerification.Status.FULLY_AUTHORIZED) {
             throw new ModelPromotionPersistenceConflictException(
                     "Institutional policy authority could not be verified"
             );

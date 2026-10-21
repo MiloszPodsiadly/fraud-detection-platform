@@ -77,15 +77,19 @@ public record ModelPromotionPolicyDocument(
     }
 
     private static String keyFor(ModelPromotionPolicy.Content content) {
-        ModelGovernanceScope scope = content.governanceScope();
+        return policyKey(content.governanceScope(), content.intendedUse(), content.policyId(), content.revision());
+    }
+
+    public static String policyKey(ModelGovernanceScope scope, ModelPromotionIntendedUse use,
+            String policyId, long revision) {
         return String.join(
                 ":",
                 "model-promotion-policy-v1",
                 scope.institutionalScope(),
                 scope.environment().name(),
-                content.intendedUse().name(),
-                content.policyId(),
-                Long.toString(content.revision())
+                use.name(),
+                policyId,
+                Long.toString(revision)
         );
     }
 

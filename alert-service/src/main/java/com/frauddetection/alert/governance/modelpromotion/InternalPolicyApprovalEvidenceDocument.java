@@ -7,7 +7,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.time.Instant;
 import java.util.Objects;
 
-/** Audit evidence for one immutable policy revision, not a second policy authority. */
+/** Immutable audit evidence bound to one signed policy revision. */
 @Document(collection = InternalPolicyApprovalEvidenceDocument.COLLECTION)
 @Immutable
 record InternalPolicyApprovalEvidenceDocument(
@@ -30,7 +30,9 @@ record InternalPolicyApprovalEvidenceDocument(
         String issuerKeyId,
         String issuerPublicKeySha256,
         String policySignature,
-        Instant publishedAt
+        Instant publishedAt,
+        String proofKind,
+        OnlinePolicyApprovalArtifact onlineApprovalProof
 ) {
     static final String COLLECTION = "model_promotion_policy_approval_evidence";
 
@@ -38,7 +40,9 @@ record InternalPolicyApprovalEvidenceDocument(
         Objects.requireNonNull(policyKey);
         Objects.requireNonNull(policyCanonicalSha256);
         Objects.requireNonNull(approvalProofSha256);
-        Objects.requireNonNull(approvalProof);
+        if ((approvalProof == null) == (onlineApprovalProof == null)) {
+            throw new IllegalArgumentException("Exactly one approval proof contract is required");
+        }
         Objects.requireNonNull(approverIdentity);
         Objects.requireNonNull(approverKeyId);
         Objects.requireNonNull(approverPublicKeySha256);
