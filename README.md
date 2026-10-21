@@ -270,14 +270,17 @@ Open:
 - Grafana: `http://localhost:3000` (initial local default: `admin` / `admin`; `grafana-data` retains password changes)
 - Keycloak: `http://localhost:8086`
 
-Local analyst-console users:
+Local Keycloak users for the analyst console and model-policy workflow:
 
-| Username | Password | Role |
+| Username | Password | Role / policy group |
 | --- | --- | --- |
 | `readonly` | `readonly` | `READ_ONLY_ANALYST` |
 | `analyst` | `analyst` | `ANALYST` |
 | `reviewer` | `reviewer` | `REVIEWER` |
 | `opsadmin` | `opsadmin` | `FRAUD_OPS_ADMIN` |
+| `policy-author` | `policy-author` | `model-policy-author` |
+| `policy-approver` | `policy-approver` | `model-policy-approver` |
+| `policy-requester` | `policy-requester` | `model-policy-publisher` |
 
 These credentials are local-only and must not be reused outside local test environments.
 
@@ -481,4 +484,4 @@ Milosz Podsiadly
 
 ## License
 
-Licensed under the [MIT License](https://opensource.org/licenses/MIT).
+See [LICENSE.md](LICENSE.md) for the full terms and conditions.
