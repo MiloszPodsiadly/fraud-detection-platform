@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/apiErrors.js";
 import { createIdempotencyKey } from "../utils/idempotencyKey.js";
+import { confirmPolicyAssertion } from "../governance/policyWebAuthn.js";
 import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
@@ -106,10 +107,23 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
   ), [client, mutate]);
   const propose = useCallback((requestedTargetState, rationale) => mutationCommand("propose", requestedTargetState, rationale), [state, mutate, client]);
   const retire = useCallback((rationale) => mutationCommand("retire", "RETIRED", rationale), [state, mutate, client]);
-  const review = useCallback(async (proposalId, outcome, rationale) => mutate(
-    (payload, id) => client.reviewModelPromotionProposal(id, payload),
+  const review = useCallback(async (proposalId, outcome, rationale) => {
+    let signedCommand;
+    return mutate(
+    async (payload, id) => {
+      if (selectionRef.current?.environment !== "PRODUCTION") {
+        return client.reviewModelPromotionProposal(id, payload);
+      }
+      if (!signedCommand) {
+        const challenge = await client.startSignedModelPromotionReview(id, payload);
+        const responseJson = await confirmPolicyAssertion(challenge.optionsJson);
+        signedCommand = { intent: payload, challengeId: challenge.challengeId, responseJson };
+      }
+      return client.finishSignedModelPromotionReview(id, signedCommand);
+    },
     await reviewPayload(outcome, rationale), proposalId
-  ), [client, mutate]);
+    );
+  }, [client, mutate]);
 
   async function mutationCommand(kind, requestedTargetState, rationale) {
     if (!state || !selectionRef.current) return Promise.resolve({ ok: false });

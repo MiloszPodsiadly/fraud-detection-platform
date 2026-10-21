@@ -1,6 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useModelPromotionWorkflow } from "./useModelPromotionWorkflow.js";
+import { confirmPolicyAssertion } from "../governance/policyWebAuthn.js";
+
+vi.mock("../governance/policyWebAuthn.js", () => ({ confirmPolicyAssertion: vi.fn() }));
 
 describe("useModelPromotionWorkflow", () => {
   it("keeps a newer selection when older state and assessment responses complete later", async () => {
@@ -71,6 +74,28 @@ describe("useModelPromotionWorkflow", () => {
     expect(apiClient.getModelPromotionState).toHaveBeenCalledTimes(2);
     expect(result.current.mutationError).toMatchObject({ status: 409, message: "revision changed" });
     expect(result.current.hasRetryableMutation).toBe(false);
+  });
+
+  it("retries a production review with the same WebAuthn assertion after an uncertain response", async () => {
+    vi.mocked(confirmPolicyAssertion).mockResolvedValue("signed-response");
+    const apiClient = {
+      getModelPromotionState: vi.fn().mockResolvedValue(state("v1")),
+      getModelPromotionAssessment: vi.fn().mockResolvedValue(assessment("v1")),
+      startSignedModelPromotionReview: vi.fn().mockResolvedValue({ challengeId: "model-promotion-review:review-1", optionsJson: "{}" }),
+      finishSignedModelPromotionReview: vi.fn().mockRejectedValueOnce({ status: 503 })
+        .mockResolvedValueOnce({ reviewStatus: "APPROVED" }),
+      reviewModelPromotionProposal: vi.fn()
+    };
+    const { result } = renderHook(() => useModelPromotionWorkflow({ enabled: true, apiClient }));
+    await act(async () => { await result.current.load({ ...selection("v1"), environment: "PRODUCTION" }); });
+    await act(async () => { await result.current.review("proposal-1", "APPROVED", "Reviewed exact evidence"); });
+    expect(result.current.hasRetryableMutation).toBe(true);
+    await act(async () => { await result.current.retryLastMutation(); });
+    expect(apiClient.startSignedModelPromotionReview).toHaveBeenCalledTimes(1);
+    expect(apiClient.finishSignedModelPromotionReview).toHaveBeenCalledTimes(2);
+    expect(apiClient.finishSignedModelPromotionReview.mock.calls[1][1])
+      .toEqual(apiClient.finishSignedModelPromotionReview.mock.calls[0][1]);
+    expect(apiClient.reviewModelPromotionProposal).not.toHaveBeenCalled();
   });
 });
 

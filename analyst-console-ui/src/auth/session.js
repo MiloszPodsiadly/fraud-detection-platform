@@ -1,4 +1,5 @@
 import { AUTHORITIES } from "./generatedAuthorities.js";
+import { MODEL_POLICY_AUTHORITY_PREFIX } from "./modelPolicyAuthorities.js";
 
 export { AUTHORITIES } from "./generatedAuthorities.js";
 
@@ -55,7 +56,7 @@ export const ROLE_AUTHORITIES = {
   ],
   FRAUD_OPS_ADMIN: Object.values(AUTHORITIES).filter((authority) =>
     authority !== AUTHORITIES.MODEL_PROMOTION_SCOPE_PRODUCTION
-      && !authority.startsWith("model-policy:"))
+      && !authority.startsWith(MODEL_POLICY_AUTHORITY_PREFIX))
 };
 
 export const AUTHORITY_LABELS = {

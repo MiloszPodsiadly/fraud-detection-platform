@@ -51,11 +51,31 @@ export function createAlertsApiClient({
     reviewModelPromotionProposal: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
       request, `/proposals/${encodeURIComponent(proposalId)}/reviews`, command, requestOptions
     ),
+    startSignedModelPromotionReview: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/proposals/${encodeURIComponent(proposalId)}/reviews/challenges`, command, requestOptions
+    ),
+    finishSignedModelPromotionReview: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/proposals/${encodeURIComponent(proposalId)}/reviews/signed`, command, requestOptions
+    ),
     getPolicyGovernanceActor: (options) => request("/api/v1/governance/model-policies/me", options),
     listPolicyProposals: (options) => request("/api/v1/governance/model-policies", options),
+    getPolicyPage: (params = {}, options) => request(
+      `/api/v1/governance/model-policies/page?${new URLSearchParams(Object.entries(params)
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")).toString()}`, options),
+    getPolicySchema: (options) => request("/api/v1/governance/model-policies/schema", options),
+    listPolicyApprovers: (environment, intendedUse, options) => request(
+      `/api/v1/governance/model-policies/approvers?${new URLSearchParams({ environment, intendedUse })}`, options),
+    getPolicyOperation: (operationId, options) => request(
+      `/api/v1/governance/model-policies/operations/${encodeURIComponent(operationId)}`, options),
     getPolicyProposal: (id, options) => request(policyProposalPath(id), options),
     getPolicyHistory: (id, options) => request(`${policyProposalPath(id)}/history`, options),
+    getPolicyHistoryPage: (id, params = {}, options) => request(
+      `${policyProposalPath(id)}/history/page?${new URLSearchParams(Object.entries(params)
+        .filter(([, value]) => value !== null && value !== undefined)).toString()}`, options),
     getPolicyPublication: (id, options) => request(`${policyProposalPath(id)}/publication`, options),
+    getPolicyPublicationRecovery: (id, options) => request(`${policyProposalPath(id)}/publication/recovery`, options),
+    requestPolicyPublicationRecovery: (id, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/publication/recovery`, "POST", command, options),
     createPolicyDraft: (command, options) => policyCommand(request, "/drafts", "POST", command, options),
     updatePolicyDraft: (id, command, options) => policyCommand(request, `/drafts/${encodeURIComponent(id)}`, "PUT", command, options),
     startPolicyAction: (id, action, command, options) => policyCommand(request,
@@ -65,10 +85,41 @@ export function createAlertsApiClient({
     requestPolicyPublication: (id, command, options) => policyCommand(request,
       `/${encodeURIComponent(id)}/publication-requests`, "POST", command, options),
     listPolicyCredentials: (options) => request("/api/v1/governance/model-policies/webauthn/credentials", options),
-    startPolicyCredentialRegistration: (options) => policyCommand(request,
-      "/webauthn/registrations", "POST", {}, options),
+    listPolicyCredentialSecurityEvents: (options) => request(
+      "/api/v1/governance/model-policies/webauthn/security-events", options),
+    renamePolicyCredential: (credentialId, label, options) => policyCommand(request,
+      `/webauthn/credentials/${encodeURIComponent(credentialId)}/label`, "PUT", { label }, options),
+    startPolicyCredentialRevocation: (credentialId, operationId, options) => policyCommand(request,
+      `/webauthn/credentials/${encodeURIComponent(credentialId)}/revocation-challenges`,
+      "POST", { operationId }, options),
+    finishPolicyCredentialRevocation: (credentialId, command, options) => policyCommand(request,
+      `/webauthn/credentials/${encodeURIComponent(credentialId)}/revoke`, "POST", command, options),
+    protectedPolicyCredentialRevocation: (credentialId, command, options) => policyCommand(request,
+      `/webauthn/credentials/${encodeURIComponent(credentialId)}/protected-revoke`, "POST", command, options),
+    requestPolicyCredentialGrant: (command, options) => policyCommand(request,
+      "/webauthn/enrollment-grants", "POST", command, options),
+    approvePolicyCredentialGrant: (grantId, options) => policyCommand(request,
+      `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/approvals`, "POST", {}, options),
+    startPolicyCredentialRegistration: (grantToken, options) => policyCommand(request,
+      "/webauthn/registrations", "POST", { grantToken }, options),
     finishPolicyCredentialRegistration: (command, options) => policyCommand(request,
       "/webauthn/registrations/complete", "POST", command, options),
+    getPolicySecurityActor: (options) => request("/api/v1/governance/policy-security/me", options),
+    getPolicySecurityOperations: (options) => request("/api/v1/governance/policy-security/operations", options),
+    getPolicyTrustRegistries: (options) => request("/api/v1/governance/policy-trust/registries", options),
+    listPolicyTrustChanges: (options) => request("/api/v1/governance/policy-trust/requests", options),
+    getPolicyTrustChangeAudit: (id, options) => request(
+      `/api/v1/governance/policy-trust/requests/${encodeURIComponent(id)}/audit`, options),
+    getPolicyTrustDeployment: (id, options) => request(
+      `/api/v1/governance/policy-trust/requests/${encodeURIComponent(id)}/deployment`, options),
+    startPolicyTrustChange: (command, options) => trustCommand(request,
+      "/requests/challenges", command, options),
+    finishPolicyTrustChange: (command, options) => trustCommand(request,
+      "/requests", command, options),
+    startPolicyTrustReview: (id, command, options) => trustCommand(request,
+      `/requests/${encodeURIComponent(id)}/reviews/challenges`, command, options),
+    finishPolicyTrustReview: (id, command, options) => trustCommand(request,
+      `/requests/${encodeURIComponent(id)}/reviews`, command, options),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -115,6 +166,12 @@ function policyCommand(request, suffix, method, command, options = {}) {
     ...options,
     method,
     body: JSON.stringify(command)
+  });
+}
+
+function trustCommand(request, suffix, command, options = {}) {
+  return request(`/api/v1/governance/policy-trust${suffix}`, {
+    ...options, method: "POST", body: JSON.stringify(command)
   });
 }
 

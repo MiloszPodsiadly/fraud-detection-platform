@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { createAlertsApiClient } from "../api/alertsApi.js";
 import { AUTHORITIES, MODEL_GOVERNANCE_READ_AUTHORITIES, hasAuthority } from "../auth/session.js";
+import { MODEL_POLICY_AUTHORITIES as POLICY } from "../auth/modelPolicyAuthorities.js";
 import { WorkspaceRuntimeContext } from "./useWorkspaceRuntime.js";
 
 export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true, children }) {
@@ -34,7 +35,11 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadModelCard: modelCardRead,
     canReadExactModelShadowPerformance: modelShadowPerformanceRead,
     canReadModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_READ),
-    canReadPolicyGovernance: authorityState(session, "model-policy:read"),
+    canReadPolicyGovernance: authorityState(session, POLICY.READ),
+    canReadPolicySecurity: authorityGroupState(session, [
+      POLICY.CREDENTIAL_ENROLL, POLICY.CREDENTIAL_ADMIN, POLICY.TRUST_READ,
+      POLICY.TRUST_REQUEST, POLICY.TRUST_APPROVE, POLICY.PUBLICATION_RECOVER
+    ]),
     canRegisterModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_REGISTER),
     canProposeModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_PROPOSE),
     canApproveModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_APPROVE),

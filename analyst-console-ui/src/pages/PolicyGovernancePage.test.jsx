@@ -26,8 +26,19 @@ function api({ actorId = reviewer, authorities = ["model-policy:read", "model-po
   return {
     getPolicyGovernanceActor: vi.fn().mockResolvedValue({ actorId, authorities }),
     listPolicyProposals: vi.fn().mockResolvedValue(items),
+    getPolicyPage: vi.fn().mockResolvedValue({ items, nextCursor: null }),
+    getPolicySchema: vi.fn().mockResolvedValue([]),
+    listPolicyApprovers: vi.fn().mockResolvedValue([]),
+    getPolicyOperation: vi.fn().mockRejectedValue({ status: 404 }),
     getPolicyHistory: vi.fn().mockResolvedValue([]),
+    getPolicyHistoryPage: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     getPolicyPublication: vi.fn().mockResolvedValue(publication),
+    getPolicyPublicationRecovery: vi.fn().mockResolvedValue({ publicationRequestId: "job-1",
+      state: "BLOCKED", attempts: 5, recoveryCount: 0, retrySafe: true,
+      alreadyCommitted: false, attemptHistory: [], recoveryHistory: [] }),
+    requestPolicyPublicationRecovery: vi.fn().mockResolvedValue({ publicationRequestId: "job-1",
+      state: "RETRYABLE", attempts: 5, recoveryCount: 1, retrySafe: false,
+      alreadyCommitted: false, attemptHistory: [], recoveryHistory: [] }),
     startPolicyAction: vi.fn().mockResolvedValue({ challengeId: "action:op", optionsJson: "{}" }),
     finishPolicyAction: vi.fn().mockResolvedValue({ ...items[0], status: "APPROVED", version: 2 }),
     requestPolicyPublication: vi.fn().mockResolvedValue(items[0]),
@@ -46,7 +57,7 @@ describe("Policy Governance workspace", () => {
       items: [proposal("DRAFT")] });
     render(<PolicyGovernancePage apiClient={client} enabled />);
     fireEvent.click(await screen.findByRole("button", { name: /risk-policy · revision 1 · DRAFT/ }));
-    expect(screen.getByRole("textbox", { name: "Draft JSON" }).value).toContain("intendedApproverActorId");
+    expect(screen.getByRole("textbox", { name: /Policy ID/ })).toHaveValue("risk-policy");
     expect(screen.getByRole("button", { name: /submit with WebAuthn/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Approve with WebAuthn/ })).not.toBeInTheDocument();
   });
@@ -105,6 +116,20 @@ describe("Policy Governance workspace", () => {
     expect(screen.queryByText("Status: REJECTED")).not.toBeInTheDocument();
   });
 
+  it("offers bounded recovery only with the dedicated mandate", async () => {
+    const client = api({ actorId: "oidc:" + "c".repeat(64),
+      authorities: ["model-policy:read", "model-policy:publication:recover"],
+      items: [proposal("PUBLICATION_PENDING")], publication: {
+        requestId: "job-1", state: "BLOCKED", failureCode: "ATTEMPTS_EXHAUSTED",
+        verificationStatus: "UNAVAILABLE" } });
+    render(<PolicyGovernancePage apiClient={client} enabled />);
+    fireEvent.click(await screen.findByRole("button", { name: /risk-policy.*revision 1.*PUBLICATION_PENDING/ }));
+    expect(await screen.findByText(/Publication is blocked/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Request recovery" }));
+    await waitFor(() => expect(client.requestPolicyPublicationRecovery).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Recovery queued for worker/)).toBeInTheDocument();
+  });
+
   it("prevents duplicate clicks and reports a backend conflict without claiming approval", async () => {
     const client = api();
     let release;
@@ -119,8 +144,44 @@ describe("Policy Governance workspace", () => {
     release({ challengeId: "action:op", optionsJson: "{}" });
     confirmPolicyAssertion.mockResolvedValue("{}");
     client.finishPolicyAction.mockRejectedValue({ status: 409 });
-    expect(await screen.findByRole("alert")).toHaveTextContent("The policy changed");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Outcome uncertain");
+    expect(screen.getByRole("button", { name: "Check and retry same operation" })).toBeInTheDocument();
     expect(screen.queryByText(/APPROVED committed/)).not.toBeInTheDocument();
+  });
+
+  it("recovers a lost approval response from the durable operation receipt", async () => {
+    const client = api();
+    confirmPolicyAssertion.mockResolvedValue("{}");
+    client.finishPolicyAction.mockRejectedValue(new Error("network response lost"));
+    client.getPolicyOperation.mockResolvedValue({ ...proposal("APPROVED"), version: 2 });
+    render(<PolicyGovernancePage apiClient={client} enabled />);
+    fireEvent.click(await screen.findByRole("button", { name: /risk-policy.*SUBMITTED/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Rationale" }),
+      { target: { value: "Independent review" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve with WebAuthn" }));
+    expect(await screen.findByText(/APPROVED committed/)).toBeInTheDocument();
+    expect(client.getPolicyOperation).toHaveBeenCalledWith(
+      client.finishPolicyAction.mock.calls[0][2].operationId);
+    expect(client.finishPolicyAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an uncertain command in memory and checks the same ID on retry", async () => {
+    const client = api();
+    confirmPolicyAssertion.mockResolvedValue("{}");
+    client.finishPolicyAction.mockRejectedValue(new Error("network response lost"));
+    client.getPolicyOperation.mockRejectedValueOnce({ status: 404 })
+      .mockResolvedValue({ ...proposal("APPROVED"), version: 2 });
+    render(<PolicyGovernancePage apiClient={client} enabled />);
+    fireEvent.click(await screen.findByRole("button", { name: /risk-policy.*SUBMITTED/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Rationale" }),
+      { target: { value: "Independent review" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve with WebAuthn" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Outcome uncertain");
+    const operationId = client.finishPolicyAction.mock.calls[0][2].operationId;
+    fireEvent.click(screen.getByRole("button", { name: "Check and retry same operation" }));
+    expect(await screen.findByText(/Committed receipt recovered/)).toBeInTheDocument();
+    expect(client.getPolicyOperation).toHaveBeenLastCalledWith(operationId);
+    expect(client.finishPolicyAction).toHaveBeenCalledTimes(1);
   });
 
   it("clears actor-specific selection on a session boundary remount", async () => {
@@ -130,7 +191,18 @@ describe("Policy Governance workspace", () => {
     expect(screen.getByText(/Policy detail/)).toBeInTheDocument();
     const second = api({ actorId: author, authorities: ["model-policy:read"] });
     rendered.rerender(<PolicyGovernancePage key="author" apiClient={second} enabled />);
-    await waitFor(() => expect(second.listPolicyProposals).toHaveBeenCalled());
+    await waitFor(() => expect(second.getPolicyPage).toHaveBeenCalled());
     expect(screen.queryByText(/Policy detail/)).not.toBeInTheDocument();
+  });
+
+  it("loads a bounded next page without losing the first page", async () => {
+    const client = api({ items: [proposal("DRAFT")] });
+    client.getPolicyPage.mockResolvedValueOnce({ items: [proposal("DRAFT")], nextCursor: "cursor-a" })
+      .mockResolvedValueOnce({ items: [{ ...proposal("SUBMITTED"), id: "proposal-2" }], nextCursor: null });
+    render(<PolicyGovernancePage apiClient={client} enabled />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load more policies" }));
+    expect(await screen.findByRole("button", { name: /risk-policy.*SUBMITTED/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /risk-policy.*DRAFT/ })).toBeInTheDocument();
+    expect(client.getPolicyPage.mock.calls[1][0]).toMatchObject({ size: 25, cursor: "cursor-a" });
   });
 });

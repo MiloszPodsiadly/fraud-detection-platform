@@ -33,6 +33,7 @@ export function WorkspaceDashboardShell({
     canReadGovernanceAdvisories,
     canReadModelGovernance,
     canReadPolicyGovernance,
+    canReadPolicySecurity,
     canWriteGovernanceAudit,
     runtimeStatus
   } = useWorkspaceRuntime();
@@ -122,7 +123,8 @@ export function WorkspaceDashboardShell({
             workspaceRoutes={visibleWorkspaceRoutes(WORKSPACE_ROUTE_ENTRIES, {
               canReadSuspiciousTransactions,
               canReadModelGovernance,
-              canReadPolicyGovernance
+              canReadPolicyGovernance,
+              canReadPolicySecurity
             })}
             showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}
             workspaceCounters={workspaceCounterState.counters}
