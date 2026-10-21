@@ -21,6 +21,7 @@ describe("WorkspaceRouteRegistry", () => {
       "analyst",
       "reports",
       "shadowPerformance",
+      "policyGovernance",
       "compliance"
     ];
 
@@ -59,7 +60,8 @@ describe("WorkspaceRouteRegistry", () => {
       "canReadTransactions",
       "canReadSuspiciousTransactions",
       "canReadGovernanceAdvisories",
-      "canReadModelGovernance"
+      "canReadModelGovernance",
+      "canReadPolicyGovernance"
     ]);
 
     expect(WORKSPACE_ROUTE_ENTRIES.every((route) => knownCapabilityKeys.has(route.capabilityKey))).toBe(true);

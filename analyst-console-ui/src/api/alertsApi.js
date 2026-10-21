@@ -51,6 +51,24 @@ export function createAlertsApiClient({
     reviewModelPromotionProposal: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
       request, `/proposals/${encodeURIComponent(proposalId)}/reviews`, command, requestOptions
     ),
+    getPolicyGovernanceActor: (options) => request("/api/v1/governance/model-policies/me", options),
+    listPolicyProposals: (options) => request("/api/v1/governance/model-policies", options),
+    getPolicyProposal: (id, options) => request(policyProposalPath(id), options),
+    getPolicyHistory: (id, options) => request(`${policyProposalPath(id)}/history`, options),
+    getPolicyPublication: (id, options) => request(`${policyProposalPath(id)}/publication`, options),
+    createPolicyDraft: (command, options) => policyCommand(request, "/drafts", "POST", command, options),
+    updatePolicyDraft: (id, command, options) => policyCommand(request, `/drafts/${encodeURIComponent(id)}`, "PUT", command, options),
+    startPolicyAction: (id, action, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/${action}/challenges`, "POST", command, options),
+    finishPolicyAction: (id, action, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/${action}`, "POST", command, options),
+    requestPolicyPublication: (id, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/publication-requests`, "POST", command, options),
+    listPolicyCredentials: (options) => request("/api/v1/governance/model-policies/webauthn/credentials", options),
+    startPolicyCredentialRegistration: (options) => policyCommand(request,
+      "/webauthn/registrations", "POST", {}, options),
+    finishPolicyCredentialRegistration: (command, options) => policyCommand(request,
+      "/webauthn/registrations/complete", "POST", command, options),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -85,6 +103,18 @@ export function createAlertsApiClient({
       headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {},
       body: JSON.stringify(decision)
     })
+  });
+}
+
+function policyProposalPath(id) {
+  return `/api/v1/governance/model-policies/${encodeURIComponent(id)}`;
+}
+
+function policyCommand(request, suffix, method, command, options = {}) {
+  return request(`/api/v1/governance/model-policies${suffix}`, {
+    ...options,
+    method,
+    body: JSON.stringify(command)
   });
 }
 

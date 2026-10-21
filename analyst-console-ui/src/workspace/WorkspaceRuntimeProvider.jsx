@@ -34,6 +34,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadModelCard: modelCardRead,
     canReadExactModelShadowPerformance: modelShadowPerformanceRead,
     canReadModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_READ),
+    canReadPolicyGovernance: authorityState(session, "model-policy:read"),
     canRegisterModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_REGISTER),
     canProposeModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_PROPOSE),
     canApproveModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_APPROVE),
