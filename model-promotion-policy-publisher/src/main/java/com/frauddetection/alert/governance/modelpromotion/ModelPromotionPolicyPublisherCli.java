@@ -308,9 +308,19 @@ public final class ModelPromotionPolicyPublisherCli {
             var approval = new OnlinePolicyApprovalVerifier(mongo, mapper, CLOCK,
                     required(options, "--webauthn-rp-id"), required(options, "--webauthn-origin"),
                     actorTrust, approvalTrust);
+            String workerId = java.util.UUID.randomUUID().toString();
             var worker = new PolicyPublicationWorker(mongo, transactions, publisher, approval, verifier,
-                    issuerKey, publisherKey, approvalTrust, CLOCK, mapper, java.util.UUID.randomUUID().toString());
+                    issuerKey, publisherKey, approvalTrust, CLOCK, mapper, workerId);
             do {
+                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", workerId,
+                        PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
+                        actorTrust.generation(), actorTrust.canonicalSha256(), CLOCK);
+                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", workerId,
+                        PolicyTrustRegistrySnapshotService.Registry.APPROVAL_KEYS,
+                        approvalTrust.generation(), approvalTrust.canonicalSha256(), CLOCK);
+                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", workerId,
+                        PolicyTrustRegistrySnapshotService.Registry.ISSUER_KEYS,
+                        issuers.generation(), issuers.canonicalSha256(), CLOCK);
                 boolean worked = worker.runOnce();
                 if (options.containsKey("--once")) break;
                 if (!worked) Thread.sleep(30_000);

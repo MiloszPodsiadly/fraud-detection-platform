@@ -5,6 +5,7 @@ import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceHistoryDo
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceState;
 import com.frauddetection.alert.governance.modelpolicy.PolicyProposalDocument;
 import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationJobDocument;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationAttemptDocument;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -27,6 +28,7 @@ import java.util.UUID;
 /** Bounded Mongo lease worker. Only this process receives the Ed25519 issuer private key. */
 final class PolicyPublicationWorker {
     private static final int MAX_ATTEMPTS = 5;
+    private static final int MAX_RECOVERIES = 3;
     private static final int LEASE_SECONDS = 120;
     private final MongoTemplate mongo;
     private final TransactionTemplate transactions;
@@ -85,8 +87,8 @@ final class PolicyPublicationWorker {
                 throw new SecurityException("Pending publication proposal changed");
             }
             if (recoverCommitted(job)) return true;
-            if (job.attempts() > MAX_ATTEMPTS) {
-                fail(job, true);
+            if (job.attempts() > MAX_ATTEMPTS + job.recoveryCount()) {
+                fail(job, "RECOVERY_BUDGET_EXHAUSTED");
                 return true;
             }
             OnlinePolicyApprovalVerifier.Verified verified = approval.verify(job);
@@ -111,14 +113,17 @@ final class PolicyPublicationWorker {
             try {
                 if (recoverCommitted(job)) return true;
             } catch (SecurityException conflict) {
-                fail(job, true);
+                fail(job, "IMMUTABLE_CONFLICT");
                 return true;
             } catch (RuntimeException uncertain) {
                 // A failed primary read is not proof that an uncertain publication did not commit.
                 return true;
             }
-            fail(job, failure instanceof SecurityException
-                    || failure instanceof MongoModelPromotionPolicyPublicationStore.PublicationConflictException);
+            String reason = failure instanceof MongoModelPromotionPolicyPublicationStore.PublicationConflictException
+                    ? "IMMUTABLE_CONFLICT" : failure instanceof SecurityException
+                            ? "CURRENT_TRUST_OR_EVIDENCE_INVALID" : job.attempts() >= MAX_ATTEMPTS
+                                    ? "ATTEMPTS_EXHAUSTED" : "OPERATIONAL_RETRYABLE";
+            fail(job, reason);
             return true;
         }
     }
@@ -127,17 +132,29 @@ final class PolicyPublicationWorker {
         Instant now = clock.instant();
         Query query = Query.query(new Criteria().orOperator(
                 new Criteria().andOperator(Criteria.where("attempts").lt(MAX_ATTEMPTS),
-                        Criteria.where("state").in(PolicyPublicationJobDocument.State.PENDING,
-                                PolicyPublicationJobDocument.State.RETRYABLE)),
+                        Criteria.where("state").is(PolicyPublicationJobDocument.State.PENDING)),
+                new Criteria().andOperator(Criteria.where("attempts").lt(MAX_ATTEMPTS + MAX_RECOVERIES),
+                        Criteria.where("state").is(PolicyPublicationJobDocument.State.RETRYABLE)),
                 new Criteria().andOperator(Criteria.where("state")
                         .is(PolicyPublicationJobDocument.State.CLAIMED),
                         Criteria.where("leaseUntil").lt(now))));
         query.with(Sort.by(Sort.Direction.ASC, "requestedAt"));
-        return mongo.findAndModify(query,
-                new Update().set("state", PolicyPublicationJobDocument.State.CLAIMED)
-                        .set("leaseOwner", workerId).set("leaseUntil", now.plusSeconds(LEASE_SECONDS))
-                        .inc("attempts", 1).unset("failureCode"),
-                FindAndModifyOptions.options().returnNew(true), PolicyPublicationJobDocument.class);
+        return transactions.execute(ignored -> {
+            PolicyPublicationJobDocument job = mongo.findAndModify(query,
+                    new Update().set("state", PolicyPublicationJobDocument.State.CLAIMED)
+                            .set("leaseOwner", workerId).set("leaseUntil", now.plusSeconds(LEASE_SECONDS))
+                            .inc("attempts", 1).unset("failureCode"),
+                    FindAndModifyOptions.options().returnNew(true), PolicyPublicationJobDocument.class);
+            if (job != null) {
+                if (job.attempts() > 1) mongo.updateFirst(Query.query(Criteria.where("_id")
+                                .is(job.id() + ":" + (job.attempts() - 1)).and("outcome").is("CLAIMED")),
+                        new Update().set("outcome", "LEASE_EXPIRED_UNCONFIRMED").set("endedAt", now),
+                        PolicyPublicationAttemptDocument.class);
+                mongo.insert(new PolicyPublicationAttemptDocument(job.id() + ":" + job.attempts(), job.id(),
+                        job.attempts(), workerId, now, "CLAIMED", null, null));
+            }
+            return job;
+        });
     }
 
     private void requireLease(PolicyPublicationJobDocument job) {
@@ -218,6 +235,9 @@ final class PolicyPublicationWorker {
                             .unset("leaseOwner").unset("leaseUntil").unset("failureCode"),
                     FindAndModifyOptions.options().returnNew(true), PolicyPublicationJobDocument.class);
             if (updated == null) throw new IllegalStateException("Publication lease changed before acknowledgement");
+            mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id() + ":" + job.attempts())),
+                    new Update().set("outcome", "PUBLISHED").set("endedAt", clock.instant()),
+                    PolicyPublicationAttemptDocument.class);
             Query pending = Query.query(Criteria.where("_id").is(job.proposalId())
                     .and("status").is(PolicyGovernanceState.PUBLICATION_PENDING)
                     .and("version").is(job.proposalVersion())
@@ -237,16 +257,24 @@ final class PolicyPublicationWorker {
         });
     }
 
-    private void fail(PolicyPublicationJobDocument job, boolean permanent) {
-        Query lease = Query.query(Criteria.where("_id").is(job.id())
-                .and("state").is(PolicyPublicationJobDocument.State.CLAIMED)
-                .and("leaseOwner").is(workerId).and("attempts").is(job.attempts()));
-        boolean blocked = permanent || job.attempts() >= MAX_ATTEMPTS;
-        mongo.updateFirst(lease, new Update().set("state", blocked
-                        ? PolicyPublicationJobDocument.State.BLOCKED
-                        : PolicyPublicationJobDocument.State.RETRYABLE)
-                .set("failureCode", blocked ? "PUBLICATION_BLOCKED" : "PUBLICATION_RETRYABLE")
-                .unset("leaseOwner").unset("leaseUntil"), PolicyPublicationJobDocument.class);
+    private void fail(PolicyPublicationJobDocument job, String reason) {
+        transactions.executeWithoutResult(ignored -> {
+            Query lease = Query.query(Criteria.where("_id").is(job.id())
+                    .and("state").is(PolicyPublicationJobDocument.State.CLAIMED)
+                    .and("leaseOwner").is(workerId).and("attempts").is(job.attempts()));
+            boolean blocked = !"OPERATIONAL_RETRYABLE".equals(reason) || job.attempts() >= MAX_ATTEMPTS;
+            var changed = mongo.updateFirst(lease, new Update().set("state", blocked
+                            ? PolicyPublicationJobDocument.State.BLOCKED
+                            : PolicyPublicationJobDocument.State.RETRYABLE)
+                    .set("failureCode", reason)
+                    .unset("leaseOwner").unset("leaseUntil"), PolicyPublicationJobDocument.class);
+            if (changed.getModifiedCount() == 1) {
+                mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id() + ":" + job.attempts())),
+                        new Update().set("outcome", blocked ? "BLOCKED" : "RETRYABLE")
+                                .set("failureCode", reason).set("endedAt", clock.instant()),
+                        PolicyPublicationAttemptDocument.class);
+            }
+        });
     }
 
     enum Stage { BEFORE_SIGN, AFTER_SIGN, AFTER_COMMIT }

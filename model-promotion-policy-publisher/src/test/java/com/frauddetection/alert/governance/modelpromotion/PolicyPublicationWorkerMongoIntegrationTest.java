@@ -7,6 +7,7 @@ import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceState;
 import com.frauddetection.alert.governance.modelpolicy.PolicyProposalDocument;
 import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationJobDocument;
 import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnChallenge;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnCredential;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnCredentialRepository;
@@ -103,7 +104,8 @@ class PolicyPublicationWorkerMongoIntegrationTest {
                 "policy-publisher", "publisher-key", "policy-issuer", "issuer-key");
         webAuthn = new PolicyWebAuthnService(mongo, manager,
                 new PolicyWebAuthnCredentialRepository(mongo), governance,
-                governanceStore, mapper, new MockEnvironment(),
+                governanceStore, new com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantService(
+                        mongo, manager, governanceStore), mapper, new MockEnvironment(),
                 "localhost", ORIGIN);
         Instant from = clock.instant().minusSeconds(86400);
         Instant to = clock.instant().plusSeconds(86400 * 365);
@@ -154,7 +156,8 @@ class PolicyPublicationWorkerMongoIntegrationTest {
                 author.issuer() + "#" + author.subject());
         var auth = new UsernamePasswordAuthenticationToken(principal, null,
                 List.of(new SimpleGrantedAuthority(ModelPolicyAuthority.READ)));
-        var status = new PolicyPublicationStatusController(governance, mongo, fullTrust())
+        var status = new PolicyPublicationStatusController(
+                new PolicyPublicationStatusService(governance, mongo, fullTrust()))
                 .publication(auth, job.proposalId());
         assertThat(status.state()).isEqualTo("PUBLISHED");
         assertThat(status.verificationStatus()).isEqualTo("FULLY_AUTHORIZED");
@@ -257,6 +260,33 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
     }
 
+    @Test void independentRecoveryIsIdempotentAuditedAndOnlyWorkerSigns() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().set("state", PolicyPublicationJobDocument.State.BLOCKED)
+                        .set("attempts", 5).set("failureCode", "ATTEMPTS_EXHAUSTED"),
+                PolicyPublicationJobDocument.class);
+        var recovery = new PolicyPublicationRecoveryService(mongo, transactions, governance, clock);
+        PolicyGovernanceActor requester = actor("requester", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        assertThatThrownBy(() -> recovery.request(requester, job.proposalId(), "recovery-1"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        PolicyGovernanceActor operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        var queued = recovery.request(operator, job.proposalId(), "recovery-1");
+        assertThat(queued.state()).isEqualTo(PolicyPublicationJobDocument.State.RETRYABLE);
+        assertThat(queued.recoveryCount()).isEqualTo(1);
+        assertThat(queued.attemptHistory()).isEmpty();
+        assertThat(recovery.request(operator, job.proposalId(), "recovery-1").recoveryHistory()).hasSize(1);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
+        assertThat(worker("worker-after-recovery", ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
+        var finished = recovery.inspect(operator, job.proposalId());
+        assertThat(finished.state()).isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(finished.attemptHistory()).hasSize(1);
+        assertThat(finished.attemptHistory().getFirst().outcome()).isEqualTo("PUBLISHED");
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+    }
+
     private PolicyPublicationJobDocument approvedJob() throws Exception {
         Authenticator authorKey = credential(author);
         Authenticator approverKey = credential(approver);
@@ -320,7 +350,8 @@ class PolicyPublicationWorkerMongoIntegrationTest {
                 .Add(-3, fixed(publicKey.getW().getAffineY())).EncodeToBytes();
         String userHandle = encode(HexFormat.of().parseHex(actor.id().substring(5)));
         mongo.insert(new PolicyWebAuthnCredential(key.id, actor.id(), actor.issuer(), actor.subject(),
-                userHandle, encode(cose), 0, false, Instant.now(), Instant.now()));
+                userHandle, encode(cose), 0, false, Instant.now(), Instant.now(),
+                "ACTIVE", "LEGACY_TEST", null, null, null));
         return key;
     }
 
