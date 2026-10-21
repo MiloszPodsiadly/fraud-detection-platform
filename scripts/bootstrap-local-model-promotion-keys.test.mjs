@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,7 @@ test("fresh local checkout gets separate credentials, never an approved policy",
     const approval = join(root, "approval");
     assert.deepEqual(readdirSync(approval).sort(), [
       "approver-b.private-key.pkcs8.base64", "author-a.private-key.pkcs8.base64",
-      "publisher.private-key.pkcs8.base64", "trusted-approvals.json"
+      "online-actor-trust.json", "publisher.private-key.pkcs8.base64", "trusted-approvals.json"
     ]);
     const trust = JSON.parse(readFileSync(join(approval, "trusted-approvals.json"), "utf8"));
     assert.deepEqual(trust.keys.map(key => key.roles[0]).sort(), [
@@ -30,6 +30,9 @@ test("fresh local checkout gets separate credentials, never an approved policy",
     ]);
     assert.ok(existsSync(join(root, "private-key.pkcs8.base64")));
     assert.deepEqual(readdirSync(root).sort(), ["approval", "private-key.pkcs8.base64", "trusted-issuers.json"]);
+    writeFileSync(join(approval, "publisher.private-key.pkcs8.base64"), "malformed\n");
+    const malformed = spawnSync(process.execPath, [copied, "--check"], { encoding: "utf8" });
+    assert.notEqual(malformed.status, 0, "malformed signing key must fail closed");
   } finally {
     const resolved = resolve(temporary);
     if (!resolved.startsWith(`${resolve(tmpdir())}${process.platform === "win32" ? "\\" : "/"}`)) {

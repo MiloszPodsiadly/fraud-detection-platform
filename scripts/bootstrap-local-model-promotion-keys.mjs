@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +29,18 @@ const localActors = [
   ["local-dev-policy-publisher", "local-dev-publisher-key-1", "POLICY_PUBLISHER", "publisher.private-key.pkcs8.base64"]
 ];
 
+function assertProtectedFile(file) {
+  for (const candidate of [localRoot, outputDir, dirname(file), file]) {
+    const entry = lstatSync(candidate);
+    if (entry.isSymbolicLink()) throw new Error(`Symlink in local policy trust path: ${candidate}`);
+  }
+  const entry = lstatSync(file);
+  if (!entry.isFile() || entry.size === 0) throw new Error(`Invalid local policy credential: ${file}`);
+  if (process.platform !== "win32" && (entry.mode & 0o077) !== 0) {
+    throw new Error(`Local policy credential must not grant group/other access: ${file}`);
+  }
+}
+
 function publicEntry(identity, id, role, publicDer, from, until) {
   return {
     identity,
@@ -57,6 +69,7 @@ function validateApproval() {
   for (const [identity, id, role, filename] of localActors) {
     const credential = join(approvalDir, filename);
     if (!existsSync(credential)) throw new Error(`Missing local credential: ${filename}`);
+    assertProtectedFile(credential);
     const encoded = readFileSync(credential, "utf8").trim();
     const privateDer = Buffer.from(encoded, "base64");
     if (privateDer.toString("base64") !== encoded) throw new Error(`Noncanonical local credential: ${filename}`);
@@ -122,6 +135,7 @@ function validateExisting() {
   if (!existsSync(privateKeyPath) || !existsSync(registryPath)) {
     throw new Error("Incomplete local model-promotion keys; inspect manually. Existing keys are never replaced automatically.");
   }
+  assertProtectedFile(privateKeyPath);
   const encoded = readFileSync(privateKeyPath, "utf8").trim();
   const privateDer = Buffer.from(encoded, "base64");
   if (privateDer.toString("base64") !== encoded) {
@@ -157,6 +171,7 @@ function ensureOnlineActorTrust() {
     const issuer = JSON.parse(readFileSync(registryPath, "utf8")).keys[0];
     const actors = onlineActors.map(([subject, role]) => ({
       actorId: actorId(subject), issuer: onlineIssuer, subject, roles: [role],
+      displayName: role === "POLICY_APPROVER" ? "Policy Approver" : "Policy Author",
       institutionalScopes: ["CURRENT_INSTITUTION"], environments: ["DEVELOPMENT", "TEST"],
       intendedUses: ["FRAUD_RISK_SCORING"], validFrom: issuer.validFrom,
       validUntil: issuer.validUntil, status: "ACTIVE"

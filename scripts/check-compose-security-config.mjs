@@ -236,39 +236,91 @@ function assertModelPromotionPolicyTrustMount() {
 
 function assertModelPromotionPublisherIsolation() {
   const name = "model-promotion-policy-publisher";
+  const loaderName = "model-promotion-policy-key-loader";
   const root = path.resolve("deployment", ".local", "model-promotion-policy");
-  const expected = new Map([
-    ["/run/policy-publication/trusted-approvals.json", path.join(root, "approval", "trusted-approvals.json")],
-    ["/run/policy-publication/online-actor-trust.json", path.join(root, "approval", "online-actor-trust.json")],
-    ["/run/policy-publication/trusted-issuers.json", path.join(root, "trusted-issuers.json")],
-    ["/run/policy-publication/publisher.private-key.pkcs8.base64", path.join(root, "approval", "publisher.private-key.pkcs8.base64")],
-    ["/run/policy-publication/issuer.private-key.pkcs8.base64", path.join(root, "private-key.pkcs8.base64")]
-  ]);
   const mounts = service(name).volumes ?? [];
-  if (mounts.length !== expected.size || (service(name).ports ?? []).length) {
-    fail("publisher must have exactly five file mounts and no published port");
+  if (mounts.length !== 1 || (service(name).ports ?? []).length
+      || service(name).user !== "10001:10001") {
+    fail("publisher must run as UID/GID 10001, have only one private volume and no published port");
   }
   const seen = new Set();
   for (const mount of mounts) {
     const target = normalizeContainerPath(mount.target);
     if (seen.has(target)) fail(`publisher has duplicate mount ${target}`);
     seen.add(target);
-    const source = expected.get(target);
+    if (target === "/run/policy-publication") {
+      if (mount.type !== "volume" || mount.source !== "model-promotion-policy-signing-keys"
+          || mount.read_only !== true) {
+        fail("publisher signing volume must be private and read-only");
+      }
+      continue;
+    }
+    fail(`publisher must not have an additional mount ${target}`);
+  }
+  if (!seen.has("/run/policy-publication")) fail("publisher is missing its private signing volume");
+  const loader = service(loaderName);
+  const loaderMounts = loader.volumes ?? [];
+  const signingSources = new Map([
+    ["/run/policy-publication-source/publisher.private-key.pkcs8.base64",
+      path.join(root, "approval", "publisher.private-key.pkcs8.base64")],
+    ["/run/policy-publication-source/issuer.private-key.pkcs8.base64",
+      path.join(root, "private-key.pkcs8.base64")],
+    ["/run/policy-publication-source/trusted-approvals.json",
+      path.join(root, "approval", "trusted-approvals.json")],
+    ["/run/policy-publication-source/online-actor-trust.json",
+      path.join(root, "approval", "online-actor-trust.json")],
+    ["/run/policy-publication-source/trusted-issuers.json",
+      path.join(root, "trusted-issuers.json")]
+  ]);
+  if (loaderMounts.length !== 6 || (loader.ports ?? []).length || loader.network_mode !== "none") {
+    fail("one-shot key loader must have exactly five source files, one private volume, no network and no ports");
+  }
+  if (loader.restart !== "no" || loader.read_only !== true
+      || !(loader.security_opt ?? []).includes("no-new-privileges:true")) {
+    fail("key loader must be one-shot, read-only and prohibit privilege escalation");
+  }
+  const observedLoaderTargets = new Set();
+  for (const mount of loaderMounts) {
+    const target = normalizeContainerPath(mount.target);
+    if (observedLoaderTargets.has(target)) fail(`key loader has duplicate mount ${target}`);
+    observedLoaderTargets.add(target);
+    if (target === "/run/policy-publication") {
+      if (mount.type !== "volume" || mount.source !== "model-promotion-policy-signing-keys"
+          || mount.read_only === true) fail("key loader needs only the private writable signing volume");
+      continue;
+    }
+    const source = signingSources.get(target);
     if (!source || mount.type !== "bind" || mount.read_only !== true
         || normalizeComparablePath(mount.source) !== normalizeComparablePath(source)
         || (mount.bind?.create_host_path !== false && mount.bind?.create_host_path !== undefined)) {
-      fail(`publisher mount ${target} must be the exact read-only fixture file`);
+      fail(`key loader mount ${target} must be an exact read-only source file`);
     }
   }
-  for (const target of expected.keys()) {
-    if (!seen.has(target)) fail(`publisher is missing mount ${target}`);
+  for (const [target, source] of signingSources) {
+    if (!observedLoaderTargets.has(target)) fail(`key loader is missing signing source ${target}`);
+    try {
+      const entry = fs.lstatSync(source);
+      const isPrivate = target.endsWith("private-key.pkcs8.base64");
+      if (!entry.isFile() || entry.isSymbolicLink() || entry.size === 0
+          || (isPrivate && process.platform !== "win32" && (entry.mode & 0o077) !== 0)) {
+        fail(`signing source is missing, linked or insufficiently protected: ${source}`);
+      }
+    } catch (error) {
+      fail(`signing source cannot be inspected: ${source}: ${error.message}`);
+    }
+  }
+  if (!observedLoaderTargets.has("/run/policy-publication")) fail("key loader is missing the signing volume");
+  if (service(name).depends_on?.[loaderName]?.condition !== "service_completed_successfully") {
+    fail("publisher must wait for successful private-key loading");
   }
   for (const [otherName, definition] of Object.entries(services)) {
-    if (otherName === name) continue;
+    if (otherName === loaderName) continue;
     for (const mount of definition.volumes ?? []) {
       const source = normalizeComparablePath(mount.source);
       if (source === normalizeComparablePath(path.join(root, "private-key.pkcs8.base64"))
-          || source === normalizeComparablePath(path.join(root, "approval", "publisher.private-key.pkcs8.base64"))) {
+          || source === normalizeComparablePath(path.join(root, "approval", "publisher.private-key.pkcs8.base64"))
+          || (mount.type === "volume" && mount.source === "model-promotion-policy-signing-keys"
+            && otherName !== name)) {
         fail(`${otherName} must not mount a model-promotion private signing key`);
       }
     }

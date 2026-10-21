@@ -278,35 +278,58 @@ test("hardened model-promotion trust mount exposes only the public registry", ()
     "a Compose renderer may omit an explicit false field, while the source overlay and file preflight remain authoritative");
 });
 
-test("publisher signing keys stay in the isolated read-only worker", () => {
+test("publisher signing keys stay in the isolated non-root worker", () => {
   const resolved = resolveHardenedCompose();
   assert.equal(resolved.status, 0, resolved.stderr || resolved.error?.message);
   const config = JSON.parse(resolved.stdout);
   assert.equal(runChecker(config, "security-hardened").status, 0);
   const mutations = [
-    ["writable issuer key", (value) => {
+    ["writable signing volume", (value) => {
       value.services["model-promotion-policy-publisher"].volumes.find(
-        ({ target }) => target === "/run/policy-publication/issuer.private-key.pkcs8.base64"
+        ({ target }) => target === "/run/policy-publication"
       ).read_only = false;
     }],
     ["missing publisher key", (value) => {
-      value.services["model-promotion-policy-publisher"].volumes =
-        value.services["model-promotion-policy-publisher"].volumes.filter(
-          ({ target }) => target !== "/run/policy-publication/publisher.private-key.pkcs8.base64"
+      value.services["model-promotion-policy-key-loader"].volumes =
+        value.services["model-promotion-policy-key-loader"].volumes.filter(
+          ({ target }) => target !== "/run/policy-publication-source/publisher.private-key.pkcs8.base64"
         );
     }],
     ["issuer key leaked to alert service", (value) => {
       value.services["alert-service"].volumes.push({
-        ...value.services["model-promotion-policy-publisher"].volumes.find(
-          ({ target }) => target === "/run/policy-publication/issuer.private-key.pkcs8.base64"
+        ...value.services["model-promotion-policy-key-loader"].volumes.find(
+          ({ target }) => target === "/run/policy-publication-source/issuer.private-key.pkcs8.base64"
         ), target: "/tmp/issuer-key"
       });
+    }],
+    ["publisher runs as root", (value) => {
+      value.services["model-promotion-policy-publisher"].user = "0:0";
+    }],
+    ["publisher exposes a port", (value) => {
+      value.services["model-promotion-policy-publisher"].ports = [{ published: "8080", target: 8080 }];
     }]
   ];
   for (const [label, mutate] of mutations) {
     const candidate = structuredClone(config);
     mutate(candidate);
     assert.notEqual(runChecker(candidate, "security-hardened").status, 0, `${label} unexpectedly passed`);
+  }
+});
+
+test("hardening alone does not activate a partial publisher, while policy trust does", () => {
+  const baseFiles = ["deployment/docker-compose.yml", "deployment/docker-compose.dev.yml"];
+  for (const [label, overlays, expected] of [
+    ["development", [], false],
+    ["app hardening", ["deployment/docker-compose.hardened.yml"], false],
+    ["policy trust", ["deployment/docker-compose.model-promotion-policy-trust.yml"], true],
+    ["policy trust hardened", ["deployment/docker-compose.model-promotion-policy-trust.yml",
+      "deployment/docker-compose.hardened.yml"], true]
+  ]) {
+    const args = ["compose", "--env-file", "deployment/.env.example",
+      ...[...baseFiles, ...overlays].flatMap(file => ["-f", file]), "config", "--services"];
+    const result = spawnSync("docker", args, { cwd: repositoryRoot, encoding: "utf8" });
+    assert.equal(result.status, 0, `${label}: ${result.stderr || result.error?.message}`);
+    assert.equal(result.stdout.split(/\r?\n/).includes("model-promotion-policy-publisher"), expected, label);
   }
 });
 

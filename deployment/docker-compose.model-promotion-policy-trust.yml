@@ -28,16 +28,68 @@ services:
         bind:
           create_host_path: false
 
+  model-promotion-policy-key-loader:
+    image: eclipse-temurin:21-jre
+    restart: "no"
+    network_mode: none
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        for file in publisher.private-key.pkcs8.base64 issuer.private-key.pkcs8.base64 trusted-approvals.json online-actor-trust.json trusted-issuers.json; do
+          source="/run/policy-publication-source/$${file}"
+          test -f "$${source}" && test ! -L "$${source}" && test -s "$${source}"
+          temporary="$$(mktemp /run/policy-publication/.key.XXXXXX)"
+          cp "$${source}" "$${temporary}"
+          chown 10001:10001 "$${temporary}"
+          chmod 0400 "$${temporary}"
+          mv -f "$${temporary}" "/run/policy-publication/$${file}"
+        done
+        chown 10001:10001 /run/policy-publication
+        chmod 0500 /run/policy-publication
+    volumes:
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/publisher.private-key.pkcs8.base64
+        target: /run/policy-publication-source/publisher.private-key.pkcs8.base64
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/private-key.pkcs8.base64
+        target: /run/policy-publication-source/issuer.private-key.pkcs8.base64
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/trusted-approvals.json
+        target: /run/policy-publication-source/trusted-approvals.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/online-actor-trust.json
+        target: /run/policy-publication-source/online-actor-trust.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/trusted-issuers.json
+        target: /run/policy-publication-source/trusted-issuers.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: model-promotion-policy-signing-keys
+        target: /run/policy-publication
+
   model-promotion-policy-publisher:
-    build:
-      context: ..
-      dockerfile: deployment/Dockerfile.backend
-      args:
-        MODULE_NAME: model-promotion-policy-publisher
-    restart: unless-stopped
+    profiles: !reset []
     depends_on:
-      mongodb:
-        condition: service_healthy
+      model-promotion-policy-key-loader:
+        condition: service_completed_successfully
     environment:
       MODEL_PROMOTION_PUBLISH_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
@@ -60,35 +112,10 @@ services:
       - --webauthn-origin
       - http://localhost:4173
     volumes:
-      - type: bind
-        source: ./.local/model-promotion-policy/approval/trusted-approvals.json
-        target: /run/policy-publication/trusted-approvals.json
+      - type: volume
+        source: model-promotion-policy-signing-keys
+        target: /run/policy-publication
         read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./.local/model-promotion-policy/approval/online-actor-trust.json
-        target: /run/policy-publication/online-actor-trust.json
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./.local/model-promotion-policy/trusted-issuers.json
-        target: /run/policy-publication/trusted-issuers.json
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./.local/model-promotion-policy/approval/publisher.private-key.pkcs8.base64
-        target: /run/policy-publication/publisher.private-key.pkcs8.base64
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./.local/model-promotion-policy/private-key.pkcs8.base64
-        target: /run/policy-publication/issuer.private-key.pkcs8.base64
-        read_only: true
-        bind:
-          create_host_path: false
-    networks:
-      - backend
+
+volumes:
+  model-promotion-policy-signing-keys:

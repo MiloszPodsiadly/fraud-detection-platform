@@ -105,6 +105,9 @@ jobs:
       - name: Test Compose security assertion mutations
         run: node --test scripts/check-compose-security-config.test.mjs
 
+      - name: Test local policy signing-key bootstrap fail-closed behavior
+        run: node --test scripts/bootstrap-local-model-promotion-keys.test.mjs
+
       - name: Test local startup contract
         run: node --test scripts/local-startup-contract.test.mjs
 

@@ -30,7 +30,7 @@ if [[ "$variant" == "app-hardening" ]]; then
   services+=(transaction-simulator-service)
   health_services+=(transaction-simulator-service)
 elif [[ "$variant" == "full-security-hardened" ]]; then
-  services=(mongodb redis kafka keycloak ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service fraud-scoring-service alert-service analyst-console-ui)
+  services=(mongodb redis kafka keycloak ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service fraud-scoring-service alert-service analyst-console-ui model-promotion-policy-key-loader model-promotion-policy-publisher)
   health_services=(ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service fraud-scoring-service alert-service analyst-console-ui)
 fi
 
@@ -88,6 +88,8 @@ if [[ "$variant" == "full-security-hardened" ]]; then
     deployment/.local/service-identity/alert-service-private.pem
     deployment/.local/service-identity/jwks.json
     deployment/.local/model-promotion-policy/trusted-issuers.json
+    deployment/.local/model-promotion-policy/private-key.pkcs8.base64
+    deployment/.local/model-promotion-policy/approval/publisher.private-key.pkcs8.base64
   )
   for fixture_file in "${fixture_files[@]}"; do
     if [[ ! -f "$fixture_file" ]]; then
@@ -145,6 +147,36 @@ for service in "${health_services[@]}"; do
 done
 
 if [[ "$variant" == "full-security-hardened" ]]; then
+  publisher_id="$("${compose[@]}" ps -q model-promotion-policy-publisher)"
+  if [[ -z "$publisher_id" || "$(docker inspect --format '{{.State.Status}}' "$publisher_id")" != "running" ]]; then
+    failed_service="model-promotion-policy-publisher"
+    echo "Policy publisher is not running after key loading." >&2
+    exit 1
+  fi
+  publisher_uid="$("${compose[@]}" exec -T model-promotion-policy-publisher id -u)"
+  if [[ "$publisher_uid" != "10001" ]]; then
+    failed_service="model-promotion-policy-publisher"
+    echo "Policy publisher must run as UID 10001, got $publisher_uid" >&2
+    exit 1
+  fi
+  for key in publisher issuer; do
+    key_path="/run/policy-publication/${key}.private-key.pkcs8.base64"
+    if ! "${compose[@]}" exec -T model-promotion-policy-publisher test -r "$key_path"; then
+      failed_service="model-promotion-policy-publisher"
+      echo "Non-root publisher cannot read its $key signing material." >&2
+      exit 1
+    fi
+    if [[ "$("${compose[@]}" exec -T model-promotion-policy-publisher stat -c '%u:%g:%a' "$key_path")" != "10001:10001:400" ]]; then
+      failed_service="model-promotion-policy-publisher"
+      echo "Publisher $key signing material has incorrect owner or mode." >&2
+      exit 1
+    fi
+    if "${compose[@]}" exec -T alert-service test -e "$key_path"; then
+      failed_service="alert-service"
+      echo "Publisher $key signing material is visible to alert-service." >&2
+      exit 1
+    fi
+  done
   reader_uid="$("${compose[@]}" exec -T alert-service id -u)"
   if [[ "$reader_uid" != "10001" ]]; then
     failed_service="alert-service"
