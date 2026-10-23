@@ -266,6 +266,7 @@ public class PolicyGovernanceService {
 
     private void validateDraft(ModelPromotionPolicyDraft draft, String digest) {
         try {
+            validator.validateNewDraftDecimals(draft);
             validator.validateDraftForPublication(draft, digest);
         } catch (RuntimeException invalid) {
             throw new IllegalArgumentException("Invalid policy draft semantics", invalid);

@@ -12,6 +12,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -22,22 +23,24 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Objects;
+import java.util.List;
 
-/** Two distinct, explicitly mandated operators approve an opaque, short-lived enrollment grant. */
+/** Target-bound, single-use credential grant ledger. Approval is handled by signed review or protected bootstrap. */
 @Service
 public class PolicyCredentialEnrollmentGrantService {
     private static final int REQUEST_SECONDS = 3600;
-    private static final int GRANT_SECONDS = 600;
     private final MongoTemplate mongo;
     private final TransactionTemplate transaction;
     private final MongoPolicyGovernanceStore clock;
+    private final PolicyCredentialGrantAuthorizationVerifier authorization;
     private final SecureRandom random = new SecureRandom();
 
     public PolicyCredentialEnrollmentGrantService(MongoTemplate mongo, MongoTransactionManager manager,
-            MongoPolicyGovernanceStore clock) {
+            MongoPolicyGovernanceStore clock, PolicyCredentialGrantAuthorizationVerifier authorization) {
         this.mongo = mongo;
         this.transaction = new TransactionTemplate(manager);
         this.clock = clock;
+        this.authorization = authorization;
     }
 
     @PostConstruct
@@ -45,6 +48,13 @@ public class PolicyCredentialEnrollmentGrantService {
         mongo.indexOps(PolicyCredentialEnrollmentGrantDocument.class).ensureIndex(new Index()
                 .on("targetActorId", Sort.Direction.ASC).on("expiresAt", Sort.Direction.ASC)
                 .named("policy_credential_grant_target_expiry_v1"));
+    }
+
+    @Scheduled(cron = "0 23 3 * * *")
+    void clearExpiredGrantDigests() {
+        mongo.updateMulti(Query.query(Criteria.where("expiresAt").lt(clock.now())
+                        .and("secretSha256").ne(null)),
+                new Update().unset("secretSha256"), PolicyCredentialEnrollmentGrantDocument.class);
     }
 
     public GrantRequestSummary request(PolicyGovernanceActor operator, GrantRequest request) {
@@ -56,11 +66,14 @@ public class PolicyCredentialEnrollmentGrantService {
             throw new IllegalArgumentException("Complete enrollment approval request required");
         }
         String targetId = PolicyGovernanceActor.identityId(request.targetIssuer(), request.targetSubject());
+        if (!operator.issuer().equals(request.targetIssuer()))
+            throw new AccessDeniedException("Credential grant target must use the institutional issuer");
         if (operator.id().equals(targetId)) throw new AccessDeniedException("Operator cannot grant own enrollment");
         Instant now = clock.now();
         var document = new PolicyCredentialEnrollmentGrantDocument(request.operationId(), targetId,
                 request.targetIssuer(), request.targetSubject(), request.purpose(), request.caseReference().trim(),
-                operator.id(), now, null, null, null, now.plusSeconds(REQUEST_SECONDS), null, null, null);
+                operator.id(), now, null, null, null, now.plusSeconds(REQUEST_SECONDS), null, null, null,
+                null, null, null, null, null, null, null, now.plusSeconds(REQUEST_SECONDS), null);
         try {
             return transaction.execute(ignored -> {
                 mongo.insert(document);
@@ -80,36 +93,65 @@ public class PolicyCredentialEnrollmentGrantService {
         }
     }
 
-    public IssuedGrant approve(PolicyGovernanceActor reviewer, String requestId) {
-        requireAdmin(reviewer);
-        if (requestId == null || !requestId.matches("^[A-Za-z0-9._:-]{1,128}$")) {
-            throw new IllegalArgumentException("Valid grant request ID required");
-        }
-        Instant now = clock.now();
+    public IssuedGrant claim(PolicyGovernanceActor target, String requestId) {
+        requireTarget(target);
+        if (requestId == null || !requestId.matches("^[A-Za-z0-9._:-]{1,128}$"))
+            throw new AccessDeniedException("Approved enrollment grant unavailable");
         byte[] secret = new byte[32];
         random.nextBytes(secret);
         String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
         String token = requestId + "." + encoded;
         String digest = sha256(token);
         return transaction.execute(ignored -> {
+            Instant now = clock.now();
             var current = mongo.findById(requestId, PolicyCredentialEnrollmentGrantDocument.class);
-            if (current == null || current.approvedAt() != null || !now.isBefore(current.expiresAt())) {
-                throw new PolicyGovernanceConflictException("Grant request unavailable or expired");
+            if (current == null || current.approvedAt() == null || current.rejectedAt() != null
+                    || current.claimedAt() != null || current.consumedAt() != null
+                    || !now.isBefore(current.expiresAt()) || !target.id().equals(current.targetActorId())
+                    || !target.issuer().equals(current.targetIssuer())
+                    || !target.subject().equals(current.targetSubject())) {
+                throw new AccessDeniedException("Approved enrollment grant unavailable for this identity");
             }
-            if (reviewer.id().equals(current.requestedBy()) || reviewer.id().equals(current.targetActorId())) {
-                throw new AccessDeniedException("Independent operator approval required");
-            }
-            var query = Query.query(Criteria.where("_id").is(requestId).and("approvedAt").is(null)
-                    .and("expiresAt").gt(now));
-            var approved = mongo.findAndModify(query, new Update().set("approvedBy", reviewer.id())
-                    .set("approvedAt", now).set("secretSha256", digest)
-                    .set("expiresAt", now.plusSeconds(GRANT_SECONDS)),
+            authorization.verify(current, now);
+            var query = Query.query(Criteria.where("_id").is(requestId).and("approvedAt").ne(null)
+                    .and("rejectedAt").is(null).and("claimedAt").is(null)
+                    .and("consumedAt").is(null).and("expiresAt").gt(now)
+                    .and("targetActorId").is(target.id()).and("targetIssuer").is(target.issuer())
+                    .and("targetSubject").is(target.subject()));
+            var claimed = mongo.findAndModify(query, new Update().set("claimedAt", now)
+                    .set("secretSha256", digest),
                     FindAndModifyOptions.options().returnNew(true), PolicyCredentialEnrollmentGrantDocument.class);
-            if (approved == null) throw new PolicyGovernanceConflictException("Grant already approved");
-            audit("grant-approval:" + requestId, "GRANT_APPROVED", approved,
-                    current.requestedBy(), reviewer.id(), null, now);
-            return new IssuedGrant(requestId, token, approved.expiresAt());
+            if (claimed == null) throw new PolicyGovernanceConflictException("Grant already claimed");
+            audit("grant-claim:" + requestId, "GRANT_CLAIMED", claimed,
+                    target.id(), claimed.approvedBy(), null, now);
+            return new IssuedGrant(requestId, token, claimed.expiresAt());
         });
+    }
+
+    public List<GrantView> mine(PolicyGovernanceActor target) {
+        requireTarget(target);
+        Instant now = clock.now();
+        return mongo.find(Query.query(Criteria.where("targetActorId").is(target.id())
+                        .and("targetIssuer").is(target.issuer()).and("targetSubject").is(target.subject())
+                        .and("approvedAt").ne(null).and("rejectedAt").is(null)
+                        .and("consumedAt").is(null).and("expiresAt").gt(now))
+                        .with(Sort.by(Sort.Direction.DESC, "approvedAt")).limit(20),
+                PolicyCredentialEnrollmentGrantDocument.class).stream()
+                .map(grant -> new GrantView(grant.id(), grant.purpose(), grant.caseReference(),
+                        grant.expiresAt(), grant.claimedAt() != null)).toList();
+    }
+
+    public GrantReviewView reviewView(PolicyGovernanceActor reviewer, String requestId) {
+        requireAdmin(reviewer);
+        var grant = requestId == null ? null : mongo.findById(requestId,
+                PolicyCredentialEnrollmentGrantDocument.class);
+        if (grant == null || reviewer.id().equals(grant.requestedBy())
+                || reviewer.id().equals(grant.targetActorId()))
+            throw new AccessDeniedException("Independent credential grant review unavailable");
+        return new GrantReviewView(grant.id(), grant.purpose(), grant.targetIssuer(),
+                grant.targetSubject(), grant.requestedBy(), grant.caseReference(),
+                grant.expiresAt(), grant.approvedAt() != null, grant.rejectedAt() != null,
+                grant.reviewOperationId(), grant.approvedBy());
     }
 
     public PolicyCredentialEnrollmentGrantDocument validate(PolicyGovernanceActor actor, String token,
@@ -119,7 +161,8 @@ public class PolicyCredentialEnrollmentGrantService {
         }
         String id = token.substring(0, token.lastIndexOf('.'));
         var grant = mongo.findById(id, PolicyCredentialEnrollmentGrantDocument.class);
-        if (grant == null || grant.approvedAt() == null || grant.consumedAt() != null
+        if (grant == null || grant.approvedAt() == null || grant.claimedAt() == null
+                || grant.rejectedAt() != null || grant.consumedAt() != null
                 || !clock.now().isBefore(grant.expiresAt()) || grant.purpose() != expectedPurpose
                 || !actor.id().equals(grant.targetActorId()) || !actor.issuer().equals(grant.targetIssuer())
                 || !actor.subject().equals(grant.targetSubject()) || grant.secretSha256() == null
@@ -145,6 +188,7 @@ public class PolicyCredentialEnrollmentGrantService {
         var query = Query.query(Criteria.where("_id").is(grant.id()).and("consumedAt").is(null)
                 .and("secretSha256").is(grant.secretSha256()).and("expiresAt").gt(now));
         var updated = mongo.findAndModify(query, new Update().set("consumedAt", now)
+                .unset("secretSha256")
                 .set("credentialId", credentialId).set("registrationResponseSha256", responseSha256),
                 FindAndModifyOptions.options().returnNew(true), PolicyCredentialEnrollmentGrantDocument.class);
         if (updated == null) throw new PolicyGovernanceConflictException("Enrollment grant already used");
@@ -167,6 +211,13 @@ public class PolicyCredentialEnrollmentGrantService {
         }
     }
 
+    private void requireTarget(PolicyGovernanceActor actor) {
+        if (actor == null || !actor.authorities().contains(ModelPolicyAuthority.CREDENTIAL_ENROLL)
+                || actor.issuer() == null || actor.subject() == null
+                || !actor.id().equals(PolicyGovernanceActor.identityId(actor.issuer(), actor.subject())))
+            throw new AccessDeniedException("Institutional credential enrollment identity required");
+    }
+
     private String sha256(String value) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
@@ -181,4 +232,10 @@ public class PolicyCredentialEnrollmentGrantService {
     public record GrantRequestSummary(String requestId,
             PolicyCredentialEnrollmentGrantDocument.Purpose purpose, Instant expiresAt) { }
     public record IssuedGrant(String requestId, String token, Instant expiresAt) { }
+    public record GrantView(String requestId, PolicyCredentialEnrollmentGrantDocument.Purpose purpose,
+            String caseReference, Instant expiresAt, boolean alreadyClaimed) { }
+    public record GrantReviewView(String requestId, PolicyCredentialEnrollmentGrantDocument.Purpose purpose,
+            String targetIssuer, String targetSubject, String requestedBy, String caseReference,
+            Instant expiresAt, boolean approved, boolean rejected,
+            String reviewOperationId, String reviewedBy) { }
 }

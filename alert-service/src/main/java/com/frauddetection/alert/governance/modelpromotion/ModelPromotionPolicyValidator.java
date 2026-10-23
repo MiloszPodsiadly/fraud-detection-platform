@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.GovernanceTimestampContract;
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
+import com.frauddetection.alert.governance.modelpolicy.ExactPolicyDecimalContract;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -154,6 +155,22 @@ public class ModelPromotionPolicyValidator {
 
     public record ThresholdDescription(String key, String unit, boolean mustBePositive,
             String maximumInclusive, boolean integer) { }
+
+    /** New draft authoring boundary; historical signed policies retain their original decimal semantics. */
+    public void validateNewDraftDecimals(ModelPromotionPolicyDraft draft) {
+        final long maxExactBrowserInteger = 9_007_199_254_740_991L;
+        if (draft.revision() > maxExactBrowserInteger)
+            throw new IllegalArgumentException("Policy revision exceeds exact browser integer range");
+        draft.criteria().forEach(rule -> {
+            if (rule.maximumEvidenceAgeSeconds() > maxExactBrowserInteger)
+                throw new IllegalArgumentException("Evidence age exceeds exact browser integer range");
+            rule.thresholds().forEach((name, value) -> {
+                ExactPolicyDecimalContract.requireNewDraftValue(value, name);
+                if (INTEGER_THRESHOLDS.contains(name) && value.scale() != 0)
+                    throw new IllegalArgumentException("Integer policy threshold " + name + " cannot have a decimal scale");
+            });
+        });
+    }
 
     private void validateThresholds(ModelPromotionPolicy.CriterionRule rule) {
         rule.thresholds().forEach((name, value) -> {

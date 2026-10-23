@@ -70,6 +70,8 @@ public class PolicyWebAuthnService {
     private final MongoPolicyGovernanceStore governanceStore;
     private final ObjectMapper mapper;
     private final RelyingParty relyingParty;
+    private final String rpId;
+    private final String origin;
     private final SecureRandom random = new SecureRandom();
 
     public PolicyWebAuthnService(MongoTemplate mongo, MongoTransactionManager manager,
@@ -86,6 +88,8 @@ public class PolicyWebAuthnService {
         this.governanceStore = governanceStore;
         this.mapper = mapper;
         validateOrigin(rpId, origin, environment);
+        this.rpId = rpId;
+        this.origin = origin;
         this.relyingParty = RelyingParty.builder()
                 .identity(RelyingPartyIdentity.builder().id(rpId).name("Model policy governance").build())
                 .credentialRepository(credentials).origins(Set.of(origin))
@@ -388,7 +392,7 @@ public class PolicyWebAuthnService {
         if (namespace == null || !namespace.matches("^[a-z-]{1,40}$")
                 || operationId == null || !operationId.matches("^[A-Za-z0-9._:-]{1,128}$")
                 || baseContract == null || !baseContract.containsKey("domain")
-                || credentials.activeForActor(actor.id()).isEmpty()) {
+                || !credentials.hasActiveForActor(actor.id())) {
             throw new AccessDeniedException("Bound assertion requires a trusted registered authenticator");
         }
         String id = namespace + ":" + operationId;
@@ -429,8 +433,9 @@ public class PolicyWebAuthnService {
                 || !actor.subject().equals(challenge.subject()) || !now().isBefore(challenge.expiresAt())) {
             throw new AccessDeniedException("Bound assertion challenge unavailable for this actor");
         }
-        String digest = GovernanceCanonicalJson.sha256(mapper,
-                boundContract(challenge.id(), challenge.nonce(), challenge.expiresAt(), actor, baseContract));
+        Map<String, Object> exactContract = boundContract(challenge.id(), challenge.nonce(),
+                challenge.expiresAt(), actor, baseContract);
+        String digest = GovernanceCanonicalJson.sha256(mapper, exactContract);
         if (!digest.equals(challenge.contractSha256())) {
             throw new PolicyGovernanceConflictException("Bound action contract changed");
         }
@@ -464,6 +469,14 @@ public class PolicyWebAuthnService {
                     PolicyWebAuthnCredential.class) == null) {
                 throw new PolicyGovernanceConflictException("Credential revoked or counter changed");
             }
+            String contractJson = new String(GovernanceCanonicalJson.serialize(mapper,
+                    mapper.valueToTree(exactContract)), StandardCharsets.UTF_8);
+            mongo.insert(new GovernanceBoundWebAuthnProof(challenge.id(), GovernanceBoundWebAuthnProof.VERSION,
+                    namespace, contractJson, digest, challenge.requestJson(),
+                    Base64.getEncoder().encodeToString(responseJson.getBytes(StandardCharsets.UTF_8)),
+                    sha256(responseJson), actor.id(), actor.issuer(), actor.subject(), credentialId,
+                    credential.userHandle(), credential.publicKeyCose(), rpId, origin, true, true,
+                    credential.signatureCount(), result.getSignatureCount(), challenge.expiresAt(), acceptedAt));
             return new VerifiedBoundAssertion(challenge.id(), credentialId, digest,
                     sha256(responseJson), result.getSignatureCount(), acceptedAt);
         } catch (AccessDeniedException | PolicyGovernanceConflictException failure) {
@@ -476,13 +489,18 @@ public class PolicyWebAuthnService {
     private Map<String, Object> boundContract(String id, String nonce, Instant expiresAt,
             PolicyGovernanceActor actor, Map<String, Object> base) {
         Map<String, Object> contract = new LinkedHashMap<>(base);
+        addChallengeIdentity(contract, id, nonce, expiresAt, actor);
+        return contract;
+    }
+
+    private void addChallengeIdentity(Map<String, Object> contract, String id, String nonce,
+            Instant expiresAt, PolicyGovernanceActor actor) {
         contract.put("challengeId", id);
         contract.put("nonce", nonce);
         contract.put("expiresAt", expiresAt.toString());
         contract.put("actorId", actor.id());
         contract.put("issuer", actor.issuer());
         contract.put("subject", actor.subject());
-        return contract;
     }
 
     private PolicyWebAuthnCredential requireOwnedActiveCredential(PolicyGovernanceActor actor, String id) {
@@ -500,12 +518,7 @@ public class PolicyWebAuthnService {
             PolicyGovernanceActor actor, String credentialId) {
         Map<String, Object> contract = new LinkedHashMap<>();
         contract.put("domain", "com.frauddetection.model-policy.credential-revoke.v1");
-        contract.put("challengeId", id);
-        contract.put("nonce", nonce);
-        contract.put("expiresAt", expiresAt.toString());
-        contract.put("actorId", actor.id());
-        contract.put("issuer", actor.issuer());
-        contract.put("subject", actor.subject());
+        addChallengeIdentity(contract, id, nonce, expiresAt, actor);
         contract.put("credentialId", credentialId);
         contract.put("action", "CREDENTIAL_REVOKE");
         return contract;
@@ -530,7 +543,7 @@ public class PolicyWebAuthnService {
         requireActionAuthority(actor, action);
         PolicyProposalDocument proposal = checkedProposal(actor, proposalId);
         validateProposalIntent(actor, proposal, intent.expectedVersion(), action);
-        if (credentials.activeForActor(actor.id()).isEmpty()) {
+        if (!credentials.hasActiveForActor(actor.id())) {
             throw new PolicyGovernanceConflictException("Register a WebAuthn credential before this action");
         }
         String id = "action:" + intent.operationId();

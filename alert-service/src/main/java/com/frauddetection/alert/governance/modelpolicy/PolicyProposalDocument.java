@@ -1,10 +1,14 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionPolicyDraft;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Document(PolicyProposalDocument.COLLECTION)
 public record PolicyProposalDocument(
@@ -24,6 +28,16 @@ public record PolicyProposalDocument(
         Instant updatedAt
 ) {
     public static final String COLLECTION = "model_policy_governance_proposals";
+
+    /** Read-only lossless browser view; never included in the draft's canonical digest. */
+    @Transient
+    @JsonProperty("exactThresholds")
+    public Map<String, Map<String, String>> exactThresholds() {
+        return draft.criteria().stream().collect(Collectors.toMap(
+                rule -> rule.criterion().name(),
+                rule -> rule.thresholds().entrySet().stream().collect(Collectors.toMap(
+                        Map.Entry::getKey, entry -> entry.getValue().toPlainString()))));
+    }
 
     public PolicyProposalDocument next(ModelPromotionPolicyDraft nextDraft, String nextSha,
             PolicyGovernanceState nextStatus, String submitter, Instant submitted,

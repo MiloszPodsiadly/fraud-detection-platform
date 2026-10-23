@@ -78,6 +78,12 @@ public class PolicyWebAuthnCredentialRepository implements CredentialRepository 
         return mongo.findById(credentialId, PolicyWebAuthnCredential.class);
     }
 
+    public boolean hasActiveForActor(String actorId) {
+        return mongo.exists(Query.query(Criteria.where("actorId").is(actorId)
+                .and("revoked").is(false).and("status").is("ACTIVE")),
+                PolicyWebAuthnCredential.class);
+    }
+
     public Set<PolicyWebAuthnCredential> activeForActor(String actorId) {
         return Set.copyOf(mongo.find(Query.query(Criteria.where("actorId").is(actorId)
                 .and("revoked").is(false).and("status").is("ACTIVE")), PolicyWebAuthnCredential.class));

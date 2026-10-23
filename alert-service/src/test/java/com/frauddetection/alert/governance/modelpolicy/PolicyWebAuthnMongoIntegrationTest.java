@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
+import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import com.frauddetection.alert.governance.modelpromotion.ModelGovernanceEnvironment;
 import com.frauddetection.alert.governance.modelpromotion.ModelGovernanceScope;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionCriterion;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.env.Environment;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.data.mongodb.MongoTransactionManager;
@@ -33,6 +35,8 @@ import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
@@ -69,7 +73,11 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
     private PolicyGovernanceService governance;
     private PolicyWebAuthnService webAuthn;
     private PolicyCredentialEnrollmentGrantService grants;
+    private PolicyCredentialGrantReviewService grantReviews;
+    private PolicyCredentialGrantAuthorizationVerifier grantAuthorization;
+    private Path bootstrapPath;
     private final com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+    @TempDir Path trustTempDir;
 
     @BeforeEach
     void setUp() {
@@ -87,12 +95,18 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
                 org.mockito.Mockito.mock(com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectory.class));
         PolicyWebAuthnCredentialRepository credentials = new PolicyWebAuthnCredentialRepository(mongo);
         credentials.ensureIndexes();
-        grants = new PolicyCredentialEnrollmentGrantService(mongo, manager, governanceStore);
+        bootstrapPath = trustTempDir.resolve("first-install.json");
+        var bootstrap = new PolicyCredentialBootstrapAuthority(mapper, bootstrapPath.toString());
+        grantAuthorization = new PolicyCredentialGrantAuthorizationVerifier(mongo, mapper, bootstrap);
+        grants = new PolicyCredentialEnrollmentGrantService(mongo, manager, governanceStore,
+                grantAuthorization);
         grants.ensureIndexes();
         Environment environment = new MockEnvironment();
         webAuthn = new PolicyWebAuthnService(mongo, manager, credentials, governance, governanceStore,
                 grants, mapper, environment, "localhost", ORIGIN);
         webAuthn.ensureIndexes();
+        grantReviews = new PolicyCredentialGrantReviewService(mongo, manager, governanceStore,
+                webAuthn, grants, mapper, bootstrap, credentials);
     }
 
     @AfterEach
@@ -110,9 +124,11 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
         grants.request(credentialAdmin("security-operator-a"),
                 new PolicyCredentialEnrollmentGrantService.GrantRequest(id, author().issuer(),
                         author().subject(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-1"));
-        assertThatThrownBy(() -> grants.approve(credentialAdmin("security-operator-a"), id))
+        assertThatThrownBy(() -> grantReviews.start(credentialAdmin("security-operator-a"), id,
+                new PolicyCredentialGrantReviewService.ReviewIntent("self-review",
+                        PolicyCredentialGrantReviewService.Decision.APPROVE)))
                 .isInstanceOf(AccessDeniedException.class);
-        String token = grants.approve(credentialAdmin("security-operator-b"), id).token();
+        String token = fixtureApproveAndClaim(author(), id);
         assertThatThrownBy(() -> webAuthn.startRegistration(approver(),
                 new PolicyWebAuthnService.RegistrationIntent(token)))
                 .isInstanceOf(AccessDeniedException.class);
@@ -127,6 +143,189 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
         assertThatThrownBy(() -> webAuthn.startRegistration(author(),
                 new PolicyWebAuthnService.RegistrationIntent(token)))
                 .isInstanceOf(AccessDeniedException.class);
+        grants.clearExpiredGrantDigests();
+        assertThat(mongo.findById(id, PolicyCredentialEnrollmentGrantDocument.class).secretSha256()).isNull();
+    }
+
+    @Test
+    void signedGrantDecisionBindsExactRequestAndOnlyTargetCanClaimOnce() throws Exception {
+        var reviewer = actor("security-operator-b", Set.of(
+                ModelPolicyAuthority.CREDENTIAL_ADMIN, ModelPolicyAuthority.CREDENTIAL_ENROLL));
+        Authenticator reviewerKey = register(reviewer);
+        String id = "signed-grant-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(id, author().issuer(),
+                        author().subject(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST,
+                        "case-strong-review"));
+        var intent = new PolicyCredentialGrantReviewService.ReviewIntent("review-" + UUID.randomUUID(),
+                PolicyCredentialGrantReviewService.Decision.APPROVE);
+        var challenge = grantReviews.start(reviewer, id, intent);
+        assertThatThrownBy(() -> grantReviews.finish(reviewer, id,
+                new PolicyCredentialGrantReviewService.FinishReview(
+                        intent, challenge.challengeId(), "{}")))
+                .isInstanceOf(RuntimeException.class);
+        String assertion = reviewerKey.assertion(challenge.challengeId(), ORIGIN, "localhost", true, 1);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(id)),
+                new Update().set("purpose", PolicyCredentialEnrollmentGrantDocument.Purpose.ADDITIONAL),
+                PolicyCredentialEnrollmentGrantDocument.class);
+        var command = new PolicyCredentialGrantReviewService.FinishReview(
+                intent, challenge.challengeId(), assertion);
+        assertThatThrownBy(() -> grantReviews.finish(reviewer, id, command))
+                .isInstanceOf(RuntimeException.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(id)),
+                new Update().set("purpose", PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST),
+                PolicyCredentialEnrollmentGrantDocument.class);
+        mongo.insert(new PolicyCredentialSecurityEventDocument("grant-review:" + id,
+                "collision", author().id(), author().issuer(), author().subject(),
+                reviewer.id(), reviewer.id(), "case-strong-review", null, clock.instant()));
+        assertThatThrownBy(() -> grantReviews.finish(reviewer, id, command))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(mongo.findById(id, PolicyCredentialEnrollmentGrantDocument.class).approvedAt()).isNull();
+        mongo.remove(Query.query(Criteria.where("_id").is("grant-review:" + id)),
+                PolicyCredentialSecurityEventDocument.class);
+        grantReviews.finish(reviewer, id, command);
+        var evidence = grantReviews.verifyHistorical(actor("auditor",
+                Set.of(ModelPolicyAuthority.AUDIT_READ)), id);
+        assertThat(evidence.decision()).isEqualTo(PolicyCredentialGrantReviewService.Decision.APPROVE);
+        assertThatThrownBy(() -> grantReviews.finish(reviewer, id, command))
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> grants.claim(approver(), id)).isInstanceOf(AccessDeniedException.class);
+        var approvedGrant = mongo.findById(id, PolicyCredentialEnrollmentGrantDocument.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(id)),
+                new Update().set("expiresAt", approvedGrant.expiresAt().plusSeconds(1)),
+                PolicyCredentialEnrollmentGrantDocument.class);
+        assertThatThrownBy(() -> grants.claim(author(), id)).isInstanceOf(SecurityException.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(id)),
+                new Update().set("expiresAt", approvedGrant.expiresAt()),
+                PolicyCredentialEnrollmentGrantDocument.class);
+        var restartedManager = new MongoTransactionManager(factory);
+        var restartedStore = new MongoPolicyGovernanceStore(mongo,
+                new TransactionTemplate(restartedManager), clock);
+        var restartedGrants = new PolicyCredentialEnrollmentGrantService(mongo, restartedManager,
+                restartedStore, new PolicyCredentialGrantAuthorizationVerifier(mongo,
+                        new ObjectMapper(), new PolicyCredentialBootstrapAuthority(
+                                new ObjectMapper(), bootstrapPath.toString())));
+        String token = restartedGrants.claim(author(), id).token();
+        assertThatThrownBy(() -> grants.claim(author(), id)).isInstanceOf(AccessDeniedException.class);
+        assertThat(grants.validate(author(), token,
+                PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST).id()).isEqualTo(id);
+    }
+
+    @Test
+    void targetClaimIsAtomicAndLostResponseCannotReissueCapability() throws Exception {
+        var reviewer = actor("security-operator-b", Set.of(
+                ModelPolicyAuthority.CREDENTIAL_ADMIN, ModelPolicyAuthority.CREDENTIAL_ENROLL));
+        Authenticator reviewerKey = register(reviewer);
+        String id = "claim-race-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(id, author().issuer(),
+                        author().subject(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST,
+                        "case-claim-race"));
+        var intent = new PolicyCredentialGrantReviewService.ReviewIntent("review-" + UUID.randomUUID(),
+                PolicyCredentialGrantReviewService.Decision.APPROVE);
+        var challenge = grantReviews.start(reviewer, id, intent);
+        grantReviews.finish(reviewer, id, new PolicyCredentialGrantReviewService.FinishReview(
+                intent, challenge.challengeId(), reviewerKey.assertion(
+                        challenge.challengeId(), ORIGIN, "localhost", true, 1)));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var calls = java.util.stream.IntStream.range(0, 2).mapToObj(ignored -> pool.submit(() -> {
+                ready.countDown(); go.await();
+                try { return grants.claim(author(), id).token(); }
+                catch (RuntimeException rejected) { return null; }
+            })).toList();
+            ready.await(); go.countDown();
+            assertThat(calls.stream().map(call -> {
+                try { return call.get(); } catch (Exception failure) { throw new RuntimeException(failure); }
+            }).filter(java.util.Objects::nonNull).count()).isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThatThrownBy(() -> grants.claim(author(), id)).isInstanceOf(AccessDeniedException.class);
+        assertThat(mongo.count(Query.query(Criteria.where("_id").is("grant-claim:" + id)),
+                PolicyCredentialSecurityEventDocument.class)).isEqualTo(1);
+    }
+
+    @Test
+    void approvedFlagWithoutSignedOrBootstrapEvidenceCannotIssueCapability() {
+        String id = "unproven-grant-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(id, author().issuer(),
+                        author().subject(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST,
+                        "case-no-proof"));
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(id)),
+                new Update().set("approvedBy", credentialAdmin("security-operator-b").id())
+                        .set("approvedAt", clock.instant())
+                        .set("expiresAt", clock.instant().plusSeconds(600)),
+                PolicyCredentialEnrollmentGrantDocument.class);
+        assertThatThrownBy(() -> grants.claim(author(), id)).isInstanceOf(SecurityException.class);
+        assertThat(mongo.findById(id, PolicyCredentialEnrollmentGrantDocument.class).claimedAt()).isNull();
+    }
+
+    @Test
+    void missingBootstrapAuthorityFailsClosedAndExactFirstInstallIsSingleUse() throws Exception {
+        String id = "bootstrap-" + UUID.randomUUID();
+        var requester = credentialAdmin("security-operator-a");
+        var reviewer = credentialAdmin("security-operator-b");
+        grants.request(requester, new PolicyCredentialEnrollmentGrantService.GrantRequest(
+                id, author().issuer(), author().subject(),
+                PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-bootstrap"));
+        assertThatThrownBy(() -> grantReviews.bootstrapApprove(reviewer, id))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> grantReviews.start(reviewer, id,
+                new PolicyCredentialGrantReviewService.ReviewIntent("oidc-only",
+                        PolicyCredentialGrantReviewService.Decision.APPROVE)))
+                .isInstanceOf(AccessDeniedException.class);
+        var request = mongo.findById(id, PolicyCredentialEnrollmentGrantDocument.class);
+        Files.writeString(bootstrapPath, new ObjectMapper().writeValueAsString(
+                new PolicyCredentialBootstrapAuthority.Authorization(
+                        PolicyCredentialBootstrapAuthority.Authorization.VERSION, "bootstrap-authority-1",
+                        id, request.targetIssuer(), request.targetSubject(), request.requestedBy(),
+                        reviewer.id(), request.caseReference(), request.requestExpiresAt().toString(),
+                        request.requestExpiresAt().toString(), "installation-authority",
+                        "independent-installation-authorizer")));
+        grantReviews.bootstrapApprove(reviewer, id);
+        assertThatThrownBy(() -> grantReviews.bootstrapApprove(reviewer, id))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(grants.claim(author(), id).requestId()).isEqualTo(id);
+    }
+
+    @Test
+    void signedRejectionAndExpiredApprovalNeverIssueTargetCapability() throws Exception {
+        var reviewer = actor("security-operator-b", Set.of(
+                ModelPolicyAuthority.CREDENTIAL_ADMIN, ModelPolicyAuthority.CREDENTIAL_ENROLL));
+        Authenticator reviewerKey = register(reviewer);
+        String rejectedId = "rejected-grant-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(rejectedId,
+                        author().issuer(), author().subject(),
+                        PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-rejected"));
+        var reject = new PolicyCredentialGrantReviewService.ReviewIntent("reject-" + UUID.randomUUID(),
+                PolicyCredentialGrantReviewService.Decision.REJECT);
+        var rejectChallenge = grantReviews.start(reviewer, rejectedId, reject);
+        grantReviews.finish(reviewer, rejectedId, new PolicyCredentialGrantReviewService.FinishReview(
+                reject, rejectChallenge.challengeId(), reviewerKey.assertion(
+                        rejectChallenge.challengeId(), ORIGIN, "localhost", true, 1)));
+        assertThat(grantReviews.verifyHistorical(actor("auditor",
+                Set.of(ModelPolicyAuthority.AUDIT_READ)), rejectedId).decision())
+                .isEqualTo(PolicyCredentialGrantReviewService.Decision.REJECT);
+        assertThatThrownBy(() -> grants.claim(author(), rejectedId)).isInstanceOf(AccessDeniedException.class);
+
+        String approvedId = "expired-grant-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(approvedId,
+                        author().issuer(), author().subject(),
+                        PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-expired"));
+        var approve = new PolicyCredentialGrantReviewService.ReviewIntent("approve-" + UUID.randomUUID(),
+                PolicyCredentialGrantReviewService.Decision.APPROVE);
+        var approveChallenge = grantReviews.start(reviewer, approvedId, approve);
+        grantReviews.finish(reviewer, approvedId, new PolicyCredentialGrantReviewService.FinishReview(
+                approve, approveChallenge.challengeId(), reviewerKey.assertion(
+                        approveChallenge.challengeId(), ORIGIN, "localhost", true, 2)));
+        clock.set(clock.instant().plusSeconds(601));
+        assertThatThrownBy(() -> grants.claim(author(), approvedId)).isInstanceOf(AccessDeniedException.class);
     }
 
     @Test
@@ -151,6 +350,7 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
         mongo.remove(Query.query(Criteria.where("_id").is("credential-enrollment:" + grantId)),
                 PolicyCredentialSecurityEventDocument.class);
         webAuthn.finishRegistration(author(), command);
+        assertThat(mongo.findById(grantId, PolicyCredentialEnrollmentGrantDocument.class).secretSha256()).isNull();
         assertThatThrownBy(() -> webAuthn.finishRegistration(author(), command))
                 .isInstanceOf(RuntimeException.class);
         assertThat(mongo.count(Query.query(Criteria.where("_id").is("credential-enrollment:" + grantId)),
@@ -212,26 +412,32 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
                 ModelPolicyAuthority.PRODUCTION));
         Authenticator requesterKey = register(requester);
         Authenticator reviewerKey = register(reviewer);
-        var registries = org.mockito.Mockito.mock(
-                com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.class);
-        var baseline = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.RegistryView(
-                com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
-                "READY", 1L, "a".repeat(64), 1, List.of());
-        org.mockito.Mockito.when(registries.requireReady(
-                com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS))
-                .thenReturn(baseline);
-        org.mockito.Mockito.when(registries.snapshot(
-                com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS))
-                .thenReturn(baseline);
+        var existing = actor("existing-approver", Set.of());
+        Path actorRegistry = trustTempDir.resolve("online-actor-trust.json");
+        Files.writeString(actorRegistry, """
+                {"version":"model-policy-online-actor-trust-v1","generation":1,"actors":[
+                {"actorId":"%s","issuer":"%s","subject":"%s",
+                 "roles":["POLICY_APPROVER"],"institutionalScopes":["CURRENT_INSTITUTION"],
+                 "environments":["TEST"],"intendedUses":["FRAUD_RISK_SCORING"],
+                 "validFrom":"2026-01-01T00:00:00Z","validUntil":"2028-01-01T00:00:00Z",
+                 "status":"ACTIVE"}]}
+                """.formatted(existing.id(), existing.issuer(), existing.subject()));
+        var registries = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService(
+                new ObjectMapper(), actorRegistry.toString(), "", "", 1, 1, 1);
         var changes = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService(
                 mongo, new TransactionTemplate(new MongoTransactionManager(factory)), webAuthn,
-                registries, new ObjectMapper(), clock);
+                registries, new ObjectMapper(), clock,
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustFleetConsistency.membership(
+                        "rollout-test", "instance-a", "instance-b"));
+        var target = actor("new-approver", Set.of());
         var intent = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Intent(
                 com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
                 com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Action.GRANT,
-                actor("new-approver", Set.of()).id(), null, null, null,
-                List.of("POLICY_APPROVER"), ModelGovernanceEnvironment.TEST,
-                ModelPromotionIntendedUse.FRAUD_RISK_SCORING, 2, "b".repeat(64), "case-trust-1");
+                target.id(), null, null, null,
+                List.of("POLICY_APPROVER"), ModelGovernanceEnvironment.PRODUCTION,
+                ModelPromotionIntendedUse.FRAUD_RISK_SCORING, 2, null, "case-trust-1",
+                target.issuer(), target.subject(), "New approver",
+                "2026-01-01T00:00:00Z", "2028-01-01T00:00:00Z", null, null);
         var start = changes.startRequest(requester, "trust-op-1", intent);
         var requested = changes.finishRequest(requester, "trust-op-1", intent, start.challengeId(),
                 requesterKey.assertion(start.challengeId(), ORIGIN, "localhost", true, 1));
@@ -244,37 +450,184 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
         var approved = changes.finishReview(reviewer, requested.id(),
                 com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.APPROVE,
                 review.challengeId(), reviewerKey.assertion(review.challengeId(), ORIGIN, "localhost", true, 1));
+        var auditReader = actor("trust-auditor", Set.of(ModelPolicyAuthority.AUDIT_READ,
+                ModelPolicyAuthority.PRODUCTION));
+        var reopenedChanges = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService(
+                mongo, new TransactionTemplate(new MongoTransactionManager(factory)), webAuthn,
+                registries, new ObjectMapper(), clock);
+        assertThatThrownBy(() -> reopenedChanges.verifyHistoricalChange(
+                actor("unscoped-auditor", Set.of(ModelPolicyAuthority.AUDIT_READ)), requested.id()))
+                .isInstanceOf(AccessDeniedException.class);
+        reopenedChanges.verifyHistoricalChange(auditReader, requested.id());
         assertThat(approved.status()).isEqualTo("PENDING_OPERATOR_ACTION");
-        assertThat(approved.intent().candidateRegistrySha256()).isEqualTo("b".repeat(64));
+        String approvedDigest = approved.candidateSha256();
+        assertThat(approvedDigest).matches("[0-9a-f]{64}");
+        var installation = reopenedChanges.installation(auditReader, approved.id());
+        var installer = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustCandidateInstallationVerifier(
+                new ObjectMapper(), clock);
+        assertThat(installer.verify(installation, actorRegistry, 1).sha256()).isEqualTo(approvedDigest);
+        Path staged = trustTempDir.resolve("approved-online-actors-2.json");
+        assertThat(installer.stage(installation, actorRegistry, staged, 1).sha256())
+                .isEqualTo(approvedDigest);
+        assertThat(Files.readString(staged)).isEqualTo(installation.candidate().canonicalJson());
+        assertThatThrownBy(() -> installer.stage(installation, actorRegistry, staged, 1))
+                .isInstanceOf(java.nio.file.FileAlreadyExistsException.class);
+        var candidate = installation.candidate();
+        var substituted = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustCandidateDocument(
+                candidate.id(), candidate.registry(), candidate.action(), candidate.baseGeneration(),
+                candidate.baseSha256(), candidate.generation(), "{}\n", candidate.sha256(),
+                candidate.semanticDiffJson(), candidate.reviewSummary(), candidate.affectsProduction());
+        assertThatThrownBy(() -> installer.verify(
+                new com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.InstallationBundle(
+                        installation.request(), substituted, installation.requestProof(), installation.reviewProof(),
+                        installation.requestAudit(), installation.reviewAudit()), actorRegistry, 1))
+                .isInstanceOf(SecurityException.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(approved.id())),
+                new Update().set("canonicalJson", "{}\n"),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustCandidateDocument.class);
+        assertThatThrownBy(() -> reopenedChanges.installation(auditReader, approved.id()))
+                .isInstanceOf(SecurityException.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(approved.id())),
+                new Update().set("canonicalJson", candidate.canonicalJson()),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustCandidateDocument.class);
+        var rejectedRequestOptions = changes.startRequest(requester, "trust-op-rejected", intent);
+        var rejectedRequest = changes.finishRequest(requester, "trust-op-rejected", intent,
+                rejectedRequestOptions.challengeId(), requesterKey.assertion(
+                        rejectedRequestOptions.challengeId(), ORIGIN, "localhost", true, 2));
+        var rejectOptions = changes.startReview(reviewer, rejectedRequest.id(), "trust-review-rejected",
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.REJECT);
+        var rejected = changes.finishReview(reviewer, rejectedRequest.id(),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.REJECT,
+                rejectOptions.challengeId(), reviewerKey.assertion(
+                        rejectOptions.challengeId(), ORIGIN, "localhost", true, 2));
+        assertThat(rejected.status()).isEqualTo("REJECTED");
+        assertThatThrownBy(() -> reopenedChanges.installation(auditReader, rejected.id()))
+                .isInstanceOf(RuntimeException.class);
+        reopenedChanges.verifyHistoricalChange(auditReader, rejected.id());
+        var competingOptions = changes.startRequest(requester, "trust-op-competing", intent);
+        var competing = changes.finishRequest(requester, "trust-op-competing", intent,
+                competingOptions.challengeId(), requesterKey.assertion(
+                        competingOptions.challengeId(), ORIGIN, "localhost", true, 3));
+        var competingReview = changes.startReview(reviewer, competing.id(), "trust-review-competing",
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.APPROVE);
+        assertThatThrownBy(() -> changes.finishReview(reviewer, competing.id(),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.APPROVE,
+                competingReview.challengeId(), reviewerKey.assertion(
+                        competingReview.challengeId(), ORIGIN, "localhost", true, 3)))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(mongo.findById(competing.id(),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeDocument.class).status())
+                .isEqualTo("PENDING_REVIEW");
         assertThat(changes.deployment(reviewer, approved.id()).rolloutState())
-                .isEqualTo("NO_ACKNOWLEDGEMENT");
+                .isEqualTo("APPROVED_PENDING_OPERATOR_ACTION");
         mongo.save(new com.frauddetection.alert.governance.modelpromotion.PolicyTrustInstanceObservation(
-                "ALERT_VERIFIER:instance-a:ONLINE_ACTORS", "ALERT_VERIFIER", "instance-a",
+                "ALERT_VERIFIER:instance-a:epoch-a:ONLINE_ACTORS", "ALERT_VERIFIER", "instance-a",
                 com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
-                2, "b".repeat(64), clock.instant()));
+                2, approvedDigest, clock.instant(), "rollout-test", "epoch-a", clock.instant().minusSeconds(30)));
         assertThat(changes.deployment(reviewer, approved.id()).rolloutState())
-                .isEqualTo("PARTIAL_ROLLOUT");
+                .isEqualTo("OBSERVED_PARTIAL");
         mongo.save(new com.frauddetection.alert.governance.modelpromotion.PolicyTrustInstanceObservation(
-                "PUBLISHER:instance-b:ONLINE_ACTORS", "PUBLISHER", "instance-b",
+                "PUBLISHER:instance-b:epoch-b:ONLINE_ACTORS", "PUBLISHER", "instance-b",
                 com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
-                1, "a".repeat(64), clock.instant()));
+                1, registries.requireReady(intent.registry()).digestSha256(), clock.instant(),
+                "rollout-test", "epoch-b", clock.instant().minusSeconds(30)));
         assertThat(changes.deployment(reviewer, approved.id()).rolloutState())
-                .isEqualTo("MISMATCH_OR_PARTIAL_ROLLOUT");
+                .isEqualTo("OBSERVED_PARTIAL");
         mongo.save(new com.frauddetection.alert.governance.modelpromotion.PolicyTrustInstanceObservation(
-                "PUBLISHER:instance-b:ONLINE_ACTORS", "PUBLISHER", "instance-b",
+                "PUBLISHER:instance-b:epoch-b:ONLINE_ACTORS", "PUBLISHER", "instance-b",
                 com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
-                2, "b".repeat(64), clock.instant()));
-        var observed = changes.deployment(reviewer, approved.id());
-        assertThat(observed.rolloutState()).isEqualTo("OBSERVED_CONSISTENT_PENDING_OPERATOR_CONFIRMATION");
+                2, approvedDigest, clock.instant(), "rollout-test", "epoch-b", clock.instant().minusSeconds(30)));
+        var oldApiView = changes.deployment(reviewer, approved.id());
+        assertThat(oldApiView.rolloutState()).isEqualTo("DEPLOYMENT_FAILED");
+        assertThat(oldApiView.consistentObservedGeneration()).isNull();
+        var installedRegistries = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService(
+                new ObjectMapper(), staged.toString(), "", "", 1, 1, 1);
+        var installedChanges = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService(
+                mongo, new TransactionTemplate(new MongoTransactionManager(factory)), webAuthn,
+                installedRegistries, new ObjectMapper(), clock,
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustFleetConsistency.membership(
+                        "rollout-test", "instance-a", "instance-b"));
+        var observed = installedChanges.deployment(reviewer, approved.id());
+        assertThat(observed.rolloutState()).isEqualTo("OBSERVED_CONSISTENT");
         assertThat(observed.consistentObservedGeneration()).isEqualTo(2L);
-        assertThat(observed.consistentObservedRegistrySha256()).isEqualTo("b".repeat(64));
+        assertThat(observed.consistentObservedRegistrySha256()).isEqualTo(approvedDigest);
         assertThat(observed.observationSetTruncated()).isFalse();
         assertThat(mongo.count(new Query(),
                 com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeAuditDocument.class))
-                .isEqualTo(2);
+                .isEqualTo(5);
         assertThat(mongo.count(new Query(),
                 com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeDocument.class))
-                .isEqualTo(1);
+                .isEqualTo(3);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(requested.id())),
+                new Update().set("intent.candidateRegistrySha256", "c".repeat(64)),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeDocument.class);
+        assertThatThrownBy(() -> reopenedChanges.verifyHistoricalChange(auditReader, requested.id()))
+                .isInstanceOf(SecurityException.class);
+
+        var nextRegistries = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService(
+                new ObjectMapper(), staged.toString(), "", "", 1, 1, 1);
+        var nextChanges = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService(
+                mongo, new TransactionTemplate(new MongoTransactionManager(factory)), webAuthn,
+                nextRegistries, new ObjectMapper(), clock);
+        var secondReviewer = actor("trust-reviewer-two", Set.of(ModelPolicyAuthority.CREDENTIAL_ENROLL,
+                ModelPolicyAuthority.TRUST_APPROVE, ModelPolicyAuthority.PRODUCTION));
+        Authenticator secondReviewerKey = register(secondReviewer);
+        var revokeExisting = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Intent(
+                intent.registry(),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Action.REVOKE,
+                existing.id(), null, null, null, List.of("POLICY_APPROVER"),
+                ModelGovernanceEnvironment.TEST, ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
+                3, null, "case-trust-race-1");
+        var revokeNew = new com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Intent(
+                intent.registry(),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Action.REVOKE,
+                target.id(), null, null, null, List.of("POLICY_APPROVER"),
+                ModelGovernanceEnvironment.PRODUCTION, ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
+                3, null, "case-trust-race-2");
+        var firstRaceChallenge = nextChanges.startRequest(requester, "trust-race-request-1", revokeExisting);
+        var firstRace = nextChanges.finishRequest(requester, "trust-race-request-1", revokeExisting,
+                firstRaceChallenge.challengeId(), requesterKey.assertion(firstRaceChallenge.challengeId(),
+                        ORIGIN, "localhost", true, 4));
+        var secondRaceChallenge = nextChanges.startRequest(requester, "trust-race-request-2", revokeNew);
+        var secondRace = nextChanges.finishRequest(requester, "trust-race-request-2", revokeNew,
+                secondRaceChallenge.challengeId(), requesterKey.assertion(secondRaceChallenge.challengeId(),
+                        ORIGIN, "localhost", true, 5));
+        var firstReview = nextChanges.startReview(reviewer, firstRace.id(), "trust-race-review-1",
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.APPROVE);
+        var secondReview = nextChanges.startReview(secondReviewer, secondRace.id(), "trust-race-review-2",
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.APPROVE);
+        String firstAssertion = reviewerKey.assertion(firstReview.challengeId(), ORIGIN, "localhost", true, 3);
+        String secondAssertion = secondReviewerKey.assertion(secondReview.challengeId(),
+                ORIGIN, "localhost", true, 1);
+        CountDownLatch raceStart = new CountDownLatch(1);
+        var raceWorkers = Executors.newFixedThreadPool(2);
+        try {
+            var one = raceWorkers.submit(() -> {
+                raceStart.await();
+                try {
+                    nextChanges.finishReview(reviewer, firstRace.id(),
+                            com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.APPROVE,
+                            firstReview.challengeId(), firstAssertion);
+                    return true;
+                } catch (RuntimeException conflict) { return false; }
+            });
+            var two = raceWorkers.submit(() -> {
+                raceStart.await();
+                try {
+                    nextChanges.finishReview(secondReviewer, secondRace.id(),
+                            com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService.Decision.APPROVE,
+                            secondReview.challengeId(), secondAssertion);
+                    return true;
+                } catch (RuntimeException conflict) { return false; }
+            });
+            raceStart.countDown();
+            assertThat((one.get() ? 1 : 0) + (two.get() ? 1 : 0)).isEqualTo(1);
+        } finally {
+            raceWorkers.shutdownNow();
+        }
+        assertThat(mongo.count(new Query(),
+                com.frauddetection.alert.governance.modelpromotion.PolicyTrustGenerationClaimDocument.class))
+                .isEqualTo(2);
     }
 
     @Test
@@ -298,7 +651,8 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
                 secondKey.registration(secondRequest.getChallenge().getBase64Url()), token);
         var manager = new MongoTransactionManager(factory);
         var store = new MongoPolicyGovernanceStore(mongo, new TransactionTemplate(manager), clock);
-        var reopenedGrants = new PolicyCredentialEnrollmentGrantService(mongo, manager, store);
+        var reopenedGrants = new PolicyCredentialEnrollmentGrantService(mongo, manager, store,
+                grantAuthorization);
         var reopened = new PolicyWebAuthnService(mongo, manager,
                 new PolicyWebAuthnCredentialRepository(mongo), governance, store, reopenedGrants,
                 new ObjectMapper(), new MockEnvironment(), "localhost", ORIGIN);
@@ -347,12 +701,162 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
                         "proposalId", "proposal-1", "modelArtifactSha256", "a".repeat(64),
                         "decision", "REJECTED"))))
                 .isInstanceOf(PolicyGovernanceConflictException.class);
+        for (String invalid : List.of(
+                key.assertionWithChallenge("wrong-challenge", ORIGIN, "localhost", true, 1),
+                key.assertionWithChallenge(challenge, "https://wrong.example", "localhost", true, 1),
+                key.assertionWithChallenge(challenge, ORIGIN, "wrong.example", true, 1),
+                key.assertionWithChallenge(challenge, ORIGIN, "localhost", false, 1))) {
+            assertThatThrownBy(() -> transaction.execute(ignored -> webAuthn.acceptBoundAssertion(
+                    author(), "model-promotion-review", options.challengeId(), invalid, contract)))
+                    .isInstanceOf(RuntimeException.class);
+        }
+        assertThat(mongo.findById(options.challengeId(), GovernanceWebAuthnBoundChallenge.class).used()).isFalse();
         var proof = transaction.execute(ignored -> webAuthn.acceptBoundAssertion(author(),
                 "model-promotion-review", options.challengeId(), assertion, contract));
         assertThat(proof.credentialId()).isEqualTo(key.credentialId);
+        var retained = mongo.findById(options.challengeId(), GovernanceBoundWebAuthnProof.class);
+        var historical = new GovernanceBoundWebAuthnProofVerifier(new ObjectMapper());
+        historical.verifyHistorical(retained, contract);
+        for (var field : Map.of("rpId", "wrong.example", "origin", "https://wrong.example",
+                "publicKeyCose", Base64.getUrlEncoder().withoutPadding()
+                        .encodeToString("wrong-key".getBytes(StandardCharsets.UTF_8)),
+                "requestJson", "{}", "contractJson", "{}").entrySet()) {
+            mongo.updateFirst(Query.query(Criteria.where("_id").is(retained.id())),
+                    new Update().set(field.getKey(), field.getValue()), GovernanceBoundWebAuthnProof.class);
+            assertThatThrownBy(() -> historical.verifyHistorical(mongo.findById(retained.id(),
+                    GovernanceBoundWebAuthnProof.class), contract)).isInstanceOf(SecurityException.class);
+            mongo.save(retained);
+        }
+        String tamperedResponse = assertion.replace("clientDataJSON", "authenticatorData");
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(retained.id())),
+                new Update().set("assertionResponseBase64", Base64.getEncoder().encodeToString(
+                        tamperedResponse.getBytes(StandardCharsets.UTF_8)))
+                        .set("assertionSha256", GovernanceCanonicalJson.sha256(
+                                tamperedResponse.getBytes(StandardCharsets.UTF_8))),
+                GovernanceBoundWebAuthnProof.class);
+        assertThatThrownBy(() -> historical.verifyHistorical(mongo.findById(retained.id(),
+                GovernanceBoundWebAuthnProof.class), contract)).isInstanceOf(SecurityException.class);
+        mongo.save(retained);
+        for (String responseField : List.of("clientDataJSON", "authenticatorData")) {
+            var altered = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(assertion);
+            var response = (com.fasterxml.jackson.databind.node.ObjectNode) altered.get("response");
+            byte[] bytes = Base64.getUrlDecoder().decode(response.get(responseField).asText());
+            bytes[bytes.length - 1] ^= 1;
+            response.put(responseField, Base64.getUrlEncoder().withoutPadding().encodeToString(bytes));
+            String changed = json.writeValueAsString(altered);
+            mongo.updateFirst(Query.query(Criteria.where("_id").is(retained.id())),
+                    new Update().set("assertionResponseBase64", Base64.getEncoder().encodeToString(
+                            changed.getBytes(StandardCharsets.UTF_8)))
+                            .set("assertionSha256", GovernanceCanonicalJson.sha256(
+                                    changed.getBytes(StandardCharsets.UTF_8))),
+                    GovernanceBoundWebAuthnProof.class);
+            assertThatThrownBy(() -> historical.verifyHistorical(mongo.findById(retained.id(),
+                    GovernanceBoundWebAuthnProof.class), contract)).isInstanceOf(SecurityException.class);
+            mongo.save(retained);
+        }
+        assertThatThrownBy(() -> historical.verifyHistorical(retained,
+                Map.of("domain", "com.frauddetection.model-promotion.review.v1",
+                        "proposalId", "proposal-1", "modelArtifactSha256", "b".repeat(64),
+                        "decision", "APPROVED"))).isInstanceOf(SecurityException.class);
+        assertThatThrownBy(() -> historical.verifyHistorical(retained,
+                Map.of("domain", "com.frauddetection.policy-trust.change-review.v1",
+                        "proposalId", "proposal-1", "modelArtifactSha256", "a".repeat(64),
+                        "decision", "APPROVED"))).isInstanceOf(SecurityException.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(key.credentialId)),
+                new Update().set("signatureCount", 9).set("revoked", true).set("status", "LOST")
+                        .set("publicKeyCose", "rotated-key-no-longer-matches"),
+                PolicyWebAuthnCredential.class);
+        historical.verifyHistorical(mongo.findById(options.challengeId(),
+                GovernanceBoundWebAuthnProof.class), contract);
         assertThatThrownBy(() -> transaction.execute(ignored -> webAuthn.acceptBoundAssertion(author(),
                 "model-promotion-review", options.challengeId(), assertion, contract)))
                 .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void failedGovernanceAuditRollsBackBoundProofChallengeAndCounter() throws Exception {
+        Authenticator key = register(author());
+        Map<String, Object> contract = Map.of("domain", "com.frauddetection.model-promotion.review.v1",
+                "proposalId", "proposal-rollback", "decision", "REJECTED");
+        var options = webAuthn.startBoundAssertion(author(), "model-promotion-review", "rollback-1", contract);
+        String assertion = key.assertion(options.challengeId(), ORIGIN, "localhost", true, 1);
+        var transaction = new TransactionTemplate(new MongoTransactionManager(factory));
+        assertThatThrownBy(() -> transaction.execute(ignored -> {
+            webAuthn.acceptBoundAssertion(author(), "model-promotion-review", options.challengeId(),
+                    assertion, contract);
+            throw new IllegalStateException("injected audit write failure");
+        })).isInstanceOf(IllegalStateException.class);
+        assertThat(mongo.findById(options.challengeId(), GovernanceBoundWebAuthnProof.class)).isNull();
+        assertThat(mongo.findById(options.challengeId(), GovernanceWebAuthnBoundChallenge.class).used()).isFalse();
+        assertThat(mongo.findById(key.credentialId, PolicyWebAuthnCredential.class).signatureCount()).isZero();
+        transaction.execute(ignored -> webAuthn.acceptBoundAssertion(author(),
+                "model-promotion-review", options.challengeId(), assertion, contract));
+        assertThat(mongo.findById(options.challengeId(), GovernanceBoundWebAuthnProof.class)).isNotNull();
+    }
+
+    @Test
+    void expiredOrCompromisedBoundCredentialCannotCommitNewProof() throws Exception {
+        Authenticator key = register(author());
+        Map<String, Object> contract = Map.of("domain", "com.frauddetection.model-promotion.review.v1",
+                "proposalId", "proposal-expiry", "decision", "APPROVED");
+        var transaction = new TransactionTemplate(new MongoTransactionManager(factory));
+        var expired = webAuthn.startBoundAssertion(author(), "model-promotion-review", "expired-bound", contract);
+        String expiredAssertion = key.assertion(expired.challengeId(), ORIGIN, "localhost", true, 1);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(expired.challengeId())),
+                new Update().set("expiresAt", clock.instant().minusSeconds(1)),
+                GovernanceWebAuthnBoundChallenge.class);
+        assertThatThrownBy(() -> transaction.execute(ignored -> webAuthn.acceptBoundAssertion(author(),
+                "model-promotion-review", expired.challengeId(), expiredAssertion, contract)))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThat(mongo.findById(expired.challengeId(), GovernanceBoundWebAuthnProof.class)).isNull();
+
+        var compromised = webAuthn.startBoundAssertion(author(), "model-promotion-review",
+                "compromised-bound", contract);
+        String compromisedAssertion = key.assertion(compromised.challengeId(), ORIGIN, "localhost", true, 1);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(key.credentialId)),
+                new Update().set("revoked", true).set("status", "COMPROMISED"),
+                PolicyWebAuthnCredential.class);
+        assertThatThrownBy(() -> transaction.execute(ignored -> webAuthn.acceptBoundAssertion(author(),
+                "model-promotion-review", compromised.challengeId(), compromisedAssertion, contract)))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(mongo.findById(compromised.challengeId(), GovernanceBoundWebAuthnProof.class)).isNull();
+    }
+
+    @Test
+    void concurrentBoundAssertionsCommitOnlyOneProof() throws Exception {
+        Authenticator key = register(author());
+        Map<String, Object> contract = Map.of("domain", "com.frauddetection.model-promotion.review.v1",
+                "proposalId", "proposal-race", "decision", "APPROVED");
+        var options = webAuthn.startBoundAssertion(author(), "model-promotion-review", "review-race", contract);
+        String assertion = key.assertion(options.challengeId(), ORIGIN, "localhost", true, 1);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var attempts = java.util.stream.IntStream.range(0, 2).mapToObj(index -> executor.submit(() -> {
+                ready.countDown();
+                go.await();
+                try {
+                    new TransactionTemplate(new MongoTransactionManager(factory)).execute(ignored ->
+                            webAuthn.acceptBoundAssertion(author(), "model-promotion-review",
+                                    options.challengeId(), assertion, contract));
+                    return true;
+                } catch (RuntimeException rejected) {
+                    return false;
+                }
+            })).toList();
+            ready.await();
+            go.countDown();
+            assertThat(attempts.stream().filter(attempt -> {
+                try { return attempt.get(); }
+                catch (Exception failure) { throw new AssertionError(failure); }
+            }).count()).isEqualTo(1);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(mongo.count(new Query(), GovernanceBoundWebAuthnProof.class)).isEqualTo(1);
+        assertThat(mongo.findById(options.challengeId(), GovernanceWebAuthnBoundChallenge.class).used()).isTrue();
+        assertThat(mongo.findById(key.credentialId, PolicyWebAuthnCredential.class).signatureCount()).isEqualTo(1);
     }
 
     private Object finishRegistrationInRace(PolicyWebAuthnService service, CountDownLatch ready,
@@ -655,7 +1159,26 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
         grants.request(credentialAdmin("security-operator-a"),
                 new PolicyCredentialEnrollmentGrantService.GrantRequest(id, target.issuer(), target.subject(),
                         purpose, "case-" + id));
-        return grants.approve(credentialAdmin("security-operator-b"), id).token();
+        return fixtureApproveAndClaim(target, id);
+    }
+
+    private String fixtureApproveAndClaim(PolicyGovernanceActor target, String id) {
+        byte[] secret = new byte[32];
+        new java.security.SecureRandom().nextBytes(secret);
+        String token = id + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
+        String digest;
+        try {
+            digest = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception impossible) { throw new IllegalStateException(impossible); }
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(id)),
+                new Update().set("approvedBy", credentialAdmin("security-operator-b").id())
+                        .set("approvedAt", clock.instant())
+                        .set("claimedAt", clock.instant())
+                        .set("secretSha256", digest)
+                        .set("expiresAt", clock.instant().plusSeconds(600)),
+                PolicyCredentialEnrollmentGrantDocument.class);
+        return token;
     }
 
     private PolicyGovernanceActor credentialAdmin(String subject) {

@@ -1,6 +1,8 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
 import jakarta.validation.Valid;
+import jakarta.validation.Validator;
+import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.http.HttpStatus;
@@ -15,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Arrays;
@@ -32,10 +36,15 @@ public class PolicyGovernanceController {
     private static final String ID = "^[A-Za-z0-9-]{1,128}$";
     private final PolicyGovernanceService service;
     private final PolicyWebAuthnService webAuthn;
+    private final ObjectMapper mapper;
+    private final Validator beanValidator;
 
-    public PolicyGovernanceController(PolicyGovernanceService service, PolicyWebAuthnService webAuthn) {
+    public PolicyGovernanceController(PolicyGovernanceService service, PolicyWebAuthnService webAuthn,
+            ObjectMapper mapper, Validator beanValidator) {
         this.service = service;
         this.webAuthn = webAuthn;
+        this.mapper = mapper;
+        this.beanValidator = beanValidator;
     }
 
     @GetMapping
@@ -110,7 +119,8 @@ public class PolicyGovernanceController {
 
     @PostMapping("/drafts")
     public ResponseEntity<PolicyProposalDocument> create(Authentication authentication,
-            @Valid @RequestBody DraftCommand request) {
+            @RequestBody JsonNode body) {
+        DraftCommand request = exactDraftCommand(body, DraftCommand.class);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(service.create(PolicyGovernanceActor.from(authentication), request));
     }
@@ -118,8 +128,21 @@ public class PolicyGovernanceController {
     @PutMapping("/drafts/{id}")
     public PolicyProposalDocument edit(Authentication authentication,
             @PathVariable @NotBlank @Pattern(regexp = ID) String id,
-            @Valid @RequestBody UpdateDraftCommand request) {
+            @RequestBody JsonNode body) {
+        UpdateDraftCommand request = exactDraftCommand(body, UpdateDraftCommand.class);
         return service.edit(PolicyGovernanceActor.from(authentication), id, request);
+    }
+
+    private <T> T exactDraftCommand(JsonNode body, Class<T> type) {
+        ExactPolicyDecimalContract.requireDraftTransport(body);
+        try {
+            T command = mapper.treeToValue(body, type);
+            var violations = beanValidator.validate(command);
+            if (!violations.isEmpty()) throw new ConstraintViolationException(violations);
+            return command;
+        } catch (tools.jackson.core.JacksonException invalid) {
+            throw new IllegalArgumentException("Invalid exact policy draft request", invalid);
+        }
     }
 
     @PostMapping("/{id}/submit")

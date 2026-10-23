@@ -22,7 +22,16 @@ public record PolicyCredentialEnrollmentGrantDocument(
         Instant expiresAt,
         Instant consumedAt,
         String credentialId,
-        String registrationResponseSha256
+        String registrationResponseSha256,
+        Instant rejectedAt,
+        Instant claimedAt,
+        String reviewOperationId,
+        String reviewProofId,
+        String reviewCredentialId,
+        String reviewAssertionSha256,
+        String bootstrapAuthorizationId,
+        Instant requestExpiresAt,
+        Instant plannedGrantExpiresAt
 ) {
     public static final String COLLECTION = "model_policy_credential_enrollment_grants";
 

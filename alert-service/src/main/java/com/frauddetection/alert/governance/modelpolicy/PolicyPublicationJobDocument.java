@@ -26,6 +26,8 @@ public record PolicyPublicationJobDocument(
         String leaseOwner,
         Instant leaseUntil,
         int attempts,
+        long publicationFence,
+        int reconciliationCount,
         String publishedPolicySha256,
         Instant publishedAt,
         String failureCode,

@@ -245,7 +245,7 @@ public class MongoPolicyGovernanceStore {
                         "webauthn:" + submission.id(), next.submittedAt(),
                         next.reviewingActorId(), next.approvalEvidenceReference(), next.decidedAt(), actor,
                         next.updatedAt(), PolicyPublicationJobDocument.State.PENDING,
-                        null, null, 0, null, null, null, 0, null));
+                        null, null, 0, 0, 0, null, null, null, 0, null));
             }
             return committed;
         });

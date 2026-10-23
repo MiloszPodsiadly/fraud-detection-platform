@@ -99,6 +99,54 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void exactDecimalSurvivesMongoReadbackAndReviewedDigestMatchesPersistedDraft() {
+        DraftInput base = input("policy-exact-decimal", false);
+        BigDecimal exact = new BigDecimal("0.12345678901234567890");
+        List<ModelPromotionPolicy.CriterionRule> rules = base.criteria().stream().map(rule ->
+                rule.criterion() == ModelPromotionCriterion.FALSE_POSITIVE_RATE
+                        ? new ModelPromotionPolicy.CriterionRule(rule.criterion(), rule.applicability(),
+                        java.util.Map.of("maximumRate", exact), rule.maximumEvidenceAgeSeconds(),
+                        rule.requiredVerificationLevel(), rule.evidenceSource(), rule.metricSemantics(),
+                        rule.populationDefinition(), rule.denominatorDefinition(), rule.applicabilityJustification())
+                        : rule).toList();
+        DraftInput input = new DraftInput(base.policyId(), base.revision(), base.governanceScope(),
+                base.intendedUse(), base.intendedApproverActorId(), base.approvalReference(),
+                base.effectiveFromInclusive(), base.effectiveToExclusive(), rules);
+        PolicyProposalDocument created = service.create(author(), new DraftCommand("exact-create", input));
+        PolicyProposalDocument persisted = store.find(created.id());
+        assertThat(persisted.exactThresholds().get("FALSE_POSITIVE_RATE").get("maximumRate"))
+                .isEqualTo("0.12345678901234567890");
+        assertThat(persisted.draftSha256()).isEqualTo(persisted.draft().canonicalSha256(mapper));
+        assertThat(mapper.writeValueAsString(persisted)).contains("\"exactThresholds\"")
+                .contains("\"maximumRate\":\"0.12345678901234567890\"");
+        PolicyProposalDocument submitted = submit(author(), created.id(),
+                new TransitionCommand("exact-submit", created.version()));
+        assertThat(submitted.draftSha256()).isEqualTo(persisted.draftSha256());
+        PolicyProposalDocument approved = review(approver(), created.id(),
+                new ReviewCommand("exact-review", submitted.version(), ReviewDecision.APPROVE,
+                        "evidence:exact-review"));
+        assertThat(approved.draftSha256()).isEqualTo(store.find(approved.id()).draft().canonicalSha256(mapper));
+    }
+
+    @Test
+    void rateBoundariesAndNegativeCountFollowAuthoritativeCriterionRules() {
+        for (String value : List.of("0", "1")) {
+            assertThat(service.create(author(), new DraftCommand("rate-" + value,
+                    inputWithThreshold("policy-rate-" + value,
+                            ModelPromotionCriterion.FALSE_POSITIVE_RATE, "maximumRate",
+                            new BigDecimal(value)))).status()).isEqualTo(PolicyGovernanceState.DRAFT);
+        }
+        assertThatThrownBy(() -> service.create(author(), new DraftCommand("rate-above-one",
+                inputWithThreshold("policy-above-one", ModelPromotionCriterion.FALSE_POSITIVE_RATE,
+                        "maximumRate", new BigDecimal("1.0001")))))
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> service.create(author(), new DraftCommand("negative-count",
+                inputWithThreshold("policy-negative-count", ModelPromotionCriterion.STATISTICALLY_MEANINGFUL_SAMPLE,
+                        "minimumPositiveLabels", new BigDecimal("-1")))))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void rejectionIsFinalAndCannotBecomePublicationRequest() {
         PolicyProposalDocument submitted = submitted("reject-1");
         PolicyProposalDocument rejected = review(approver(), submitted.id(),
@@ -334,6 +382,23 @@ class PolicyGovernanceMongoIntegrationTest extends AbstractIntegrationTest {
                 production ? ModelGovernanceEnvironment.PRODUCTION : ModelGovernanceEnvironment.TEST),
                 ModelPromotionIntendedUse.FRAUD_RISK_SCORING, APPROVER_ID, "review-1",
                 "2026-12-01T00:00:00Z", "2027-01-01T00:00:00Z", rules);
+    }
+
+    private DraftInput inputWithThreshold(String policyId, ModelPromotionCriterion criterion,
+            String key, BigDecimal value) {
+        DraftInput base = input(policyId, false);
+        List<ModelPromotionPolicy.CriterionRule> rules = base.criteria().stream().map(rule -> {
+            if (rule.criterion() != criterion) return rule;
+            var thresholds = new java.util.HashMap<>(rule.thresholds());
+            thresholds.put(key, value);
+            return new ModelPromotionPolicy.CriterionRule(rule.criterion(), rule.applicability(),
+                    thresholds, rule.maximumEvidenceAgeSeconds(), rule.requiredVerificationLevel(),
+                    rule.evidenceSource(), rule.metricSemantics(), rule.populationDefinition(),
+                    rule.denominatorDefinition(), rule.applicabilityJustification());
+        }).toList();
+        return new DraftInput(base.policyId(), base.revision(), base.governanceScope(),
+                base.intendedUse(), base.intendedApproverActorId(), base.approvalReference(),
+                base.effectiveFromInclusive(), base.effectiveToExclusive(), rules);
     }
 
     private static final class MutableClock extends Clock {
