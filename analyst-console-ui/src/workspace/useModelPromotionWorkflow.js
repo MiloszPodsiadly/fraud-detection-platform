@@ -4,6 +4,30 @@ import { createIdempotencyKey } from "../utils/idempotencyKey.js";
 import { confirmPolicyAssertion } from "../governance/policyWebAuthn.js";
 import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
+const SIGNED_PENDING_KEY = "model-promotion-pending-signed-review";
+function rememberSignedReview(payload, proposalId, selection) {
+  try { sessionStorage.setItem(SIGNED_PENDING_KEY, JSON.stringify({
+    payload: { operationId: payload.operationId, approvalId: payload.approvalId,
+      outcome: payload.outcome, rationaleSha256: payload.rationaleSha256 },
+    proposalId, mutationSelection: selection
+  })); } catch { /* The open view still retains the operation. */ }
+}
+function restoredSignedReview(client) {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(SIGNED_PENDING_KEY) || "null");
+    if (!value?.payload?.operationId || !value.proposalId || !value.mutationSelection
+        || !["APPROVED", "REJECTED"].includes(value.payload.outcome)) return null;
+    return { ...value, checkOnly: true,
+      recovery: (payload, id) => verifySignedReviewReceipt(client, payload, id) };
+  } catch { return null; }
+}
+function forgetSignedReview(operationId) {
+  try {
+    if (JSON.parse(sessionStorage.getItem(SIGNED_PENDING_KEY) || "null")?.payload?.operationId === operationId)
+      sessionStorage.removeItem(SIGNED_PENDING_KEY);
+  } catch { /* Browser storage is optional. */ }
+}
+
 export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
   const runtime = useOptionalWorkspaceRuntime();
   const client = apiClient !== undefined ? apiClient : runtime?.apiClient;
@@ -22,18 +46,31 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
   const mutationSequenceRef = useRef(0);
   const retryableMutationRef = useRef(null);
 
-  const clear = useCallback(() => {
+  const clear = useCallback((discardPending = false) => {
     controllerRef.current?.abort();
     controllerRef.current = null;
     sequenceRef.current += 1;
     mutationSequenceRef.current += 1;
-    retryableMutationRef.current = null;
+    const unresolved = !discardPending && retryableMutationRef.current?.checkOnly;
+    if (!unresolved) retryableMutationRef.current = null;
     selectionRef.current = null;
-    setState(null); setAssessment(null); setStateError(null); setAssessmentError(null); setMutationError(null); setHasRetryableMutation(false); setIsLoading(false); setIsMutating(mutationInFlightRef.current);
+    setState(null); setAssessment(null); setStateError(null); setAssessmentError(null);
+    if (!unresolved) setMutationError(null);
+    setHasRetryableMutation(Boolean(unresolved)); setIsLoading(false); setIsMutating(mutationInFlightRef.current);
   }, []);
 
   const load = useCallback(async (selection = selectionRef.current, { preserveMutationError = false } = {}) => {
     if (!enabled || !client || !selection) return null;
+    if (!retryableMutationRef.current) {
+      const restored = restoredSignedReview(client);
+      if (restored) {
+        retryableMutationRef.current = restored;
+        setHasRetryableMutation(true);
+        const uncertain = new Error(`Outcome uncertain for operation ${restored.payload.operationId}. Check its durable receipt.`);
+        uncertain.code = "UNCERTAIN_OUTCOME";
+        setMutationError(uncertain);
+      }
+    }
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -41,7 +78,7 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
     sequenceRef.current = sequence;
     selectionRef.current = selection;
     setIsLoading(true); setState(null); setAssessment(null); setStateError(null); setAssessmentError(null);
-    if (!preserveMutationError) {
+    if (!preserveMutationError && !retryableMutationRef.current?.checkOnly) {
       retryableMutationRef.current = null;
       setMutationError(null);
       setHasRetryableMutation(false);
@@ -62,8 +99,10 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
     return null;
   }, [client, enabled]);
 
-  const mutate = useCallback(async (method, payload, proposalId, mutationSelection = selectionRef.current) => {
-    if (!client || !mutationSelection || mutationInFlightRef.current) return { ok: false };
+  const mutate = useCallback(async (method, payload, proposalId, mutationSelection = selectionRef.current,
+    recovery = null) => {
+    if (!client || !mutationSelection || mutationInFlightRef.current
+        || retryableMutationRef.current?.checkOnly) return { ok: false };
     const mutationSequence = mutationSequenceRef.current;
     mutationInFlightRef.current = true;
     setIsMutating(true); setMutationError(null);
@@ -78,6 +117,27 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
       }
       return { ok: true };
     } catch (error) {
+      if (recovery && isRetryableMutationError(error)) {
+        try {
+          await recovery(payload, proposalId);
+          forgetSignedReview(payload.operationId);
+          if (mutationSequence === mutationSequenceRef.current) {
+            if (sameSelection(mutationSelection, selectionRef.current)) await load(selectionRef.current);
+            setMutationError(null);
+          }
+          return { ok: true, recovered: true };
+        } catch (lookupFailure) {
+          const uncertain = new Error(`Outcome uncertain for operation ${payload.operationId}. Check its durable receipt; the passkey assertion was discarded.`);
+          uncertain.code = "UNCERTAIN_OUTCOME";
+          if (mutationSequence === mutationSequenceRef.current) {
+            retryableMutationRef.current = { payload, proposalId, mutationSelection, recovery, checkOnly: true };
+            rememberSignedReview(payload, proposalId, mutationSelection);
+            setHasRetryableMutation(true);
+            setMutationError(lookupFailure?.code === "RECEIPT_CONFLICT" ? lookupFailure : uncertain);
+          }
+          return { ok: false, error: lookupFailure?.code === "RECEIPT_CONFLICT" ? lookupFailure : uncertain };
+        }
+      }
       if (mutationSequence === mutationSequenceRef.current) {
         setMutationError(error);
         if (isRetryableMutationError(error)) {
@@ -95,11 +155,34 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
     }
   }, [client, load]);
 
-  const retryLastMutation = useCallback(() => {
+  const retryLastMutation = useCallback(async () => {
     const retry = retryableMutationRef.current;
-    if (!retry) return Promise.resolve({ ok: false });
+    if (!retry) return { ok: false };
+    if (retry.checkOnly) {
+      if (mutationInFlightRef.current || !sameSelection(retry.mutationSelection, selectionRef.current))
+        return { ok: false };
+      mutationInFlightRef.current = true;
+      setIsMutating(true);
+      try {
+        await retry.recovery(retry.payload, retry.proposalId);
+        forgetSignedReview(retry.payload.operationId);
+        retryableMutationRef.current = null;
+        setHasRetryableMutation(false);
+        setMutationError(null);
+        await load(retry.mutationSelection);
+        return { ok: true, recovered: true };
+      } catch (error) {
+        const uncertain = new Error(`Outcome remains uncertain for operation ${retry.payload.operationId}.`);
+        uncertain.code = "UNCERTAIN_OUTCOME";
+        setMutationError(error?.code === "RECEIPT_CONFLICT" ? error : uncertain);
+        return { ok: false, error };
+      } finally {
+        mutationInFlightRef.current = false;
+        setIsMutating(false);
+      }
+    }
     return mutate(retry.method, retry.payload, retry.proposalId, retry.mutationSelection);
-  }, [mutate]);
+  }, [mutate, load]);
 
   const register = useCallback(() => mutate(
     (payload) => client.registerModelPromotionCandidate(payload),
@@ -108,20 +191,19 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
   const propose = useCallback((requestedTargetState, rationale) => mutationCommand("propose", requestedTargetState, rationale), [state, mutate, client]);
   const retire = useCallback((rationale) => mutationCommand("retire", "RETIRED", rationale), [state, mutate, client]);
   const review = useCallback(async (proposalId, outcome, rationale) => {
-    let signedCommand;
+    const production = selectionRef.current?.environment === "PRODUCTION";
     return mutate(
     async (payload, id) => {
-      if (selectionRef.current?.environment !== "PRODUCTION") {
+      if (!production) {
         return client.reviewModelPromotionProposal(id, payload);
       }
-      if (!signedCommand) {
-        const challenge = await client.startSignedModelPromotionReview(id, payload);
-        const responseJson = await confirmPolicyAssertion(challenge.optionsJson);
-        signedCommand = { intent: payload, challengeId: challenge.challengeId, responseJson };
-      }
-      return client.finishSignedModelPromotionReview(id, signedCommand);
+      const challenge = await client.startSignedModelPromotionReview(id, payload);
+      const responseJson = await confirmPolicyAssertion(challenge.optionsJson);
+      return client.finishSignedModelPromotionReview(id,
+        { intent: payload, challengeId: challenge.challengeId, responseJson });
     },
-    await reviewPayload(outcome, rationale), proposalId
+    await reviewPayload(outcome, rationale), proposalId, selectionRef.current,
+    production ? (payload, id) => verifySignedReviewReceipt(client, payload, id) : null
     );
   }, [client, mutate]);
 
@@ -141,7 +223,7 @@ export function useModelPromotionWorkflow({ enabled = true, apiClient } = {}) {
     return mutate((command) => client.proposeModelRetirement(command), payload);
   }
 
-  useEffect(() => { if (!enabled || !client) clear(); }, [clear, client, enabled]);
+  useEffect(() => { if (!enabled || !client) clear(true); }, [clear, client, enabled]);
   useEffect(() => () => controllerRef.current?.abort(), []);
   return { state, assessment, stateError, assessmentError, mutationError, hasRetryableMutation, isLoading, isMutating, load, clear, register, propose, retire, review, retryLastMutation };
 }
@@ -167,4 +249,16 @@ function sameSelection(left, right) {
 function isRetryableMutationError(error) {
   if (isAbortError(error)) return false;
   return error?.status == null || error.status >= 500;
+}
+
+async function verifySignedReviewReceipt(client, payload, proposalId) {
+  const receipt = await client.getSignedModelPromotionReviewOperation(proposalId, payload.operationId);
+  if (receipt.proposalId !== proposalId || receipt.operationId !== payload.operationId
+      || receipt.approvalId !== payload.approvalId || receipt.outcome !== payload.outcome
+      || receipt.rationaleSha256 !== payload.rationaleSha256) {
+    const conflict = new Error("Durable review receipt conflicts with the signed intent.");
+    conflict.code = "RECEIPT_CONFLICT";
+    throw conflict;
+  }
+  return receipt;
 }

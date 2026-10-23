@@ -1,9 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useModelPromotionWorkflow } from "./useModelPromotionWorkflow.js";
 import { confirmPolicyAssertion } from "../governance/policyWebAuthn.js";
 
 vi.mock("../governance/policyWebAuthn.js", () => ({ confirmPolicyAssertion: vi.fn() }));
+beforeEach(() => window.sessionStorage.clear());
 
 describe("useModelPromotionWorkflow", () => {
   it("keeps a newer selection when older state and assessment responses complete later", async () => {
@@ -76,26 +77,84 @@ describe("useModelPromotionWorkflow", () => {
     expect(result.current.hasRetryableMutation).toBe(false);
   });
 
-  it("retries a production review with the same WebAuthn assertion after an uncertain response", async () => {
+  it("resolves a lost production review response from the durable receipt without repeating WebAuthn", async () => {
     vi.mocked(confirmPolicyAssertion).mockResolvedValue("signed-response");
     const apiClient = {
       getModelPromotionState: vi.fn().mockResolvedValue(state("v1")),
       getModelPromotionAssessment: vi.fn().mockResolvedValue(assessment("v1")),
       startSignedModelPromotionReview: vi.fn().mockResolvedValue({ challengeId: "model-promotion-review:review-1", optionsJson: "{}" }),
-      finishSignedModelPromotionReview: vi.fn().mockRejectedValueOnce({ status: 503 })
-        .mockResolvedValueOnce({ reviewStatus: "APPROVED" }),
+      finishSignedModelPromotionReview: vi.fn().mockRejectedValue({ status: 503 }),
+      getSignedModelPromotionReviewOperation: vi.fn().mockImplementation((id, operationId) =>
+        Promise.resolve({ proposalId: id, operationId, approvalId: command.approvalId,
+          outcome: command.outcome, rationaleSha256: command.rationaleSha256 })),
       reviewModelPromotionProposal: vi.fn()
+    };
+    let command;
+    const { result } = renderHook(() => useModelPromotionWorkflow({ enabled: true, apiClient }));
+    await act(async () => { await result.current.load({ ...selection("v1"), environment: "PRODUCTION" }); });
+    apiClient.startSignedModelPromotionReview.mockImplementation((id, payload) => {
+      command = payload;
+      return Promise.resolve({ challengeId: "model-promotion-review:review-1", optionsJson: "{}" });
+    });
+    await act(async () => { await result.current.review("proposal-1", "APPROVED", "Reviewed exact evidence"); });
+    expect(result.current.hasRetryableMutation).toBe(false);
+    expect(apiClient.startSignedModelPromotionReview).toHaveBeenCalledTimes(1);
+    expect(apiClient.finishSignedModelPromotionReview).toHaveBeenCalledTimes(1);
+    expect(apiClient.getSignedModelPromotionReviewOperation).toHaveBeenCalledWith(
+      "proposal-1", command.operationId);
+    expect(apiClient.reviewModelPromotionProposal).not.toHaveBeenCalled();
+  });
+
+  it("holds an offline signed review for read-only receipt checks without storing its assertion", async () => {
+    vi.mocked(confirmPolicyAssertion).mockResolvedValue("signed-response");
+    const apiClient = {
+      getModelPromotionState: vi.fn().mockResolvedValue(state("v1")),
+      getModelPromotionAssessment: vi.fn().mockResolvedValue(assessment("v1")),
+      startSignedModelPromotionReview: vi.fn().mockResolvedValue({ challengeId: "model-promotion-review:review-2", optionsJson: "{}" }),
+      finishSignedModelPromotionReview: vi.fn().mockRejectedValue(new Error("offline")),
+      getSignedModelPromotionReviewOperation: vi.fn().mockRejectedValue({ status: 404 })
     };
     const { result } = renderHook(() => useModelPromotionWorkflow({ enabled: true, apiClient }));
     await act(async () => { await result.current.load({ ...selection("v1"), environment: "PRODUCTION" }); });
     await act(async () => { await result.current.review("proposal-1", "APPROVED", "Reviewed exact evidence"); });
     expect(result.current.hasRetryableMutation).toBe(true);
+    expect(result.current.mutationError.message).toMatch(/Outcome uncertain/);
     await act(async () => { await result.current.retryLastMutation(); });
+    expect(apiClient.getSignedModelPromotionReviewOperation).toHaveBeenCalledTimes(2);
     expect(apiClient.startSignedModelPromotionReview).toHaveBeenCalledTimes(1);
-    expect(apiClient.finishSignedModelPromotionReview).toHaveBeenCalledTimes(2);
-    expect(apiClient.finishSignedModelPromotionReview.mock.calls[1][1])
-      .toEqual(apiClient.finishSignedModelPromotionReview.mock.calls[0][1]);
-    expect(apiClient.reviewModelPromotionProposal).not.toHaveBeenCalled();
+    expect(apiClient.finishSignedModelPromotionReview).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(window.localStorage)).not.toContain("signed-response");
+    expect(JSON.stringify(window.sessionStorage)).not.toContain("signed-response");
+    act(() => result.current.clear());
+    await act(async () => { await result.current.load({ ...selection("v2"), environment: "PRODUCTION" }); });
+    await act(async () => { await result.current.review("proposal-2", "APPROVED", "Different scope"); });
+    expect(apiClient.startSignedModelPromotionReview).toHaveBeenCalledTimes(1);
+    expect(result.current.hasRetryableMutation).toBe(true);
+    expect(window.sessionStorage.getItem("model-promotion-pending-signed-review"))
+      .toContain("proposal-1");
+    expect(window.sessionStorage.getItem("model-promotion-pending-signed-review"))
+      .not.toContain("signed-response");
+  });
+
+  it("restores only operation metadata after a remount and checks the original receipt", async () => {
+    const pending = { payload: { operationId: "review-op", approvalId: "approval-1",
+      outcome: "APPROVED", rationaleSha256: "a".repeat(64) }, proposalId: "proposal-1",
+    mutationSelection: { ...selection("v1"), environment: "PRODUCTION" } };
+    window.sessionStorage.setItem("model-promotion-pending-signed-review", JSON.stringify(pending));
+    const apiClient = {
+      getModelPromotionState: vi.fn().mockResolvedValue(state("v1")),
+      getModelPromotionAssessment: vi.fn().mockResolvedValue(assessment("v1")),
+      getSignedModelPromotionReviewOperation: vi.fn().mockResolvedValue({
+        proposalId: "proposal-1", ...pending.payload }),
+      startSignedModelPromotionReview: vi.fn(), finishSignedModelPromotionReview: vi.fn()
+    };
+    const { result } = renderHook(() => useModelPromotionWorkflow({ enabled: true, apiClient }));
+    await act(async () => { await result.current.load(pending.mutationSelection); });
+    expect(result.current.hasRetryableMutation).toBe(true);
+    await act(async () => { await result.current.retryLastMutation(); });
+    expect(apiClient.getSignedModelPromotionReviewOperation).toHaveBeenCalledWith("proposal-1", "review-op");
+    expect(apiClient.startSignedModelPromotionReview).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem("model-promotion-pending-signed-review")).toBeNull();
   });
 });
 

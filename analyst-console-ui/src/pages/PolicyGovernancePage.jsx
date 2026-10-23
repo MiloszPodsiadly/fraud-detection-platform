@@ -5,14 +5,57 @@ import { MODEL_POLICY_AUTHORITIES as POLICY, MODEL_POLICY_AUTHORITY_PREFIX } fro
 
 const PREFIX = MODEL_POLICY_AUTHORITY_PREFIX;
 const STATUS = ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "PUBLICATION_PENDING", "PUBLISHED"];
+const PENDING_KEY = "policy-governance-pending-operation";
 const createId = () => crypto.randomUUID();
-const editableDraft = (draft) => ({
+function rememberPending(pending) {
+  try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({
+    operationId: pending.operationId, actorId: pending.actorId,
+    kind: pending.kind || "policy", expected: pending.expected || null,
+    proposalId: pending.proposalId || null
+  })); } catch { /* In-memory recovery remains available. */ }
+}
+function storedPending(actorId) {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
+    if (value?.actorId !== actorId || !/^[A-Za-z0-9._:-]{1,128}$/.test(value.operationId)
+        || !["policy", "recovery"].includes(value.kind)) return null;
+    if (value.kind === "policy" && !STATUS.includes(value.expected?.status)) return null;
+    if (value.kind === "recovery" && typeof value.proposalId !== "string") return null;
+    return { ...value, requestFn: null };
+  } catch { return null; }
+}
+function forgetPending(operationId) {
+  try {
+    if (JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null")?.operationId === operationId)
+      sessionStorage.removeItem(PENDING_KEY);
+  } catch { /* Browser storage is optional. */ }
+}
+const receiptMatches = (receipt, expected) => receipt?.status === expected.status
+  && (!expected.id || receipt.id === expected.id)
+  && (!expected.policyId || receipt.draft?.policyId === expected.policyId);
+export const exactDraft = (proposal) => {
+  if (!proposal?.exactThresholds || !proposal?.draft?.criteria) return null;
+  const criteria = proposal.draft.criteria.map((rule) => ({
+    ...rule, thresholds: proposal.exactThresholds[rule.criterion]
+  }));
+  if (!Number.isSafeInteger(proposal.draft.revision)
+      || criteria.some((rule, index) => !Number.isSafeInteger(rule.maximumEvidenceAgeSeconds)
+        || !rule.thresholds || Object.keys(rule.thresholds).sort().join("|")
+          !== Object.keys(proposal.draft.criteria[index].thresholds || {}).sort().join("|")
+        || Object.values(rule.thresholds).some((value) => typeof value !== "string"))) return null;
+  return { ...proposal.draft, criteria };
+};
+const editableDraft = (proposal) => {
+  const draft = exactDraft(proposal);
+  if (!draft || draft.criteria.some((rule) => !rule.thresholds)) return null;
+  return ({
   policyId: draft.policyId, revision: draft.revision, governanceScope: draft.governanceScope,
   intendedUse: draft.intendedUse, intendedApproverActorId: draft.approverIdentity,
   approvalReference: draft.approvalReference,
   effectiveFromInclusive: draft.effectiveFromInclusive,
   effectiveToExclusive: draft.effectiveToExclusive, criteria: draft.criteria
 });
+};
 const readableError = (error) => error?.status === 409 ? "The policy changed. Refresh and review the current revision before retrying."
   : error?.status === 401 ? "Your session expired. Sign in again before continuing."
     : error?.status === 403 ? "The backend denied this action for your current identity or scope."
@@ -61,6 +104,11 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
       apiClient.getPolicyPage({ size: 25 }, { signal: controller.signal }),
       apiClient.getPolicySchema({ signal: controller.signal })
     ]).then(([identity, page, criterionSchema]) => {
+      const stored = storedPending(identity.actorId);
+      if (stored) {
+        pendingMutationRef.current = stored;
+        setPendingMutation({ operationId: stored.operationId });
+      }
       setActor(identity);
       setPolicies(page.items);
       setNextCursor(page.nextCursor);
@@ -143,23 +191,29 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
     }
   }
 
-  async function runMutation(operationId, requestFn) {
+  async function runMutation(operationId, requestFn, expected, retryable = true) {
     try {
       const result = await requestFn();
       pendingMutationRef.current = null;
       setPendingMutation(null);
+      forgetPending(operationId);
       return result;
     } catch (failure) {
       if (failure?.status === 401 || failure?.status === 403) throw failure;
       try {
         const receipt = await apiClient.getPolicyOperation(operationId);
+        if (!receiptMatches(receipt, expected)) throw new Error("Durable operation receipt conflicts with the intended action.");
         pendingMutationRef.current = null;
         setPendingMutation(null);
+        forgetPending(operationId);
         return receipt;
       } catch (lookupFailure) {
-        pendingMutationRef.current = { operationId, requestFn };
+        if (lookupFailure?.message?.includes("conflicts with the intended action")) throw lookupFailure;
+        pendingMutationRef.current = { operationId, requestFn: retryable ? requestFn : null,
+          expected, actorId: actor?.actorId };
+        rememberPending(pendingMutationRef.current);
         setPendingMutation({ operationId });
-        throw new Error(`Outcome uncertain for operation ${operationId}. Check durable status or retry this same operation; do not start a new one.`);
+        throw new Error(`Outcome uncertain for operation ${operationId}. Check its durable status before any new action.`);
       }
     }
   }
@@ -168,13 +222,17 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
     const pending = pendingMutationRef.current;
     if (!pending) return;
     await act(async () => {
+      if (pending.actorId && pending.actorId !== actor?.actorId)
+        throw new Error("The signed-in actor changed; this operation cannot be resumed here.");
       if (pending.kind === "recovery") {
         let result = await apiClient.getPolicyPublicationRecovery(pending.proposalId);
         if (!result.recoveryHistory?.some((event) => event.operationId === pending.operationId)) {
+          if (!pending.requestFn) throw new Error(`Recovery operation ${pending.operationId} remains uncertain; check its durable history again.`);
           result = await pending.requestFn();
         }
         pendingMutationRef.current = null;
         setPendingMutation(null);
+        forgetPending(pending.operationId);
         setRecovery(result);
         setPublication(await apiClient.getPolicyPublication(pending.proposalId));
         setReceipt(`Recovery request confirmed for job ${result.publicationRequestId}; worker outcome remains ${result.state}.`);
@@ -183,11 +241,14 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
       let result;
       try {
         result = await apiClient.getPolicyOperation(pending.operationId);
+        if (!receiptMatches(result, pending.expected)) throw new Error("Durable operation receipt conflicts with the intended action.");
         pendingMutationRef.current = null;
         setPendingMutation(null);
+        forgetPending(pending.operationId);
       } catch (failure) {
         if (failure?.status !== 404) throw failure;
-        result = await runMutation(pending.operationId, pending.requestFn);
+        if (!pending.requestFn) throw new Error(`Operation ${pending.operationId} has no committed receipt yet. The passkey assertion was discarded; check again before considering a new ceremony.`);
+        result = await runMutation(pending.operationId, pending.requestFn, pending.expected);
       }
       await reload(result.id);
       setReceipt(`Committed receipt recovered: ${result.status}, version ${result.version}.`);
@@ -196,7 +257,7 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
 
   function openPolicy(policy) {
     setSelectedId(policy.id);
-    setEditor(policy.status === "DRAFT" ? editableDraft(policy.draft) : null);
+    setEditor(policy.status === "DRAFT" ? editableDraft(policy) : null);
     setError("");
   }
 
@@ -205,9 +266,10 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
       const operationId = createId();
       const result = await runMutation(operationId, () => selected?.status === "DRAFT"
         ? apiClient.updatePolicyDraft(selected.id, { operationId, expectedVersion: selected.version, draft })
-        : apiClient.createPolicyDraft({ operationId, draft }));
+        : apiClient.createPolicyDraft({ operationId, draft }),
+      { status: "DRAFT", policyId: draft.policyId, id: selected?.id });
       await reload(result.id);
-      setEditor(editableDraft(result.draft));
+      setEditor(editableDraft(result));
       setReceipt(`Draft saved: ${result.id}, version ${result.version}.`);
     });
   }
@@ -221,8 +283,11 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
           rationale: action === "review" ? rationale.trim() : null });
       const responseJson = await confirmPolicyAssertion(challenge.optionsJson);
       const command = { operationId, challengeId: challenge.challengeId, responseJson };
+      const expectedStatus = action === "submit" ? "SUBMITTED"
+        : decision === "APPROVE" ? "APPROVED" : "REJECTED";
       const result = await runMutation(operationId, () =>
-        apiClient.finishPolicyAction(selected.id, action, command));
+        apiClient.finishPolicyAction(selected.id, action, command),
+      { id: selected.id, status: expectedStatus }, false);
       await reload(result.id);
       setReceipt(`${result.status} committed. Receipt version ${result.version}; approval reference ${result.approvalEvidenceReference || "none"}.`);
     });
@@ -247,7 +312,8 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
       const operationId = createId();
       const command = { operationId, expectedVersion: selected.version };
       const result = await runMutation(operationId, () =>
-        apiClient.requestPolicyPublication(selected.id, command));
+        apiClient.requestPolicyPublication(selected.id, command),
+      { id: selected.id, status: "PUBLICATION_PENDING" });
       await reload(result.id);
       setReceipt(`Publication request committed. State: ${result.status}.`);
     });
@@ -272,6 +338,8 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
         } catch { /* Durable outcome remains uncertain. */ }
         if (!result) {
           pendingMutationRef.current = { operationId, requestFn, kind: "recovery", proposalId: selected.id };
+          pendingMutationRef.current.actorId = actor?.actorId;
+          rememberPending(pendingMutationRef.current);
           setPendingMutation({ operationId });
           throw new Error(`Outcome uncertain for recovery operation ${operationId}. Check or retry this same request.`);
         }
@@ -292,8 +360,8 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
       {loading && <p role="status">Loading policies…</p>}
       <div tabIndex={-1} ref={feedbackRef} aria-live="polite">
         {error && <p role="alert">{error}</p>}{receipt && <p role="status">{receipt}</p>}
-        {pendingMutation && <div role="status"><p>Operation {pendingMutation.operationId} has an uncertain outcome. Its original command is retained only in this open browser view.</p>
-          <button type="button" disabled={busy} onClick={retryPendingMutation}>Check and retry same operation</button></div>}
+        {pendingMutation && <div role="status"><p>Operation {pendingMutation.operationId} has an uncertain outcome. Check the durable receipt; no approval is claimed before it is found.</p>
+          <button type="button" disabled={busy} onClick={retryPendingMutation}>Check operation status</button></div>}
       </div>
     </div>
     <div className="panel"><h3>Policies</h3>
@@ -326,7 +394,7 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
         setEditor(emptyPolicyDraft(schema));
       }}>New draft</button>
       {editor && <PolicyDraftWizard key={selectedId || "new"} draft={editor} onChange={setEditor} schema={schema}
-        approvers={approvers} savedDraft={selected?.status === "DRAFT" ? editableDraft(selected.draft) : null}
+        approvers={approvers} savedDraft={selected?.status === "DRAFT" ? editableDraft(selected) : null}
         busy={busy || !!pendingMutation} onSave={saveDraft} />}
     </div>}
     {selected && <div className="panel"><h3>Policy detail · {selected.draft.policyId}</h3>
@@ -334,25 +402,28 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
       <p>Author: {selected.authorActorId} · intended approver: {selected.draft.approverIdentity}</p>
       <p>Scope: {selected.draft.governanceScope?.institutionalScope} / {selected.draft.governanceScope?.environment} · use: {selected.draft.intendedUse}</p>
       <p>Effective: {selected.draft.effectiveFromInclusive} – {selected.draft.effectiveToExclusive}</p>
-      <details open><summary>Exact {selected.status === "DRAFT" ? "draft" : "submitted revision"} and thresholds</summary>
-        <pre className="policyGovernanceJson">{JSON.stringify(selected.draft, null, 2)}</pre></details>
+      {exactDraft(selected) ? <details open><summary>Exact {selected.status === "DRAFT" ? "draft" : "submitted revision"} and thresholds</summary>
+        <pre className="policyGovernanceJson">{JSON.stringify(exactDraft(selected), null, 2)}</pre></details>
+        : <p role="alert">Exact threshold read-back is unavailable. Review and decisions are disabled until the policy is refreshed from an exact-capable server.</p>}
       {selected.status === "DRAFT" && can("submit") && selected.authorActorId === actor?.actorId &&
-        <button type="button" disabled={busy || !!pendingMutation} onClick={() => confirmAction("submit", null)}>Review SHA and submit with WebAuthn</button>}
+        <button type="button" disabled={busy || !!pendingMutation || !exactDraft(selected)} onClick={() => confirmAction("submit", null)}>Review SHA and submit with WebAuthn</button>}
       {selected.status === "SUBMITTED" && <div><h4>Independent review</h4>
         {ownPolicy && <p>You authored this policy and cannot review it.</p>}
         {canReview && <><p>Confirm the complete immutable content above before deciding.</p>
           <label htmlFor="policy-review-rationale">Rationale</label>
           <textarea id="policy-review-rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} />
           <p>The rationale is bound to the WebAuthn challenge and visible in authorized history.</p>
-          <button type="button" disabled={busy || !!pendingMutation || !rationale.trim() || !can("approve")} onClick={() => confirmAction("review", "APPROVE")}>Approve with WebAuthn</button>
-          <button type="button" disabled={busy || !!pendingMutation || !rationale.trim() || !can("reject")} onClick={() => confirmAction("review", "REJECT")}>Reject with WebAuthn</button></>}
+          <button type="button" disabled={busy || !!pendingMutation || !exactDraft(selected) || !rationale.trim() || !can("approve")} onClick={() => confirmAction("review", "APPROVE")}>Approve with WebAuthn</button>
+          <button type="button" disabled={busy || !!pendingMutation || !exactDraft(selected) || !rationale.trim() || !can("reject")} onClick={() => confirmAction("review", "REJECT")}>Reject with WebAuthn</button></>}
       </div>}
       {selected.status === "APPROVED" && can("publish:request") &&
         <button type="button" disabled={busy || !!pendingMutation} onClick={requestPublication}>Request publication</button>}
       <div><h4>Publication and trust</h4>
         {publication?.requestId && <p>Original publication request: <code>{publication.requestId}</code></p>}
-        {publication?.state === "BLOCKED" && <p role="alert">Publication is blocked; this job has not produced a confirmed signed policy.</p>}
+        {publication?.state === "BLOCKED" && <p role="alert">Publication is blocked. Inspect durable policy and evidence before requesting recovery.</p>}
+        {publication?.state === "CLAIMED" && <p role="status">A worker holds the publication lease. The commit outcome may be uncertain until durable reconciliation completes.</p>}
         {publication?.state === "RETRYABLE" && <p>Publication is awaiting a bounded worker retry.</p>}
+        {publication?.state === "PUBLISHED" && <p role="status">The policy publication commit and job acknowledgement are confirmed.</p>}
         {can("publication:recover") && recovery && <div>
           <p>Recovery: {recovery.retrySafe ? "request allowed" : "request unavailable"}; attempts {recovery.attempts}; recoveries {recovery.recoveryCount}; committed evidence {recovery.alreadyCommitted ? "present" : "not found"}.</p>
           <button type="button" disabled={busy || !!pendingMutation || !recovery.retrySafe} onClick={requestRecovery}>Request recovery</button>

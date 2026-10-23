@@ -28,6 +28,9 @@ export function ShadowPerformanceDashboardPage({
   canApproveModelPromotion,
   canRejectModelPromotion,
   canRetireModelPromotion,
+  canRequestEmergencyModelRetirement,
+  canAuthorizeEmergencyModelRetirement,
+  canAuditEmergencyModelRetirement,
   onRetry,
   workspaceHeadingProps = {}
 }) {
@@ -69,6 +72,9 @@ export function ShadowPerformanceDashboardPage({
         canApprove={canApproveModelPromotion}
         canReject={canRejectModelPromotion}
         canRetire={canRetireModelPromotion}
+        canRequestEmergency={canRequestEmergencyModelRetirement}
+        canAuthorizeEmergency={canAuthorizeEmergencyModelRetirement}
+        canAuditEmergency={canAuditEmergencyModelRetirement}
       />}
     </>
   );

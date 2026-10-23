@@ -273,7 +273,7 @@ Open:
 
 Local Keycloak users for the analyst console and model-policy workflow:
 
-| Username | Password | Role / policy group |
+| Username | Password | Role / institutional group |
 | --- | --- | --- |
 | `readonly` | `readonly` | `READ_ONLY_ANALYST` |
 | `analyst` | `analyst` | `ANALYST` |
@@ -286,6 +286,9 @@ Local Keycloak users for the analyst console and model-policy workflow:
 | `policy-security-a` | `policy-security-a` | credential admin/holder, trust requester, production |
 | `policy-security-b` | `policy-security-b` | credential admin/holder, trust approver, production |
 | `policy-security-c` | `policy-security-c` | credential admin/holder |
+| `model-retirement-requester` | `model-retirement-requester` | reviewer, retirement operator, production scope, emergency requester |
+| `model-retirement-authorizer` | `model-retirement-authorizer` | read-only analyst, production scope, independent emergency authorizer |
+| `model-retirement-auditor` | `model-retirement-auditor` | read-only analyst, production scope, emergency audit read |
 
 These credentials are local-only and must not be reused outside local test environments.
 
@@ -490,4 +493,4 @@ Milosz Podsiadly
 
 ## License
 
-See [LICENSE.md](LICENSE.md) for the full terms and conditions.
+See [LICENSE](LICENSE.md) for the full terms and conditions.

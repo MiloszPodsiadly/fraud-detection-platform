@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { LoadingPanel } from "./LoadingPanel.jsx";
+import { ModelPromotionEmergencyPanel } from "./ModelPromotionEmergencyPanel.jsx";
 
 const EMPTY = Object.freeze({ modelName: "", modelVersion: "", featureContractVersion: "", modelArtifactSha256: "", fromInclusive: "", toInclusive: "", environment: "TEST", intendedUse: "FRAUD_RISK_SCORING" });
 
-export function ModelPromotionPanel({ workflow, modelCard, canRead, canRegister, canPropose, canApprove, canReject, canRetire }) {
+export function ModelPromotionPanel({ workflow, modelCard, canRead, canRegister, canPropose, canApprove,
+  canReject, canRetire, canRequestEmergency, canAuthorizeEmergency, canAuditEmergency }) {
   const [selection, setSelection] = useState(EMPTY);
   const manual = useRef(false);
   const previousCard = useRef(null);
@@ -48,11 +50,19 @@ export function ModelPromotionPanel({ workflow, modelCard, canRead, canRegister,
     {workflow.stateError && workflow.stateError.status !== 404 && <State title="Governance state unavailable" message={message(workflow.stateError)} />}
     {workflow.stateError?.status === 404 && <State title="Candidate not registered" message="No authoritative lifecycle state exists for this exact model and scope. Assessment diagnostics may still be available." />}
     {workflow.assessmentError && <State title="Assessment unavailable" message={message(workflow.assessmentError)} />}
-    {workflow.mutationError && <State title={workflow.mutationError.status === 409 ? "Command conflict" : "Command not committed"} message={message(workflow.mutationError)} action={workflow.hasRetryableMutation ? <button className="secondaryButton" type="button" disabled={workflow.isMutating} onClick={() => workflow.retryLastMutation()}>Retry original command</button> : null} />}
+    {workflow.mutationError && <State title={workflow.mutationError.status === 409
+      || workflow.mutationError.code === "RECEIPT_CONFLICT" ? "Command conflict"
+      : workflow.mutationError.code === "UNCERTAIN_OUTCOME" || workflow.hasRetryableMutation
+        ? "Command outcome uncertain" : "Command not completed"} message={message(workflow.mutationError)}
+      action={workflow.hasRetryableMutation ? <button className="secondaryButton" type="button" disabled={workflow.isMutating} onClick={() => workflow.retryLastMutation()}>Resolve original operation</button> : null} />}
     {workflow.state && <StateDetails state={workflow.state} />}
     {workflow.assessment && <AssessmentDetails assessment={workflow.assessment} />}
     {workflow.assessment && !workflow.assessment.formalRecommendationEligible && <State title="Formal recommendation assessment blocked" message={assessmentBlockerMessage(workflow.assessment)} />}
     {canRead !== false && <Actions workflow={workflow} state={workflow.state} pending={pending} canRegister={canRegister} canPropose={canPropose} canApprove={canApprove} canReject={canReject} canRetire={canRetire} />}
+    {(canRequestEmergency === true || canAuthorizeEmergency === true || canAuditEmergency === true) && <ModelPromotionEmergencyPanel
+      workflow={workflow} state={workflow.state} pending={pending}
+      canRequest={canRequestEmergency} canAuthorize={canAuthorizeEmergency}
+      canAudit={canAuditEmergency} />}
   </section>;
 }
 
@@ -61,11 +71,11 @@ function Actions({ workflow, state, pending, canRegister, canPropose, canApprove
   const [rationale, setRationale] = useState("");
   useEffect(() => { setTarget(state?.structurallyAllowedTargetStates?.find((value) => value !== "RETIRED") || ""); }, [state]);
   return <div className="shadowPerformanceStack"><section className="shadowPerformanceSubpanel"><h3>Lifecycle action requests</h3>
-    {!state && canRegister === true && <button className="primaryButton" type="button" disabled={workflow.isMutating} onClick={() => workflow.register()}>Register candidate</button>}
+    {!state && canRegister === true && <button className="primaryButton" type="button" disabled={workflow.isMutating || workflow.hasRetryableMutation} onClick={() => workflow.register()}>Register candidate</button>}
     {(state || pending.length > 0) && <label className="filterField"><span>Operator rationale</span><textarea value={rationale} onChange={(event) => setRationale(event.target.value)} required /></label>}
-    {state && canPropose === true && target && <><label className="filterField"><span>Structurally supported target (not approved)</span><select value={target} onChange={(event) => setTarget(event.target.value)}>{state.structurallyAllowedTargetStates.filter((value) => value !== "RETIRED").map((value) => <option key={value}>{value}</option>)}</select></label><button className="primaryButton" type="button" disabled={workflow.isMutating || !rationale.trim()} onClick={() => workflow.propose(target, rationale)}>Submit independent-review proposal</button></>}
-    {state?.structurallyAllowedTargetStates?.includes("RETIRED") && canRetire === true && <button className="secondaryButton" type="button" disabled={workflow.isMutating || !rationale.trim()} onClick={() => workflow.retire(rationale)}>Propose retirement</button>}
-    {pending.map((proposal) => <div key={proposal.proposalId}><p>Pending proposal: {proposal.requestedTargetState}</p>{canApprove === true && <button className="primaryButton" type="button" disabled={workflow.isMutating || !rationale.trim()} onClick={() => workflow.review(proposal.proposalId, "APPROVED", rationale)}>Independently approve</button>}{canReject === true && <button className="secondaryButton" type="button" disabled={workflow.isMutating || !rationale.trim()} onClick={() => workflow.review(proposal.proposalId, "REJECTED", rationale)}>Reject proposal</button>}</div>)}
+    {state && canPropose === true && target && <><label className="filterField"><span>Structurally supported target (not approved)</span><select value={target} onChange={(event) => setTarget(event.target.value)}>{state.structurallyAllowedTargetStates.filter((value) => value !== "RETIRED").map((value) => <option key={value}>{value}</option>)}</select></label><button className="primaryButton" type="button" disabled={workflow.isMutating || workflow.hasRetryableMutation || !rationale.trim()} onClick={() => workflow.propose(target, rationale)}>Submit independent-review proposal</button></>}
+    {state?.structurallyAllowedTargetStates?.includes("RETIRED") && canRetire === true && <button className="secondaryButton" type="button" disabled={workflow.isMutating || workflow.hasRetryableMutation || !rationale.trim()} onClick={() => workflow.retire(rationale)}>Propose retirement</button>}
+    {pending.map((proposal) => <div key={proposal.proposalId}><p>Pending proposal: {proposal.requestedTargetState}</p>{canApprove === true && <button className="primaryButton" type="button" disabled={workflow.isMutating || workflow.hasRetryableMutation || !rationale.trim()} onClick={() => workflow.review(proposal.proposalId, "APPROVED", rationale)}>Independently approve</button>}{canReject === true && <button className="secondaryButton" type="button" disabled={workflow.isMutating || workflow.hasRetryableMutation || !rationale.trim()} onClick={() => workflow.review(proposal.proposalId, "REJECTED", rationale)}>Reject proposal</button>}</div>)}
     <p className="sectionCopy">Listed targets are structurally supported lifecycle transitions, not evidence eligibility or approval. Current policy and evidence may block a proposal; an independent reviewer must approve a valid proposal. CHAMPION never authorizes runtime deployment. The server revalidates principal, environment scope, evidence, policy and reviewer independence before commit.</p>
   </section></div>;
 }

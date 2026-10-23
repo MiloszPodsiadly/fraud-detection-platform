@@ -19,7 +19,10 @@ export function ShadowPerformanceWorkspaceContainer({
   canProposeModelPromotion,
   canApproveModelPromotion,
   canRejectModelPromotion,
-  canRetireModelPromotion
+  canRetireModelPromotion,
+  canRequestEmergencyModelRetirement,
+  canAuthorizeEmergencyModelRetirement,
+  canAuditEmergencyModelRetirement
 }) {
   return (
     <ShadowPerformanceDashboardPage
@@ -46,6 +49,9 @@ export function ShadowPerformanceWorkspaceContainer({
       canApproveModelPromotion={canApproveModelPromotion}
       canRejectModelPromotion={canRejectModelPromotion}
       canRetireModelPromotion={canRetireModelPromotion}
+      canRequestEmergencyModelRetirement={canRequestEmergencyModelRetirement}
+      canAuthorizeEmergencyModelRetirement={canAuthorizeEmergencyModelRetirement}
+      canAuditEmergencyModelRetirement={canAuditEmergencyModelRetirement}
       onRetry={summaryState.refresh}
       workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />

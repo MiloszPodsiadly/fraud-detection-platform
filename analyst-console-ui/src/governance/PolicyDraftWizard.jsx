@@ -2,6 +2,22 @@ import { useState } from "react";
 
 const ENVIRONMENTS = ["DEVELOPMENT", "TEST", "PRODUCTION"];
 const USES = ["FRAUD_RISK_SCORING"];
+const EXACT_DECIMAL = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
+
+export function validExactDecimal(value) {
+  if (typeof value !== "string" || value.length > 60 || !EXACT_DECIMAL.test(value)) return false;
+  const [integer, fraction = ""] = value.split(".");
+  return fraction.length <= 24 && (integer + fraction).replace(/^0+/, "").length <= 34;
+}
+
+function changedFields(saved, current, path = "") {
+  if (saved === undefined) return [];
+  if (saved && current && typeof saved === "object" && typeof current === "object") {
+    return [...new Set([...Object.keys(saved), ...Object.keys(current)])].sort().flatMap((key) =>
+      changedFields(saved[key], current[key], path ? `${path}.${key}` : key));
+  }
+  return String(saved ?? "") === String(current ?? "") ? [] : [path];
+}
 
 export function emptyPolicyDraft(schema = []) {
   return {
@@ -23,7 +39,8 @@ export function emptyPolicyDraft(schema = []) {
 export function validatePolicyDraft(draft, schema, approvers) {
   const errors = [];
   if (!draft.policyId?.trim()) errors.push("Policy ID is required.");
-  if (!Number.isInteger(Number(draft.revision)) || Number(draft.revision) < 1) errors.push("Revision must be a positive integer.");
+  if (!Number.isSafeInteger(Number(draft.revision)) || Number(draft.revision) < 1)
+    errors.push("Revision must be a positive exact integer.");
   if (!draft.intendedApproverActorId || !approvers.some((item) => item.actorId === draft.intendedApproverActorId)) {
     errors.push("Select a currently eligible independent approver.");
   }
@@ -47,14 +64,14 @@ export function validatePolicyDraft(draft, schema, approvers) {
     } else {
       for (const key of item.requiredThresholdKeys) {
         const raw = rule.thresholds?.[key];
-        if (raw === "" || raw === null || raw === undefined || !Number.isFinite(Number(raw))) {
-          errors.push(`${item.criterion}: ${key} needs a numeric policy limit.`);
+        if (!validExactDecimal(raw)) {
+          errors.push(`${item.criterion}: ${key} needs a plain, nonnegative exact decimal (up to 34 digits and 24 fractional places).`);
         }
       }
     }
-    if (!Number.isInteger(Number(rule.maximumEvidenceAgeSeconds))
+    if (!Number.isSafeInteger(Number(rule.maximumEvidenceAgeSeconds))
         || Number(rule.maximumEvidenceAgeSeconds) <= 0) {
-      errors.push(`${item.criterion}: maximum evidence age must be a positive number of seconds.`);
+      errors.push(`${item.criterion}: maximum evidence age must be a positive exact number of seconds.`);
     }
   }
   return errors;
@@ -66,7 +83,7 @@ export function normalizedPolicyDraft(draft) {
     criteria: draft.criteria.map((rule) => ({ ...rule,
       maximumEvidenceAgeSeconds: Number(rule.maximumEvidenceAgeSeconds),
       thresholds: Object.fromEntries(Object.entries(rule.thresholds || {})
-        .map(([key, value]) => [key, Number(value)]))
+        .map(([key, value]) => [key, value]))
     }))
   };
 }
@@ -129,8 +146,7 @@ export function PolicyDraftWizard({ draft, onChange, schema, approvers, savedDra
           {rule.applicability === "MANDATORY" ? item.requiredThresholdKeys.map((key) => {
             const limit = item.thresholds?.find((entry) => entry.key === key);
             return <label key={key}>{key} ({limit?.unit || "policy limit"}; {limit?.mustBePositive ? "greater than zero" : "at least zero"}{limit?.maximumInclusive ? `; at most ${limit.maximumInclusive}` : ""})
-              <input required type="number" min="0" max={limit?.maximumInclusive || undefined}
-                step={limit?.integer ? "1" : "any"} value={rule.thresholds[key] ?? ""}
+              <input required type="text" inputMode="decimal" value={rule.thresholds[key] ?? ""}
                 onChange={(event) => setRule(item.criterion,
                   { thresholds: { ...rule.thresholds, [key]: event.target.value } })} /></label>;
           })
@@ -145,6 +161,7 @@ export function PolicyDraftWizard({ draft, onChange, schema, approvers, savedDra
       })}
     </div>
     <details><summary>Compare current form with saved draft</summary>
+      <p>Changed fields: {savedDraft ? changedFields(savedDraft, draft).join(", ") || "none" : "new draft"}.</p>
       <p>Saved revision</p><pre className="policyGovernanceJson">{JSON.stringify(savedDraft || {}, null, 2)}</pre>
       <p>Current form</p><pre className="policyGovernanceJson">{JSON.stringify(draft, null, 2)}</pre>
     </details>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { confirmPolicyAssertion, registerPolicyCredential } from "../governance/policyWebAuthn.js";
 import { MODEL_POLICY_AUTHORITIES as POLICY } from "../auth/modelPolicyAuthorities.js";
 
@@ -6,11 +6,54 @@ const blankIntent = {
   registry: "ONLINE_ACTORS", action: "GRANT", targetIdentity: "", keyId: "",
   publicKeySha256: "", publicKeySpkiBase64: "", roles: "POLICY_APPROVER",
   environment: "TEST", intendedUse: "FRAUD_RISK_SCORING",
-  requestedGeneration: "", candidateRegistrySha256: "", caseReference: ""
+  caseReference: "", targetIssuer: "", targetSubject: "", displayName: "",
+  validFrom: "", validUntil: "", replacesKeyId: "", retireAt: ""
 };
 const id = () => crypto.randomUUID();
 const can = (actor, authority) => actor?.authorities?.includes(authority);
 const explain = (error) => error?.message || "The security operation could not be completed.";
+const PENDING_KEY = "policy-security-pending-operation";
+function rememberSecurityPending(pending) {
+  try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending)); }
+  catch { /* The open view still retains the operation. */ }
+}
+function storedSecurityPending(actorId) {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
+    return value?.actorId === actorId && /^[A-Za-z0-9._:-]{1,128}$/.test(value.operationId)
+      && ["credentialRevoke", "grantReview", "trustRequest", "trustReview"].includes(value.kind)
+      ? value : null;
+  } catch { return null; }
+}
+function forgetSecurityPending(operationId) {
+  try {
+    if (JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null")?.operationId === operationId)
+      sessionStorage.removeItem(PENDING_KEY);
+  } catch { /* Browser storage is optional. */ }
+}
+
+async function readSecurityReceipt(apiClient, pending) {
+  const { operationId, actorId } = pending;
+  if (pending.kind === "credentialRevoke")
+    return (await apiClient.listPolicyCredentialSecurityEvents()).find((event) =>
+      event.id === `credential-revoke:${operationId}` && event.actorId === actorId
+        && event.credentialId === pending.credentialId && event.action === "CREDENTIAL_REVOKED");
+  if (pending.kind === "grantReview") {
+    const receipt = await apiClient.getPolicyCredentialGrantReview(pending.requestId);
+    return receipt.reviewOperationId === operationId && receipt.reviewedBy === actorId
+      && (pending.decision === "APPROVE" ? receipt.approved : receipt.rejected) ? receipt : null;
+  }
+  if (pending.kind === "trustRequest")
+    return (await apiClient.listPolicyTrustChanges()).find((entry) =>
+      entry.id === operationId && entry.requestedBy === actorId
+        && entry.candidateSha256 === pending.candidateSha256);
+  if (pending.kind === "trustReview")
+    return (await apiClient.listPolicyTrustChanges()).find((entry) =>
+      entry.id === pending.requestId && entry.reviewedBy === actorId
+        && entry.reviewProofId === `trust-review:${operationId}`
+        && entry.status === (pending.decision === "APPROVE" ? "PENDING_OPERATOR_ACTION" : "REJECTED"));
+  return null;
+}
 
 export function PolicySecurityPage({ apiClient, enabled }) {
   const [actor, setActor] = useState(null);
@@ -21,33 +64,45 @@ export function PolicySecurityPage({ apiClient, enabled }) {
   const [changes, setChanges] = useState([]);
   const [intent, setIntent] = useState(blankIntent);
   const [grantToken, setGrantToken] = useState("");
+  const [claimedPurpose, setClaimedPurpose] = useState(null);
+  const [myGrants, setMyGrants] = useState([]);
+  const [grantReview, setGrantReview] = useState(null);
   const [grant, setGrant] = useState({ targetIssuer: "", targetSubject: "", purpose: "FIRST", caseReference: "" });
   const [approvalId, setApprovalId] = useState("");
   const [lostId, setLostId] = useState("");
   const [compromised, setCompromised] = useState(false);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [audit, setAudit] = useState([]);
   const [deployment, setDeployment] = useState(null);
+  const [candidatePreview, setCandidatePreview] = useState(null);
+  const [previewedIntent, setPreviewedIntent] = useState("");
+  const [reviewCandidate, setReviewCandidate] = useState(null);
   const [operations, setOperations] = useState(null);
+  const [uncertain, setUncertain] = useState(null);
 
   const refresh = useCallback(async () => {
     const me = await apiClient.getPolicySecurityActor();
+    const stored = storedSecurityPending(me.actorId);
+    if (stored) setUncertain((current) => current || stored);
     setActor(me);
-    const [devices, decisions, publicRegistries, requests, diagnostics] = await Promise.all([
+    const [devices, decisions, publicRegistries, requests, diagnostics, approvedGrants] = await Promise.all([
       can(me, POLICY.CREDENTIAL_ENROLL) ? apiClient.listPolicyCredentials() : [],
       can(me, POLICY.CREDENTIAL_ENROLL) ? apiClient.listPolicyCredentialSecurityEvents() : [],
       can(me, POLICY.TRUST_READ) ? apiClient.getPolicyTrustRegistries() : [],
       can(me, POLICY.TRUST_READ) ? apiClient.listPolicyTrustChanges() : [],
       can(me, POLICY.TRUST_READ) && can(me, POLICY.PRODUCTION)
-        ? apiClient.getPolicySecurityOperations() : null
+        ? apiClient.getPolicySecurityOperations() : null,
+      can(me, POLICY.CREDENTIAL_ENROLL) ? apiClient.listMyPolicyCredentialGrants() : []
     ]);
     setCredentials(devices);
     setEvents(decisions);
     setRegistries(publicRegistries);
     setChanges(requests);
     setOperations(diagnostics);
+    setMyGrants(approvedGrants);
   }, [apiClient]);
 
   useEffect(() => {
@@ -57,12 +112,56 @@ export function PolicySecurityPage({ apiClient, enabled }) {
     return () => { live = false; };
   }, [apiClient, enabled, refresh]);
 
+  useEffect(() => {
+    setGrantToken("");
+    setClaimedPurpose(null);
+  }, [actor?.actorId]);
+
   async function run(operation) {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true); setError(""); setNotice("");
-    try { await operation(); await refresh(); }
+    try {
+      if (uncertain) throw new Error(`Resolve operation ${uncertain.operationId} before starting another security mutation.`);
+      await operation();
+      try { await refresh(); }
+      catch { setError("Action response was received, but security state could not be refreshed. Refresh the view before proceeding."); }
+    }
     catch (failure) { setError(explain(failure)); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function settleSigned(operationId, send, receiptSpec, label) {
+    const pending = { operationId, actorId: actor?.actorId, label, ...receiptSpec };
+    try { return await send(); }
+    catch (failure) {
+      if (failure?.status && failure.status < 500 && failure.status !== 408 && failure.status !== 429)
+        throw failure;
+      try {
+        const receipt = await readSecurityReceipt(apiClient, pending);
+        if (receipt) return receipt;
+      } catch { /* The outcome remains uncertain. */ }
+      setUncertain(pending);
+      rememberSecurityPending(pending);
+      throw new Error(`Outcome uncertain for ${label} operation ${operationId}. Check its durable receipt before a new action.`);
+    }
+  }
+
+  async function checkUncertain() {
+    if (!uncertain || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true); setError("");
+    try {
+      if (uncertain.actorId !== actor?.actorId)
+        throw new Error("The signed-in actor changed; this receipt must be checked in its original session.");
+      const receipt = await readSecurityReceipt(apiClient, uncertain);
+      if (!receipt) throw new Error(`Operation ${uncertain.operationId} remains uncertain.`);
+      setUncertain(null);
+      forgetSecurityPending(uncertain.operationId);
+      setNotice(`${uncertain.label} operation ${uncertain.operationId} has a durable receipt.`);
+      await refresh();
+    } catch (failure) { setError(explain(failure)); }
+    finally { busyRef.current = false; setBusy(false); }
   }
 
   async function revoke(credential) {
@@ -71,57 +170,130 @@ export function PolicySecurityPage({ apiClient, enabled }) {
       const operationId = id();
       const challenge = await apiClient.startPolicyCredentialRevocation(credential.credentialId, operationId);
       const responseJson = await confirmPolicyAssertion(challenge.optionsJson);
-      await apiClient.finishPolicyCredentialRevocation(credential.credentialId,
-        { operationId, challengeId: challenge.challengeId, responseJson });
+      await settleSigned(operationId,
+        () => apiClient.finishPolicyCredentialRevocation(credential.credentialId,
+          { operationId, challengeId: challenge.challengeId, responseJson }),
+        { kind: "credentialRevoke", credentialId: credential.credentialId },
+        "credential revocation");
       setNotice("Credential revoked. It can no longer sign new actions.");
     });
   }
 
-  async function enroll() {
-    await run(async () => {
-      const token = grantToken.trim();
+  async function enrollWithToken(token) {
       if (!token) throw new Error("An independently approved enrollment grant is required.");
       const challenge = await apiClient.startPolicyCredentialRegistration(token);
       const responseJson = await registerPolicyCredential(challenge.optionsJson);
       await apiClient.finishPolicyCredentialRegistration({ challengeId: challenge.challengeId, responseJson, grantToken: token });
-      setGrantToken(""); setNotice("Passkey enrolled.");
+      setGrantToken(""); setClaimedPurpose(null); setNotice("Passkey enrolled.");
+  }
+
+  async function claimGrant(entry) {
+    await run(async () => {
+      const issued = await apiClient.claimPolicyCredentialGrant(entry.requestId);
+      setGrantToken(issued.token);
+      setClaimedPurpose(entry.purpose);
+      if (["FIRST", "ADDITIONAL", "LOST_DEVICE_RECOVERY", "COMPROMISE_RECOVERY"].includes(entry.purpose)) {
+        await enrollWithToken(issued.token);
+      } else {
+        setNotice("Revocation authorization claimed. Enter the credential ID and complete revocation before expiry.");
+      }
+    });
+  }
+
+  async function reviewGrant(decision) {
+    await run(async () => {
+      if (!grantReview || grantReview.approved || grantReview.rejected)
+        throw new Error("Inspect an unreviewed exact grant first.");
+      const fresh = await apiClient.getPolicyCredentialGrantReview(grantReview.requestId);
+      if (JSON.stringify(fresh) !== JSON.stringify(grantReview))
+        throw new Error("Grant request changed; inspect it again.");
+      if (!window.confirm(`${decision} ${fresh.purpose} for ${fresh.targetIssuer} / ${fresh.targetSubject}, case ${fresh.caseReference}?`)) return;
+      const intent = { operationId: id(), decision };
+      const challenge = await apiClient.startPolicyCredentialGrantReview(fresh.requestId, intent);
+      const responseJson = await confirmPolicyAssertion(challenge.optionsJson);
+      await settleSigned(intent.operationId,
+        () => apiClient.finishPolicyCredentialGrantReview(fresh.requestId,
+          { intent, challengeId: challenge.challengeId, responseJson }),
+        { kind: "grantReview", requestId: fresh.requestId, decision }, "credential grant review");
+      setGrantReview(null);
+      setNotice(`${decision} recorded. Only the target can claim the grant.`);
+    });
+  }
+
+  function preparedIntent() {
+    const registry = registries.find((entry) => entry.registry === intent.registry);
+    if (!registry || registry.status !== "READY") throw new Error("Current public registry is not ready.");
+    return {
+      ...intent, targetIdentity: intent.targetIdentity.trim(),
+      keyId: intent.registry === "ONLINE_ACTORS" ? null : intent.keyId.trim(),
+      publicKeySha256: intent.registry === "ONLINE_ACTORS" ? null : intent.publicKeySha256.trim(),
+      publicKeySpkiBase64: intent.registry === "ONLINE_ACTORS" || !["ADD", "ROTATE"].includes(intent.action)
+        ? null : intent.publicKeySpkiBase64.trim(),
+      roles: intent.roles.split(",").map((role) => role.trim()).filter(Boolean),
+      requestedGeneration: Number(registry.generation) + 1,
+      candidateRegistrySha256: null,
+      caseReference: intent.caseReference.trim(),
+      targetIssuer: intent.registry === "ONLINE_ACTORS" ? intent.targetIssuer.trim() || null : null,
+      targetSubject: intent.registry === "ONLINE_ACTORS" ? intent.targetSubject.trim() || null : null,
+      displayName: intent.registry === "ONLINE_ACTORS" ? intent.displayName.trim() || null : null,
+      validFrom: ["ADD", "ROTATE", "GRANT"].includes(intent.action) ? intent.validFrom.trim() : null,
+      validUntil: ["ADD", "ROTATE", "GRANT"].includes(intent.action) ? intent.validUntil.trim() : null,
+      replacesKeyId: intent.action === "ROTATE" ? intent.replacesKeyId.trim() : null,
+      retireAt: ["RETIRE", "ROTATE"].includes(intent.action) ? intent.retireAt.trim() : null
+    };
+  }
+
+  async function previewChange() {
+    await run(async () => {
+      const candidate = preparedIntent();
+      const preview = await apiClient.previewPolicyTrustChange(candidate);
+      setCandidatePreview(preview);
+      setPreviewedIntent(JSON.stringify(candidate));
     });
   }
 
   async function submitChange() {
     await run(async () => {
-      const registry = registries.find((entry) => entry.registry === intent.registry);
-      if (!registry || registry.status !== "READY") throw new Error("Current public registry is not ready.");
-      const candidate = {
-        ...intent, targetIdentity: intent.targetIdentity.trim(),
-        keyId: intent.registry === "ONLINE_ACTORS" ? null : intent.keyId.trim(),
-        publicKeySha256: intent.registry === "ONLINE_ACTORS" ? null : intent.publicKeySha256.trim(),
-        publicKeySpkiBase64: intent.registry === "ONLINE_ACTORS" || !["ADD", "ROTATE"].includes(intent.action)
-          ? null : intent.publicKeySpkiBase64.trim(),
-        roles: intent.roles.split(",").map((role) => role.trim()).filter(Boolean),
-        requestedGeneration: Number(intent.requestedGeneration),
-        candidateRegistrySha256: intent.candidateRegistrySha256.trim(),
-        caseReference: intent.caseReference.trim()
-      };
-      if (!window.confirm(`Request ${candidate.action} in ${candidate.registry} at generation ${candidate.requestedGeneration}? Approval will NOT activate the registry.`)) return;
+      const candidate = preparedIntent();
+      if (!candidatePreview || previewedIntent !== JSON.stringify(candidate)) {
+        throw new Error("Preview the current exact registry diff before signing.");
+      }
+      if (!window.confirm(`Sign the displayed ${candidate.action} candidate ${candidatePreview.candidateSha256}? Approval will not activate it.`)) return;
+      const boundCandidate = { ...candidate, candidateRegistrySha256: candidatePreview.candidateSha256 };
       const operationId = id();
-      const challenge = await apiClient.startPolicyTrustChange({ operationId, intent: candidate });
+      const challenge = await apiClient.startPolicyTrustChange({ operationId, intent: boundCandidate });
       const responseJson = await confirmPolicyAssertion(challenge.optionsJson);
-      const result = await apiClient.finishPolicyTrustChange({ operationId, intent: candidate,
-        challengeId: challenge.challengeId, responseJson });
+      const result = await settleSigned(operationId,
+        () => apiClient.finishPolicyTrustChange({ operationId, intent: boundCandidate,
+          challengeId: challenge.challengeId, responseJson }),
+        { kind: "trustRequest", candidateSha256: candidatePreview.candidateSha256 }, "trust change request");
       setNotice(`Request ${result.id} is pending independent review; trust is unchanged.`);
+      setCandidatePreview(null); setPreviewedIntent("");
     });
   }
 
   async function reviewChange(change, decision) {
     await run(async () => {
-      if (!window.confirm(`${decision} exact change ${change.id} / ${change.intentSha256}? This does not activate trust.`)) return;
+      if (!reviewCandidate || reviewCandidate.requestId !== change.id
+          || reviewCandidate.candidateSha256 !== change.candidateSha256) {
+        throw new Error("Inspect the exact stored candidate diff before reviewing.");
+      }
+      const current = await apiClient.getPolicyTrustCandidate(change.id);
+      if (current.candidateSha256 !== reviewCandidate.candidateSha256
+          || current.requestStatus !== "PENDING_REVIEW") {
+        throw new Error("Trust candidate changed or is no longer pending.");
+      }
+      if (!window.confirm(`${decision} the displayed exact candidate ${current.candidateSha256}? This does not activate trust.`)) return;
       const operationId = id();
       const challenge = await apiClient.startPolicyTrustReview(change.id, { operationId, decision });
       const responseJson = await confirmPolicyAssertion(challenge.optionsJson);
-      const result = await apiClient.finishPolicyTrustReview(change.id,
-        { decision, challengeId: challenge.challengeId, responseJson });
+      const result = await settleSigned(operationId,
+        () => apiClient.finishPolicyTrustReview(change.id,
+          { decision, challengeId: challenge.challengeId, responseJson }),
+        { kind: "trustReview", requestId: change.id, decision },
+        "trust change review");
       setNotice(`Change ${result.id}: ${result.status}. Deployment acknowledgement is still required.`);
+      setReviewCandidate(null);
     });
   }
 
@@ -130,7 +302,9 @@ export function PolicySecurityPage({ apiClient, enabled }) {
     <h2>Settings / Security &amp; Operations</h2>
     <p>Institutional actions require a registered passkey and dedicated mandates. Approval is not deployment.</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <button type="button" disabled={busy} onClick={() => run(async () => {})}>Refresh security state</button>
+    {uncertain && <p role="status">Operation {uncertain.operationId} is unresolved. Its passkey assertion is not retained.
+      <button type="button" disabled={busy} onClick={checkUncertain}>Check durable security receipt</button></p>}
+    <button type="button" disabled={busy} onClick={() => refresh().catch((failure) => setError(explain(failure)))}>Refresh security state</button>
 
     {can(actor, POLICY.CREDENTIAL_ENROLL) && <section className="panel"><h3>Security &amp; signing devices</h3>
       <ul>{credentials.map((device) => <li key={device.credentialId}>
@@ -147,16 +321,23 @@ export function PolicySecurityPage({ apiClient, enabled }) {
           })}>Save label</button>
         {device.status === "ACTIVE" && <button type="button" disabled={busy} onClick={() => revoke(device)}>Revoke with passkey</button>}
       </li>)}</ul>
-      <label>Independent enrollment grant <input value={grantToken} onChange={(event) => setGrantToken(event.target.value)} /></label>
-      <button type="button" disabled={busy || !grantToken.trim()} onClick={enroll}>Enroll new passkey</button>
+      <h4>Approved grants for this account</h4>
+      <ul>{myGrants.map((entry) => <li key={entry.requestId}>
+        {entry.purpose} / {entry.caseReference} / expires {entry.expiresAt}
+        <button type="button" disabled={busy || entry.alreadyClaimed || !!grantToken} onClick={() => claimGrant(entry)}>
+          {entry.purpose.endsWith("REVOCATION") ? "Claim for revocation" : "Claim and enroll passkey"}
+        </button>
+      </li>)}</ul>
+      {grantToken && !claimedPurpose?.endsWith("REVOCATION") && <button type="button" disabled={busy} onClick={() => run(() => enrollWithToken(grantToken))}>
+        Retry passkey enrollment with this claimed grant</button>}
       <h4>Lost-device or compromise recovery</h4>
       <p>A separate credential administrator must request and independently approve a short-lived grant.</p>
       <label>Credential ID <input value={lostId} onChange={(event) => setLostId(event.target.value)} /></label>
       <label><input type="checkbox" checked={compromised} onChange={(event) => setCompromised(event.target.checked)} /> Compromised (blocks historical reliance)</label>
-      <button type="button" disabled={busy || !lostId || !grantToken.trim()} onClick={() => run(async () => {
+      <button type="button" disabled={busy || !lostId || !grantToken} onClick={() => run(async () => {
         await apiClient.protectedPolicyCredentialRevocation(lostId,
-          { grantToken: grantToken.trim(), compromised });
-        setGrantToken(""); setLostId(""); setNotice("Protected revocation completed.");
+          { grantToken, compromised });
+        setGrantToken(""); setClaimedPurpose(null); setLostId(""); setNotice("Protected revocation completed.");
       })}>Revoke with recovery grant</button>
       <h4>Recent security decisions</h4>
       <ul>{events.map((event) => <li key={event.id}>{event.action} — {event.credentialId || "—"} — {event.occurredAt}</li>)}</ul>
@@ -175,9 +356,23 @@ export function PolicySecurityPage({ apiClient, enabled }) {
       })}>Request grant</button>
       <label>Request ID for independent approval <input value={approvalId} onChange={(e) => setApprovalId(e.target.value)} /></label>
       <button type="button" disabled={busy || !approvalId} onClick={() => run(async () => {
-        const issued = await apiClient.approvePolicyCredentialGrant(approvalId);
-        setNotice(`One-time grant token (copy now): ${issued.token}`);
-      })}>Approve grant</button>
+        setGrantReview(await apiClient.getPolicyCredentialGrantReview(approvalId));
+      })}>Inspect grant request</button>
+      {grantReview && <div><p>Request {grantReview.requestId}: {grantReview.purpose} for
+        {" "}{grantReview.targetIssuer} / {grantReview.targetSubject}; requested by {grantReview.requestedBy};
+        case {grantReview.caseReference}; expires {grantReview.expiresAt}.</p>
+        <button type="button" disabled={busy || grantReview.approved || grantReview.rejected}
+          onClick={() => reviewGrant("APPROVE")}>Approve with passkey</button>
+        <button type="button" disabled={busy || grantReview.approved || grantReview.rejected}
+          onClick={() => reviewGrant("REJECT")}>Reject with passkey</button>
+        {grantReview.purpose === "FIRST" && !grantReview.approved && !grantReview.rejected &&
+          <button type="button" disabled={busy} onClick={() => run(async () => {
+            if (!window.confirm("Use an exact protected first-install authorization for this request?")) return;
+            await apiClient.bootstrapPolicyCredentialGrant(grantReview.requestId);
+            setGrantReview(null);
+            setNotice("Protected first-install authorization consumed. The target can claim the grant.");
+          })}>Approve with protected first-install authority</button>}
+      </div>}
     </section>}
 
     {can(actor, POLICY.TRUST_READ) && <><section className="panel"><h3>Institutional mandates &amp; public trust</h3>
@@ -196,23 +391,34 @@ export function PolicySecurityPage({ apiClient, enabled }) {
           {change.id}: {change.intent.registry} {change.intent.action} / {change.status} / generation {change.intent.requestedGeneration}
           <button type="button" disabled={busy} onClick={() => run(async () => { setAudit(await apiClient.getPolicyTrustChangeAudit(change.id)); })}>Audit</button>
           <button type="button" disabled={busy} onClick={() => run(async () => { setDeployment(await apiClient.getPolicyTrustDeployment(change.id)); })}>Deployment</button>
+          <button type="button" disabled={busy} onClick={() => run(async () => {
+            setReviewCandidate(await apiClient.getPolicyTrustCandidate(change.id));
+          })}>Inspect candidate diff</button>
           {change.status === "PENDING_REVIEW" && can(actor, POLICY.TRUST_APPROVE) && change.requestedBy !== actor.actorId && <>
-            <button type="button" disabled={busy} onClick={() => reviewChange(change, "APPROVE")}>Approve with passkey</button>
-            <button type="button" disabled={busy} onClick={() => reviewChange(change, "REJECT")}>Reject with passkey</button>
+            <button type="button" disabled={busy || reviewCandidate?.requestId !== change.id} onClick={() => reviewChange(change, "APPROVE")}>Approve displayed candidate with passkey</button>
+            <button type="button" disabled={busy || reviewCandidate?.requestId !== change.id} onClick={() => reviewChange(change, "REJECT")}>Reject displayed candidate with passkey</button>
           </>}
         </li>)}</ul>
+        {reviewCandidate && <TrustCandidateDiff candidate={reviewCandidate} />}
         {audit.length > 0 && <ol>{audit.map((entry) => <li key={entry.id}>{entry.action} by {entry.actorId} at {entry.occurredAt}</li>)}</ol>}
         {deployment && <div><h4>Deployment of {deployment.requestId}</h4>
-          <p>{deployment.rolloutState}; requested generation {deployment.requestedGeneration}; candidate digest {deployment.candidateRegistrySha256}; consistent observed generation {deployment.consistentObservedGeneration ?? "unconfirmed"}; consistent observed digest {deployment.consistentObservedRegistrySha256 || "unconfirmed"}; rollback floor {deployment.rollbackFloor}</p>
+          <p>Review: {deployment.requestStatus}; rollout: {deployment.rolloutState}; activation: {deployment.activationConfirmed ? "confirmed" : "not confirmed"}.</p>
+          <p>Approved candidate: {deployment.registry}, generation {deployment.requestedGeneration}, digest {deployment.candidateRegistrySha256}; rollback floor {deployment.rollbackFloor}.</p>
+          <p>File visible to this API instance: generation {deployment.configuredFileGeneration ?? "unknown"}, digest {deployment.configuredFileDigestSha256 || "unknown"}. This file view does not prove a running verifier reloaded it.</p>
+          <p>Deployment ID: {deployment.deploymentId || "unknown"}; membership: {deployment.membershipEvidence || "unknown"}; evidence: {deployment.observationEvidence || "unverified heartbeat"}.</p>
+          <p>consistent observed generation {deployment.consistentObservedGeneration ?? "unconfirmed"}; consistent observed digest {deployment.consistentObservedRegistrySha256 || "unconfirmed"}; mismatch reason: {deployment.mismatchReason || "none"}.</p>
+          <p>Expected instances: {(deployment.expectedInstances || []).map((member) => `${member.role}/${member.instanceId}`).join(", ") || "unknown"}.</p>
+          <p>Missing instances: {(deployment.missingInstances || []).map((member) => `${member.role}/${member.instanceId}`).join(", ") || "none"}; stale instances: {(deployment.staleInstances || []).map((member) => `${member.role}/${member.instanceId}`).join(", ") || "none"}; mismatched instances: {(deployment.mismatchedInstances || []).map((member) => `${member.role}/${member.instanceId}`).join(", ") || "none"}.</p>
+          <p>Operator action: install the approved exact manifest on every expected instance, restart each process, check loaded trust and investigate missing, stale or mismatched reports. Approval alone does not activate trust.</p>
           {deployment.observationSetTruncated && <p>Observation list is truncated to the latest 100 records; consistency is not established.</p>}
-          <ul>{deployment.acknowledgements.map((ack) => <li key={`${ack.role}:${ack.instanceId}`}>
-            {ack.role} / {ack.instanceId}: generation {ack.generation}, digest {ack.digestSha256}, {ack.fresh ? "fresh" : "stale"}
+          <ul>{(deployment.acknowledgements || []).map((ack, index) => <li key={`${ack.role}:${ack.instanceId}:${ack.processEpoch || index}`}>
+            {ack.role} / {ack.instanceId}: generation {ack.generation}, digest {ack.digestSha256}, {ack.fresh ? "fresh" : "stale"}; process {ack.processEpoch || "unbound"}; {ack.reason || "unknown"}
           </li>)}</ul>
         </div>}
       </section></>}
 
     {can(actor, POLICY.TRUST_REQUEST) && <section className="panel"><h3>Request mandate or key change</h3>
-      <p>Submit a scoped proposed registry digest. Approval creates PENDING_OPERATOR_ACTION, not activation.</p>
+      <p>Preview the complete server-built candidate before signing. Approval creates PENDING_OPERATOR_ACTION, not activation.</p>
       <label>Registry <select value={intent.registry} onChange={(e) => setIntent({ ...intent, registry: e.target.value,
         action: e.target.value === "ONLINE_ACTORS" ? "GRANT" : "ADD" })}>
         {["ONLINE_ACTORS", "APPROVAL_KEYS", "ISSUER_KEYS"].map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -220,22 +426,60 @@ export function PolicySecurityPage({ apiClient, enabled }) {
         {(intent.registry === "ONLINE_ACTORS" ? ["GRANT", "REVOKE"] : ["ADD", "ROTATE", "RETIRE", "REVOKE"])
           .map((item) => <option key={item}>{item}</option>)}</select></label>
       {[["Target identity", "targetIdentity"], ["Roles (comma-separated)", "roles"],
-        ["Requested generation", "requestedGeneration"], ["Candidate registry SHA-256", "candidateRegistrySha256"],
         ["Case reference", "caseReference"]].map(([label, field]) => <label key={field}>{label}
         <input value={intent[field]} onChange={(e) => setIntent({ ...intent, [field]: e.target.value })} /></label>)}
+      {intent.registry === "ONLINE_ACTORS" && intent.action === "GRANT" && <>
+        {[["OIDC issuer", "targetIssuer"], ["OIDC subject", "targetSubject"],
+          ["Display name", "displayName"]].map(([label, field]) => <label key={field}>{label}
+          <input value={intent[field]} onChange={(e) => setIntent({ ...intent, [field]: e.target.value })} /></label>)}
+      </>}
       {intent.registry !== "ONLINE_ACTORS" && <>{[["Key ID", "keyId"], ["Public key SHA-256", "publicKeySha256"]].map(([label, field]) =>
         <label key={field}>{label}<input value={intent[field]} onChange={(e) => setIntent({ ...intent, [field]: e.target.value })} /></label>)}
         {["ADD", "ROTATE"].includes(intent.action) && <label>Public Ed25519 SPKI (base64)
           <input value={intent.publicKeySpkiBase64} onChange={(e) => setIntent({ ...intent, publicKeySpkiBase64: e.target.value })} /></label>}</>}
+      {intent.action === "ROTATE" && <label>Existing key ID to rotate
+        <input value={intent.replacesKeyId} onChange={(e) => setIntent({ ...intent, replacesKeyId: e.target.value })} /></label>}
+      {["ADD", "ROTATE", "GRANT"].includes(intent.action) && [["Effective from (UTC)", "validFrom"],
+        ["Expires at (UTC)", "validUntil"]].map(([label, field]) => <label key={field}>{label}
+        <input value={intent[field]} onChange={(e) => setIntent({ ...intent, [field]: e.target.value })} /></label>)}
+      {["RETIRE", "ROTATE"].includes(intent.action) && <label>Old key retirement cutoff (UTC)
+        <input value={intent.retireAt} onChange={(e) => setIntent({ ...intent, retireAt: e.target.value })} /></label>}
       <label>Environment <select value={intent.environment} onChange={(e) => setIntent({ ...intent, environment: e.target.value })}>
         {(can(actor, POLICY.PRODUCTION) ? ["DEVELOPMENT", "TEST", "PRODUCTION"] : ["DEVELOPMENT", "TEST"]).map((item) => <option key={item}>{item}</option>)}
       </select></label>
-      <button type="button" disabled={busy} onClick={submitChange}>Submit with passkey</button>
+      <button type="button" disabled={busy} onClick={previewChange}>Preview exact registry candidate</button>
+      {candidatePreview && <TrustCandidateDiff candidate={{ ...candidatePreview,
+        diff: candidatePreview.diff, requestStatus: "PREVIEW" }} />}
+      <button type="button" disabled={busy || !candidatePreview} onClick={submitChange}>Sign displayed candidate with passkey</button>
     </section>}
     <section className="panel"><h3>Operations</h3>
       {operations ? <><p>Blocked publication jobs: {operations.blockedPublicationJobs ?? "unknown"}; signing worker: {operations.signingWorkerAvailability}; Mongo transaction capability: {operations.mongoTransactionReadiness}; OIDC/WebAuthn: {operations.oidcWebAuthnConfiguration}; trust instances: {operations.trustRegistryConsistency}.</p>
         <p>Observations are operational signals, not proof of protected deployment or complete instance inventory.</p></>
         : <p>Diagnostics require production trust-read mandate. Worker, Mongo, OIDC/WebAuthn and cross-instance consistency are UNKNOWN here.</p>}
     </section>
+  </section>;
+}
+
+function TrustCandidateDiff({ candidate }) {
+  const diff = candidate.diff || {};
+  const before = diff.existingEntry;
+  const after = diff.proposedEntry;
+  const describe = (entry) => entry ? <>
+    <p>Identity {entry.identity || entry.issuerIdentity || entry.actorId}; key {entry.keyId || "OIDC actor"};
+      fingerprint {entry.publicKeySha256 || "none"}; status {entry.status}</p>
+    <p>Roles {(entry.roles || (candidate.registry === "ISSUER_KEYS" ? ["POLICY_ISSUER"] : [])).join(", ")}; environments {(entry.environments || []).join(", ")};
+      scopes {(entry.institutionalScopes || []).join(", ")}; uses {(entry.intendedUses || []).join(", ")}</p>
+    <p>Effective {entry.validFrom}; expires {entry.validUntil}</p>
+  </> : <p>None</p>;
+  return <section className="panel" aria-label="Exact trust candidate diff">
+    <h4>{candidate.reviewSummary || `${diff.action} ${diff.targetIdentity}`}</h4>
+    <p>Base generation {candidate.baseGeneration}; base SHA-256 {candidate.baseSha256}</p>
+    <p>Candidate generation {candidate.candidateGeneration}; exact SHA-256 {candidate.candidateSha256}</p>
+    <h5>Existing entry</h5>{describe(before)}
+    {diff.updatedExistingEntry && <><h5>Existing entry after change</h5>{describe(diff.updatedExistingEntry)}</>}
+    <h5>Proposed entry</h5>{describe(after)}
+    <p>Authorities removed: {(diff.removedAuthorities || []).join(", ") || "none"};
+      authorities added: {(diff.addedAuthorities || []).join(", ") || "none"}.</p>
+    <p>Unexpected differences: none in the server-built single-action candidate.</p>
   </section>;
 }

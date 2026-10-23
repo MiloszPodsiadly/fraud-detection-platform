@@ -20,6 +20,9 @@ export function ShadowPerformanceWorkspaceRuntime({
     canApproveModelPromotion,
     canRejectModelPromotion,
     canRetireModelPromotion,
+    canRequestEmergencyModelRetirement,
+    canAuthorizeEmergencyModelRetirement,
+    canAuditEmergencyModelRetirement,
     canReadModelCard,
     canReadPromotionReadiness,
     canReadShadowPerformance
@@ -67,6 +70,9 @@ export function ShadowPerformanceWorkspaceRuntime({
         canApproveModelPromotion={canApproveModelPromotion}
         canRejectModelPromotion={canRejectModelPromotion}
         canRetireModelPromotion={canRetireModelPromotion}
+        canRequestEmergencyModelRetirement={canRequestEmergencyModelRetirement}
+        canAuthorizeEmergencyModelRetirement={canAuthorizeEmergencyModelRetirement}
+        canAuditEmergencyModelRetirement={canAuditEmergencyModelRetirement}
       />
     ),
     error: summaryState.error,

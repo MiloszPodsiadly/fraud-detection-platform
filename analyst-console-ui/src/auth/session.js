@@ -56,6 +56,8 @@ export const ROLE_AUTHORITIES = {
   ],
   FRAUD_OPS_ADMIN: Object.values(AUTHORITIES).filter((authority) =>
     authority !== AUTHORITIES.MODEL_PROMOTION_SCOPE_PRODUCTION
+      && authority !== AUTHORITIES.MODEL_PROMOTION_EMERGENCY_REQUEST
+      && authority !== AUTHORITIES.MODEL_PROMOTION_EMERGENCY_AUTHORIZE
       && !authority.startsWith(MODEL_POLICY_AUTHORITY_PREFIX))
 };
 

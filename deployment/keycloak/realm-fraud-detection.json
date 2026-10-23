@@ -144,6 +144,9 @@
       "name": "model-policy-author"
     },
     {
+      "name": "model-policy-reader"
+    },
+    {
       "name": "model-policy-approver"
     },
     {
@@ -166,6 +169,18 @@
     },
     {
       "name": "model-policy-trust-approver"
+    },
+    {
+      "name": "model-promotion-emergency-requester"
+    },
+    {
+      "name": "model-promotion-emergency-authorizer"
+    },
+    {
+      "name": "model-promotion-retirement-operator"
+    },
+    {
+      "name": "model-promotion-production"
     }
   ],
   "users": [
@@ -332,6 +347,44 @@
       "requiredActions": [],
       "credentials": [{ "type": "password", "value": "policy-security-c", "temporary": false }],
       "groups": ["model-policy-credential-admin", "model-policy-credential-holder"]
+    },
+    {
+      "id": "34d6645e-5fd7-44c2-ae66-1e9f4fc45483",
+      "username": "model-retirement-requester",
+      "enabled": true,
+      "firstName": "Model Retirement",
+      "lastName": "Requester",
+      "email": "model-retirement-requester@example.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "model-retirement-requester", "temporary": false }],
+      "groups": ["fraud-reviewer", "model-promotion-retirement-operator",
+        "model-promotion-emergency-requester", "model-promotion-production"]
+    },
+    {
+      "id": "a26c823c-19b8-4fd0-9301-449f5c9ab244",
+      "username": "model-retirement-authorizer",
+      "enabled": true,
+      "firstName": "Model Retirement",
+      "lastName": "Authorizer",
+      "email": "model-retirement-authorizer@example.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "model-retirement-authorizer", "temporary": false }],
+      "groups": ["fraud-readonly-analyst", "model-promotion-emergency-authorizer",
+        "model-promotion-production"]
+    },
+    {
+      "id": "bcfa93ab-817e-49ca-b172-d31812f771de",
+      "username": "model-retirement-auditor",
+      "enabled": true,
+      "firstName": "Model Retirement",
+      "lastName": "Auditor",
+      "email": "model-retirement-auditor@example.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "model-retirement-auditor", "temporary": false }],
+      "groups": ["fraud-readonly-analyst", "model-policy-reader", "model-promotion-production"]
     }
   ]
 }
