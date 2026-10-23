@@ -126,6 +126,35 @@ class OidcAnalystAuthoritiesMapperTest {
                 .doesNotContain(ModelPolicyAuthority.PRODUCTION);
     }
 
+    @Test
+    void emergencyRetirementMandatesAreAbsentFromGeneralReviewerAndFraudOpsAdmin() {
+        JwtSecurityProperties properties = new JwtSecurityProperties(true, false,
+                "https://issuer.example/realm", "", "sub", "groups",
+                Map.of("fraud-reviewer", AnalystRole.REVIEWER,
+                        "fraud-ops-admin", AnalystRole.FRAUD_OPS_ADMIN),
+                Set.of("model-promotion-production"));
+        OidcAnalystAuthoritiesMapper mapper = new OidcAnalystAuthoritiesMapper(properties, null,
+                new ModelPolicyIamMapping(Map.of(
+                        "model-promotion-emergency-requester",
+                        Set.of(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_REQUEST),
+                        "model-promotion-emergency-authorizer",
+                        Set.of(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE),
+                        "model-promotion-retirement-operator", Set.of(AnalystAuthority.MODEL_PROMOTION_RETIRE))));
+        assertThat(mapper.mapAuthorities(List.of(new OidcUserAuthority(
+                token(List.of("fraud-reviewer", "fraud-ops-admin", "model-promotion-production"))))).stream()
+                .map(GrantedAuthority::getAuthority))
+                .doesNotContain(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_REQUEST,
+                        AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE);
+        assertThat(mapper.mapAuthorities(List.of(new OidcUserAuthority(token(List.of(
+                "fraud-reviewer", "model-promotion-retirement-operator",
+                "model-promotion-emergency-requester", "model-promotion-production"))))).stream()
+                .map(GrantedAuthority::getAuthority))
+                .contains(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_REQUEST,
+                        AnalystAuthority.MODEL_PROMOTION_RETIRE,
+                        AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION)
+                .doesNotContain(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE);
+    }
+
     private OidcIdToken token(List<String> groups) {
         return new OidcIdToken("id-token-value", Instant.now(), Instant.now().plusSeconds(300),
                 Map.of("sub", "operator-1", "groups", groups));

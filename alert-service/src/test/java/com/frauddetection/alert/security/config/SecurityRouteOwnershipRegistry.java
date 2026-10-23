@@ -77,6 +77,20 @@ final class SecurityRouteOwnershipRegistry {
                 "GovernanceAuthorizationRules");
         route(routes, "POST", "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/signed",
                 "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/operations/{operationId}",
+                "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/emergency-authorizations",
+                "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/emergency",
+                "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}",
+                "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/audit",
+                "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/approve",
+                "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/revoke",
+                "GovernanceAuthorizationRules");
         policyGovernanceRoutes(routes, "/api/v1/governance/model-policies");
         route(routes, "GET", "/api/v1/governance/policy-security/me", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-security/operations", "GovernanceAuthorizationRules");
@@ -84,6 +98,9 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "GET", "/api/v1/governance/policy-trust/requests", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-trust/requests/{id}/audit", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-trust/requests/{id}/deployment", "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/policy-trust/requests/{id}/candidate", "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/policy-trust/requests/{id}/installation", "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/policy-trust/requests/preview", "GovernanceAuthorizationRules");
         route(routes, "POST", "/api/v1/governance/policy-trust/requests/challenges", "GovernanceAuthorizationRules");
         route(routes, "POST", "/api/v1/governance/policy-trust/requests", "GovernanceAuthorizationRules");
         route(routes, "POST", "/api/v1/governance/policy-trust/requests/{id}/reviews/challenges", "GovernanceAuthorizationRules");
@@ -153,7 +170,13 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "POST", base + "/webauthn/credentials/{credentialId}/revoke", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/webauthn/credentials/{credentialId}/protected-revoke", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/webauthn/enrollment-grants", "GovernanceAuthorizationRules");
-        route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/approvals", "GovernanceAuthorizationRules");
+        route(routes, "GET", base + "/webauthn/enrollment-grants/mine", "GovernanceAuthorizationRules");
+        route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/claim", "GovernanceAuthorizationRules");
+        route(routes, "GET", base + "/webauthn/enrollment-grants/{id}/review", "GovernanceAuthorizationRules");
+        route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/review/challenges", "GovernanceAuthorizationRules");
+        route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/review", "GovernanceAuthorizationRules");
+        route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/bootstrap-approval", "GovernanceAuthorizationRules");
+        route(routes, "GET", base + "/webauthn/enrollment-grants/{id}/evidence", "GovernanceAuthorizationRules");
     }
 
     private static void route(List<RouteOwnership> routes, String method, String pattern, String owner) {

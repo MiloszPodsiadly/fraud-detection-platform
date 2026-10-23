@@ -146,7 +146,7 @@ class ModelPromotionWorkflowServiceTest {
     }
 
     @Test
-    void unsignedProductionReviewIsDeniedExceptSeparatelyAuthorizedEmergencyRetirement() {
+    void unsignedProductionReviewAndFormattedEmergencyRationaleAreDenied() {
         ModelPromotionProposalDocument ordinary = pendingProposal("proposer", ModelGovernanceEnvironment.PRODUCTION);
         when(store.findProposal(ordinary.proposalId())).thenReturn(Optional.of(ordinary));
         authenticate("reviewer", Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE,
@@ -163,15 +163,14 @@ class ModelPromotionWorkflowServiceTest {
                 "retirement-approval", ModelPromotionApproval.Outcome.APPROVED,
                 "retirement-review", rationale, ModelPromotionDecisionRationale.sha256(rationale));
         assertThatThrownBy(() -> service.reviewProposal(emergency))
-                .isInstanceOf(ModelPromotionWorkflowBlockedException.class);
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("WebAuthn");
         authenticate("reviewer", Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE,
                 AnalystAuthority.MODEL_PROMOTION_RETIRE,
                 AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION), Set.of());
-        when(store.reviewProposal(any(), any())).thenAnswer(invocation -> {
-            ((Runnable) invocation.getArgument(1)).run();
-            return retirement.toResult(false);
-        });
-        assertThat(service.reviewProposal(emergency)).isNotNull();
+        assertThatThrownBy(() -> service.reviewProposal(emergency))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("WebAuthn");
     }
 
     @Test

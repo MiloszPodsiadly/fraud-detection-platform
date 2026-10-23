@@ -115,6 +115,14 @@ protected deployment control. An attacker able to roll back **both** the registr
 application check. The repository cannot itself provide immutable configuration, fleet-wide monotonicity or timely
 restart of all service instances.
 
+The policy-trust API records signed maker and independent reviewer decisions for exact candidate files; approval
+does not install a file. Compose declares the expected alert verifier and publisher identities for a rollout.
+Each process reports the trust loaded into its verifier or publisher, while deployment diagnostics also compare
+the API's configured file. Missing, stale, duplicated or mismatched observations prevent an observed-consistent
+status, and the publisher pauses new signatures while its declared fleet disagrees. Mongo heartbeats and the
+declared inventory are not independent proof that every capable process was discovered or activated; the system
+does not report `ACTIVATION_CONFIRMED`. See [trust operations](../operations/model_promotion_trust_operations.md).
+
 Use the following controlled sequence, with institutional governance ownership and change records:
 
 1. Generate a new Ed25519 signing key under separately controlled offline custody (a future KMS/HSM integration is

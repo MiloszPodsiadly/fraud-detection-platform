@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.Map;
@@ -30,7 +31,7 @@ class ModelPromotionSignedReviewServiceTest {
     private final PolicyWebAuthnService webAuthn = mock(PolicyWebAuthnService.class);
     private final MongoTemplate mongo = mock(MongoTemplate.class);
     private final ModelPromotionSignedReviewService service = new ModelPromotionSignedReviewService(
-            store, authorization, workflow, webAuthn, mongo);
+            store, authorization, workflow, webAuthn, mongo, new tools.jackson.databind.ObjectMapper());
     private final ExactModelArtifactIdentity identity = new ExactModelArtifactIdentity(
             "fraud_model", "v1", "features_v1", "a".repeat(64));
     private final ModelGovernanceScope scope = new ModelGovernanceScope(
@@ -102,6 +103,33 @@ class ModelPromotionSignedReviewServiceTest {
         when(mongo.findById(challengeId, ModelPromotionWebAuthnReviewEvidence.class)).thenReturn(receipt);
         assertThatThrownBy(() -> service.finish(reviewer, "proposal-1",
                 new ModelPromotionSignedReviewService.SignedReview(intent, challengeId, "changed-assertion")))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void receiptLookupRequiresExactOperationAndOriginalReviewer() {
+        var approval = mock(ModelPromotionApproval.class);
+        var approvalRationale = mock(ModelPromotionDecisionRationale.class);
+        when(proposal.reviewOperationId()).thenReturn("review-1");
+        when(proposal.approval()).thenReturn(approval);
+        when(approval.outcome()).thenReturn(ModelPromotionApproval.Outcome.APPROVED);
+        when(approval.approvedBy()).thenReturn(reviewer.subject());
+        when(approval.approvalId()).thenReturn("approval-1");
+        when(approval.rationale()).thenReturn(approvalRationale);
+        when(approvalRationale.sha256()).thenReturn(intent.rationaleSha256());
+        var evidence = new ModelPromotionWebAuthnReviewEvidence("model-promotion-review:review-1",
+                "proposal-1", "review-1", "approval-1", ModelPromotionApproval.Outcome.APPROVED,
+                intent.rationaleSha256(), reviewer.id(), reviewer.issuer(), reviewer.subject(),
+                "credential-1", "d".repeat(64), "e".repeat(64), 1, Instant.now());
+        when(mongo.findById(evidence.challengeId(), ModelPromotionWebAuthnReviewEvidence.class))
+                .thenReturn(evidence);
+        assertThat(service.receipt(reviewer, "proposal-1", "review-1").rationaleSha256())
+                .isEqualTo(intent.rationaleSha256());
+        assertThatThrownBy(() -> service.receipt(reviewer, "proposal-1", "other-operation"))
+                .isInstanceOf(ResponseStatusException.class);
+        var stranger = new PolicyGovernanceActor(PolicyGovernanceActor.identityId(
+                "https://issuer.example", "stranger"), Set.of(), "https://issuer.example", "stranger");
+        assertThatThrownBy(() -> service.receipt(stranger, "proposal-1", "review-1"))
                 .isInstanceOf(AccessDeniedException.class);
     }
 }

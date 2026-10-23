@@ -164,9 +164,25 @@ public class MongoModelPromotionStore {
             Runnable preconditionRevalidation,
             Runnable signedProofInTransaction
     ) {
+        return reviewProposal(review, preconditionRevalidation, signedProofInTransaction,
+                signedProofInTransaction == null ? ReviewEvidence.NONE : ReviewEvidence.WEBAUTHN);
+    }
+
+    enum ReviewEvidence { NONE, WEBAUTHN, INDEPENDENT_EMERGENCY_GRANT }
+
+    ModelPromotionProposalResult reviewProposal(
+            ModelPromotionProposalReview review,
+            Runnable preconditionRevalidation,
+            Runnable protectedEvidenceInTransaction,
+            ReviewEvidence evidenceKind
+    ) {
         requireTransactions();
         Objects.requireNonNull(review, "review is required");
         Objects.requireNonNull(preconditionRevalidation, "preconditionRevalidation is required");
+        if (evidenceKind == null || (evidenceKind == ReviewEvidence.NONE)
+                != (protectedEvidenceInTransaction == null)) {
+            throw new IllegalArgumentException("Review evidence kind and transaction callback differ");
+        }
         String reviewCommandSha256 = decisionValidator.reviewCommandSha256(review);
         Optional<ModelPromotionProposalResult> replay = replayProposalReview(
                 review.proposalId(), reviewCommandSha256, review.operationContext()
@@ -178,7 +194,7 @@ public class MongoModelPromotionStore {
                 review,
                 reviewCommandSha256,
                 () -> reviewProposalWithinTransaction(review, reviewCommandSha256,
-                        preconditionRevalidation, signedProofInTransaction)
+                        preconditionRevalidation, protectedEvidenceInTransaction, evidenceKind)
         );
     }
 
@@ -272,7 +288,8 @@ public class MongoModelPromotionStore {
             ModelPromotionProposalReview review,
             String reviewCommandSha256,
             Runnable preconditionRevalidation,
-            Runnable signedProofInTransaction
+            Runnable protectedEvidenceInTransaction,
+            ReviewEvidence evidenceKind
     ) {
         ModelPromotionProposalDocument proposal = mongoTemplate.findById(
                 review.proposalId(), ModelPromotionProposalDocument.class
@@ -309,10 +326,10 @@ public class MongoModelPromotionStore {
                 ModelPromotionOperationClaimDocument.OperationType.REVIEW_PROPOSAL
         );
         preconditionRevalidation.run();
-        if (signedProofInTransaction != null) signedProofInTransaction.run();
+        if (protectedEvidenceInTransaction != null) protectedEvidenceInTransaction.run();
 
         Instant reviewedAt = clock.instant();
-        ModelPromotionProposalReview committedReview = signedProofInTransaction == null
+        ModelPromotionProposalReview committedReview = protectedEvidenceInTransaction == null
                 ? review : acceptedReview(review, reviewedAt);
         if (committedReview.approval().outcome() == ModelPromotionApproval.Outcome.APPROVED) {
             DurableModelPromotionTransitionCommand transition = approvedTransition(proposal, committedReview);
@@ -331,11 +348,8 @@ public class MongoModelPromotionStore {
                     committedReview,
                     reviewCommandSha256,
                     ModelPromotionProposalDocument.ReviewStatus.APPROVED,
-                    signedProofInTransaction == null
-                            && proposal.transition().governanceScope().environment()
-                                    == ModelGovernanceEnvironment.PRODUCTION
-                            && proposal.transition().requestedTargetState() == ModelPromotionLifecycleState.RETIRED
-                            ? "BREAK_GLASS_RETIRE_MODEL_PROMOTION_PROPOSAL"
+                    evidenceKind == ReviewEvidence.INDEPENDENT_EMERGENCY_GRANT
+                            ? "EMERGENCY_RETIRE_MODEL_PROMOTION_PROPOSAL"
                             : "APPROVE_MODEL_PROMOTION_PROPOSAL",
                     reviewedAt
             );

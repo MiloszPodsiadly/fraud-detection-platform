@@ -27,6 +27,9 @@ public final class AnalystAuthority {
     public static final String MODEL_PROMOTION_APPROVE = "model-promotion:approve";
     public static final String MODEL_PROMOTION_REJECT = "model-promotion:reject";
     public static final String MODEL_PROMOTION_RETIRE = "model-promotion:retire";
+    /** Issued only by explicit institutional IAM group mapping, never by analyst roles or demo auth. */
+    public static final String MODEL_PROMOTION_EMERGENCY_REQUEST = "model-promotion:emergency:request";
+    public static final String MODEL_PROMOTION_EMERGENCY_AUTHORIZE = "model-promotion:emergency:authorize";
     public static final String MODEL_PROMOTION_SCOPE_DEVELOPMENT = "model-promotion:scope:development";
     public static final String MODEL_PROMOTION_SCOPE_TEST = "model-promotion:scope:test";
     public static final String MODEL_PROMOTION_SCOPE_PRODUCTION = "model-promotion:scope:production";

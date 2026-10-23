@@ -164,10 +164,21 @@ public class ModelPromotionWorkflowService {
     }
 
     public ModelPromotionProposalResult reviewProposal(ReviewRequest request) {
-        return reviewProposal(request, null);
+        return reviewProposalInternal(request, null, false);
     }
 
     ModelPromotionProposalResult reviewProposal(ReviewRequest request, Runnable signedProofInTransaction) {
+        return reviewProposalInternal(request, signedProofInTransaction, false);
+    }
+
+    ModelPromotionProposalResult reviewEmergencyRetirement(ReviewRequest request,
+            Runnable emergencyGrantInTransaction) {
+        Objects.requireNonNull(emergencyGrantInTransaction, "Emergency authorization consumption is required");
+        return reviewProposalInternal(request, emergencyGrantInTransaction, true);
+    }
+
+    private ModelPromotionProposalResult reviewProposalInternal(ReviewRequest request,
+            Runnable protectedEvidenceInTransaction, boolean emergency) {
         Objects.requireNonNull(request, "request is required");
         ModelPromotionProposalDocument proposal = store.findProposal(request.proposalId())
                 .orElseThrow(() -> new ModelPromotionWorkflowBlockedException(
@@ -189,8 +200,19 @@ public class ModelPromotionWorkflowService {
                     "A model promotion proposer cannot review their own proposal"
             );
         }
+        if (emergency) {
+            if (request.outcome() != ModelPromotionApproval.Outcome.APPROVED
+                    || proposal.transition().requestedTargetState() != ModelPromotionLifecycleState.RETIRED
+                    || proposal.transition().governanceScope().environment()
+                            != ModelGovernanceEnvironment.PRODUCTION) {
+                throw new ModelPromotionPersistenceConflictException(
+                        "Emergency authorization is only for production model retirement");
+            }
+            authorization.requireAuthority(AnalystAuthority.MODEL_PROMOTION_RETIRE,
+                    proposal.transition().governanceScope());
+        }
         if (proposal.transition().governanceScope().environment() == ModelGovernanceEnvironment.PRODUCTION
-                && signedProofInTransaction == null && !isEmergencyRetirement(request, proposal)) {
+                && protectedEvidenceInTransaction == null) {
             throw new ModelPromotionPersistenceConflictException(
                     "Production model promotion review requires a bound WebAuthn assertion");
         }
@@ -218,21 +240,11 @@ public class ModelPromotionWorkflowService {
                 actor.operationContext(),
                 request.outcome()
         );
-        return signedProofInTransaction == null
+        return protectedEvidenceInTransaction == null
                 ? store.reviewProposal(review, revalidate)
-                : store.reviewProposal(review, revalidate, signedProofInTransaction);
-    }
-
-    private boolean isEmergencyRetirement(ReviewRequest request, ModelPromotionProposalDocument proposal) {
-        if (proposal.transition().requestedTargetState() != ModelPromotionLifecycleState.RETIRED
-                || request.outcome() != ModelPromotionApproval.Outcome.APPROVED
-                || request.rationale() == null
-                || !request.rationale().matches("(?s)^BREAK_GLASS:[A-Za-z0-9._-]{6,64}:.{20,}$")) {
-            return false;
-        }
-        authorization.requireAuthority(AnalystAuthority.MODEL_PROMOTION_RETIRE,
-                proposal.transition().governanceScope());
-        return true;
+                : store.reviewProposal(review, revalidate, protectedEvidenceInTransaction,
+                        emergency ? MongoModelPromotionStore.ReviewEvidence.INDEPENDENT_EMERGENCY_GRANT
+                                : MongoModelPromotionStore.ReviewEvidence.WEBAUTHN);
     }
 
     public Optional<ModelPromotionAggregate> currentState(StateRequest request) {

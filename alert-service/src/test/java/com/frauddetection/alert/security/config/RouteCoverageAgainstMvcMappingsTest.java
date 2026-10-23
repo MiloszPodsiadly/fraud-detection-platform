@@ -48,7 +48,9 @@ import com.frauddetection.alert.governance.modelcard.ModelCardController;
 import com.frauddetection.alert.governance.modelcard.ModelCardReadService;
 import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiController;
 import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionSignedReviewController;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionEmergencyRetirementController;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionSignedReviewService;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionEmergencyRetirementService;
 import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectory;
 import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectoryController;
 import com.frauddetection.alert.governance.modelpromotion.PolicyPublicationRecoveryService;
@@ -63,6 +65,7 @@ import com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySna
 import org.springframework.data.mongodb.core.MongoTemplate;
 import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantController;
 import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialGrantReviewService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusController;
 import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationRecoveryController;
@@ -156,6 +159,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         ExactModelShadowPerformanceController.class,
         ModelPromotionApiController.class,
         ModelPromotionSignedReviewController.class,
+        ModelPromotionEmergencyRetirementController.class,
         PolicyGovernanceController.class,
         PolicySecurityActorController.class,
         PolicySecurityOperationsController.class,
@@ -300,6 +304,9 @@ class RouteCoverageAgainstMvcMappingsTest {
     private ModelPromotionSignedReviewService modelPromotionSignedReviewService;
 
     @MockitoBean
+    private ModelPromotionEmergencyRetirementService modelPromotionEmergencyRetirementService;
+
+    @MockitoBean
     private ModelPromotionApiRateLimiter modelPromotionApiRateLimiter;
 
     @MockitoBean
@@ -310,6 +317,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockitoBean
     private PolicyCredentialEnrollmentGrantService policyCredentialEnrollmentGrantService;
+
+    @MockitoBean
+    private PolicyCredentialGrantReviewService policyCredentialGrantReviewService;
 
     @MockitoBean
     private PolicyPublicationStatusService policyPublicationStatusService;

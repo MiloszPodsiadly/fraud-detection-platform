@@ -74,6 +74,8 @@ model-shadow-performance:
 
 app:
   model-promotion:
+    credential-bootstrap:
+      path: ${MODEL_PROMOTION_CREDENTIAL_BOOTSTRAP_PATH:}
     trusted-issuers:
       path: ${MODEL_PROMOTION_TRUSTED_ISSUERS_PATH:}
       minimum-generation: ${MODEL_PROMOTION_TRUST_MIN_GENERATION:1}
@@ -214,6 +216,9 @@ app:
         model-policy-production: ["model-policy:scope:production"]
         model-policy-trust-requester: ["model-policy:trust:read", "model-policy:trust:request"]
         model-policy-trust-approver: ["model-policy:trust:read", "model-policy:trust:approve"]
+        model-promotion-emergency-requester: ["model-promotion:emergency:request"]
+        model-promotion-emergency-authorizer: ["model-promotion:emergency:authorize"]
+        model-promotion-retirement-operator: ["model-promotion:retire"]
   model-policy-webauthn:
     rp-id: ${APP_MODEL_POLICY_WEBAUTHN_RP_ID:localhost}
     origin: ${APP_MODEL_POLICY_WEBAUTHN_ORIGIN:http://localhost:4173}

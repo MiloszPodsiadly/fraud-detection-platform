@@ -10,6 +10,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -45,6 +46,15 @@ public class ModelPromotionSignedReviewController {
         requireRateLimit(authentication);
         return api.fromSignedReviewResult(signedReviews.finish(
                 PolicyGovernanceActor.fromOidcSession(authentication), proposalId, request));
+    }
+
+    @GetMapping("/operations/{operationId}")
+    public ModelPromotionSignedReviewService.ReviewReceipt receipt(Authentication authentication,
+            @PathVariable @NotBlank @Pattern(regexp = PROPOSAL_ID) String proposalId,
+            @PathVariable @NotBlank @Pattern(regexp = "^[A-Za-z0-9._:-]{1,128}$") String operationId) {
+        requireRateLimit(authentication);
+        return signedReviews.receipt(PolicyGovernanceActor.fromOidcSession(authentication),
+                proposalId, operationId);
     }
 
     private void requireRateLimit(Authentication authentication) {

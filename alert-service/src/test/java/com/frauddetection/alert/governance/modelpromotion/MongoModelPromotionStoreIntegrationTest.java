@@ -1,16 +1,26 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
+import com.frauddetection.alert.governance.modelpolicy.GovernanceBoundWebAuthnProof;
+import com.frauddetection.alert.governance.modelpolicy.MongoPolicyGovernanceStore;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnCredential;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnCredentialRepository;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionCapabilityProbe;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
+import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.mongodb.MongoException;
+import com.upokecenter.cbor.CBORObject;
+import com.yubico.webauthn.AssertionRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
@@ -22,14 +32,26 @@ import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
+import java.security.Signature;
+import java.security.interfaces.ECPublicKey;
+import java.util.Base64;
+import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -83,6 +105,143 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         if (databaseFactory != null) {
             databaseFactory.destroy();
         }
+    }
+
+    @Test
+    void committedSignedReviewIsCryptographicallyVerifiableAfterServiceRestart() throws Exception {
+        ExactModelArtifactIdentity identity = identity("8");
+        ModelGovernanceScope scope = scope("TEST");
+        store.registerCandidate(registration(identity, scope, "register-signed-review"));
+        store.submitProposal(proposal(identity, scope, "propose-signed-review", "proposal-signed-review", "maker"));
+        store.submitProposal(proposal(identity, scope, "propose-stale-review", "proposal-stale-review", "maker-2"));
+
+        String issuer = "https://issuer.example";
+        String subject = "reviewer";
+        String actorId = PolicyGovernanceActor.identityId(issuer, subject);
+        PolicyGovernanceActor reviewer = new PolicyGovernanceActor(actorId, Set.of(), issuer, subject);
+        var keyPairGenerator = KeyPairGenerator.getInstance("EC");
+        keyPairGenerator.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"));
+        var keyPair = keyPairGenerator.generateKeyPair();
+        var publicKey = (ECPublicKey) keyPair.getPublic();
+        String credentialId = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("signed-review-key".getBytes(StandardCharsets.UTF_8));
+        String userHandle = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(java.util.HexFormat.of().parseHex(actorId.substring(5)));
+        CBORObject cose = CBORObject.NewMap().Add(1, 2).Add(3, -7).Add(-1, 1)
+                .Add(-2, coseCoordinate(publicKey.getW().getAffineX()))
+                .Add(-3, coseCoordinate(publicKey.getW().getAffineY()));
+        mongoTemplate.insert(new PolicyWebAuthnCredential(credentialId, actorId, issuer, subject, userHandle,
+                Base64.getUrlEncoder().withoutPadding().encodeToString(cose.EncodeToBytes()),
+                0, false, NOW, NOW, "ACTIVE", "TEST", null, null, null, null));
+
+        MongoTransactionManager manager = new MongoTransactionManager(databaseFactory);
+        PolicyWebAuthnService webAuthn = new PolicyWebAuthnService(mongoTemplate, manager,
+                new PolicyWebAuthnCredentialRepository(mongoTemplate), null,
+                new MongoPolicyGovernanceStore(mongoTemplate, manager), null,
+                new ObjectMapper(), new MockEnvironment(), "localhost", "http://localhost:4173");
+        ModelPromotionAuthorization authorization = new ModelPromotionAuthorization(new CurrentAnalystUser());
+        ModelPromotionWorkflowService workflow = new ModelPromotionWorkflowService(store,
+                mock(ModelPromotionEvidenceResolver.class), mock(ModelPromotionAssessmentService.class),
+                mock(ModelPromotionPolicyResolver.class), authorization, Clock.fixed(NOW, ZoneOffset.UTC));
+        ModelPromotionSignedReviewService signed = new ModelPromotionSignedReviewService(store,
+                authorization, workflow, webAuthn, mongoTemplate, new ObjectMapper());
+        authenticate(subject, Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE,
+                AnalystAuthority.MODEL_PROMOTION_REJECT,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST));
+        var intent = new ModelPromotionSignedReviewService.ReviewIntent("approval-signed-review",
+                ModelPromotionApproval.Outcome.APPROVED, "review-signed-review", RATIONALE,
+                ModelPromotionDecisionRationale.sha256(RATIONALE));
+        var options = signed.start(reviewer, "proposal-signed-review", intent);
+        String challenge = AssertionRequest.fromJson(mongoTemplate.findById(options.challengeId(),
+                com.frauddetection.alert.governance.modelpolicy.GovernanceWebAuthnBoundChallenge.class)
+                .requestJson()).getPublicKeyCredentialRequestOptions().getChallenge().getBase64Url();
+        byte[] clientData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(Map.of(
+                "type", "webauthn.get", "challenge", challenge,
+                "origin", "http://localhost:4173", "crossOrigin", false));
+        byte[] authenticatorData = ByteBuffer.allocate(37)
+                .put(MessageDigest.getInstance("SHA-256").digest("localhost".getBytes(StandardCharsets.UTF_8)))
+                .put((byte) 0x05).putInt(1).array();
+        Signature signature = Signature.getInstance("SHA256withECDSA");
+        signature.initSign(keyPair.getPrivate());
+        signature.update(authenticatorData);
+        signature.update(MessageDigest.getInstance("SHA-256").digest(clientData));
+        var encoder = Base64.getUrlEncoder().withoutPadding();
+        String assertion = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of(
+                "id", credentialId, "rawId", credentialId, "type", "public-key",
+                "response", Map.of("clientDataJSON", encoder.encodeToString(clientData),
+                        "authenticatorData", encoder.encodeToString(authenticatorData),
+                        "signature", encoder.encodeToString(signature.sign()), "userHandle", userHandle),
+                "clientExtensionResults", Map.of()));
+        signed.finish(reviewer, "proposal-signed-review",
+                new ModelPromotionSignedReviewService.SignedReview(intent, options.challengeId(), assertion));
+        assertThat(mongoTemplate.findById(options.challengeId(), GovernanceBoundWebAuthnProof.class)).isNotNull();
+
+        var staleIntent = new ModelPromotionSignedReviewService.ReviewIntent("approval-stale-review",
+                ModelPromotionApproval.Outcome.REJECTED, "review-stale-review", RATIONALE,
+                ModelPromotionDecisionRationale.sha256(RATIONALE));
+        var staleOptions = signed.start(reviewer, "proposal-stale-review", staleIntent);
+        String staleChallenge = AssertionRequest.fromJson(mongoTemplate.findById(staleOptions.challengeId(),
+                com.frauddetection.alert.governance.modelpolicy.GovernanceWebAuthnBoundChallenge.class)
+                .requestJson()).getPublicKeyCredentialRequestOptions().getChallenge().getBase64Url();
+        byte[] staleClientData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(Map.of(
+                "type", "webauthn.get", "challenge", staleChallenge,
+                "origin", "http://localhost:4173", "crossOrigin", false));
+        byte[] staleAuthenticatorData = ByteBuffer.allocate(37)
+                .put(MessageDigest.getInstance("SHA-256").digest("localhost".getBytes(StandardCharsets.UTF_8)))
+                .put((byte) 0x05).putInt(2).array();
+        Signature staleSignature = Signature.getInstance("SHA256withECDSA");
+        staleSignature.initSign(keyPair.getPrivate());
+        staleSignature.update(staleAuthenticatorData);
+        staleSignature.update(MessageDigest.getInstance("SHA-256").digest(staleClientData));
+        String staleAssertion = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of(
+                "id", credentialId, "rawId", credentialId, "type", "public-key",
+                "response", Map.of("clientDataJSON", encoder.encodeToString(staleClientData),
+                        "authenticatorData", encoder.encodeToString(staleAuthenticatorData),
+                        "signature", encoder.encodeToString(staleSignature.sign()), "userHandle", userHandle),
+                "clientExtensionResults", Map.of()));
+        AtomicBoolean unknownCommitSignalled = new AtomicBoolean();
+        MongoModelPromotionStore uncertainStore = storeWithCommitSignal(unknownCommitSignalled, true);
+        ModelPromotionWorkflowService uncertainWorkflow = new ModelPromotionWorkflowService(uncertainStore,
+                mock(ModelPromotionEvidenceResolver.class), mock(ModelPromotionAssessmentService.class),
+                mock(ModelPromotionPolicyResolver.class), authorization, Clock.fixed(NOW, ZoneOffset.UTC));
+        ModelPromotionSignedReviewService uncertainSigned = new ModelPromotionSignedReviewService(uncertainStore,
+                authorization, uncertainWorkflow, webAuthn, mongoTemplate, new ObjectMapper());
+        assertThat(uncertainSigned.finish(reviewer, "proposal-stale-review",
+                new ModelPromotionSignedReviewService.SignedReview(staleIntent, staleOptions.challengeId(),
+                        staleAssertion)).idempotentReplay()).isTrue();
+        assertThat(unknownCommitSignalled.get()).isTrue();
+
+        var reopenedFactory = new SimpleMongoClientDatabaseFactory(mongoUri);
+        try {
+            MongoTemplate reopenedMongo = new MongoTemplate(reopenedFactory);
+            MongoModelPromotionStore reopenedStore = new MongoModelPromotionStore(reopenedMongo,
+                    requiredTransactionRunner(), validator, new ModelPromotionLocalAuditFactory(),
+                    Clock.fixed(NOW, ZoneOffset.UTC));
+            ModelPromotionSignedReviewService restarted = new ModelPromotionSignedReviewService(reopenedStore,
+                    authorization, workflow, webAuthn, reopenedMongo, new ObjectMapper());
+            PolicyGovernanceActor auditor = new PolicyGovernanceActor(
+                    PolicyGovernanceActor.identityId(issuer, "auditor"),
+                    Set.of(ModelPolicyAuthority.AUDIT_READ), issuer, "auditor");
+            restarted.verifyHistoricalReview(auditor, "proposal-signed-review");
+            restarted.verifyHistoricalReview(auditor, "proposal-stale-review");
+            assertThatThrownBy(() -> restarted.verifyHistoricalReview(reviewer, "proposal-signed-review"))
+                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            reopenedMongo.updateFirst(Query.query(Criteria.where("_id").is("proposal-signed-review")),
+                    new Update().set("transition.artifactIdentity.modelArtifactSha256", "0".repeat(64)),
+                    ModelPromotionProposalDocument.class);
+            assertThatThrownBy(() -> restarted.verifyHistoricalReview(auditor, "proposal-signed-review"))
+                    .isInstanceOf(SecurityException.class);
+        } finally {
+            reopenedFactory.destroy();
+        }
+    }
+
+    private static byte[] coseCoordinate(java.math.BigInteger value) {
+        byte[] encoded = value.toByteArray();
+        byte[] out = new byte[32];
+        System.arraycopy(encoded, Math.max(0, encoded.length - 32), out,
+                Math.max(0, 32 - encoded.length), Math.min(32, encoded.length));
+        return out;
     }
 
     @Test
@@ -553,7 +712,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void emergencyRetirementByIndependentReviewerReleasesChampionWithoutPolicyEvidence() {
+    void independentlyAuthorizedEmergencyRetirementReleasesChampionWithoutPolicyEvidence() {
         ExactModelArtifactIdentity identity = identity("a");
         ModelGovernanceScope scope = scope("PRODUCTION");
         advanceToPromotionRecommended(identity, scope, "retire");
@@ -564,10 +723,139 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         );
 
         ModelPromotionProposalResult pending = store.submitProposal(retirement);
-        ModelPromotionProposalResult approved = store.reviewProposal(
-                review("retirement-proposal", "retirement-review", "retirement-reviewer"), () -> {
-                }
-        );
+        String issuer = "https://issuer.example";
+        String reviewer = "retirement-reviewer";
+        PolicyGovernanceActor requester = new PolicyGovernanceActor(
+                PolicyGovernanceActor.identityId(issuer, reviewer), Set.of(
+                AnalystAuthority.MODEL_PROMOTION_EMERGENCY_REQUEST,
+                AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_RETIRE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION), issuer, reviewer);
+        PolicyGovernanceActor authorizer = new PolicyGovernanceActor(
+                PolicyGovernanceActor.identityId(issuer, "incident-authorizer"), Set.of(
+                AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION), issuer, "incident-authorizer");
+        ModelPromotionAuthorization reviewerAuthorization = new ModelPromotionAuthorization(new CurrentAnalystUser());
+        ModelPromotionWorkflowService retirementWorkflow = new ModelPromotionWorkflowService(store,
+                mock(ModelPromotionEvidenceResolver.class), mock(ModelPromotionAssessmentService.class),
+                mock(ModelPromotionPolicyResolver.class), reviewerAuthorization, Clock.fixed(NOW, ZoneOffset.UTC));
+        ModelPromotionEmergencyRetirementService emergency = new ModelPromotionEmergencyRetirementService(
+                mongoTemplate, new TransactionTemplate(new MongoTransactionManager(databaseFactory)),
+                store, retirementWorkflow, reviewerAuthorization, new ObjectMapper(),
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        emergency.ensureIndexes();
+        authenticate(reviewer, requester.authorities());
+        var command = new ModelPromotionEmergencyRetirementService.Request("authorization-retire",
+                "review-retire", "approval-retire", "case-12345", "incident-ledger:case-12345",
+                "Immediate retirement required after an independently confirmed model incident");
+        assertThatThrownBy(() -> emergency.request(requester, pending.proposalId(),
+                new ModelPromotionEmergencyRetirementService.Request("missing-evidence", "review-missing",
+                        "approval-missing", "case-12345", "", command.reason())))
+                .isInstanceOf(IllegalArgumentException.class);
+        var requested = emergency.request(requester, pending.proposalId(), command);
+        assertThat(requested.status()).isEqualTo("REQUESTED");
+        assertThatThrownBy(() -> emergency.retire(requester, "another-model-proposal",
+                requested.authorizationId(), "unused-token"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        String intentSha256 = emergency.inspect(authorizer, requested.authorizationId()).intentSha256();
+        var fraudAdmin = new PolicyGovernanceActor(PolicyGovernanceActor.identityId(issuer, "fraud-admin"),
+                AnalystRole.FRAUD_OPS_ADMIN.authorities(), issuer, "fraud-admin");
+        assertThatThrownBy(() -> emergency.authorize(fraudAdmin, requested.authorizationId(),
+                new ModelPromotionEmergencyRetirementService.AuthorizationAttestation(
+                        intentSha256, command.incidentEvidenceReference(),
+                        "I independently verified incident evidence")))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(() -> emergency.authorize(requester, requested.authorizationId(),
+                new ModelPromotionEmergencyRetirementService.AuthorizationAttestation(
+                        intentSha256, command.incidentEvidenceReference(),
+                        "I independently verified incident evidence")))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(() -> emergency.authorize(authorizer, requested.authorizationId(),
+                new ModelPromotionEmergencyRetirementService.AuthorizationAttestation(
+                        "0".repeat(64), command.incidentEvidenceReference(),
+                        "I independently verified incident evidence")))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class);
+        var issued = emergency.authorize(authorizer, requested.authorizationId(),
+                new ModelPromotionEmergencyRetirementService.AuthorizationAttestation(
+                        intentSha256, command.incidentEvidenceReference(),
+                        "I independently verified the incident record"));
+        var originalTransition = mongoTemplate.findById(requested.authorizationId(),
+                ModelPromotionEmergencyAuthorizationDocument.class).transition();
+        mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(requested.authorizationId())),
+                new Update().set("transition", new ModelPromotionTransitionProposal(identity("d"), scope,
+                        use(), ModelPromotionLifecycleState.CHAMPION, 4,
+                        ModelPromotionLifecycleState.RETIRED, originalTransition.operationId())),
+                ModelPromotionEmergencyAuthorizationDocument.class);
+        assertThatThrownBy(() -> emergency.retire(requester, pending.proposalId(),
+                requested.authorizationId(), issued.token())).isInstanceOf(SecurityException.class);
+        mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(requested.authorizationId())),
+                new Update().set("transition", originalTransition),
+                ModelPromotionEmergencyAuthorizationDocument.class);
+        assertThat(emergency.request(requester, pending.proposalId(), command))
+                .extracting(ModelPromotionEmergencyRetirementService.Summary::authorizationId,
+                        ModelPromotionEmergencyRetirementService.Summary::status)
+                .containsExactly(requested.authorizationId(), "AUTHORIZED");
+        assertThatThrownBy(() -> emergency.request(requester, pending.proposalId(),
+                new ModelPromotionEmergencyRetirementService.Request(command.authorizationId(),
+                        "conflicting-review", command.approvalId(), command.incidentId(),
+                        command.incidentEvidenceReference(), command.reason())))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class);
+        var expiring = emergency.request(requester, pending.proposalId(),
+                new ModelPromotionEmergencyRetirementService.Request("authorization-expiring",
+                        "review-expiring", "approval-expiring", command.incidentId(),
+                        command.incidentEvidenceReference(), command.reason()));
+        var later = new ModelPromotionEmergencyRetirementService(mongoTemplate,
+                new TransactionTemplate(new MongoTransactionManager(databaseFactory)), store,
+                retirementWorkflow, reviewerAuthorization, new ObjectMapper(),
+                Clock.fixed(NOW.plusSeconds(301), ZoneOffset.UTC));
+        assertThatThrownBy(() -> later.authorize(authorizer, expiring.authorizationId(),
+                new ModelPromotionEmergencyRetirementService.AuthorizationAttestation(
+                        emergency.inspect(authorizer, expiring.authorizationId()).intentSha256(),
+                        command.incidentEvidenceReference(), "I independently verified the incident record")))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class);
+        var revokedRequest = emergency.request(requester, pending.proposalId(),
+                new ModelPromotionEmergencyRetirementService.Request("authorization-revoked",
+                        "review-revoked", "approval-revoked", command.incidentId(),
+                        command.incidentEvidenceReference(), command.reason()));
+        var revokedToken = emergency.authorize(authorizer, revokedRequest.authorizationId(),
+                new ModelPromotionEmergencyRetirementService.AuthorizationAttestation(
+                        emergency.inspect(authorizer, revokedRequest.authorizationId()).intentSha256(),
+                        command.incidentEvidenceReference(), "I independently verified the incident record"));
+        emergency.revoke(authorizer, revokedRequest.authorizationId());
+        assertThatThrownBy(() -> emergency.retire(requester, pending.proposalId(),
+                revokedRequest.authorizationId(), revokedToken.token()))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThatThrownBy(() -> emergency.retire(requester, pending.proposalId(),
+                requested.authorizationId(), "invalid-token"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().lifecycleState())
+                .isEqualTo(ModelPromotionLifecycleState.CHAMPION);
+        mongoTemplate.insert(new ModelPromotionEmergencyAuditDocument("authorization-retire:consumed",
+                requested.authorizationId(), pending.proposalId(), "CONSUMED", requester.id(), issuer, reviewer,
+                mongoTemplate.findById(requested.authorizationId(),
+                        ModelPromotionEmergencyAuthorizationDocument.class).intentSha256(),
+                command.incidentId(), NOW));
+        assertThatThrownBy(() -> emergency.retire(requester, pending.proposalId(),
+                requested.authorizationId(), issued.token())).isInstanceOf(RuntimeException.class);
+        assertThat(mongoTemplate.findById(requested.authorizationId(),
+                ModelPromotionEmergencyAuthorizationDocument.class).status())
+                .isEqualTo(ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED);
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().lifecycleState())
+                .isEqualTo(ModelPromotionLifecycleState.CHAMPION);
+        mongoTemplate.remove(Query.query(Criteria.where("_id").is("authorization-retire:consumed")),
+                ModelPromotionEmergencyAuditDocument.class);
+        AtomicBoolean unknownCommitSignalled = new AtomicBoolean();
+        MongoModelPromotionStore restartedStore = storeWithCommitSignal(unknownCommitSignalled, true);
+        ModelPromotionWorkflowService restartedWorkflow = new ModelPromotionWorkflowService(restartedStore,
+                mock(ModelPromotionEvidenceResolver.class), mock(ModelPromotionAssessmentService.class),
+                mock(ModelPromotionPolicyResolver.class), reviewerAuthorization, Clock.fixed(NOW, ZoneOffset.UTC));
+        ModelPromotionEmergencyRetirementService restartedEmergency = new ModelPromotionEmergencyRetirementService(
+                mongoTemplate, new TransactionTemplate(new MongoTransactionManager(databaseFactory)),
+                restartedStore, restartedWorkflow, reviewerAuthorization, new ObjectMapper(),
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ModelPromotionProposalResult approved = restartedEmergency.retire(requester, pending.proposalId(),
+                requested.authorizationId(), issued.token());
+        assertThat(unknownCommitSignalled.get()).isTrue();
+        assertThat(approved.idempotentReplay()).isTrue();
 
         assertThat(pending.policySha256()).isNull();
         assertThat(pending.assessmentSha256()).isNull();
@@ -583,6 +871,131 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         assertThat(decision.assessmentSnapshot()).isNull();
         assertThat(decision.proposal().rationale().content()).isEqualTo(RATIONALE);
         assertThat(decision.approval().approvedBy()).isEqualTo("retirement-reviewer");
+        assertThat(store.findProposal(pending.proposalId()).orElseThrow().reviewAudit().action())
+                .isEqualTo("EMERGENCY_RETIRE_MODEL_PROMOTION_PROPOSAL");
+        assertThatThrownBy(() -> emergency.retire(requester, pending.proposalId(),
+                requested.authorizationId(), issued.token())).isInstanceOf(RuntimeException.class);
+        PolicyGovernanceActor auditor = new PolicyGovernanceActor(
+                PolicyGovernanceActor.identityId(issuer, "auditor"),
+                Set.of(ModelPolicyAuthority.AUDIT_READ, AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION),
+                issuer, "auditor");
+        assertThat(emergency.auditView(auditor, requested.authorizationId()).proofStatus())
+                .isEqualTo("INDEPENDENT_AUTHORIZATION_AND_RETIREMENT_COMMITTED");
+    }
+
+    @Test
+    void testScopeCannotRequestProductionEmergencyGrant() {
+        ExactModelArtifactIdentity identity = identity("b");
+        ModelGovernanceScope scope = scope("TEST");
+        advanceToPromotionRecommended(identity, scope, "test-emergency");
+        acceptTransition(identity, scope, ModelPromotionLifecycleState.PROMOTION_RECOMMENDED, 3,
+                ModelPromotionLifecycleState.CHAMPION, "test-emergency-champion");
+        var pending = store.submitProposal(retirementProposal(identity, scope,
+                "test-emergency-retirement", "test-emergency-proposal", "test-proposer"));
+        String issuer = "https://issuer.example";
+        String subject = "test-reviewer";
+        var requester = new PolicyGovernanceActor(PolicyGovernanceActor.identityId(issuer, subject), Set.of(
+                AnalystAuthority.MODEL_PROMOTION_EMERGENCY_REQUEST,
+                AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_RETIRE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST), issuer, subject);
+        var authorization = new ModelPromotionAuthorization(new CurrentAnalystUser());
+        var workflow = workflow(store, mock(ModelPromotionEvidenceResolver.class),
+                mock(ModelPromotionAssessmentService.class), mock(ModelPromotionPolicyResolver.class));
+        var emergency = new ModelPromotionEmergencyRetirementService(mongoTemplate,
+                new TransactionTemplate(new MongoTransactionManager(databaseFactory)), store, workflow,
+                authorization, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+        authenticate(subject, requester.authorities());
+        assertThatThrownBy(() -> emergency.request(requester, pending.proposalId(),
+                new ModelPromotionEmergencyRetirementService.Request("test-grant", "test-review",
+                        "test-approval", "case-12345", "incident-ledger:case-12345",
+                        "The exact test model has an independently documented incident")))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class);
+    }
+
+    @Test
+    void concurrentEmergencyReviewersConsumeOnlyOneGrant() throws Exception {
+        ExactModelArtifactIdentity identity = identity("c");
+        ModelGovernanceScope scope = scope("PRODUCTION");
+        advanceToPromotionRecommended(identity, scope, "emergency-race");
+        acceptTransition(identity, scope, ModelPromotionLifecycleState.PROMOTION_RECOMMENDED, 3,
+                ModelPromotionLifecycleState.CHAMPION, "emergency-race-champion");
+        var pending = store.submitProposal(retirementProposal(identity, scope,
+                "emergency-race-retirement", "emergency-race-proposal", "race-proposer"));
+        String issuer = "https://issuer.example";
+        var mandates = Set.of(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_REQUEST,
+                AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_RETIRE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+        var reviewerOne = new PolicyGovernanceActor(PolicyGovernanceActor.identityId(issuer, "race-one"),
+                mandates, issuer, "race-one");
+        var reviewerTwo = new PolicyGovernanceActor(PolicyGovernanceActor.identityId(issuer, "race-two"),
+                mandates, issuer, "race-two");
+        var authorizer = new PolicyGovernanceActor(PolicyGovernanceActor.identityId(issuer, "race-authorizer"),
+                Set.of(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE,
+                        AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION), issuer, "race-authorizer");
+        var reviewerAuthorization = new ModelPromotionAuthorization(new CurrentAnalystUser());
+        var workflow = new ModelPromotionWorkflowService(store, mock(ModelPromotionEvidenceResolver.class),
+                mock(ModelPromotionAssessmentService.class), mock(ModelPromotionPolicyResolver.class),
+                reviewerAuthorization, Clock.fixed(NOW, ZoneOffset.UTC));
+        var emergency = new ModelPromotionEmergencyRetirementService(mongoTemplate,
+                new TransactionTemplate(new MongoTransactionManager(databaseFactory)), store, workflow,
+                reviewerAuthorization, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+        emergency.ensureIndexes();
+        authenticate("race-one", mandates);
+        var first = emergency.request(reviewerOne, pending.proposalId(),
+                new ModelPromotionEmergencyRetirementService.Request("race-grant-one", "race-review-one",
+                        "race-approval-one", "case-race-123", "incident-ledger:case-race-123",
+                        "Independently confirmed emergency for the exact production champion"));
+        authenticate("race-two", mandates);
+        var second = emergency.request(reviewerTwo, pending.proposalId(),
+                new ModelPromotionEmergencyRetirementService.Request("race-grant-two", "race-review-two",
+                        "race-approval-two", "case-race-123", "incident-ledger:case-race-123",
+                        "Independently confirmed emergency for the exact production champion"));
+        var firstToken = emergency.authorize(authorizer, first.authorizationId(),
+                new ModelPromotionEmergencyRetirementService.AuthorizationAttestation(
+                        emergency.inspect(authorizer, first.authorizationId()).intentSha256(),
+                        "incident-ledger:case-race-123", "I independently verified the first retirement request"));
+        var secondToken = emergency.authorize(authorizer, second.authorizationId(),
+                new ModelPromotionEmergencyRetirementService.AuthorizationAttestation(
+                        emergency.inspect(authorizer, second.authorizationId()).intentSha256(),
+                        "incident-ledger:case-race-123", "I independently verified the second retirement request"));
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var attempts = List.<Callable<Boolean>>of(
+                    () -> emergencyRetireAfter(start, emergency, reviewerOne, mandates,
+                            pending.proposalId(), firstToken),
+                    () -> emergencyRetireAfter(start, emergency, reviewerTwo, mandates,
+                            pending.proposalId(), secondToken));
+            var futures = attempts.stream().map(executor::submit).toList();
+            start.countDown();
+            assertThat((futures.get(0).get() ? 1 : 0) + (futures.get(1).get() ? 1 : 0)).isEqualTo(1);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(store.currentState(identity, scope, use()).orElseThrow().lifecycleState())
+                .isEqualTo(ModelPromotionLifecycleState.RETIRED);
+        assertThat(mongoTemplate.count(new Query(), ModelPromotionChampionClaimDocument.class)).isZero();
+        assertThat(mongoTemplate.count(Query.query(Criteria.where("status").is("CONSUMED")),
+                ModelPromotionEmergencyAuthorizationDocument.class)).isEqualTo(1);
+        assertThat(store.history(identity, scope, use(), 10).stream()
+                .filter(decision -> decision.resultingState() == ModelPromotionLifecycleState.RETIRED))
+                .hasSize(1);
+    }
+
+    private boolean emergencyRetireAfter(CountDownLatch start, ModelPromotionEmergencyRetirementService emergency,
+            PolicyGovernanceActor actor, Set<String> mandates, String proposalId,
+            ModelPromotionEmergencyRetirementService.IssuedGrant grant) throws InterruptedException {
+        start.await();
+        authenticate(actor.subject(), mandates);
+        try {
+            emergency.retire(actor, proposalId, grant.authorizationId(), grant.token());
+            return true;
+        } catch (RuntimeException expectedConflict) {
+            return false;
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 
     @RepeatedTest(12)

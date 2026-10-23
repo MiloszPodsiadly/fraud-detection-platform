@@ -25,23 +25,41 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/policy-trust/registries",
                         "/api/v1/governance/policy-trust/requests",
                         "/api/v1/governance/policy-trust/requests/*/audit",
-                        "/api/v1/governance/policy-trust/requests/*/deployment")
+                        "/api/v1/governance/policy-trust/requests/*/deployment",
+                        "/api/v1/governance/policy-trust/requests/*/candidate")
                 .hasAuthority(ModelPolicyAuthority.TRUST_READ)
+                .requestMatchers(HttpMethod.GET, "/api/v1/governance/policy-trust/requests/*/installation")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/policy-security/me")
                 .hasAnyAuthority(ModelPolicyAuthority.CREDENTIAL_ENROLL, ModelPolicyAuthority.CREDENTIAL_ADMIN,
                         ModelPolicyAuthority.TRUST_READ, ModelPolicyAuthority.TRUST_REQUEST,
                         ModelPolicyAuthority.TRUST_APPROVE, ModelPolicyAuthority.PUBLICATION_RECOVER)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/policy-security/operations")
                 .hasAuthority(ModelPolicyAuthority.TRUST_READ)
-                .requestMatchers(HttpMethod.POST, "/api/v1/governance/policy-trust/requests/challenges",
+                .requestMatchers(HttpMethod.POST, "/api/v1/governance/policy-trust/requests/preview",
+                        "/api/v1/governance/policy-trust/requests/challenges",
                         "/api/v1/governance/policy-trust/requests")
                 .hasAuthority(ModelPolicyAuthority.TRUST_REQUEST)
                 .requestMatchers(HttpMethod.POST, "/api/v1/governance/policy-trust/requests/*/reviews/challenges",
                         "/api/v1/governance/policy-trust/requests/*/reviews")
                 .hasAuthority(ModelPolicyAuthority.TRUST_APPROVE)
-                .requestMatchers(HttpMethod.POST, "/api/v1/governance/model-policies/webauthn/enrollment-grants",
-                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/approvals")
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/review")
                 .hasAuthority(ModelPolicyAuthority.CREDENTIAL_ADMIN)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/evidence")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_READ)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/mine")
+                .hasAuthority(ModelPolicyAuthority.CREDENTIAL_ENROLL)
+                .requestMatchers(HttpMethod.POST, "/api/v1/governance/model-policies/webauthn/enrollment-grants",
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/review/challenges",
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/review",
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/bootstrap-approval")
+                .hasAuthority(ModelPolicyAuthority.CREDENTIAL_ADMIN)
+                .requestMatchers(HttpMethod.POST,
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/claim")
+                .hasAuthority(ModelPolicyAuthority.CREDENTIAL_ENROLL)
                 .requestMatchers(HttpMethod.POST, "/api/v1/governance/model-policies/webauthn/registrations",
                         "/api/v1/governance/model-policies/webauthn/registrations/complete")
                 .hasAuthority(ModelPolicyAuthority.CREDENTIAL_ENROLL)
@@ -106,6 +124,23 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
                         "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/challenges",
                         "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/signed")
                 .hasAnyAuthority(AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_REJECT)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/operations/{operationId}")
+                .hasAnyAuthority(AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_REJECT)
+                .requestMatchers(HttpMethod.POST,
+                        "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/emergency-authorizations",
+                        "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/emergency")
+                .hasAuthority(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_REQUEST)
+                .requestMatchers(HttpMethod.POST,
+                        "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/approve",
+                        "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/revoke")
+                .hasAuthority(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}")
+                .hasAuthority(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/audit")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_READ)
                 .requestMatchers(HttpMethod.GET, "/governance/advisories/analytics").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                 .requestMatchers(HttpMethod.GET, "/governance/advisories").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                 .requestMatchers(HttpMethod.GET, "/governance/advisories/{eventId}").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
