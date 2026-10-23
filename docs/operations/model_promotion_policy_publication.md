@@ -7,9 +7,37 @@ ceremony through the [governance API](model_policy_governance_workflow.md). A se
 creates a durable publication request. The worker verifies the frozen draft, public credential assertions, current
 actor mandates and publisher/issuer keys independently before signing and atomically publishing the policy and its
 approval evidence. `GET /api/v1/governance/model-policies/{id}/publication` shows job state and the current policy
-signature result; `PENDING`, `RETRYABLE` and `BLOCKED` do not imply `VERIFIED`. Lease takeover and immutable-receipt
+signature result; `PENDING`, `CLAIMED`, `RETRYABLE` and `BLOCKED` do not imply `VERIFIED`. Lease takeover and immutable-receipt
 reconciliation handle process restarts and uncertain commit acknowledgement. The local worker uses the shared Mongo
 replica set; production needs separately scoped database credentials and independently managed trust material.
+The `PUBLISH_POLICY` history event records the publication transition and approval evidence reference. Its
+`rationale` is null because publication is not a new human review decision; the signed review rationale belongs
+to the separate `REVIEW_APPROVE` history event.
+
+## Publication recovery state machine
+
+| From | Condition | To | Operator meaning |
+| --- | --- | --- | --- |
+| PENDING | Worker atomically claims the frozen request | CLAIMED | One lease and attempt number exist. |
+| CLAIMED | Operational failure before commit, with attempts 1–4 | RETRYABLE | Worker may claim another attempt. |
+| RETRYABLE | Worker claims within the authorized budget | CLAIMED | Prior attempts remain in the ledger. |
+| CLAIMED | Exact policy and evidence commit, followed by atomic job, proposal and audit acknowledgement | PUBLISHED | Authoritative publication is complete. |
+| CLAIMED | Lost commit acknowledgement or failed durable read | CLAIMED | Outcome is uncertain; wait for lease expiry and reconcile durable data. |
+| CLAIMED | Expired final attempt with no matching commit, invalid current trust, immutable conflict, or three failed reconciliation cycles | BLOCKED | No further automatic signing or reconciliation. |
+| BLOCKED | Independent operator requests recovery for `ATTEMPTS_EXHAUSTED` | RETRYABLE | Exactly one extra attempt is authorized; at most three recoveries. |
+
+The normal budget is five attempts, plus one for each authorized recovery, capped at eight total. A recovery
+operation ID replays only for the same actor, proposal, request and draft; each accepted request has one durable
+audit event. An expired final lease is first taken for reconciliation **without** consuming another attempt.
+`IMMUTABLE_CONFLICT` and `CURRENT_TRUST_OR_EVIDENCE_INVALID` remain blocked. Operational failures within the
+budget are retryable; an unknown commit result remains uncertain until the original policy revision and exact
+approval proof can be read. A matching committed revision is acknowledged without signing again. The signed policy,
+approval evidence and lease fence write share one Mongo transaction; job acknowledgement, proposal transition and
+`PUBLISH_POLICY` audit share another. Three failed lease reconciliation cycles end in
+`RECONCILIATION_UNAVAILABLE`; operators must investigate the durable policy and audit state before intervention.
+Operators can inspect failure codes and attempt/recovery history in the
+governance UI; only the isolated worker holds the issuer private key. A `PUBLISHED` job still requires current
+`FULLY_AUTHORIZED` verification for model decisions.
 
 In the local Compose stack, a network-isolated, one-shot key loader copies only the publisher's two signing keys
 and three trust registries into a dedicated Docker volume. It sets UID/GID `10001:10001` and file mode `0400`;

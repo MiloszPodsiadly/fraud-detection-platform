@@ -1,6 +1,8 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
+import com.mongodb.MongoException;
 import com.frauddetection.alert.governance.modelpolicy.MongoPolicyGovernanceStore;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceHistoryDocument;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceState;
@@ -21,6 +23,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
@@ -31,6 +36,7 @@ import org.springframework.mock.env.MockEnvironment;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionCallback;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.ObjectMapper;
@@ -39,6 +45,8 @@ import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
@@ -57,7 +65,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import static com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceContracts.*;
@@ -67,6 +80,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PolicyPublicationWorkerMongoIntegrationTest {
     private static final MongoDBContainer MONGO = new MongoDBContainer(DockerImageName.parse("mongo:7.0"));
     private static final String ORIGIN = "http://localhost:4173";
+    @TempDir Path temp;
     private final ObjectMapper mapper = new ObjectMapper();
     private final com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
     private SimpleMongoClientDatabaseFactory factory;
@@ -99,20 +113,29 @@ class PolicyPublicationWorkerMongoIntegrationTest {
                 ModelPolicyAuthority.SUBMIT));
         approver = actor("approver", Set.of(ModelPolicyAuthority.READ, ModelPolicyAuthority.APPROVE));
         MongoPolicyGovernanceStore governanceStore = new MongoPolicyGovernanceStore(mongo, manager);
+        Instant from = clock.instant().minusSeconds(86400);
+        Instant to = clock.instant().plusSeconds(86400 * 365);
+        var actorConfiguration = new OnlinePolicyActorTrustRegistry.Configuration(
+                OnlinePolicyActorTrustRegistry.VERSION, 1, List.of(
+                trustedActor(author, OnlinePolicyActorTrustRegistry.Role.POLICY_AUTHOR, from, to),
+                trustedActor(approver, OnlinePolicyActorTrustRegistry.Role.POLICY_APPROVER, from, to)));
+        actors = OnlinePolicyActorTrustRegistry.fromConfiguration(actorConfiguration, 1);
+        Path actorTrustPath = temp.resolve("online-actors.json");
+        Files.writeString(actorTrustPath, mapper.writeValueAsString(actorConfiguration));
         governance = new PolicyGovernanceService(governanceStore,
                 new ModelPromotionPolicyValidator(mapper), mapper,
-                "policy-publisher", "publisher-key", "policy-issuer", "issuer-key");
+                "policy-publisher", "publisher-key", "policy-issuer", "issuer-key",
+                new OnlinePolicyApproverDirectory(mapper, actorTrustPath.toString(), 1));
         webAuthn = new PolicyWebAuthnService(mongo, manager,
                 new PolicyWebAuthnCredentialRepository(mongo), governance,
                 governanceStore, new com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantService(
-                        mongo, manager, governanceStore), mapper, new MockEnvironment(),
+                        mongo, manager, governanceStore,
+                        new com.frauddetection.alert.governance.modelpolicy.PolicyCredentialGrantAuthorizationVerifier(
+                                mongo, mapper,
+                                new com.frauddetection.alert.governance.modelpolicy.PolicyCredentialBootstrapAuthority(
+                                        mapper, temp.resolve("bootstrap.json").toString()))),
+                mapper, new MockEnvironment(),
                 "localhost", ORIGIN);
-        Instant from = clock.instant().minusSeconds(86400);
-        Instant to = clock.instant().plusSeconds(86400 * 365);
-        actors = OnlinePolicyActorTrustRegistry.fromConfiguration(new OnlinePolicyActorTrustRegistry.Configuration(
-                OnlinePolicyActorTrustRegistry.VERSION, 1, List.of(
-                trustedActor(author, OnlinePolicyActorTrustRegistry.Role.POLICY_AUTHOR, from, to),
-                trustedActor(approver, OnlinePolicyActorTrustRegistry.Role.POLICY_APPROVER, from, to))), 1);
         approvalTrust = InternalPolicyApprovalTrustRegistry.fromConfiguration(
                 new InternalPolicyApprovalTrustRegistry.Configuration(InternalPolicyApprovalTrustRegistry.VERSION,
                         1, List.of(trustedKey("policy-publisher", "publisher-key", publisherKey,
@@ -143,6 +166,12 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         assertThat(published.state()).isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
         assertThat(mongo.findById(job.proposalId(), PolicyProposalDocument.class).status())
                 .isEqualTo(PolicyGovernanceState.PUBLISHED);
+        PolicyGovernanceHistoryDocument publication = mongo.findOne(Query.query(
+                Criteria.where("proposalId").is(job.proposalId()).and("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class);
+        assertThat(publication).isNotNull();
+        assertThat(publication.approvalEvidenceReference()).isEqualTo(job.approvalEvidenceReference());
+        assertThat(publication.rationale()).isNull();
         String key = ModelPromotionPolicyDocument.policyKey(job.draft().governanceScope(),
                 job.draft().intendedUse(), job.draft().policyId(), job.draft().revision());
         ModelPromotionPolicyDocument policy = mongo.findById(key, ModelPromotionPolicyDocument.class);
@@ -169,21 +198,32 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         assertThat(mongo.findById(key, ModelPromotionPolicyDocument.class)).isEqualTo(policy);
     }
 
-    @Test void crashesBeforeSigningAfterSigningAndAfterCommitRecoverThroughLease() throws Exception {
-        for (PolicyPublicationWorker.Stage stage : PolicyPublicationWorker.Stage.values()) {
-            PolicyPublicationJobDocument job = approvedJob();
-            PolicyPublicationWorker crashing = worker("crashing-" + stage,
-                    checkpoint -> { if (checkpoint == stage) throw new AssertionError("simulated process crash"); },
-                    issuerKey.getPrivate());
-            assertThatThrownBy(crashing::runOnce).isInstanceOf(AssertionError.class);
+    @ParameterizedTest
+    @EnumSource(PolicyPublicationWorker.Stage.class)
+    void crashesBeforeSigningAfterSigningAndAfterCommitRecoverThroughLease(
+            PolicyPublicationWorker.Stage stage) throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        PolicyPublicationWorker crashing = worker("crashing-" + stage,
+                checkpoint -> { if (checkpoint == stage) throw new AssertionError("simulated process crash"); },
+                issuerKey.getPrivate());
+        assertThatThrownBy(crashing::runOnce).isInstanceOf(AssertionError.class);
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.CLAIMED);
+        long committedBeforeRestart = mongo.count(new Query(), ModelPromotionPolicyDocument.class);
+        assertThat(committedBeforeRestart).isEqualTo(stage == PolicyPublicationWorker.Stage.AFTER_COMMIT ? 1 : 0);
+        clock.set(clock.instant().plusSeconds(121));
+        assertThat(worker("restarted-" + stage, ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
+        if (stage != PolicyPublicationWorker.Stage.AFTER_COMMIT) {
             assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
-                    .isEqualTo(PolicyPublicationJobDocument.State.CLAIMED);
-            clock.set(clock.instant().plusSeconds(121));
+                    .isEqualTo(PolicyPublicationJobDocument.State.RETRYABLE);
             assertThat(worker("restarted-" + stage, ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
-            assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
-                    .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
-            mongo.getDb().drop();
         }
+        PolicyPublicationJobDocument published = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        assertThat(published.state()).isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(new Query(), InternalPolicyApprovalEvidenceDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isEqualTo(1);
     }
 
     @Test void secondWorkerCannotClaimLiveLeaseButCanTakeOverExpiredLease() throws Exception {
@@ -200,8 +240,208 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         clock.set(clock.instant().plusSeconds(121));
         assertThat(worker("worker-second", ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
         assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.RETRYABLE);
+        assertThat(worker("worker-second", ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
                 .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
         assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+    }
+
+    @Test void simultaneousWorkersHaveOneWinnerAndOneDurablePublication() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        var start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> {
+                start.await();
+                return worker("simultaneous-a", ignored -> { }, issuerKey.getPrivate()).runOnce();
+            });
+            var second = pool.submit(() -> {
+                start.await();
+                return worker("simultaneous-b", ignored -> { }, issuerKey.getPrivate()).runOnce();
+            });
+            start.countDown();
+            boolean firstWorked = first.get(15, TimeUnit.SECONDS);
+            boolean secondWorked = second.get(15, TimeUnit.SECONDS);
+            assertThat(firstWorked || secondWorked).isTrue();
+        }
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(new Query(), InternalPolicyApprovalEvidenceDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isEqualTo(1);
+    }
+
+    @Test void mismatchedFleetBlocksNewSigningWithoutConsumingIdleAttempts() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        AtomicBoolean fleetMatches = new AtomicBoolean(false);
+        var guarded = worker("fleet-guarded", ignored -> { }, issuerKey.getPrivate(), mongo,
+                transactions, fleetMatches::get);
+        assertThat(guarded.runOnce()).isFalse();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).attempts()).isZero();
+        fleetMatches.set(true);
+        var changedDuringSigning = worker("fleet-drift", stage -> {
+            if (stage == PolicyPublicationWorker.Stage.AFTER_SIGN) fleetMatches.set(false);
+        }, issuerKey.getPrivate(), mongo, transactions, fleetMatches::get);
+        assertThat(changedDuringSigning.runOnce()).isTrue();
+        PolicyPublicationJobDocument waiting = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        assertThat(waiting.state()).isEqualTo(PolicyPublicationJobDocument.State.RETRYABLE);
+        assertThat(waiting.failureCode()).isEqualTo("FLEET_TRUST_INCONSISTENT");
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
+        fleetMatches.set(true);
+        assertThat(guarded.runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+    }
+
+    @Test void slowSignerLosesLeaseToAnotherWorkerWithoutDuplicatePublication() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        PolicyPublicationWorker slow = worker("slow-signer", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_SIGN) {
+                clock.set(clock.instant().plusSeconds(121));
+                assertThat(worker("replacement", ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
+                assertThat(worker("replacement", ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
+            }
+        }, issuerKey.getPrivate());
+        assertThat(slow.runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(new Query(), InternalPolicyApprovalEvidenceDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(Query.query(Criteria.where("publicationRequestId").is(job.id())),
+                com.frauddetection.alert.governance.modelpolicy.PolicyPublicationAttemptDocument.class))
+                .isEqualTo(2);
+    }
+
+    @Test void unknownCommitAcknowledgementIsReconciledWithoutNewSignature() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        AtomicBoolean unknownOnce = new AtomicBoolean(true);
+        TransactionTemplate uncertainCommit = new TransactionTemplate(new MongoTransactionManager(factory)) {
+            @Override public <T> T execute(TransactionCallback<T> action) {
+                T result = super.execute(action);
+                if (unknownOnce.getAndSet(false)) {
+                    MongoException unknown = new MongoException("simulated lost commit acknowledgement");
+                    unknown.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL);
+                    throw unknown;
+                }
+                return result;
+            }
+        };
+        assertThat(worker("unknown-commit", ignored -> { }, issuerKey.getPrivate(), mongo,
+                uncertainCommit).runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(unknownOnce).isFalse();
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(new Query(), InternalPolicyApprovalEvidenceDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(Query.query(Criteria.where("publicationRequestId").is(job.id())),
+                com.frauddetection.alert.governance.modelpolicy.PolicyPublicationAttemptDocument.class))
+                .isEqualTo(1);
+    }
+
+    @Test void unknownCommitWithoutDurableRevisionWaitsForLeaseThenUsesNextAttempt() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        TransactionTemplate noAcknowledgement = new TransactionTemplate(new MongoTransactionManager(factory)) {
+            @Override public <T> T execute(TransactionCallback<T> action) {
+                MongoException unknown = new MongoException("simulated unknown outcome before durable commit");
+                unknown.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL);
+                throw unknown;
+            }
+        };
+        assertThat(worker("uncertain-no-commit", ignored -> { }, issuerKey.getPrivate(), mongo,
+                noAcknowledgement).runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.CLAIMED);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
+        clock.set(clock.instant().plusSeconds(121));
+        assertThat(worker("reconcile-no-commit", ignored -> {
+            throw new AssertionError("reconciliation must not sign");
+        }, issuerKey.getPrivate()).runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.RETRYABLE);
+        assertThat(worker("next-attempt", ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).attempts()).isEqualTo(2);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+    }
+
+    @Test void auditInsertFailureLeavesCommitForRestartReconciliation() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        AtomicBoolean rejectAudit = new AtomicBoolean(true);
+        MongoTemplate injected = new MongoTemplate(factory) {
+            @Override public <T> T insert(T objectToSave) {
+                if (objectToSave instanceof PolicyGovernanceHistoryDocument && rejectAudit.get()) {
+                    throw new IllegalStateException("simulated publication audit insert failure");
+                }
+                return super.insert(objectToSave);
+            }
+        };
+        assertThat(worker("audit-fails", ignored -> { }, issuerKey.getPrivate(), injected,
+                transactions).runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.CLAIMED);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isZero();
+        rejectAudit.set(false);
+        clock.set(clock.instant().plusSeconds(121));
+        assertThat(worker("audit-restart", ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isEqualTo(1);
+    }
+
+    @Test void persistentAuditFailureStopsAutomaticReconciliationAfterThreeCycles() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        MongoTemplate injected = new MongoTemplate(factory) {
+            @Override public <T> T insert(T objectToSave) {
+                if (objectToSave instanceof PolicyGovernanceHistoryDocument)
+                    throw new IllegalStateException("persistent publication audit failure");
+                return super.insert(objectToSave);
+            }
+        };
+        assertThat(worker("audit-fails", ignored -> { }, issuerKey.getPrivate(), injected,
+                transactions).runOnce()).isTrue();
+        for (int cycle = 1; cycle <= 3; cycle++) {
+            clock.set(clock.instant().plusSeconds(121));
+            assertThat(worker("reconcile-" + cycle, checkpoint -> {
+                throw new AssertionError("reconciliation must not sign again");
+            }, issuerKey.getPrivate(), injected, transactions).runOnce()).isTrue();
+            PolicyPublicationJobDocument current = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+            assertThat(current.reconciliationCount()).isEqualTo(cycle);
+            assertThat(current.state()).isEqualTo(cycle == 3
+                    ? PolicyPublicationJobDocument.State.BLOCKED
+                    : PolicyPublicationJobDocument.State.CLAIMED);
+        }
+        PolicyPublicationJobDocument blocked = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        assertThat(blocked.attempts()).isEqualTo(1);
+        assertThat(blocked.failureCode()).isEqualTo("RECONCILIATION_UNAVAILABLE");
+        assertThat(worker("no-more-reconcile", ignored -> { }, issuerKey.getPrivate(), injected,
+                transactions).runOnce()).isFalse();
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isZero();
+    }
+
+    @Test void interruptedPolicyTransactionLeavesNoPartialPolicyOrEvidence() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        MongoTemplate injected = new MongoTemplate(factory) {
+            @Override public <T> T insert(T objectToSave) {
+                if (objectToSave instanceof InternalPolicyApprovalEvidenceDocument) {
+                    throw new IllegalStateException("simulated crash during policy transaction");
+                }
+                return super.insert(objectToSave);
+            }
+        };
+        assertThat(worker("partial-write", ignored -> { }, issuerKey.getPrivate(), injected,
+                transactions).runOnce()).isTrue();
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.RETRYABLE);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
+        assertThat(mongo.count(new Query(), InternalPolicyApprovalEvidenceDocument.class)).isZero();
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isZero();
     }
 
     @Test void expiredFinalAttemptReconcilesCommitWithoutSigningAgain() throws Exception {
@@ -236,8 +476,10 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         assertThat(worker("worker-reconcile", ignored -> {
             throw new AssertionError("reconciliation must not sign");
         }, issuerKey.getPrivate()).runOnce()).isTrue();
-        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
-                .isEqualTo(PolicyPublicationJobDocument.State.BLOCKED);
+        PolicyPublicationJobDocument blocked = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        assertThat(blocked.state()).isEqualTo(PolicyPublicationJobDocument.State.BLOCKED);
+        assertThat(blocked.failureCode()).isEqualTo("ATTEMPTS_EXHAUSTED");
+        assertThat(blocked.attempts()).isEqualTo(5);
         assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
     }
 
@@ -287,6 +529,122 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
     }
 
+    @Test void recoveryBudgetIsExactAndPriorAttemptHistorySurvivesAllRecoveries() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        var recovery = new PolicyPublicationRecoveryService(mongo, transactions, governance, clock);
+        PolicyGovernanceActor operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        for (int attempt = 1; attempt <= 8; attempt++) {
+            if (attempt > 5) {
+                var queued = recovery.request(operator, job.proposalId(), "recovery-" + (attempt - 5));
+                assertThat(queued.recoveryCount()).isEqualTo(attempt - 5);
+                assertThat(queued.attemptHistory()).hasSize(attempt - 1);
+            }
+            assertThat(worker("failing-" + attempt, checkpoint -> {
+                if (checkpoint == PolicyPublicationWorker.Stage.AFTER_SIGN)
+                    throw new IllegalStateException("simulated operational failure");
+            }, issuerKey.getPrivate()).runOnce()).isTrue();
+            var current = recovery.inspect(operator, job.proposalId());
+            assertThat(current.attempts()).isEqualTo(attempt);
+            assertThat(current.attemptHistory()).hasSize(attempt);
+            assertThat(current.state()).isEqualTo(attempt < 5
+                    ? PolicyPublicationJobDocument.State.RETRYABLE
+                    : PolicyPublicationJobDocument.State.BLOCKED);
+        }
+        assertThatThrownBy(() -> recovery.request(operator, job.proposalId(), "recovery-4"))
+                .isInstanceOf(com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceConflictException.class);
+        var finalState = recovery.inspect(operator, job.proposalId());
+        assertThat(finalState.recoveryHistory()).hasSize(3);
+        assertThat(finalState.attemptHistory()).hasSize(8);
+        assertThat(finalState.retrySafe()).isFalse();
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
+    }
+
+    @Test void concurrentExactRecoveryReplayHasOneDurableEventAndChangedActorIsRejected() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().set("state", PolicyPublicationJobDocument.State.BLOCKED)
+                        .set("attempts", 5).set("failureCode", "ATTEMPTS_EXHAUSTED"),
+                PolicyPublicationJobDocument.class);
+        var recovery = new PolicyPublicationRecoveryService(mongo, transactions, governance, clock);
+        PolicyGovernanceActor operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        var start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> { start.await(); return recovery.request(operator, job.proposalId(), "same-op"); });
+            var second = pool.submit(() -> { start.await(); return recovery.request(operator, job.proposalId(), "same-op"); });
+            start.countDown();
+            assertThat(first.get(15, TimeUnit.SECONDS).recoveryCount()).isEqualTo(1);
+            assertThat(second.get(15, TimeUnit.SECONDS).recoveryCount()).isEqualTo(1);
+        }
+        assertThat(mongo.count(new Query(),
+                com.frauddetection.alert.governance.modelpolicy.PolicyPublicationRecoveryEventDocument.class))
+                .isEqualTo(1);
+        var reopened = new PolicyPublicationRecoveryService(mongo,
+                new TransactionTemplate(new MongoTransactionManager(factory)), governance, clock);
+        assertThat(reopened.request(operator, job.proposalId(), "same-op").recoveryCount()).isEqualTo(1);
+        PolicyGovernanceActor other = actor("other-operator", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        assertThatThrownBy(() -> reopened.request(other, job.proposalId(), "same-op"))
+                .isInstanceOf(com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceConflictException.class);
+    }
+
+    @Test void expiredIssuerCannotPublishThroughRecovery() throws Exception {
+        PolicyPublicationJobDocument expired = approvedJob();
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(expired.id())),
+                new Update().set("state", PolicyPublicationJobDocument.State.BLOCKED)
+                        .set("attempts", 5).set("failureCode", "ATTEMPTS_EXHAUSTED"),
+                PolicyPublicationJobDocument.class);
+        var recovery = new PolicyPublicationRecoveryService(mongo, transactions, governance, clock);
+        PolicyGovernanceActor operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        recovery.request(operator, expired.proposalId(), "issuer-expired");
+        clock.set(clock.instant().plusSeconds(366L * 86400));
+        assertThat(worker("expired-issuer", ignored -> { }, issuerKey.getPrivate()).runOnce()).isTrue();
+        assertThat(mongo.findById(expired.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.BLOCKED);
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
+    }
+
+    @Test void tamperedApprovalEvidenceBlocksWorkerBeforeSigning() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        String evidenceId = job.approvalEvidenceReference().substring("webauthn:".length());
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(evidenceId)),
+                new Update().set("draftSha256", "tampered"),
+                com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnEvidence.class);
+        assertThat(worker("tampered-approval", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.BEFORE_SIGN)
+                throw new AssertionError("tampered approval must not reach signing");
+        }, issuerKey.getPrivate()).runOnce()).isTrue();
+        PolicyPublicationJobDocument blocked = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        assertThat(blocked.state()).isEqualTo(PolicyPublicationJobDocument.State.BLOCKED);
+        assertThat(blocked.failureCode()).isEqualTo("CURRENT_TRUST_OR_EVIDENCE_INVALID");
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isZero();
+    }
+
+    @Test void conflictingCommittedEvidenceCannotBeAcknowledgedOrSignedAgain() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        assertThatThrownBy(worker("commit-crash", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_COMMIT)
+                throw new AssertionError("crash after publication transaction");
+        }, issuerKey.getPrivate())::runOnce).isInstanceOf(AssertionError.class);
+        String key = ModelPromotionPolicyDocument.policyKey(job.draft().governanceScope(),
+                job.draft().intendedUse(), job.draft().policyId(), job.draft().revision());
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(key)),
+                new Update().set("onlineApprovalProof.publicationRequestId", "conflicting-request"),
+                InternalPolicyApprovalEvidenceDocument.class);
+        clock.set(clock.instant().plusSeconds(121));
+        assertThat(worker("conflict-restart", ignored -> {
+            throw new AssertionError("conflict must not sign again");
+        }, issuerKey.getPrivate()).runOnce()).isTrue();
+        PolicyPublicationJobDocument blocked = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        assertThat(blocked.state()).isEqualTo(PolicyPublicationJobDocument.State.BLOCKED);
+        assertThat(blocked.failureCode()).isEqualTo("IMMUTABLE_CONFLICT");
+        assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isZero();
+    }
+
     private PolicyPublicationJobDocument approvedJob() throws Exception {
         Authenticator authorKey = credential(author);
         Authenticator approverKey = credential(approver);
@@ -305,7 +663,7 @@ class PolicyPublicationWorkerMongoIntegrationTest {
                 effective.toString(), effective.plusSeconds(86400 * 30).toString(), rules);
         PolicyProposalDocument draft = governance.create(author, new DraftCommand("create-" + UUID.randomUUID(), input));
         var submit = webAuthn.startAction(author, draft.id(),
-                new PolicyWebAuthnService.ActionIntent("submit-" + UUID.randomUUID(), 0, null), "submit");
+                new PolicyWebAuthnService.ActionIntent("submit-" + UUID.randomUUID(), 0, null, null), "submit");
         var submitted = webAuthn.finishAction(author, draft.id(),
                 new PolicyWebAuthnService.FinishAction(mongo.findById(submit.challengeId(),
                         PolicyWebAuthnChallenge.class).operationId(), submit.challengeId(),
@@ -325,13 +683,25 @@ class PolicyPublicationWorkerMongoIntegrationTest {
 
     private PolicyPublicationWorker worker(String workerId, PolicyPublicationWorker.Checkpoints checkpoints,
             PrivateKey signingKey) {
-        var store = new MongoModelPromotionPolicyPublicationStore(mongo, transactions);
+        return worker(workerId, checkpoints, signingKey, mongo, transactions);
+    }
+
+    private PolicyPublicationWorker worker(String workerId, PolicyPublicationWorker.Checkpoints checkpoints,
+            PrivateKey signingKey, MongoTemplate workerMongo, TransactionTemplate publicationTransactions) {
+        return worker(workerId, checkpoints, signingKey, workerMongo, publicationTransactions, () -> true);
+    }
+
+    private PolicyPublicationWorker worker(String workerId, PolicyPublicationWorker.Checkpoints checkpoints,
+            PrivateKey signingKey, MongoTemplate workerMongo, TransactionTemplate publicationTransactions,
+            BooleanSupplier fleetConsistent) {
+        var store = new MongoModelPromotionPolicyPublicationStore(workerMongo, publicationTransactions);
         var publisher = new ModelPromotionPolicyPublisher(mapper, new ModelPromotionPolicyValidator(mapper),
                 issuerVerifier, store, clock);
-        var approval = new OnlinePolicyApprovalVerifier(mongo, mapper, clock, "localhost", ORIGIN,
+        var approval = new OnlinePolicyApprovalVerifier(workerMongo, mapper, clock, "localhost", ORIGIN,
                 actors, approvalTrust);
-        return new PolicyPublicationWorker(mongo, transactions, publisher, approval, issuerVerifier,
-                signingKey, publisherKey.getPrivate(), approvalTrust, clock, mapper, workerId, checkpoints);
+        return new PolicyPublicationWorker(workerMongo, transactions, publisher, approval, issuerVerifier,
+                signingKey, publisherKey.getPrivate(), approvalTrust, clock, mapper, workerId, checkpoints,
+                fleetConsistent);
     }
 
     private ModelPromotionPolicyFullTrustVerifier fullTrust() {
@@ -351,7 +721,7 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         String userHandle = encode(HexFormat.of().parseHex(actor.id().substring(5)));
         mongo.insert(new PolicyWebAuthnCredential(key.id, actor.id(), actor.issuer(), actor.subject(),
                 userHandle, encode(cose), 0, false, Instant.now(), Instant.now(),
-                "ACTIVE", "LEGACY_TEST", null, null, null));
+                "ACTIVE", "LEGACY_TEST", null, null, null, null));
         return key;
     }
 

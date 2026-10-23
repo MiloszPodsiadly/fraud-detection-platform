@@ -38,14 +38,15 @@ public final class ModelPromotionPolicyPublisherCli {
             "--publisher-private-key", "--issuer-private-key", "--author-identity", "--author-key-id",
             "--approver-identity", "--approver-key-id", "--decision", "--expires-at", "--policy-id", "--effective-from",
             "--approval-reference", "--out", "--signed-policy", "--online-actor-trust",
-            "--webauthn-rp-id", "--webauthn-origin");
+            "--webauthn-rp-id", "--webauthn-origin", "--approved-bundle",
+            "--current-registry", "--registry-kind");
 
     private ModelPromotionPolicyPublisherCli() {
     }
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            throw new IllegalArgumentException("First argument must be help, prepare, demo-draft, author, approve, publish, worker, trust-check or inspect-policy");
+            throw new IllegalArgumentException("First argument must be help, prepare, demo-draft, author, approve, publish, worker, trust-check, inspect-policy, stage-approved-trust or verify-loaded-trust");
         }
         Map<String, String> options = options(Arrays.copyOfRange(args, 1, args.length));
         ObjectMapper mapper = new ObjectMapper();
@@ -59,16 +60,20 @@ public final class ModelPromotionPolicyPublisherCli {
             case "worker" -> worker(mapper, options);
             case "trust-check" -> trustCheck(mapper, options);
             case "inspect-policy" -> inspectPolicy(mapper, options);
+            case "stage-approved-trust" -> stageApprovedTrust(mapper, options);
+            case "verify-loaded-trust" -> verifyLoadedTrust(mapper, options);
             default -> throw new IllegalArgumentException("Unknown workflow command: " + args[0]);
         }
     }
 
     private static void help() {
-        System.out.println("Commands: prepare, demo-draft, author, approve, publish, worker, trust-check, inspect-policy");
+        System.out.println("Commands: prepare, demo-draft, author, approve, publish, worker, trust-check, inspect-policy, stage-approved-trust, verify-loaded-trust");
         System.out.println("worker --approval-trust <public-registry> --online-actor-trust <public-mandates> --trusted-issuers <public-registry> --publisher-private-key <key> --issuer-private-key <key> --webauthn-rp-id <rp> --webauthn-origin <origin> [--once]");
         System.out.println("trust-check --approval-trust <public-registry.json> --trusted-issuers <public-registry.json>");
         System.out.println("inspect-policy --signed-policy <signed-policy.json> --trusted-issuers <public-registry.json>");
-        System.out.println("Both commands enforce MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION / MODEL_PROMOTION_TRUST_MIN_GENERATION when applicable.");
+        System.out.println("stage-approved-trust --approved-bundle <protected-export.json> --current-registry <loaded-file.json> --out <new-file.json>");
+        System.out.println("verify-loaded-trust --registry-kind ONLINE_ACTORS|APPROVAL_KEYS|ISSUER_KEYS --current-registry <mounted-file.json>");
+        System.out.println("Trust commands enforce the applicable MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION, MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION and MODEL_PROMOTION_TRUST_MIN_GENERATION floors.");
         System.out.println("Historical INTACT never grants current VERIFIED authorization. See docs/operations/model_promotion_trust_operations.md.");
     }
 
@@ -84,6 +89,41 @@ public final class ModelPromotionPolicyPublisherCli {
                 "approvalRegistryCanonicalSha256", approval.canonicalSha256(),
                 "issuerGeneration", issuers.generation(),
                 "issuerRegistryFileSha256", issuerFileSha256)));
+    }
+
+    private static void stageApprovedTrust(ObjectMapper mapper, Map<String, String> options) throws Exception {
+        var bundle = mapper.readValue(Files.readString(Path.of(required(options, "--approved-bundle"))),
+                PolicyTrustChangeService.InstallationBundle.class);
+        var kind = bundle.candidate().registry();
+        Path output = Path.of(required(options, "--out"));
+        var verified = new PolicyTrustCandidateInstallationVerifier(mapper, CLOCK).stage(bundle,
+                Path.of(required(options, "--current-registry")), output, trustFloor(kind));
+        System.out.println(mapper.writeValueAsString(Map.of("stagedRegistry", kind.name(),
+                "generation", verified.generation(), "canonicalSha256", verified.sha256(),
+                "output", output.toAbsolutePath().toString())));
+    }
+
+    private static void verifyLoadedTrust(ObjectMapper mapper, Map<String, String> options) throws Exception {
+        var kind = PolicyTrustRegistrySnapshotService.Registry.valueOf(required(options, "--registry-kind"));
+        Path path = Path.of(required(options, "--current-registry"));
+        long floor = trustFloor(kind);
+        var snapshots = new PolicyTrustRegistrySnapshotService(mapper,
+                kind == PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS ? path.toString() : "",
+                kind == PolicyTrustRegistrySnapshotService.Registry.APPROVAL_KEYS ? path.toString() : "",
+                kind == PolicyTrustRegistrySnapshotService.Registry.ISSUER_KEYS ? path.toString() : "",
+                floor, floor, floor);
+        var loaded = snapshots.validated(kind);
+        System.out.println(mapper.writeValueAsString(Map.of("loadedRegistry", kind.name(),
+                "generation", loaded.generation(), "canonicalSha256", loaded.digestSha256(),
+                "protectedFloor", floor)));
+    }
+
+    private static long trustFloor(PolicyTrustRegistrySnapshotService.Registry kind) {
+        return switch (kind) {
+            case ONLINE_ACTORS -> generationFloor("MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION");
+            case APPROVAL_KEYS -> generationFloor("MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION");
+            case ISSUER_KEYS -> generationFloor("MODEL_PROMOTION_TRUST_MIN_GENERATION");
+        };
     }
 
     private static void inspectPolicy(ObjectMapper mapper, Map<String, String> options) throws Exception {
@@ -309,18 +349,46 @@ public final class ModelPromotionPolicyPublisherCli {
                     required(options, "--webauthn-rp-id"), required(options, "--webauthn-origin"),
                     actorTrust, approvalTrust);
             String workerId = java.util.UUID.randomUUID().toString();
+            String deploymentId = System.getenv("MODEL_PROMOTION_TRUST_DEPLOYMENT_ID");
+            String configuredInstanceId = System.getenv("MODEL_PROMOTION_TRUST_INSTANCE_ID");
+            String instanceId = configuredInstanceId == null || configuredInstanceId.isBlank()
+                    ? workerId : configuredInstanceId;
+            var membership = PolicyTrustFleetConsistency.membership(deploymentId,
+                    System.getenv("MODEL_PROMOTION_TRUST_EXPECTED_ALERT_INSTANCES"),
+                    System.getenv("MODEL_PROMOTION_TRUST_EXPECTED_PUBLISHER_INSTANCES"));
+            var fleet = new PolicyTrustFleetGuard(mongo, membership, Map.of(
+                    PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
+                    new PolicyTrustFleetGuard.ExpectedRegistry(actorTrust.generation(),
+                            actorTrust.canonicalSha256(), generationFloor("MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION")),
+                    PolicyTrustRegistrySnapshotService.Registry.APPROVAL_KEYS,
+                    new PolicyTrustFleetGuard.ExpectedRegistry(approvalTrust.generation(),
+                            approvalTrust.canonicalSha256(), generationFloor("MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION")),
+                    PolicyTrustRegistrySnapshotService.Registry.ISSUER_KEYS,
+                    new PolicyTrustFleetGuard.ExpectedRegistry(issuers.generation(),
+                            issuers.canonicalSha256(), generationFloor("MODEL_PROMOTION_TRUST_MIN_GENERATION"))), CLOCK);
+            var processStartedAt = CLOCK.instant();
             var worker = new PolicyPublicationWorker(mongo, transactions, publisher, approval, verifier,
-                    issuerKey, publisherKey, approvalTrust, CLOCK, mapper, workerId);
+                    issuerKey, publisherKey, approvalTrust, CLOCK, mapper, workerId, fleet::consistent);
+            boolean fleetPaused = false;
             do {
-                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", workerId,
+                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", instanceId,
+                        deploymentId, workerId, processStartedAt,
                         PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
                         actorTrust.generation(), actorTrust.canonicalSha256(), CLOCK);
-                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", workerId,
+                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", instanceId,
+                        deploymentId, workerId, processStartedAt,
                         PolicyTrustRegistrySnapshotService.Registry.APPROVAL_KEYS,
                         approvalTrust.generation(), approvalTrust.canonicalSha256(), CLOCK);
-                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", workerId,
+                PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", instanceId,
+                        deploymentId, workerId, processStartedAt,
                         PolicyTrustRegistrySnapshotService.Registry.ISSUER_KEYS,
                         issuers.generation(), issuers.canonicalSha256(), CLOCK);
+                boolean ready = fleet.consistent();
+                if (ready != !fleetPaused) {
+                    System.err.println(ready ? "Online policy publication resumed: fleet trust observations match"
+                            : "Online policy publication paused: fleet trust observations incomplete or inconsistent");
+                }
+                fleetPaused = !ready;
                 boolean worked = worker.runOnce();
                 if (options.containsKey("--once")) break;
                 if (!worked) Thread.sleep(30_000);

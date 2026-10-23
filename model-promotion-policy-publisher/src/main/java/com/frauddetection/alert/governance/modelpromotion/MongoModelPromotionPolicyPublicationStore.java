@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.modelpromotion;
 
 import com.mongodb.MongoException;
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationJobDocument;
 import org.bson.Document;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
@@ -35,18 +36,18 @@ final class MongoModelPromotionPolicyPublicationStore {
     ModelPromotionPolicyPublicationReceipt publish(ModelPromotionPolicy policy, Instant publicationTime,
             InternalPolicyApprovalArtifact approvalProof,
             InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
-        return publish(policy, publicationTime, approvalProof, null, authorization);
+        return publish(policy, publicationTime, approvalProof, null, authorization, null);
     }
 
     ModelPromotionPolicyPublicationReceipt publishOnline(ModelPromotionPolicy policy, Instant publicationTime,
             OnlinePolicyApprovalArtifact approvalProof,
-            InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
-        return publish(policy, publicationTime, null, approvalProof, authorization);
+            InstitutionalPolicyPublicationAuthorization.Authorization authorization, PublicationLease lease) {
+        return publish(policy, publicationTime, null, approvalProof, authorization, Objects.requireNonNull(lease));
     }
 
     private ModelPromotionPolicyPublicationReceipt publish(ModelPromotionPolicy policy, Instant publicationTime,
             InternalPolicyApprovalArtifact approvalProof, OnlinePolicyApprovalArtifact onlineProof,
-            InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
+            InstitutionalPolicyPublicationAuthorization.Authorization authorization, PublicationLease lease) {
         Objects.requireNonNull(policy);
         Objects.requireNonNull(publicationTime);
         if ((approvalProof == null) == (onlineProof == null)) {
@@ -57,7 +58,7 @@ final class MongoModelPromotionPolicyPublicationStore {
         for (int attempt = 1; attempt <= MAX_PUBLICATION_ATTEMPTS; attempt++) {
             try {
                 ModelPromotionPolicyPublicationReceipt receipt = transactions.execute(status -> publishWithinTransaction(
-                        policy, publicationTime, approvalProof, onlineProof, authorization));
+                        policy, publicationTime, approvalProof, onlineProof, authorization, lease));
                 return Objects.requireNonNull(receipt, "Mongo publication transaction returned no receipt");
             } catch (PublicationConflictException exception) {
                 throw exception;
@@ -66,6 +67,9 @@ final class MongoModelPromotionPolicyPublicationStore {
                     throw new PublicationConflictException("Policy revision or concurrent publication conflicts", exception);
                 }
             } catch (RuntimeException exception) {
+                if (hasMongoLabel(exception, MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) {
+                    throw new PublicationOutcomeUncertainException("Mongo publication commit outcome is unknown", exception);
+                }
                 if (retryableTransactionFailure(exception) && attempt < MAX_PUBLICATION_ATTEMPTS) {
                     continue;
                 }
@@ -81,11 +85,17 @@ final class MongoModelPromotionPolicyPublicationStore {
 
     private boolean retryableTransactionFailure(Throwable failure) {
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof MongoException mongo && (mongo.hasErrorLabel(
-                    MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL) || mongo.hasErrorLabel(
-                    MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL))) {
+            if (cause instanceof MongoException mongo && mongo.hasErrorLabel(
+                    MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    private boolean hasMongoLabel(Throwable failure, String label) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof MongoException mongo && mongo.hasErrorLabel(label)) return true;
         }
         return false;
     }
@@ -93,7 +103,18 @@ final class MongoModelPromotionPolicyPublicationStore {
     private ModelPromotionPolicyPublicationReceipt publishWithinTransaction(
             ModelPromotionPolicy policy, Instant publicationTime, InternalPolicyApprovalArtifact approvalProof,
             OnlinePolicyApprovalArtifact onlineProof,
-            InstitutionalPolicyPublicationAuthorization.Authorization authorization) {
+            InstitutionalPolicyPublicationAuthorization.Authorization authorization, PublicationLease lease) {
+        if (lease != null) {
+            var owned = mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(lease.jobId())
+                            .and("state").is(PolicyPublicationJobDocument.State.CLAIMED)
+                            .and("leaseOwner").is(lease.workerId())
+                            .and("attempts").is(lease.attempt())
+                            .and("leaseUntil").gt(lease.checkedAt())),
+                    new Update().inc("publicationFence", 1), PolicyPublicationJobDocument.class);
+            if (owned.getModifiedCount() != 1) {
+                throw new PublicationLeaseLostException("Publication lease changed before persistence");
+            }
+        }
         ModelPromotionPolicyDocument proposed = ModelPromotionPolicyDocument.from(policy, publicationTime);
         InternalPolicyApprovalEvidenceDocument evidence = approvalProof != null
                 ? evidence(proposed, approvalProof, authorization, publicationTime)
@@ -268,5 +289,15 @@ final class MongoModelPromotionPolicyPublicationStore {
         PublicationConflictException(String message, Throwable cause) {
             super(message, cause);
         }
+    }
+
+    record PublicationLease(String jobId, String workerId, int attempt, Instant checkedAt) { }
+
+    static final class PublicationLeaseLostException extends RuntimeException {
+        PublicationLeaseLostException(String message) { super(message); }
+    }
+
+    static final class PublicationOutcomeUncertainException extends RuntimeException {
+        PublicationOutcomeUncertainException(String message, Throwable cause) { super(message, cause); }
     }
 }

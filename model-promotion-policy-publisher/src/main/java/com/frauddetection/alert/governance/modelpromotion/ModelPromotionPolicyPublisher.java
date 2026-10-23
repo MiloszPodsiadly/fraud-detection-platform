@@ -116,10 +116,11 @@ final class ModelPromotionPolicyPublisher {
                 prepared.authorization());
     }
 
-    ModelPromotionPolicyPublicationReceipt publishOnlinePrepared(PreparedOnlinePublication prepared) {
+    ModelPromotionPolicyPublicationReceipt publishOnlinePrepared(PreparedOnlinePublication prepared,
+            MongoModelPromotionPolicyPublicationStore.PublicationLease lease) {
         Objects.requireNonNull(store, "Mongo publication store is required");
         return store.publishOnline(prepared.policy(), clock.instant(), prepared.approvalArtifact(),
-                prepared.authorization());
+                prepared.authorization(), lease);
     }
 
     private void requireExactAuthorization(ModelPromotionPolicy.Content content, String finalDigest,

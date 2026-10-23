@@ -32,6 +32,18 @@ class InternalPolicyWorkflowCliTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void protectedLoadedRegistryCheckReportsActualGenerationAndDigest() throws Exception {
+        Fixture fixture = fixture();
+        String report = capture(() -> ModelPromotionPolicyPublisherCli.main(new String[] {
+                "verify-loaded-trust", "--registry-kind", "ISSUER_KEYS", "--current-registry",
+                fixture.issuerTrust().toString() }));
+        var loaded = ModelPromotionTrustedIssuerRegistry.load(mapper, fixture.issuerTrust(), 1);
+        assertThat(report).contains("\"loadedRegistry\":\"ISSUER_KEYS\"")
+                .contains("\"generation\":" + loaded.generation())
+                .contains(loaded.canonicalSha256());
+    }
+
+    @Test
     void repositoryCliProducesSignedAuthorSubmissionIndependentDecisionAndVerifiedDryRun() throws Exception {
         Fixture fixture = fixture();
         ModelPromotionPolicyPublisherCli.main(new String[] {"trust-check", "--approval-trust",
