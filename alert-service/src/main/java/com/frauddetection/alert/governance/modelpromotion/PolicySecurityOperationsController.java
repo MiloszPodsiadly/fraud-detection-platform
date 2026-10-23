@@ -86,7 +86,7 @@ public class PolicySecurityOperationsController {
                             || current.stream().anyMatch(item -> item.generation() != loaded.generation()
                                     || !item.digestSha256().equals(loaded.digestSha256()))) consistent = false;
                 }
-                trust = consistent ? "OBSERVED_CONSISTENT" : "PARTIAL_OR_MISMATCHED";
+                trust = consistent ? "MATCHING_HEARTBEATS_MEMBERSHIP_UNVERIFIED" : "PARTIAL_OR_MISMATCHED";
             }
             String config = oidcIssuer != null && !oidcIssuer.isBlank()
                     && rpId != null && !rpId.isBlank() && origin != null && !origin.isBlank()

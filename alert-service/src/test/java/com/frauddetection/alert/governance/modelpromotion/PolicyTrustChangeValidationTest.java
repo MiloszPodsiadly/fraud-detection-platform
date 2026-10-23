@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
+import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
@@ -10,16 +11,19 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class PolicyTrustChangeValidationTest {
+    private final MongoTemplate mongo = mock(MongoTemplate.class);
     private final PolicyTrustRegistrySnapshotService registries = mock(PolicyTrustRegistrySnapshotService.class);
-    private final PolicyTrustChangeService service = new PolicyTrustChangeService(mock(MongoTemplate.class),
+    private final PolicyTrustChangeService service = new PolicyTrustChangeService(mongo,
             mock(TransactionTemplate.class), mock(PolicyWebAuthnService.class), registries,
             new ObjectMapper(), Clock.systemUTC());
 
@@ -74,6 +78,52 @@ class PolicyTrustChangeValidationTest {
         assertThatThrownBy(() -> service.startRequest(operator, "duplicate-roles", duplicateRoles))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Structured trust change request is invalid");
+    }
+
+    @Test
+    void nonProductionDiffCanBeReviewedWhenUnrelatedRegistryEntriesAreProduction() {
+        var intent = actorIntent("oidc:" + "b".repeat(64), ModelGovernanceEnvironment.TEST, 2);
+        String canonicalJson = "{\"actors\":[{\"environments\":[\"PRODUCTION\"]}],\"generation\":2,\"version\":1}\n";
+        String digest = GovernanceCanonicalJson.sha256(canonicalJson.getBytes(StandardCharsets.UTF_8));
+        var request = new PolicyTrustChangeDocument("nonprod", intent, "a".repeat(64),
+                1, "b".repeat(64), digest, false, "maker", "credential", "c".repeat(64),
+                "proof", java.time.Instant.EPOCH, "PENDING_REVIEW", null, null, null, null, null);
+        var candidate = new PolicyTrustCandidateDocument("nonprod", intent.registry(),
+                intent.action().name(), 1, "b".repeat(64), 2, canonicalJson, digest,
+                "{}\n", "Nonproduction actor change", false);
+        when(mongo.findById("nonprod", PolicyTrustChangeDocument.class)).thenReturn(request);
+        when(mongo.findById("nonprod", PolicyTrustCandidateDocument.class)).thenReturn(candidate);
+        assertThat(service.candidate(actor(Set.of(ModelPolicyAuthority.TRUST_READ)), "nonprod")
+                .candidateSha256()).isEqualTo(digest);
+        when(mongo.findById("nonprod", PolicyTrustChangeDocument.class))
+                .thenReturn(new PolicyTrustChangeDocument("nonprod", intent, "a".repeat(64),
+                        1, "b".repeat(64), digest, true, "maker", "credential", "c".repeat(64),
+                        "proof", java.time.Instant.EPOCH, "PENDING_REVIEW", null, null, null, null, null));
+        when(mongo.findById("nonprod", PolicyTrustCandidateDocument.class))
+                .thenReturn(new PolicyTrustCandidateDocument("nonprod", intent.registry(),
+                        intent.action().name(), 1, "b".repeat(64), 2, canonicalJson, digest,
+                        "{}\n", "Production actor change", true));
+        assertThatThrownBy(() -> service.candidate(
+                actor(Set.of(ModelPolicyAuthority.TRUST_READ)), "nonprod"))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void productionIntentCannotBeReadUsingOnlyTheCandidateFlag() {
+        var intent = actorIntent("oidc:" + "b".repeat(64), ModelGovernanceEnvironment.PRODUCTION, 2);
+        String canonicalJson = "{\"actors\":[],\"generation\":2,\"version\":1}\n";
+        String digest = GovernanceCanonicalJson.sha256(canonicalJson.getBytes(StandardCharsets.UTF_8));
+        var request = new PolicyTrustChangeDocument("production-intent", intent, "a".repeat(64),
+                1, "b".repeat(64), digest, false, "maker", "credential", "c".repeat(64),
+                "proof", java.time.Instant.EPOCH, "PENDING_REVIEW", null, null, null, null, null);
+        var candidate = new PolicyTrustCandidateDocument("production-intent", intent.registry(),
+                intent.action().name(), 1, "b".repeat(64), 2, canonicalJson, digest,
+                "{}\n", "Production actor change", false);
+        when(mongo.findById("production-intent", PolicyTrustChangeDocument.class)).thenReturn(request);
+        when(mongo.findById("production-intent", PolicyTrustCandidateDocument.class)).thenReturn(candidate);
+
+        assertThatThrownBy(() -> service.candidate(actor(Set.of(ModelPolicyAuthority.TRUST_READ)),
+                "production-intent")).isInstanceOf(AccessDeniedException.class);
     }
 
     private PolicyTrustChangeService.Intent actorIntent(String target,

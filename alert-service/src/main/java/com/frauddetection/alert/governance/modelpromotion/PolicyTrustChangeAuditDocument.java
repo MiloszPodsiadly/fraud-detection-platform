@@ -7,6 +7,7 @@ import java.time.Instant;
 
 @Document(PolicyTrustChangeAuditDocument.COLLECTION)
 public record PolicyTrustChangeAuditDocument(@Id String id, String requestId,
-        String action, String actorId, String intentSha256, String assertionSha256, Instant occurredAt) {
+        String action, String actorId, String intentSha256, String assertionSha256,
+        String proofId, Instant occurredAt) {
     public static final String COLLECTION = "model_policy_trust_change_audit";
 }

@@ -7,10 +7,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Validated public trust metadata only; no signing or trust-file write capability. */
 @Service
@@ -70,6 +73,30 @@ public class PolicyTrustRegistrySnapshotService {
         return view;
     }
 
+    /** Returns the complete file-backed configuration only after the production parser validates it. */
+    ValidatedRegistry validated(Registry kind) {
+        return switch (kind) {
+            case ONLINE_ACTORS -> {
+                var configuration = read(actorPath, OnlinePolicyActorTrustRegistry.Configuration.class);
+                var registry = OnlinePolicyActorTrustRegistry.fromConfiguration(configuration, actorFloor);
+                yield new ValidatedRegistry(kind, configuration, registry.generation(),
+                        registry.canonicalSha256(), actorFloor);
+            }
+            case APPROVAL_KEYS -> {
+                var configuration = read(approvalPath, InternalPolicyApprovalTrustRegistry.Configuration.class);
+                var registry = InternalPolicyApprovalTrustRegistry.fromConfiguration(configuration, approvalFloor);
+                yield new ValidatedRegistry(kind, configuration, registry.generation(),
+                        registry.canonicalSha256(), approvalFloor);
+            }
+            case ISSUER_KEYS -> {
+                var configuration = read(issuerPath, ModelPromotionTrustedIssuerRegistry.Configuration.class);
+                var registry = ModelPromotionTrustedIssuerRegistry.fromConfiguration(configuration, issuerFloor);
+                yield new ValidatedRegistry(kind, configuration, registry.generation(),
+                        registry.canonicalSha256(), issuerFloor);
+            }
+        };
+    }
+
     private RegistryView actors() {
         var configuration = read(actorPath, OnlinePolicyActorTrustRegistry.Configuration.class);
         var registry = OnlinePolicyActorTrustRegistry.fromConfiguration(configuration, actorFloor);
@@ -115,10 +142,44 @@ public class PolicyTrustRegistrySnapshotService {
             if (!Files.isRegularFile(source) || !Files.isReadable(source)) {
                 throw new IllegalStateException("Registry file unavailable");
             }
-            return mapper.readValue(Files.readString(source), type);
+            String json = Files.readString(source);
+            strictSchema(mapper.readTree(json), type);
+            return mapper.readValue(json, type);
         } catch (Exception failure) {
             throw new IllegalStateException("Registry file invalid or unavailable", failure);
         }
+    }
+
+    private void strictSchema(JsonNode root, Class<?> type) {
+        boolean actor = type == OnlinePolicyActorTrustRegistry.Configuration.class;
+        Set<String> rootFields = Set.of("version", "generation", actor ? "actors" : "keys");
+        if (root == null || !root.isObject() || !fields(root).equals(rootFields)) {
+            throw new IllegalStateException("Trust registry root schema differs");
+        }
+        JsonNode entries = root.path(actor ? "actors" : "keys");
+        if (!entries.isArray()) throw new IllegalStateException("Trust registry entries are invalid");
+        Set<String> required = actor
+                ? Set.of("actorId", "issuer", "subject", "roles", "institutionalScopes",
+                        "environments", "intendedUses", "validFrom", "validUntil", "status")
+                : type == InternalPolicyApprovalTrustRegistry.Configuration.class
+                    ? Set.of("identity", "keyId", "publicKeySpkiBase64", "publicKeySha256", "roles",
+                            "institutionalScopes", "environments", "intendedUses", "validFrom",
+                            "validUntil", "status")
+                    : Set.of("issuerIdentity", "keyId", "publicKeySpkiBase64", "publicKeySha256",
+                            "institutionalScopes", "environments", "intendedUses", "validFrom",
+                            "validUntil", "status");
+        for (JsonNode entry : entries) {
+            if (!entry.isObject() || !fields(entry).containsAll(required)
+                    || fields(entry).stream().anyMatch(field -> !required.contains(field)
+                            && !(actor && "displayName".equals(field)))) {
+                throw new IllegalStateException("Trust registry entry schema differs");
+            }
+        }
+    }
+
+    private Set<String> fields(JsonNode object) {
+        return object.properties().stream().map(java.util.Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private long floor(Registry registry) {
@@ -130,6 +191,8 @@ public class PolicyTrustRegistrySnapshotService {
     }
 
     public enum Registry { ONLINE_ACTORS, APPROVAL_KEYS, ISSUER_KEYS }
+    record ValidatedRegistry(Registry registry, Object configuration, long generation,
+            String digestSha256, long rollbackFloor) { }
     public record RegistryView(Registry registry, String status, Long generation, String digestSha256,
             long rollbackFloor, List<Entry> entries) { }
     public record Entry(String identity, String keyId, String publicKeySha256, String displayName,

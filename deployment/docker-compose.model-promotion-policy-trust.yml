@@ -1,7 +1,11 @@
-# Local development trust material only; no policy approval authority is configured here.
+# Local development trust material and signing worker; not production key custody.
 services:
   alert-service:
     environment:
+      MODEL_PROMOTION_TRUST_DEPLOYMENT_ID: ${MODEL_PROMOTION_TRUST_DEPLOYMENT_ID:-local-compose}
+      MODEL_PROMOTION_TRUST_INSTANCE_ID: alert-service
+      MODEL_PROMOTION_TRUST_EXPECTED_ALERT_INSTANCES: alert-service
+      MODEL_PROMOTION_TRUST_EXPECTED_PUBLISHER_INSTANCES: model-promotion-policy-publisher
       MODEL_PROMOTION_TRUSTED_ISSUERS_PATH: /run/model-promotion-policy/trusted-issuers.json
       MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
       MODEL_PROMOTION_APPROVAL_TRUST_PATH: /run/model-promotion-policy/trusted-approvals.json
@@ -91,6 +95,10 @@ services:
       model-promotion-policy-key-loader:
         condition: service_completed_successfully
     environment:
+      MODEL_PROMOTION_TRUST_DEPLOYMENT_ID: ${MODEL_PROMOTION_TRUST_DEPLOYMENT_ID:-local-compose}
+      MODEL_PROMOTION_TRUST_INSTANCE_ID: model-promotion-policy-publisher
+      MODEL_PROMOTION_TRUST_EXPECTED_ALERT_INSTANCES: alert-service
+      MODEL_PROMOTION_TRUST_EXPECTED_PUBLISHER_INSTANCES: model-promotion-policy-publisher
       MODEL_PROMOTION_PUBLISH_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
       MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION: "1"

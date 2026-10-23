@@ -130,7 +130,7 @@ function addKey() {
   data.keys.push(entry);
   data.generation += 1;
   writeNew(required("--out"), `${JSON.stringify(data, null, 2)}\n`);
-  console.log(`Created ${kind} registry generation ${data.generation}; key SHA-256 ${material.publicKeySha256}`);
+  console.log(`Created UNAPPROVED ${kind} draft generation ${data.generation}; key SHA-256 ${material.publicKeySha256}`);
 }
 
 function setStatus() {
@@ -152,7 +152,7 @@ function setStatus() {
   key.status = status;
   data.generation += 1;
   writeNew(required("--out"), `${JSON.stringify(data, null, 2)}\n`);
-  console.log(`Created ${kind} registry generation ${data.generation}; key status ${status}`);
+  console.log(`Created UNAPPROVED ${kind} draft generation ${data.generation}; key status ${status}`);
 }
 
 switch (command) {

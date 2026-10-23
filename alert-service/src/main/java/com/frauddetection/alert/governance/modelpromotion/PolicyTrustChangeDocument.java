@@ -10,9 +10,24 @@ import java.time.Instant;
 public record PolicyTrustChangeDocument(@Id String id,
         PolicyTrustChangeService.Intent intent, String intentSha256,
         long baseGeneration, String baseRegistrySha256,
-        String requestedBy, String requesterCredentialId, String requestAssertionSha256,
+        String candidateSha256, boolean affectsProduction,
+        String requestedBy, String requesterCredentialId, String requestAssertionSha256, String requestProofId,
         Instant requestedAt, String status,
-        String reviewedBy, String reviewerCredentialId, String reviewAssertionSha256,
+        String reviewedBy, String reviewerCredentialId, String reviewAssertionSha256, String reviewProofId,
         Instant reviewedAt) {
     public static final String COLLECTION = "model_policy_trust_change_requests";
+
+    public PolicyTrustChangeDocument(String id, PolicyTrustChangeService.Intent intent, String intentSha256,
+            long baseGeneration, String baseRegistrySha256,
+            String requestedBy, String requesterCredentialId, String requestAssertionSha256,
+            String requestProofId, Instant requestedAt, String status,
+            String reviewedBy, String reviewerCredentialId, String reviewAssertionSha256,
+            String reviewProofId, Instant reviewedAt) {
+        this(id, intent, intentSha256, baseGeneration, baseRegistrySha256,
+                intent.candidateRegistrySha256(),
+                intent.environment() == ModelGovernanceEnvironment.PRODUCTION,
+                requestedBy, requesterCredentialId,
+                requestAssertionSha256, requestProofId, requestedAt, status, reviewedBy,
+                reviewerCredentialId, reviewAssertionSha256, reviewProofId, reviewedAt);
+    }
 }

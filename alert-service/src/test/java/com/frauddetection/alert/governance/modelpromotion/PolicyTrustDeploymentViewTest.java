@@ -42,7 +42,8 @@ class PolicyTrustDeploymentViewTest {
 
         var view = service.deployment(reader(), "request-1");
 
-        assertThat(view.rolloutState()).isEqualTo("OBSERVATION_SET_TRUNCATED");
+        assertThat(view.rolloutState()).isEqualTo("UNKNOWN");
+        assertThat(view.mismatchReason()).isEqualTo("EXPECTED_MEMBERSHIP_UNAVAILABLE");
         assertThat(view.observationSetTruncated()).isTrue();
         assertThat(view.acknowledgements()).hasSize(100);
         assertThat(view.consistentObservedGeneration()).isNull();
@@ -66,9 +67,68 @@ class PolicyTrustDeploymentViewTest {
 
         assertThat(view.requestStatus()).isEqualTo("PENDING_REVIEW");
         assertThat(view.candidateRegistrySha256()).isEqualTo(DIGEST);
-        assertThat(view.rolloutState()).isEqualTo("REQUEST_NOT_APPROVED");
+        assertThat(view.rolloutState()).isEqualTo("PENDING_INDEPENDENT_REVIEW");
         assertThat(view.consistentObservedGeneration()).isNull();
         assertThat(view.consistentObservedRegistrySha256()).isNull();
+    }
+
+    @Test
+    void matchingHeartbeatsWithoutDeclaredInventoryRemainUnknown() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        var registries = mock(PolicyTrustRegistrySnapshotService.class);
+        when(mongo.findById("request-1", PolicyTrustChangeDocument.class)).thenReturn(request("PENDING_OPERATOR_ACTION"));
+        when(registries.snapshot(REGISTRY)).thenReturn(readyRegistry());
+        when(mongo.find(any(Query.class), eq(PolicyTrustInstanceObservation.class))).thenReturn(List.of(
+                observation("ALERT_VERIFIER", "alert-1", NOW),
+                observation("PUBLISHER", "publisher-1", NOW)));
+        var view = service(mongo, registries).deployment(reader(), "request-1");
+        assertThat(view.rolloutState()).isEqualTo("UNKNOWN");
+        assertThat(view.membershipEvidence()).isEqualTo("UNKNOWN");
+        assertThat(view.activationConfirmed()).isFalse();
+    }
+
+    @Test
+    void changedFileWithoutVerifierReloadCannotClaimObservedConsistency() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        var registries = mock(PolicyTrustRegistrySnapshotService.class);
+        when(mongo.findById("request-1", PolicyTrustChangeDocument.class)).thenReturn(request("PENDING_OPERATOR_ACTION"));
+        when(registries.snapshot(REGISTRY)).thenReturn(readyRegistry());
+        when(mongo.find(any(Query.class), eq(PolicyTrustInstanceObservation.class))).thenReturn(List.of(
+                loaded("ALERT_VERIFIER", "alert-1", 1), loaded("PUBLISHER", "publisher-1", 1)));
+        var service = new PolicyTrustChangeService(mongo,
+                mock(org.springframework.transaction.support.TransactionTemplate.class),
+                mock(PolicyWebAuthnService.class), registries, new ObjectMapper(),
+                Clock.fixed(NOW, ZoneOffset.UTC), PolicyTrustFleetConsistency.membership(
+                        "rollout", "alert-1", "publisher-1"));
+        var view = service.deployment(reader(), "request-1");
+        assertThat(view.configuredFileGeneration()).isEqualTo(2L);
+        assertThat(view.rolloutState()).isEqualTo("DEPLOYMENT_IN_PROGRESS");
+        assertThat(view.consistentObservedGeneration()).isNull();
+    }
+
+    @Test
+    void matchingLoadedFleetWithOldApiFileIsDeploymentFailure() {
+        MongoTemplate mongo = mock(MongoTemplate.class);
+        var registries = mock(PolicyTrustRegistrySnapshotService.class);
+        when(mongo.findById("request-1", PolicyTrustChangeDocument.class))
+                .thenReturn(request("PENDING_OPERATOR_ACTION"));
+        when(registries.snapshot(REGISTRY)).thenReturn(new PolicyTrustRegistrySnapshotService.RegistryView(
+                REGISTRY, "READY", 1L, "a".repeat(64), 1, List.of()));
+        when(mongo.find(any(Query.class), eq(PolicyTrustInstanceObservation.class))).thenReturn(List.of(
+                loaded("ALERT_VERIFIER", "alert-1", 2), loaded("PUBLISHER", "publisher-1", 2)));
+        var service = new PolicyTrustChangeService(mongo,
+                mock(org.springframework.transaction.support.TransactionTemplate.class),
+                mock(PolicyWebAuthnService.class), registries, new ObjectMapper(),
+                Clock.fixed(NOW, ZoneOffset.UTC), PolicyTrustFleetConsistency.membership(
+                        "rollout", "alert-1", "publisher-1"));
+
+        var view = service.deployment(reader(), "request-1");
+
+        assertThat(view.rolloutState()).isEqualTo("DEPLOYMENT_FAILED");
+        assertThat(view.mismatchReason()).isEqualTo("API_REGISTRY_FILE_DIFFERS_FROM_APPROVED_CANDIDATE");
+        assertThat(view.configuredFileGeneration()).isEqualTo(1L);
+        assertThat(view.consistentObservedGeneration()).isNull();
+        assertThat(view.activationConfirmed()).isFalse();
     }
 
     private PolicyTrustChangeService service(MongoTemplate mongo,
@@ -83,13 +143,18 @@ class PolicyTrustDeploymentViewTest {
                 ModelGovernanceEnvironment.TEST, ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
                 2, DIGEST, "case-1");
         return new PolicyTrustChangeDocument("request-1", intent, "a".repeat(64), 1,
-                "b".repeat(64), "requester", "credential-1", "assertion-1", NOW,
-                status, "reviewer", "credential-2", "assertion-2", NOW);
+                "b".repeat(64), "requester", "credential-1", "assertion-1", "trust-request:request-1", NOW,
+                status, "reviewer", "credential-2", "assertion-2", "trust-review:review-1", NOW);
     }
 
     private PolicyTrustInstanceObservation observation(String role, String instanceId, Instant observedAt) {
         return new PolicyTrustInstanceObservation(role + ":" + instanceId, role, instanceId,
                 REGISTRY, 2, DIGEST, observedAt);
+    }
+
+    private PolicyTrustInstanceObservation loaded(String role, String instanceId, long generation) {
+        return new PolicyTrustInstanceObservation(role + ":" + instanceId + ":epoch", role, instanceId,
+                REGISTRY, generation, DIGEST, NOW, "rollout", "epoch", NOW.minusSeconds(20));
     }
 
     private PolicyTrustRegistrySnapshotService.RegistryView readyRegistry() {

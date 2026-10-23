@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import org.springframework.security.core.Authentication;
@@ -43,6 +44,26 @@ public class PolicyTrustAdministrationController {
     public PolicyTrustChangeService.DeploymentView deployment(Authentication authentication,
             @PathVariable String id) {
         return changes.deployment(PolicyGovernanceActor.from(authentication), id);
+    }
+
+    @GetMapping("/requests/{id}/candidate")
+    @AuditedSensitiveRead
+    public PolicyTrustChangeService.CandidateView candidate(Authentication authentication,
+            @PathVariable String id) {
+        return changes.candidate(PolicyGovernanceActor.from(authentication), id);
+    }
+
+    @GetMapping("/requests/{id}/installation")
+    @AuditedSensitiveRead
+    public PolicyTrustChangeService.InstallationBundle installation(Authentication authentication,
+            @PathVariable String id) {
+        return changes.installation(PolicyGovernanceActor.from(authentication), id);
+    }
+
+    @PostMapping("/requests/preview")
+    public PolicyTrustChangeService.CandidatePreview preview(Authentication authentication,
+            @RequestBody PolicyTrustChangeService.Intent intent) {
+        return changes.preview(PolicyGovernanceActor.fromOidcSession(authentication), intent);
     }
 
     @PostMapping("/requests/challenges")

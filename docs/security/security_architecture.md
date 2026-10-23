@@ -86,15 +86,18 @@ independent external trust anchor.
 
 ## Model-promotion policy trust
 
-The offline `model-promotion-policy-publisher` authenticates separately provisioned author, independent approver,
-publisher and issuer Ed25519 credentials against a deployment-controlled public approval registry. `alert-service`
-receives only the public issuer registry; it never holds an issuer private key or infers authority from a Mongo
-policy document. Current policy `VERIFIED` requires an active issuer mandate and exact signature. Historical
+The `model-promotion-policy-publisher` authenticates separately provisioned author, independent approver,
+publisher and issuer credentials against deployment-controlled public trust registries. `alert-service`
+loads the public actor, approval-key and issuer registries; it never holds an issuer private key or infers authority
+from a Mongo policy document. Current policy `VERIFIED` requires an active issuer mandate and exact signature. Historical
 `INTACT_*` inspection is not current authorization. Ordinary model-promotion reads omit original rationale content;
 the approval-proof collection is not exposed by those APIs and requires restricted direct Mongo audit access.
 The verifier reports only bounded status/reason metrics and a label-free loaded-registry generation gauge.
-Protect both registry files and their independent minimum-generation settings against rollback. See
+Protect each registry file and its independent minimum-generation setting against rollback. See
 [trust operations](../operations/model_promotion_trust_operations.md); local fixture keys are not production keys.
+The rollout view compares a declared Compose instance inventory with bounded runtime observations and the API's
+configured file. These Mongo observations are operational telemetry, not independent deployment attestation;
+`OBSERVED_CONSISTENT` does not establish `ACTIVATION_CONFIRMED`.
 
 ## Limitations
 

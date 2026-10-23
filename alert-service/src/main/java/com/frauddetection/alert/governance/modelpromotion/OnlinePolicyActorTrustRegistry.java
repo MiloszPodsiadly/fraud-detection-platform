@@ -54,13 +54,10 @@ final class OnlinePolicyActorTrustRegistry {
             if (actor == null || actor.issuer() == null || actor.issuer().isBlank()
                     || actor.subject() == null || actor.subject().isBlank()
                     || !actorId(actor.issuer(), actor.subject()).equals(actor.actorId())
-                    || actor.roles() == null || actor.roles().isEmpty()
-                    || actor.roles().stream().anyMatch(role -> role == null)
-                    || actor.institutionalScopes() == null
-                    || !Set.copyOf(actor.institutionalScopes()).equals(Set.of(ModelGovernanceScope.CURRENT_INSTITUTION))
-                    || actor.environments() == null || actor.environments().isEmpty()
-                    || actor.intendedUses() == null || actor.intendedUses().isEmpty()
+                    || !validActorSets(actor)
                     || actor.status() == null
+                    || actor.displayName() != null && (actor.displayName().isBlank()
+                            || actor.displayName().length() > 128)
                     || !ModelPromotionTrustedIssuerRegistry.canonicalTime(actor.validFrom(), "validFrom")
                             .isBefore(ModelPromotionTrustedIssuerRegistry.canonicalTime(actor.validUntil(), "validUntil"))
                     || actors.putIfAbsent(actor.actorId(), actor) != null) {
@@ -69,6 +66,14 @@ final class OnlinePolicyActorTrustRegistry {
         }
         return new OnlinePolicyActorTrustRegistry(configuration.generation(),
                 GovernanceCanonicalJson.sha256(new ObjectMapper(), configuration), actors);
+    }
+
+    private static boolean validActorSets(Actor actor) {
+        ModelPromotionTrustedIssuerRegistry.requiredSet(actor.roles(), "roles");
+        ModelPromotionTrustedIssuerRegistry.requiredSet(actor.environments(), "environments");
+        ModelPromotionTrustedIssuerRegistry.requiredSet(actor.intendedUses(), "intendedUses");
+        return ModelPromotionTrustedIssuerRegistry.requiredSet(actor.institutionalScopes(),
+                "institutionalScopes").equals(Set.of(ModelGovernanceScope.CURRENT_INSTITUTION));
     }
 
     void require(String actorId, String issuer, String subject, Role role,
