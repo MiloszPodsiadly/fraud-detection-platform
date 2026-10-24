@@ -91,6 +91,19 @@ final class OnlinePolicyActorTrustRegistry {
         }
     }
 
+    /** Historical mandate at the signed action time; later retirement is not a new signing authorization. */
+    void requireHistorical(String actorId, String issuer, String subject, Role role,
+            ModelGovernanceScope scope, ModelPromotionIntendedUse use, Instant actionAt) {
+        Actor actor = actors.get(actorId);
+        if (actor == null || !actor.issuer().equals(issuer) || !actor.subject().equals(subject)
+                || !actor.roles().contains(role)
+                || !actor.institutionalScopes().contains(scope.institutionalScope())
+                || !actor.environments().contains(scope.environment()) || !actor.intendedUses().contains(use)
+                || actionAt.isBefore(Instant.parse(actor.validFrom()))
+                || !actionAt.isBefore(Instant.parse(actor.validUntil())))
+            throw new SecurityException("Historical independent OIDC actor mandate unavailable");
+    }
+
     long generation() { return generation; }
     String canonicalSha256() { return canonicalSha256; }
 

@@ -54,6 +54,7 @@ public final class PolicyTrustFleetConsistency {
         Map<Member, List<PolicyTrustInstanceObservation>> byMember = new HashMap<>();
         boolean hardMismatch = false;
         boolean rollback = false;
+        Set<String> liveEpochs = new HashSet<>();
         int exactFresh = 0;
         int freshCount = 0;
         for (PolicyTrustInstanceObservation observation : observations) {
@@ -76,6 +77,7 @@ public final class PolicyTrustFleetConsistency {
                     observation.generation(), observation.digestSha256(), observation.observedAt(), fresh, reason));
             if (fresh) {
                 freshCount++;
+                if (!liveEpochs.add(observation.processEpoch())) hardMismatch = true;
                 if ("MATCH".equals(reason)) exactFresh++;
                 if ("ROLLBACK_BELOW_FLOOR".equals(reason)) rollback = true;
                 if ("DIGEST_MISMATCH".equals(reason) || "UNEXPECTED_INSTANCE".equals(reason)
@@ -109,7 +111,7 @@ public final class PolicyTrustFleetConsistency {
         String reason = truncated ? "OBSERVATION_SET_TRUNCATED"
                 : "OBSERVED_CONSISTENT".equals(state) ? "DECLARED_MEMBERSHIP_MATCHES_LOADED_TRUST"
                 : "REVOKED_OR_ROLLED_BACK".equals(state) ? "GENERATION_BELOW_PROTECTED_FLOOR"
-                : hardMismatch ? "DUPLICATE_UNEXPECTED_OR_WRONG_DIGEST"
+                : hardMismatch ? "DUPLICATE_EPOCH_UNEXPECTED_OR_WRONG_DIGEST"
                 : "EXPECTED_INSTANCES_NOT_ALL_MATCHING";
         return new Assessment(state, reason, membership.expected(), List.copyOf(missing),
                 List.copyOf(stale), List.copyOf(mismatched), List.copyOf(viewed), truncated);

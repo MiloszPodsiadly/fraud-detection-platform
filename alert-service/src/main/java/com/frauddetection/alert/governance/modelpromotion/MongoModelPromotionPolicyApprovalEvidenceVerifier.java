@@ -32,6 +32,8 @@ final class MongoModelPromotionPolicyApprovalEvidenceVerifier
         return online == null ? null : online.loadedActorTrust();
     }
 
+    OnlinePolicyApprovalVerifier onlineVerifier() { return online; }
+
     @Override
     public ModelPromotionPolicyApprovalEvidenceVerification verify(ModelPromotionPolicy policy) {
         if (policy == null || policy.content() == null) {

@@ -16,6 +16,23 @@ const registryPath = join(outputDir, "trusted-issuers.json");
 const issuerIdentity = "local-dev-model-promotion-issuer";
 const keyId = "local-dev-model-promotion-key-1";
 const approvalDir = join(outputDir, "approval");
+const observationDir = join(outputDir, "fleet-observation");
+const observationRegistryPath = join(observationDir, "trusted-reporters.json");
+const localEnvPath = join(repositoryRoot, "deployment", ".env");
+const localEnvDeploymentId = existsSync(localEnvPath)
+  ? readFileSync(localEnvPath, "utf8").split(/\r?\n/)
+    .map(line => line.match(/^MODEL_PROMOTION_TRUST_DEPLOYMENT_ID\s*=\s*(.*?)\s*$/))
+    .find(Boolean)?.[1]?.replace(/^['"]|['"]$/g, "")
+  : undefined;
+const observationDeploymentId = process.env.MODEL_PROMOTION_TRUST_DEPLOYMENT_ID
+  || localEnvDeploymentId || "local-compose";
+if (!/^[A-Za-z0-9._:-]{1,128}$/.test(observationDeploymentId)) {
+  throw new Error("Invalid local observation deployment ID");
+}
+const observationKeys = [
+  ["ALERT_VERIFIER", "alert-service", "local-alert-observation-1", "alert.private-key.pkcs8.base64"],
+  ["PUBLISHER", "model-promotion-policy-publisher", "local-publisher-observation-1", "publisher.private-key.pkcs8.base64"]
+];
 const approvalRegistryPath = join(approvalDir, "trusted-approvals.json");
 const onlineActorTrustPath = join(approvalDir, "online-actor-trust.json");
 const onlineIssuer = "http://localhost:8086/realms/fraud-detection";
@@ -131,6 +148,53 @@ function ensureApproval() {
   console.log("Generated separate local-only author, approver and publisher credentials; no approval decision was created.");
 }
 
+function ensureObservationKeys() {
+  if (!existsSync(observationDir)) {
+    if (mode === "--check") throw new Error("Local fleet observation keys are missing");
+    const stagingDir = mkdtempSync(join(outputDir, "fleet-observation.tmp."));
+    try {
+      const keys = observationKeys.map(([role, instanceId, keyId, filename]) => {
+        const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+        const privateDer = privateKey.export({ format: "der", type: "pkcs8" });
+        const publicDer = publicKey.export({ format: "der", type: "spki" });
+        writeFileSync(join(stagingDir, filename), `${privateDer.toString("base64")}\n`, { mode: 0o600, flag: "wx" });
+        return { role, instanceId, keyId, publicKeySpkiBase64: publicDer.toString("base64") };
+      });
+      writeFileSync(join(stagingDir, "trusted-reporters.json"),
+        `${JSON.stringify({ version: "policy-trust-observation-keys-v1", deploymentId: observationDeploymentId, keys }, null, 2)}\n`,
+        { mode: 0o444, flag: "wx" });
+      renameSync(stagingDir, observationDir);
+    } finally {
+      if (existsSync(stagingDir)) {
+        if (!resolve(stagingDir).startsWith(`${resolve(outputDir)}${sep}`)) {
+          throw new Error("Refusing cleanup outside the local fixture directory");
+        }
+        rmSync(stagingDir, { recursive: true });
+      }
+    }
+  }
+  const registry = JSON.parse(readFileSync(observationRegistryPath, "utf8"));
+  if (registry.version !== "policy-trust-observation-keys-v1"
+      || registry.deploymentId !== observationDeploymentId
+      || registry.keys?.length !== observationKeys.length) {
+    throw new Error("Local fleet observation trust registry is invalid or belongs to another deployment");
+  }
+  for (const [role, instanceId, keyId, filename] of observationKeys) {
+    const credential = join(observationDir, filename);
+    assertProtectedFile(credential);
+    const privateKey = createPrivateKey({
+      key: Buffer.from(readFileSync(credential, "utf8").trim(), "base64"), format: "der", type: "pkcs8"
+    });
+    if (privateKey.asymmetricKeyType !== "ed25519") throw new Error(`Invalid observation key: ${filename}`);
+    const publicDer = createPublicKey(privateKey).export({ format: "der", type: "spki" });
+    const entry = registry.keys.find(key => key.keyId === keyId);
+    if (entry?.role !== role || entry.instanceId !== instanceId
+        || entry.publicKeySpkiBase64 !== publicDer.toString("base64")) {
+      throw new Error(`Local observation identity mismatch: ${keyId}`);
+    }
+  }
+}
+
 function validateExisting() {
   if (!existsSync(privateKeyPath) || !existsSync(registryPath)) {
     throw new Error("Incomplete local model-promotion keys; inspect manually. Existing keys are never replaced automatically.");
@@ -242,3 +306,4 @@ if (existsSync(outputDir)) {
 }
 ensureApproval();
 ensureOnlineActorTrust();
+ensureObservationKeys();

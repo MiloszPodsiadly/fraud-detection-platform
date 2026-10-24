@@ -178,6 +178,11 @@ app:
     audit:
       fail-closed: ${SENSITIVE_READS_AUDIT_FAIL_CLOSED:false}
   security:
+    model-promotion-emergency:
+      # Configure only after the IdP enforces and signs this exact fresh step-up ACR.
+      trusted-issuer: ${MODEL_PROMOTION_EMERGENCY_TRUSTED_ISSUER:}
+      trusted-acr: ${MODEL_PROMOTION_EMERGENCY_TRUSTED_ACR:}
+      max-age-seconds: ${MODEL_PROMOTION_EMERGENCY_MAX_AGE_SECONDS:300}
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}
     bff:
@@ -212,6 +217,7 @@ app:
         model-policy-publisher: ["model-policy:read", "model-policy:publish:request"]
         model-policy-recovery: ["model-policy:read", "model-policy:publication:recover", "model-policy:audit:read"]
         model-policy-credential-admin: ["model-policy:credential:admin"]
+        model-policy-credential-incident-revoker: ["model-policy:credential:incident-revoke"]
         model-policy-credential-holder: ["model-policy:credential:enroll"]
         model-policy-production: ["model-policy:scope:production"]
         model-policy-trust-requester: ["model-policy:trust:read", "model-policy:trust:request"]

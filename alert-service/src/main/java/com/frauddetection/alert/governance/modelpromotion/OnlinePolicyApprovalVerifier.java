@@ -87,18 +87,27 @@ final class OnlinePolicyApprovalVerifier {
                     || submitted.publicKeyCose().equals(approved.publicKeyCose())) {
                 throw new SecurityException("Author and approver cannot share an authenticator credential");
             }
-            actors.require(submitted.evidence().actorId(), submitted.evidence().issuer(),
-                    submitted.evidence().subject(), OnlinePolicyActorTrustRegistry.Role.POLICY_AUTHOR,
-                    job.draft().governanceScope(), job.draft().intendedUse(), job.submittedAt(), now);
-            actors.require(approved.evidence().actorId(), approved.evidence().issuer(),
-                    approved.evidence().subject(), OnlinePolicyActorTrustRegistry.Role.POLICY_APPROVER,
-                    job.draft().governanceScope(), job.draft().intendedUse(), job.decidedAt(), now);
+            if (newPublication) {
+                actors.require(submitted.evidence().actorId(), submitted.evidence().issuer(),
+                        submitted.evidence().subject(), OnlinePolicyActorTrustRegistry.Role.POLICY_AUTHOR,
+                        job.draft().governanceScope(), job.draft().intendedUse(), job.submittedAt(), now);
+                actors.require(approved.evidence().actorId(), approved.evidence().issuer(),
+                        approved.evidence().subject(), OnlinePolicyActorTrustRegistry.Role.POLICY_APPROVER,
+                        job.draft().governanceScope(), job.draft().intendedUse(), job.decidedAt(), now);
+            } else {
+                actors.requireHistorical(submitted.evidence().actorId(), submitted.evidence().issuer(),
+                        submitted.evidence().subject(), OnlinePolicyActorTrustRegistry.Role.POLICY_AUTHOR,
+                        job.draft().governanceScope(), job.draft().intendedUse(), job.submittedAt());
+                actors.requireHistorical(approved.evidence().actorId(), approved.evidence().issuer(),
+                        approved.evidence().subject(), OnlinePolicyActorTrustRegistry.Role.POLICY_APPROVER,
+                        job.draft().governanceScope(), job.draft().intendedUse(), job.decidedAt());
+            }
             InternalPolicyApprovalTrustRegistry.TrustedKey publisher = mandate(job.draft().publisherIdentity(),
                     job.draft().publisherKeyId(), InternalPolicyApprovalTrustRegistry.Role.POLICY_PUBLISHER,
-                    job.draft(), now);
+                    job.draft(), newPublication ? now : job.decidedAt(), newPublication);
             InternalPolicyApprovalTrustRegistry.TrustedKey issuer = mandate(job.draft().issuerIdentity(),
                     job.draft().issuerKeyId(), InternalPolicyApprovalTrustRegistry.Role.POLICY_ISSUER,
-                    job.draft(), now);
+                    job.draft(), newPublication ? now : job.decidedAt(), newPublication);
             if (publisher.publicKeySha256().equals(issuer.publicKeySha256())) {
                 throw new SecurityException("Publisher and issuer keys must be independent");
             }
@@ -124,6 +133,27 @@ final class OnlinePolicyApprovalVerifier {
     }
 
     Verified verifyPublished(ModelPromotionPolicy policy, InternalPolicyApprovalEvidenceDocument evidence) {
+        Verified verified = verifyCommitted(policy, evidence);
+        var job = mongo.findById(evidence.onlineApprovalProof().publicationRequestId(),
+                PolicyPublicationJobDocument.class);
+        PolicyProposalDocument proposal = mongo.findById(job.proposalId(), PolicyProposalDocument.class);
+        Query historyQuery = Query.query(Criteria.where("proposalId").is(job.proposalId())
+                .and("action").is("PUBLISH_POLICY").and("operationId").is("publish:" + job.id()));
+        PolicyGovernanceHistoryDocument history = mongo.findOne(historyQuery, PolicyGovernanceHistoryDocument.class);
+        if (job.state() != PolicyPublicationJobDocument.State.PUBLISHED
+                || !policy.canonicalSha256().equals(job.publishedPolicySha256())
+                || !job.publishedAt().equals(evidence.publishedAt())
+                || proposal == null || proposal.status() != PolicyGovernanceState.PUBLISHED
+                || history == null || mongo.count(historyQuery, PolicyGovernanceHistoryDocument.class) != 1
+                || history.toStatus() != PolicyGovernanceState.PUBLISHED
+                || !job.draftSha256().equals(history.draftSha256())
+                || !job.approvalEvidenceReference().equals(history.approvalEvidenceReference()))
+            throw new SecurityException("Published acknowledgement or history linkage is invalid");
+        return verified;
+    }
+
+    /** Verifies the immutable commit before a worker or operator writes the missing acknowledgement. */
+    Verified verifyCommitted(ModelPromotionPolicy policy, InternalPolicyApprovalEvidenceDocument evidence) {
         if (policy == null || evidence == null || evidence.onlineApprovalProof() == null
                 || !OnlinePolicyApprovalArtifact.VERSION.equals(evidence.proofKind())) {
             throw new SecurityException("Online approval evidence is unavailable");
@@ -131,27 +161,22 @@ final class OnlinePolicyApprovalVerifier {
         OnlinePolicyApprovalArtifact storedProof = evidence.onlineApprovalProof();
         PolicyPublicationJobDocument job = mongo.findById(storedProof.publicationRequestId(),
                 PolicyPublicationJobDocument.class);
-        if (job == null || job.state() != PolicyPublicationJobDocument.State.PUBLISHED
-                || !policy.canonicalSha256().equals(job.publishedPolicySha256())
+        if (job == null
                 || !storedProof.draft().equals(job.draft())
                 || !storedProof.draftSha256().equals(job.draftSha256())
                 || !storedProof.publicationRequestId().equals(job.id())
-                || !job.publishedAt().equals(evidence.publishedAt())) {
+                || evidence.publishedAt() == null) {
             throw new SecurityException("Published job does not match retained approval proof");
         }
         PolicyProposalDocument proposal = mongo.findById(job.proposalId(), PolicyProposalDocument.class);
-        Query historyQuery = Query.query(Criteria.where("proposalId").is(job.proposalId())
-                .and("action").is("PUBLISH_POLICY").and("operationId").is("publish:" + job.id()));
-        PolicyGovernanceHistoryDocument history = mongo.findOne(historyQuery, PolicyGovernanceHistoryDocument.class);
-        if (proposal == null || proposal.status() != PolicyGovernanceState.PUBLISHED
+        if (proposal == null || !(proposal.status() == PolicyGovernanceState.PUBLICATION_PENDING
+                    || proposal.status() == PolicyGovernanceState.PUBLISHED)
                 || !job.id().equals(proposal.publicationRequestId())
+                || !job.draft().equals(proposal.draft())
                 || !job.draftSha256().equals(proposal.draftSha256())
                 || !job.decidedAt().equals(proposal.decidedAt())
-                || history == null || mongo.count(historyQuery, PolicyGovernanceHistoryDocument.class) != 1
-                || history.toStatus() != PolicyGovernanceState.PUBLISHED
-                || !job.draftSha256().equals(history.draftSha256())
-                || !job.approvalEvidenceReference().equals(history.approvalEvidenceReference())) {
-            throw new SecurityException("Publication proposal or history linkage is invalid");
+                || !job.approvalEvidenceReference().equals(proposal.approvalEvidenceReference())) {
+            throw new SecurityException("Publication proposal linkage is invalid");
         }
         Verified verified = verify(job, storedProof, false);
         var authorization = verified.authorization();
@@ -265,14 +290,15 @@ final class OnlinePolicyApprovalVerifier {
     }
 
     private InternalPolicyApprovalTrustRegistry.TrustedKey mandate(String identity, String keyId,
-            InternalPolicyApprovalTrustRegistry.Role role, ModelPromotionPolicyDraft draft, Instant now) {
+            InternalPolicyApprovalTrustRegistry.Role role, ModelPromotionPolicyDraft draft,
+            Instant at, boolean requireActive) {
         var key = approvalTrust.find(identity, keyId);
-        if (key == null || key.status() != ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE
+        if (key == null || requireActive && key.status() != ModelPromotionTrustedIssuerRegistry.KeyStatus.ACTIVE
                 || !key.roles().contains(role)
                 || !key.institutionalScopes().contains(draft.governanceScope().institutionalScope())
                 || !key.environments().contains(draft.governanceScope().environment())
                 || !key.intendedUses().contains(draft.intendedUse())
-                || now.isBefore(key.validFrom()) || !now.isBefore(key.validUntil())) {
+                || at.isBefore(key.validFrom()) || !at.isBefore(key.validUntil())) {
             throw new SecurityException("Current publisher or issuer mandate is unavailable");
         }
         return key;

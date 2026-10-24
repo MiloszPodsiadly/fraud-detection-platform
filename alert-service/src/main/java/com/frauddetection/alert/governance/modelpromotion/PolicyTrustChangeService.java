@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
+import com.frauddetection.alert.governance.audit.GovernanceEventCommitment;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceConflictException;
 import com.frauddetection.alert.governance.modelpolicy.GovernanceBoundWebAuthnProof;
@@ -25,6 +26,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +48,7 @@ public class PolicyTrustChangeService {
     private final GovernanceBoundWebAuthnProofVerifier historicalVerifier;
     private final Clock clock;
     private final PolicyTrustFleetConsistency.Membership membership;
+    private final PolicyTrustObservationProof observationProof;
 
     @Autowired
     public PolicyTrustChangeService(MongoTemplate mongo, MongoTransactionManager manager,
@@ -53,9 +56,12 @@ public class PolicyTrustChangeService {
             ObjectMapper mapper,
             @Value("${MODEL_PROMOTION_TRUST_DEPLOYMENT_ID:}") String deploymentId,
             @Value("${MODEL_PROMOTION_TRUST_EXPECTED_ALERT_INSTANCES:}") String expectedAlerts,
-            @Value("${MODEL_PROMOTION_TRUST_EXPECTED_PUBLISHER_INSTANCES:}") String expectedPublishers) {
+            @Value("${MODEL_PROMOTION_TRUST_EXPECTED_PUBLISHER_INSTANCES:}") String expectedPublishers,
+            @Value("${MODEL_PROMOTION_OBSERVATION_KEYS_PATH:}") String observationKeysPath) {
         this(mongo, new TransactionTemplate(manager), webAuthn, registries, mapper, Clock.systemUTC(),
-                PolicyTrustFleetConsistency.membership(deploymentId, expectedAlerts, expectedPublishers));
+                PolicyTrustFleetConsistency.membership(deploymentId, expectedAlerts, expectedPublishers),
+                observationKeysPath == null || observationKeysPath.isBlank() ? null
+                        : PolicyTrustObservationProof.load(Path.of(observationKeysPath)));
     }
 
     public PolicyTrustChangeService(MongoTemplate mongo, TransactionTemplate transactions,
@@ -68,6 +74,13 @@ public class PolicyTrustChangeService {
     public PolicyTrustChangeService(MongoTemplate mongo, TransactionTemplate transactions,
             PolicyWebAuthnService webAuthn, PolicyTrustRegistrySnapshotService registries,
             ObjectMapper mapper, Clock clock, PolicyTrustFleetConsistency.Membership membership) {
+        this(mongo, transactions, webAuthn, registries, mapper, clock, membership, null);
+    }
+
+    public PolicyTrustChangeService(MongoTemplate mongo, TransactionTemplate transactions,
+            PolicyWebAuthnService webAuthn, PolicyTrustRegistrySnapshotService registries,
+            ObjectMapper mapper, Clock clock, PolicyTrustFleetConsistency.Membership membership,
+            PolicyTrustObservationProof observationProof) {
         this.mongo = mongo;
         this.transactions = transactions;
         this.webAuthn = webAuthn;
@@ -77,6 +90,7 @@ public class PolicyTrustChangeService {
         this.historicalVerifier = new GovernanceBoundWebAuthnProofVerifier(mapper);
         this.clock = clock;
         this.membership = membership;
+        this.observationProof = observationProof;
     }
 
     @PostConstruct
@@ -152,9 +166,13 @@ public class PolicyTrustChangeService {
                             java.nio.charset.StandardCharsets.UTF_8), candidate.summary(),
                     candidate.affectsProduction()));
             mongo.insert(document);
-            mongo.insert(new PolicyTrustChangeAuditDocument(operationId + ":requested", operationId,
+            var audit = new PolicyTrustChangeAuditDocument(operationId + ":requested", operationId,
                     "REQUESTED", actor.id(), digest, proof.assertionSha256(), proof.challengeId(),
-                    proof.acceptedAt()));
+                    proof.acceptedAt());
+            mongo.insert(audit);
+            GovernanceEventCommitment.record(mongo, GovernanceEventCommitment.Kind.TRUST_CHANGE,
+                    audit.id(), audit, requestScope(document), actor.id(), operationId,
+                    operationId, proof.assertionSha256(), document.id(), proof.acceptedAt());
             return document;
         });
     }
@@ -191,9 +209,13 @@ public class PolicyTrustChangeService {
                             .set("reviewedAt", proof.acceptedAt()),
                     FindAndModifyOptions.options().returnNew(true), PolicyTrustChangeDocument.class);
             if (updated == null) throw new PolicyGovernanceConflictException("Trust change was reviewed concurrently");
-            mongo.insert(new PolicyTrustChangeAuditDocument(requestId + ":reviewed", requestId,
+            var audit = new PolicyTrustChangeAuditDocument(requestId + ":reviewed", requestId,
                     decision.name(), actor.id(), current.intentSha256(), proof.assertionSha256(),
-                    proof.challengeId(), proof.acceptedAt()));
+                    proof.challengeId(), proof.acceptedAt());
+            mongo.insert(audit);
+            GovernanceEventCommitment.record(mongo, GovernanceEventCommitment.Kind.TRUST_CHANGE,
+                    audit.id(), audit, requestScope(current), actor.id(), requestId,
+                    requestId + ":reviewed", proof.assertionSha256(), updated.id(), proof.acceptedAt());
             return updated;
         });
     }
@@ -329,9 +351,10 @@ public class PolicyTrustChangeService {
         boolean observationsTruncated = queried.size() > MAX_DEPLOYMENT_OBSERVATIONS;
         List<PolicyTrustInstanceObservation> all = queried.stream()
                 .limit(MAX_DEPLOYMENT_OBSERVATIONS).toList();
+        Instant observedNow = clock.instant();
         var assessment = PolicyTrustFleetConsistency.assess(membership, all,
                 request.intent().requestedGeneration(), request.candidateSha256(),
-                current.rollbackFloor(), clock.instant(), observationsTruncated);
+                current.rollbackFloor(), observedNow, observationsTruncated);
         boolean approvedForOperatorAction = "PENDING_OPERATOR_ACTION".equals(request.status());
         String state = "PENDING_REVIEW".equals(request.status()) ? "PENDING_INDEPENDENT_REVIEW"
                 : "REJECTED".equals(request.status()) ? "REJECTED"
@@ -348,6 +371,12 @@ public class PolicyTrustChangeService {
                     : "API_REGISTRY_FILE_UNAVAILABLE";
         }
         boolean observedConsistent = approvedForOperatorAction && "OBSERVED_CONSISTENT".equals(state);
+        var freshReports = all.stream().filter(observation -> observation.observedAt() != null
+                        && !observation.observedAt().isBefore(observedNow.minusSeconds(90))
+                        && !observation.observedAt().isAfter(observedNow.plusSeconds(5)))
+                .toList();
+        boolean authenticated = observationProof != null && !freshReports.isEmpty()
+                && freshReports.stream().allMatch(observationProof::verify);
         return new DeploymentView(request.id(), request.status(), request.intent().registry(),
                 request.intent().requestedGeneration(), request.candidateSha256(),
                 current.rollbackFloor(), state,
@@ -355,7 +384,8 @@ public class PolicyTrustChangeService {
                 observedConsistent ? request.candidateSha256() : null,
                 observationsTruncated, assessment.observations(), membership.deploymentId(),
                 membership.complete() ? "DECLARED_STATIC_MEMBERSHIP" : "UNKNOWN",
-                "UNAUTHENTICATED_RUNTIME_HEARTBEAT", current.generation(), current.digestSha256(),
+                authenticated ? "AUTHENTICATED_WORKLOAD_EVIDENCE" : "UNAUTHENTICATED_RUNTIME_HEARTBEAT",
+                current.generation(), current.digestSha256(),
                 assessment.expected(), assessment.missing(), assessment.stale(), assessment.mismatched(),
                 mismatchReason, false);
     }
@@ -502,6 +532,10 @@ public class PolicyTrustChangeService {
                 "baseRegistrySha256", current.baseRegistrySha256(),
                 "candidateRegistrySha256", current.candidateSha256(),
                 "requestedGeneration", current.intent().requestedGeneration(), "decision", decision.name());
+    }
+
+    private static String requestScope(PolicyTrustChangeDocument request) {
+        return "CURRENT_INSTITUTION/" + request.intent().environment().name();
     }
 
     public enum Action { GRANT, ADD, ROTATE, RETIRE, REVOKE }

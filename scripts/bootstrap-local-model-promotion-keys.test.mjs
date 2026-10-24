@@ -29,7 +29,15 @@ test("fresh local checkout gets separate credentials, never an approved policy",
       "POLICY_APPROVER", "POLICY_AUTHOR", "POLICY_ISSUER", "POLICY_PUBLISHER"
     ]);
     assert.ok(existsSync(join(root, "private-key.pkcs8.base64")));
-    assert.deepEqual(readdirSync(root).sort(), ["approval", "private-key.pkcs8.base64", "trusted-issuers.json"]);
+    assert.deepEqual(readdirSync(root).sort(), ["approval", "fleet-observation",
+      "private-key.pkcs8.base64", "trusted-issuers.json"]);
+    const reports = join(root, "fleet-observation");
+    assert.deepEqual(readdirSync(reports).sort(), ["alert.private-key.pkcs8.base64",
+      "publisher.private-key.pkcs8.base64", "trusted-reporters.json"]);
+    const reporters = JSON.parse(readFileSync(join(reports, "trusted-reporters.json"), "utf8"));
+    assert.deepEqual(reporters.keys.map(key => `${key.role}/${key.instanceId}`).sort(), [
+      "ALERT_VERIFIER/alert-service", "PUBLISHER/model-promotion-policy-publisher"
+    ]);
     writeFileSync(join(approval, "publisher.private-key.pkcs8.base64"), "malformed\n");
     const malformed = spawnSync(process.execPath, [copied, "--check"], { encoding: "utf8" });
     assert.notEqual(malformed.status, 0, "malformed signing key must fail closed");

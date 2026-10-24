@@ -6,6 +6,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -15,17 +16,20 @@ public final class PolicyTrustFleetGuard {
     private final PolicyTrustFleetConsistency.Membership membership;
     private final Map<PolicyTrustRegistrySnapshotService.Registry, ExpectedRegistry> loaded;
     private final Clock clock;
+    private final PolicyTrustObservationProof proof;
 
     public PolicyTrustFleetGuard(MongoTemplate mongo, PolicyTrustFleetConsistency.Membership membership,
-            Map<PolicyTrustRegistrySnapshotService.Registry, ExpectedRegistry> loaded, Clock clock) {
+            Map<PolicyTrustRegistrySnapshotService.Registry, ExpectedRegistry> loaded, Clock clock,
+            PolicyTrustObservationProof proof) {
         this.mongo = mongo;
         this.membership = membership;
         this.loaded = Map.copyOf(loaded);
         this.clock = clock;
+        this.proof = proof;
     }
 
     public boolean consistent() {
-        if (!membership.complete()
+        if (proof == null || !membership.complete()
                 || loaded.size() != PolicyTrustRegistrySnapshotService.Registry.values().length) return false;
         try {
             for (var registry : PolicyTrustRegistrySnapshotService.Registry.values()) {
@@ -37,10 +41,15 @@ public final class PolicyTrustFleetGuard {
                         .limit(PolicyTrustFleetConsistency.MAX_OBSERVATIONS + 1),
                         PolicyTrustInstanceObservation.class);
                 boolean truncated = queried.size() > PolicyTrustFleetConsistency.MAX_OBSERVATIONS;
+                Instant now = clock.instant();
+                if (queried.stream().anyMatch(observation -> observation.observedAt() == null
+                        || (!observation.observedAt().isBefore(now.minusSeconds(90))
+                            && !observation.observedAt().isAfter(now.plusSeconds(5))
+                            && !proof.verify(observation)))) return false;
                 var assessment = PolicyTrustFleetConsistency.assess(membership,
                         queried.stream().limit(PolicyTrustFleetConsistency.MAX_OBSERVATIONS).toList(),
                         expected.generation(), expected.digestSha256(), expected.rollbackFloor(),
-                        clock.instant(), truncated);
+                        now, truncated);
                 if (!"OBSERVED_CONSISTENT".equals(assessment.rolloutState())) return false;
             }
             return true;

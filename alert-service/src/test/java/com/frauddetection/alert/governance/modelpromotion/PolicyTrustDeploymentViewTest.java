@@ -154,7 +154,7 @@ class PolicyTrustDeploymentViewTest {
 
     private PolicyTrustInstanceObservation loaded(String role, String instanceId, long generation) {
         return new PolicyTrustInstanceObservation(role + ":" + instanceId + ":epoch", role, instanceId,
-                REGISTRY, generation, DIGEST, NOW, "rollout", "epoch", NOW.minusSeconds(20));
+                REGISTRY, generation, DIGEST, NOW, "rollout", "epoch-" + instanceId, NOW.minusSeconds(20));
     }
 
     private PolicyTrustRegistrySnapshotService.RegistryView readyRegistry() {

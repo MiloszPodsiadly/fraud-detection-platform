@@ -56,6 +56,13 @@ class PolicyTrustFleetConsistencyTest {
         assertThat(assess(afterOldExpires).rolloutState()).isEqualTo("OBSERVED_CONSISTENT");
     }
 
+    @Test void sameLiveProcessEpochCannotRepresentTwoMembers() {
+        var result = assess(List.of(report("ALERT_VERIFIER", "alert-a", "shared", 2, DIGEST, NOW),
+                report("ALERT_VERIFIER", "alert-b", "shared", 2, DIGEST, NOW),
+                report("PUBLISHER", "publisher-a", "publisher", 2, DIGEST, NOW)));
+        assertThat(result.rolloutState()).isEqualTo("DEPLOYMENT_FAILED");
+    }
+
     @Test void rollbackAndWrongDigestFailClosed() {
         var base = List.of(report("ALERT_VERIFIER", "alert-a", "a", 2, DIGEST, NOW),
                 report("ALERT_VERIFIER", "alert-b", "b", 2, DIGEST, NOW));
@@ -76,6 +83,19 @@ class PolicyTrustFleetConsistencyTest {
         assertThat(result.stale()).isEmpty();
         assertThat(result.mismatched()).isEmpty();
         assertThat(PolicyTrustFleetConsistency.membership(null, "alert-a", "publisher-a").complete()).isFalse();
+    }
+
+    @Test void freshUnexpectedInstanceFailsAndMissingPublisherStaysPartial() {
+        var alerts = List.of(report("ALERT_VERIFIER", "alert-a", "a", 2, DIGEST, NOW),
+                report("ALERT_VERIFIER", "alert-b", "b", 2, DIGEST, NOW));
+        var missingPublisher = assess(alerts);
+        assertThat(missingPublisher.rolloutState()).isNotEqualTo("OBSERVED_CONSISTENT");
+        assertThat(missingPublisher.missing()).contains(
+                new PolicyTrustFleetConsistency.Member("PUBLISHER", "publisher-a"));
+        assertThat(assess(List.of(alerts.get(0), alerts.get(1),
+                report("PUBLISHER", "publisher-a", "p", 2, DIGEST, NOW),
+                report("ALERT_VERIFIER", "unlisted", "x", 2, DIGEST, NOW)))
+                .rolloutState()).isEqualTo("DEPLOYMENT_FAILED");
     }
 
     private PolicyTrustFleetConsistency.Assessment assess(List<PolicyTrustInstanceObservation> observations) {
