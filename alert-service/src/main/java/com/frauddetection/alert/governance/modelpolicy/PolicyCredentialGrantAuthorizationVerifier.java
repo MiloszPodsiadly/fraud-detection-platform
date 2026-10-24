@@ -22,6 +22,7 @@ public class PolicyCredentialGrantAuthorizationVerifier {
 
     public void verify(PolicyCredentialEnrollmentGrantDocument grant, Instant now) {
         if (grant == null || grant.approvedAt() == null || grant.approvedBy() == null
+                || grant.revokedAt() != null
                 || grant.requestExpiresAt() == null
                 || (grant.reviewProofId() == null) == (grant.bootstrapAuthorizationId() == null))
             throw new SecurityException("Independent credential grant authorization missing");

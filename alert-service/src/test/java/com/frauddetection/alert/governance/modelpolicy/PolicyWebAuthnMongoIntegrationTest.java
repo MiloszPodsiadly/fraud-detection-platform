@@ -148,6 +148,372 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void requestedGrantRevocationIsDurableScopedAuditedAndIdempotent() {
+        String requestId = "revoke-request-" + UUID.randomUUID();
+        var requester = credentialAdmin("security-operator-a");
+        var revoker = credentialAdmin("security-operator-c");
+        grants.request(requester, new PolicyCredentialEnrollmentGrantService.GrantRequest(requestId,
+                author().issuer(), author().subject(),
+                PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-request"));
+        var command = revocation("revoke-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.ADMINISTRATIVE);
+        assertThat(grants.status(revoker, requestId).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REQUESTED);
+        var auditor = actor("independent-auditor", Set.of(ModelPolicyAuthority.AUDIT_READ));
+        assertThat(grants.status(auditor, requestId).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REQUESTED);
+        assertThatThrownBy(() -> grants.revoke(auditor, requestId, command))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> grants.revoke(author(), requestId, command))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> grants.revoke(revoker, requestId,
+                new PolicyCredentialEnrollmentGrantService.RevocationCommand(command.operationId(),
+                        "https://wrong.example", command.targetSubject(), command.reason(),
+                        command.caseReference(), command.kind()))).isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> grants.revoke(revoker, requestId,
+                new PolicyCredentialEnrollmentGrantService.RevocationCommand(command.operationId(),
+                        command.targetIssuer(), "wrong-subject", command.reason(),
+                        command.caseReference(), command.kind()))).isInstanceOf(AccessDeniedException.class);
+        var revoked = grants.revoke(revoker, requestId, command);
+        assertThat(revoked.state()).isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REVOKED);
+        assertThat(revoked.requestedBy()).isEqualTo(requester.id());
+        assertThat(revoked.revokedBy()).isEqualTo(revoker.id());
+        assertThat(grants.revoke(revoker, requestId, command)).isEqualTo(revoked);
+        assertThat(mongo.count(Query.query(Criteria.where("_id").is("grant-revoke:" + command.operationId())),
+                PolicyCredentialSecurityEventDocument.class)).isEqualTo(1);
+        assertThatThrownBy(() -> grants.revoke(revoker, requestId,
+                new PolicyCredentialEnrollmentGrantService.RevocationCommand(command.operationId(),
+                        command.targetIssuer(), command.targetSubject(), "changed reason",
+                        command.caseReference(), command.kind())))
+                .isInstanceOf(PolicyGovernanceConflictException.class);
+        assertThatThrownBy(() -> grantReviews.bootstrapApprove(credentialAdmin("security-operator-b"), requestId))
+                .isInstanceOf(PolicyGovernanceConflictException.class);
+        var restarted = new PolicyCredentialEnrollmentGrantService(mongo,
+                new MongoTransactionManager(factory), new MongoPolicyGovernanceStore(mongo,
+                new TransactionTemplate(new MongoTransactionManager(factory)), clock), grantAuthorization);
+        assertThat(restarted.status(revoker, requestId).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REVOKED);
+    }
+
+    @Test
+    void rejectedAndExpiredGrantsRemainTerminalForRevocation() {
+        var operator = credentialAdmin("security-operator-c");
+        var command = revocation("terminal-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.ADMINISTRATIVE);
+        String rejectedId = "rejected-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(rejectedId,
+                        author().issuer(), author().subject(),
+                        PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-rejected"));
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(rejectedId)),
+                new Update().set("rejectedAt", clock.instant()),
+                PolicyCredentialEnrollmentGrantDocument.class);
+        assertThatThrownBy(() -> grants.revoke(operator, rejectedId, command))
+                .isInstanceOf(PolicyGovernanceConflictException.class);
+        assertThat(grants.status(operator, rejectedId).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REJECTED);
+        String expiredId = "expired-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(expiredId,
+                        author().issuer(), author().subject(),
+                        PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-expired"));
+        clock.set(clock.instant().plusSeconds(3601));
+        assertThatThrownBy(() -> grants.revoke(operator, expiredId, command))
+                .isInstanceOf(PolicyGovernanceConflictException.class);
+        assertThat(grants.status(operator, expiredId).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.EXPIRED);
+        assertThat(mongo.findById("grant-revoke:" + command.operationId(),
+                PolicyCredentialSecurityEventDocument.class)).isNull();
+    }
+
+    @Test
+    void unknownCommitResponseReconcilesExactDurableRevocationReceipt() throws Exception {
+        String requestId = "commit-unknown-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(requestId,
+                        author().issuer(), author().subject(),
+                        PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-unknown-commit"));
+        var uncertainManager = new MongoTransactionManager(factory) {
+            @Override
+            protected void doCommit(MongoTransactionObject transaction) throws Exception {
+                super.doCommit(transaction);
+                throw new IllegalStateException("Simulated lost commit acknowledgement");
+            }
+        };
+        var uncertainService = new PolicyCredentialEnrollmentGrantService(mongo, uncertainManager,
+                new MongoPolicyGovernanceStore(mongo,
+                        new TransactionTemplate(new MongoTransactionManager(factory)), clock),
+                grantAuthorization);
+        var operator = credentialAdmin("security-operator-c");
+        var command = revocation("unknown-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.ADMINISTRATIVE);
+        assertThat(uncertainService.revoke(operator, requestId, command).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REVOKED);
+        assertThat(grants.revoke(operator, requestId, command).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REVOKED);
+        assertThat(mongo.count(Query.query(Criteria.where("_id").is("grant-revoke:" + command.operationId())),
+                PolicyCredentialSecurityEventDocument.class)).isEqualTo(1);
+    }
+
+    @Test
+    void claimedGrantRevocationInvalidatesBearerAndAlreadyStartedRegistration() throws Exception {
+        String token = grant(author(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST);
+        String requestId = token.substring(0, token.lastIndexOf('.'));
+        assertThatThrownBy(() -> webAuthn.startRegistration(actor("author", Set.of()),
+                new PolicyWebAuthnService.RegistrationIntent(token)))
+                .isInstanceOf(AccessDeniedException.class);
+        var options = webAuthn.startRegistration(author(),
+                new PolicyWebAuthnService.RegistrationIntent(token));
+        var request = PublicKeyCredentialCreationOptions.fromJson(mongo.findById(options.challengeId(),
+                PolicyWebAuthnChallenge.class).requestJson());
+        var key = new Authenticator(author());
+        key.credentialId = key.newCredentialId();
+        var response = key.registration(request.getChallenge().getBase64Url());
+        var command = revocation("revoke-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.ADMINISTRATIVE);
+        grants.revoke(credentialAdmin("security-operator-c"), requestId, command);
+        assertThatThrownBy(() -> grants.validate(author(), token,
+                PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> webAuthn.startRegistration(author(),
+                new PolicyWebAuthnService.RegistrationIntent(token)))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> webAuthn.finishRegistration(author(),
+                new PolicyWebAuthnService.FinishCeremony(options.challengeId(), response, token)))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThat(mongo.findById(requestId, PolicyCredentialEnrollmentGrantDocument.class).consumedAt()).isNull();
+        assertThat(mongo.findById(key.credentialId, PolicyWebAuthnCredential.class)).isNull();
+        assertThat(mongo.count(new Query(), PolicyWebAuthnCredential.class)).isZero();
+    }
+
+    @Test
+    void approvedGrantRevocationPreservesExactSignedApprovalReference() throws Exception {
+        var reviewer = actor("security-operator-b", Set.of(
+                ModelPolicyAuthority.CREDENTIAL_ADMIN, ModelPolicyAuthority.CREDENTIAL_ENROLL));
+        Authenticator reviewerKey = register(reviewer);
+        String requestId = "approved-revoke-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(requestId,
+                        author().issuer(), author().subject(),
+                        PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-approved-revoke"));
+        var intent = new PolicyCredentialGrantReviewService.ReviewIntent("review-" + UUID.randomUUID(),
+                PolicyCredentialGrantReviewService.Decision.APPROVE);
+        var challenge = grantReviews.start(reviewer, requestId, intent);
+        grantReviews.finish(reviewer, requestId, new PolicyCredentialGrantReviewService.FinishReview(
+                intent, challenge.challengeId(), reviewerKey.assertion(
+                        challenge.challengeId(), ORIGIN, "localhost", true, 1)));
+        var operator = credentialAdmin("security-operator-c");
+        var before = grants.status(operator, requestId);
+        assertThat(before.state()).isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.APPROVED);
+        assertThat(before.approvalReference()).isNotNull();
+        var command = revocation("approved-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.ADMINISTRATIVE);
+        var after = grants.revoke(operator, requestId, command);
+        assertThat(after.state()).isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REVOKED);
+        assertThat(after.approvalReference()).isEqualTo(before.approvalReference());
+        var receipt = mongo.findById("grant-revoke:" + command.operationId(),
+                PolicyCredentialSecurityEventDocument.class);
+        assertThat(receipt.originalApprovalReference()).isEqualTo(before.approvalReference());
+        assertThat(receipt.reviewerActorId()).isEqualTo(reviewer.id());
+        assertThatThrownBy(() -> grants.claim(author(), requestId)).isInstanceOf(AccessDeniedException.class);
+        assertThat(grantReviews.verifyHistorical(actor("auditor", Set.of(ModelPolicyAuthority.AUDIT_READ)),
+                requestId).decision()).isEqualTo(PolicyCredentialGrantReviewService.Decision.APPROVE);
+    }
+
+    @Test
+    void consumedEnrollmentCannotBeRetrospectivelyRevoked() throws Exception {
+        String token = grant(author(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST);
+        String requestId = token.substring(0, token.lastIndexOf('.'));
+        var options = webAuthn.startRegistration(author(),
+                new PolicyWebAuthnService.RegistrationIntent(token));
+        var request = PublicKeyCredentialCreationOptions.fromJson(mongo.findById(options.challengeId(),
+                PolicyWebAuthnChallenge.class).requestJson());
+        var key = new Authenticator(author());
+        key.credentialId = key.newCredentialId();
+        webAuthn.finishRegistration(author(), new PolicyWebAuthnService.FinishCeremony(
+                options.challengeId(), key.registration(request.getChallenge().getBase64Url()), token));
+        var command = revocation("late-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.SECURITY_INCIDENT);
+        var incidentOperator = actor("security-operator-c", Set.of(ModelPolicyAuthority.CREDENTIAL_ADMIN,
+                ModelPolicyAuthority.CREDENTIAL_INCIDENT_REVOKE));
+        assertThatThrownBy(() -> grants.revoke(incidentOperator, requestId, command))
+                .isInstanceOf(PolicyGovernanceConflictException.class);
+        var persisted = mongo.findById(requestId, PolicyCredentialEnrollmentGrantDocument.class);
+        assertThat(persisted.consumedAt()).isNotNull();
+        assertThat(persisted.revokedAt()).isNull();
+        assertThat(mongo.findById(key.credentialId, PolicyWebAuthnCredential.class)).isNotNull();
+        assertThat(mongo.findById("grant-revoke:" + command.operationId(),
+                PolicyCredentialSecurityEventDocument.class)).isNull();
+    }
+
+    @Test
+    void incidentSearchRequiresEmergencyMandateAndAuditFailureRollsBack() {
+        String requestId = "incident-" + UUID.randomUUID();
+        var requester = credentialAdmin("security-operator-a");
+        var operator = actor("security-operator-c", Set.of(ModelPolicyAuthority.CREDENTIAL_ADMIN,
+                ModelPolicyAuthority.CREDENTIAL_INCIDENT_REVOKE));
+        grants.request(requester, new PolicyCredentialEnrollmentGrantService.GrantRequest(requestId,
+                author().issuer(), author().subject(),
+                PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-incident"));
+        assertThatThrownBy(() -> grants.incidentGrants(credentialAdmin("security-operator-b"),
+                requester.id(), null)).isInstanceOf(AccessDeniedException.class);
+        assertThat(grants.incidentGrants(operator, requester.id(), null).grants())
+                .extracting(PolicyCredentialEnrollmentGrantService.GrantStatus::requestId)
+                .contains(requestId);
+        var command = revocation("collision-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.SECURITY_INCIDENT);
+        mongo.insert(new PolicyCredentialSecurityEventDocument("grant-revoke:" + command.operationId(),
+                "collision", author().id(), author().issuer(), author().subject(), operator.id(), null,
+                "case", null, clock.instant()));
+        assertThatThrownBy(() -> grants.revoke(operator, requestId, command))
+                .isInstanceOf(PolicyGovernanceConflictException.class);
+        assertThat(mongo.findById(requestId, PolicyCredentialEnrollmentGrantDocument.class).revokedAt()).isNull();
+        mongo.remove(Query.query(Criteria.where("_id").is("grant-revoke:" + command.operationId())),
+                PolicyCredentialSecurityEventDocument.class);
+        assertThat(grants.revoke(operator, requestId, command).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REVOKED);
+        assertThat(grants.incidentGrants(operator, requester.id(), null).grants()).isEmpty();
+    }
+
+    @Test
+    void revokeAndClaimRaceLeavesNoUsableBearerAfterRevocation() throws Exception {
+        var reviewer = actor("security-operator-b", Set.of(
+                ModelPolicyAuthority.CREDENTIAL_ADMIN, ModelPolicyAuthority.CREDENTIAL_ENROLL));
+        Authenticator reviewerKey = register(reviewer);
+        String requestId = "revoke-claim-race-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(requestId, author().issuer(),
+                        author().subject(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST, "case-race"));
+        var intent = new PolicyCredentialGrantReviewService.ReviewIntent("approve-" + UUID.randomUUID(),
+                PolicyCredentialGrantReviewService.Decision.APPROVE);
+        var challenge = grantReviews.start(reviewer, requestId, intent);
+        grantReviews.finish(reviewer, requestId, new PolicyCredentialGrantReviewService.FinishReview(
+                intent, challenge.challengeId(), reviewerKey.assertion(
+                        challenge.challengeId(), ORIGIN, "localhost", true, 1)));
+        var operator = credentialAdmin("security-operator-c");
+        var command = revocation("race-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.ADMINISTRATIVE);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+        Object claimResult;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var claim = executor.submit(() -> {
+                ready.countDown(); go.await();
+                try { return (Object) grants.claim(author(), requestId); }
+                catch (RuntimeException failure) { return failure; }
+            });
+            var revoke = executor.submit(() -> {
+                ready.countDown(); go.await();
+                try { return (Object) grants.revoke(operator, requestId, command); }
+                catch (RuntimeException failure) { return failure; }
+            });
+            ready.await(); go.countDown();
+            claimResult = claim.get();
+            if (!(revoke.get() instanceof PolicyCredentialEnrollmentGrantService.GrantStatus))
+                grants.revoke(operator, requestId, command);
+        }
+        assertThat(grants.status(operator, requestId).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REVOKED);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("GRANT_REVOKED")),
+                PolicyCredentialSecurityEventDocument.class)).isEqualTo(1);
+        if (claimResult instanceof PolicyCredentialEnrollmentGrantService.IssuedGrant issued)
+            assertThatThrownBy(() -> webAuthn.startRegistration(author(),
+                    new PolicyWebAuthnService.RegistrationIntent(issued.token())))
+                    .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void revokedTargetMandateAndCompromisedApproverRequireIncidentCancellation() throws Exception {
+        var reviewer = actor("security-operator-b", Set.of(
+                ModelPolicyAuthority.CREDENTIAL_ADMIN, ModelPolicyAuthority.CREDENTIAL_ENROLL));
+        Authenticator reviewerKey = register(reviewer);
+        String requestId = "compromised-reviewer-" + UUID.randomUUID();
+        grants.request(credentialAdmin("security-operator-a"),
+                new PolicyCredentialEnrollmentGrantService.GrantRequest(requestId, author().issuer(),
+                        author().subject(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST,
+                        "case-compromised-approver"));
+        var intent = new PolicyCredentialGrantReviewService.ReviewIntent("review-" + UUID.randomUUID(),
+                PolicyCredentialGrantReviewService.Decision.APPROVE);
+        var challenge = grantReviews.start(reviewer, requestId, intent);
+        grantReviews.finish(reviewer, requestId, new PolicyCredentialGrantReviewService.FinishReview(
+                intent, challenge.challengeId(), reviewerKey.assertion(
+                        challenge.challengeId(), ORIGIN, "localhost", true, 1)));
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(reviewerKey.credentialId)),
+                new Update().set("revoked", true).set("status", "COMPROMISED"),
+                PolicyWebAuthnCredential.class);
+        assertThatThrownBy(() -> grants.claim(author(), requestId)).isInstanceOf(SecurityException.class);
+        var incidentOperator = actor("security-operator-c", Set.of(ModelPolicyAuthority.CREDENTIAL_ADMIN,
+                ModelPolicyAuthority.CREDENTIAL_INCIDENT_REVOKE));
+        assertThat(grants.incidentGrants(incidentOperator, reviewer.id(), null).grants())
+                .extracting(PolicyCredentialEnrollmentGrantService.GrantStatus::requestId)
+                .contains(requestId);
+        var command = revocation("compromise-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.SECURITY_INCIDENT);
+        assertThat(grants.revoke(incidentOperator, requestId, command).state())
+                .isEqualTo(PolicyCredentialEnrollmentGrantService.GrantState.REVOKED);
+        assertThat(mongo.findById(requestId, PolicyCredentialEnrollmentGrantDocument.class)
+                .reviewProofId()).isNotNull();
+        assertThat(grantReviews.verifyHistorical(actor("auditor", Set.of(ModelPolicyAuthority.AUDIT_READ)),
+                requestId).decision()).isEqualTo(PolicyCredentialGrantReviewService.Decision.APPROVE);
+    }
+
+    @Test
+    void revokeAndGenuineRegistrationRaceAcrossInstancesHasOneDurableOutcome() throws Exception {
+        String token = grant(author(), PolicyCredentialEnrollmentGrantDocument.Purpose.FIRST);
+        String requestId = token.substring(0, token.lastIndexOf('.'));
+        var options = webAuthn.startRegistration(author(),
+                new PolicyWebAuthnService.RegistrationIntent(token));
+        var request = PublicKeyCredentialCreationOptions.fromJson(mongo.findById(options.challengeId(),
+                PolicyWebAuthnChallenge.class).requestJson());
+        var key = new Authenticator(author());
+        key.credentialId = key.newCredentialId();
+        var finish = new PolicyWebAuthnService.FinishCeremony(options.challengeId(),
+                key.registration(request.getChallenge().getBase64Url()), token);
+        var manager = new MongoTransactionManager(factory);
+        var reopenedStore = new MongoPolicyGovernanceStore(mongo, new TransactionTemplate(manager), clock);
+        var reopenedGrants = new PolicyCredentialEnrollmentGrantService(mongo, manager,
+                reopenedStore, grantAuthorization);
+        var reopened = new PolicyWebAuthnService(mongo, manager,
+                new PolicyWebAuthnCredentialRepository(mongo), governance, reopenedStore,
+                reopenedGrants, new ObjectMapper(), new MockEnvironment(), "localhost", ORIGIN);
+        var operator = credentialAdmin("security-operator-c");
+        var command = revocation("race-finish-" + UUID.randomUUID(), author(),
+                PolicyCredentialEnrollmentGrantDocument.RevocationKind.ADMINISTRATIVE);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+        Object finishResult;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var enrollment = executor.submit(() -> finishRegistrationInRace(reopened, ready, go, finish));
+            var revocation = executor.submit(() -> {
+                ready.countDown(); go.await();
+                try { return (Object) grants.revoke(operator, requestId, command); }
+                catch (RuntimeException failure) { return failure; }
+            });
+            ready.await(); go.countDown();
+            finishResult = enrollment.get();
+            Object revokeResult = revocation.get();
+            var durable = mongo.findById(requestId, PolicyCredentialEnrollmentGrantDocument.class);
+            if (durable.consumedAt() == null && durable.revokedAt() == null)
+                grants.revoke(operator, requestId, command);
+            else if (revokeResult instanceof PolicyCredentialEnrollmentGrantService.GrantStatus)
+                assertThat(durable.revokedAt()).isNotNull();
+        }
+        var durable = mongo.findById(requestId, PolicyCredentialEnrollmentGrantDocument.class);
+        assertThat(durable.consumedAt() == null || durable.revokedAt() == null).isTrue();
+        assertThat(durable.consumedAt() != null || durable.revokedAt() != null).isTrue();
+        assertThat(mongo.count(new Query(), PolicyWebAuthnCredential.class))
+                .isEqualTo(durable.consumedAt() == null ? 0 : 1);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("GRANT_REVOKED")),
+                PolicyCredentialSecurityEventDocument.class))
+                .isEqualTo(durable.revokedAt() == null ? 0 : 1);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("CREDENTIAL_ENROLLED")),
+                PolicyCredentialSecurityEventDocument.class))
+                .isEqualTo(durable.consumedAt() == null ? 0 : 1);
+        if (durable.revokedAt() != null)
+            assertThat(finishResult).isNotInstanceOf(PolicyWebAuthnService.CredentialSummary.class);
+    }
+
+    @Test
     void signedGrantDecisionBindsExactRequestAndOnlyTargetCanClaimOnce() throws Exception {
         var reviewer = actor("security-operator-b", Set.of(
                 ModelPolicyAuthority.CREDENTIAL_ADMIN, ModelPolicyAuthority.CREDENTIAL_ENROLL));
@@ -1183,6 +1549,13 @@ class PolicyWebAuthnMongoIntegrationTest extends AbstractIntegrationTest {
 
     private PolicyGovernanceActor credentialAdmin(String subject) {
         return actor(subject, Set.of(ModelPolicyAuthority.CREDENTIAL_ADMIN));
+    }
+
+    private PolicyCredentialEnrollmentGrantService.RevocationCommand revocation(String operationId,
+            PolicyGovernanceActor target, PolicyCredentialEnrollmentGrantDocument.RevocationKind kind) {
+        return new PolicyCredentialEnrollmentGrantService.RevocationCommand(operationId,
+                target.issuer(), target.subject(), "Compromised enrollment capability",
+                "incident-2026-01", kind);
     }
 
     private PolicyProposalDocument draft() {

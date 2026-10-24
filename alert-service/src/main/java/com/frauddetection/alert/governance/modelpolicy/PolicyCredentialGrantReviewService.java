@@ -88,6 +88,7 @@ public class PolicyCredentialGrantReviewService {
             }
             var reviewed = mongo.findAndModify(Query.query(Criteria.where("_id").is(requestId)
                             .and("approvedAt").is(null).and("rejectedAt").is(null)
+                            .and("revokedAt").is(null)
                             .and("expiresAt").gt(now)), update,
                     FindAndModifyOptions.options().returnNew(true),
                     PolicyCredentialEnrollmentGrantDocument.class);
@@ -114,6 +115,7 @@ public class PolicyCredentialGrantReviewService {
                     requestId, reviewer.id(), now));
             var approved = mongo.findAndModify(Query.query(Criteria.where("_id").is(requestId)
                             .and("approvedAt").is(null).and("rejectedAt").is(null)
+                            .and("revokedAt").is(null)
                             .and("expiresAt").gt(now)),
                     new Update().set("approvedBy", reviewer.id()).set("approvedAt", now)
                             .set("expiresAt", now.plusSeconds(GRANT_SECONDS))
@@ -183,6 +185,7 @@ public class PolicyCredentialGrantReviewService {
             throw new IllegalArgumentException("Exact credential grant review required");
         var request = mongo.findById(requestId, PolicyCredentialEnrollmentGrantDocument.class);
         if (request == null || request.approvedAt() != null || request.rejectedAt() != null
+                || request.revokedAt() != null
                 || !clock.now().isBefore(request.expiresAt()))
             throw new PolicyGovernanceConflictException("Credential grant request unavailable or expired");
         if (reviewer.id().equals(request.requestedBy())

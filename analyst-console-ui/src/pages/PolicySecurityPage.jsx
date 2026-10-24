@@ -21,7 +21,7 @@ function storedSecurityPending(actorId) {
   try {
     const value = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
     return value?.actorId === actorId && /^[A-Za-z0-9._:-]{1,128}$/.test(value.operationId)
-      && ["credentialRevoke", "grantReview", "trustRequest", "trustReview"].includes(value.kind)
+      && ["credentialRevoke", "grantRevoke", "grantReview", "trustRequest", "trustReview"].includes(value.kind)
       ? value : null;
   } catch { return null; }
 }
@@ -42,6 +42,11 @@ async function readSecurityReceipt(apiClient, pending) {
     const receipt = await apiClient.getPolicyCredentialGrantReview(pending.requestId);
     return receipt.reviewOperationId === operationId && receipt.reviewedBy === actorId
       && (pending.decision === "APPROVE" ? receipt.approved : receipt.rejected) ? receipt : null;
+  }
+  if (pending.kind === "grantRevoke") {
+    const receipt = await apiClient.getPolicyCredentialGrantStatus(pending.requestId);
+    return receipt.state === "REVOKED" && receipt.revocationOperationId === operationId
+      && receipt.revokedBy === actorId ? receipt : null;
   }
   if (pending.kind === "trustRequest")
     return (await apiClient.listPolicyTrustChanges()).find((entry) =>
@@ -69,6 +74,11 @@ export function PolicySecurityPage({ apiClient, enabled }) {
   const [grantReview, setGrantReview] = useState(null);
   const [grant, setGrant] = useState({ targetIssuer: "", targetSubject: "", purpose: "FIRST", caseReference: "" });
   const [approvalId, setApprovalId] = useState("");
+  const [grantStatus, setGrantStatus] = useState(null);
+  const [revocationReason, setRevocationReason] = useState("");
+  const [revocationCase, setRevocationCase] = useState("");
+  const [incidentActorId, setIncidentActorId] = useState("");
+  const [incidentPage, setIncidentPage] = useState(null);
   const [lostId, setLostId] = useState("");
   const [compromised, setCompromised] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -352,6 +362,7 @@ export function PolicySecurityPage({ apiClient, enabled }) {
       <label>Case reference <input value={grant.caseReference} onChange={(e) => setGrant({ ...grant, caseReference: e.target.value })} /></label>
       <button type="button" disabled={busy} onClick={() => run(async () => {
         const result = await apiClient.requestPolicyCredentialGrant({ ...grant, operationId: id() });
+        setApprovalId(result.requestId);
         setNotice(`Grant request ${result.requestId} needs a different credential administrator.`);
       })}>Request grant</button>
       <label>Request ID for independent approval <input value={approvalId} onChange={(e) => setApprovalId(e.target.value)} /></label>
@@ -372,6 +383,65 @@ export function PolicySecurityPage({ apiClient, enabled }) {
             setGrantReview(null);
             setNotice("Protected first-install authorization consumed. The target can claim the grant.");
           })}>Approve with protected first-install authority</button>}
+      </div>}
+      <h4>Grant status and revocation</h4>
+      <label>Grant ID <input value={approvalId} onChange={(e) => setApprovalId(e.target.value)} /></label>
+      <button type="button" disabled={busy || !approvalId} onClick={() => run(async () => {
+        setGrantStatus(await apiClient.getPolicyCredentialGrantStatus(approvalId));
+      })}>Inspect status and audit</button>
+      {grantStatus && <div>
+        <p>{grantStatus.requestId}: {grantStatus.state} / {grantStatus.purpose};
+          issuer {grantStatus.targetIssuer}; target {grantStatus.targetSubject}; expires {grantStatus.expiresAt}.</p>
+        <p>Requester {grantStatus.requestedBy}; approver {grantStatus.approvedBy || "pending"};
+          approval reference {grantStatus.approvalReference || "pending"}; case {grantStatus.caseReference}.</p>
+        <p>Enrollment {grantStatus.consumedAt ? `committed at ${grantStatus.consumedAt} / credential ${grantStatus.credentialId}` : "not committed"}.
+          {grantStatus.revokedAt && ` Revoked at ${grantStatus.revokedAt} by ${grantStatus.revokedBy}: ${grantStatus.revocationReason} / case ${grantStatus.revocationCaseReference}.`}</p>
+        <h5>Grant audit</h5>
+        <ol>{(grantStatus.history || []).map((event, index) => <li key={`${event.action}:${index}`}>
+          {event.action} by {event.actorId} at {event.occurredAt}
+          {event.reviewerActorId && ` / reviewer ${event.reviewerActorId}`}
+          {event.reason && ` / ${event.reason}`}
+        </li>)}</ol>
+        {["REQUESTED", "APPROVED", "CLAIMED"].includes(grantStatus.state) && <>
+          <label>Revocation reason <input value={revocationReason} onChange={(e) => setRevocationReason(e.target.value)} /></label>
+          <label>Incident or administrative case <input value={revocationCase} onChange={(e) => setRevocationCase(e.target.value)} /></label>
+          <button type="button" disabled={busy || !revocationReason.trim() || !revocationCase.trim()} onClick={() => run(async () => {
+            const operationId = id();
+            const result = await settleSigned(operationId,
+              () => apiClient.revokePolicyCredentialGrant(grantStatus.requestId, {
+                operationId, targetIssuer: grantStatus.targetIssuer, targetSubject: grantStatus.targetSubject,
+                reason: revocationReason, caseReference: revocationCase, kind: "ADMINISTRATIVE"
+              }), { kind: "grantRevoke", requestId: grantStatus.requestId }, "grant revocation");
+            setGrantStatus(result); setNotice("Grant revoked.");
+          })}>Revoke grant</button>
+          {can(actor, POLICY.CREDENTIAL_INCIDENT_REVOKE) && <button type="button"
+            disabled={busy || !revocationReason.trim() || !revocationCase.trim()} onClick={() => run(async () => {
+              const operationId = id();
+              const result = await settleSigned(operationId,
+                () => apiClient.revokePolicyCredentialGrant(grantStatus.requestId, {
+                  operationId, targetIssuer: grantStatus.targetIssuer, targetSubject: grantStatus.targetSubject,
+                  reason: revocationReason, caseReference: revocationCase, kind: "SECURITY_INCIDENT"
+                }), { kind: "grantRevoke", requestId: grantStatus.requestId }, "incident grant revocation");
+              setGrantStatus(result); setNotice("Incident grant revoked.");
+            })}>Revoke for security incident</button>}
+        </>}
+      </div>}
+      {can(actor, POLICY.CREDENTIAL_INCIDENT_REVOKE) && <div>
+        <h4>Compromised actor grants</h4>
+        <label>Exact actor ID <input value={incidentActorId} onChange={(e) => setIncidentActorId(e.target.value)} /></label>
+        <button type="button" disabled={busy || !incidentActorId} onClick={() => run(async () => {
+          setIncidentPage(await apiClient.findPolicyCredentialIncidentGrants(incidentActorId));
+        })}>Find active grants</button>
+        <ul>{(incidentPage?.grants || []).map((entry) => <li key={entry.requestId}>
+          {entry.requestId}: {entry.state} / {entry.targetSubject} / expires {entry.expiresAt}
+          <button type="button" disabled={busy} onClick={() => run(async () => {
+            setApprovalId(entry.requestId);
+            setGrantStatus(await apiClient.getPolicyCredentialGrantStatus(entry.requestId));
+          })}>Inspect and revoke</button>
+        </li>)}</ul>
+        {incidentPage?.nextAfterId && <button type="button" disabled={busy} onClick={() => run(async () => {
+          setIncidentPage(await apiClient.findPolicyCredentialIncidentGrants(incidentActorId, incidentPage.nextAfterId));
+        })}>Next page</button>}
       </div>}
     </section>}
 
@@ -406,6 +476,7 @@ export function PolicySecurityPage({ apiClient, enabled }) {
           <p>Approved candidate: {deployment.registry}, generation {deployment.requestedGeneration}, digest {deployment.candidateRegistrySha256}; rollback floor {deployment.rollbackFloor}.</p>
           <p>File visible to this API instance: generation {deployment.configuredFileGeneration ?? "unknown"}, digest {deployment.configuredFileDigestSha256 || "unknown"}. This file view does not prove a running verifier reloaded it.</p>
           <p>Deployment ID: {deployment.deploymentId || "unknown"}; membership: {deployment.membershipEvidence || "unknown"}; evidence: {deployment.observationEvidence || "unverified heartbeat"}.</p>
+          <p>A signed workload report proves possession of its configured reporting key. It does not independently attest the running process or confirm activation.</p>
           <p>consistent observed generation {deployment.consistentObservedGeneration ?? "unconfirmed"}; consistent observed digest {deployment.consistentObservedRegistrySha256 || "unconfirmed"}; mismatch reason: {deployment.mismatchReason || "none"}.</p>
           <p>Expected instances: {(deployment.expectedInstances || []).map((member) => `${member.role}/${member.instanceId}`).join(", ") || "unknown"}.</p>
           <p>Missing instances: {(deployment.missingInstances || []).map((member) => `${member.role}/${member.instanceId}`).join(", ") || "none"}; stale instances: {(deployment.staleInstances || []).map((member) => `${member.role}/${member.instanceId}`).join(", ") || "none"}; mismatched instances: {(deployment.mismatchedInstances || []).map((member) => `${member.role}/${member.instanceId}`).join(", ") || "none"}.</p>

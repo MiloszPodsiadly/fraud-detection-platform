@@ -10,7 +10,19 @@ Mount this manifest read-only for the service account and keep the installation 
 
 Approval stores a protected authorization record and returns no bearer secret. The target signs in and sees only their own approved grant metadata at `GET /webauthn/enrollment-grants/mine`. `POST /{id}/claim` rechecks the signed proof or protected bootstrap record and returns a fresh 256-bit capability once to that exact issuer/subject. Mongo retains only its SHA-256 digest while the capability is live; consumption clears it transactionally and the scheduled cleanup clears expired digests. A signed grant expires at most 10 minutes after the review challenge starts; a bootstrap grant expires 10 minutes after approval. Registration or protected revocation consumes it in one transaction. The browser keeps it only in memory. A lost HTTP claim response does not reissue a second capability; request a new independent authorization. Grant IDs cannot be enumerated through the target endpoint, and audit/list responses contain no token.
 
-Keycloak imports the fixture when the realm is created; an already-persisted local realm is not silently rewritten. Add the two security-operator users and credential-holder group to an existing local realm through Keycloak administration, or recreate only that local development realm deliberately after preserving needed data.
+An administrator can explicitly revoke an unconsumed, unexpired grant through `POST /{id}/revoke`, binding the exact target issuer/subject, reason, case, operation ID and `ADMINISTRATIVE` or `SECURITY_INCIDENT` kind. Incident revocation additionally requires `model-policy:credential:incident-revoke` alongside the administrator mandate; the local fixture grants this to `policy-security-c`. `GET /{id}/status` reports the derived state and bounded audit history to credential administrators and independent audit readers within the issuer scope. An independent auditor should review the incident case, revoker, original approver and durable receipt after urgent action. `GET /incidents?actorId=...&afterId=...` lets an incident operator find at most 20 active grants associated with a compromised requester, approver or target per page. Each grant is revoked separately and has its own durable receipt; there is no bulk completion claim. A successful exact operation replay returns the same durable result; a changed intent conflicts. The original approval and assertion remain intact.
+
+| Grant state | Next allowed action |
+| --- | --- |
+| `REQUESTED` | Independent approve/reject, or administrator revoke |
+| `APPROVED` | Target claim, administrator revoke, or expiry |
+| `CLAIMED` | Consume in a registration/protected revocation transaction, administrator revoke, or expiry |
+| `CONSUMED` | Historical outcome only; use the separate credential revocation procedure if needed |
+| `REJECTED`, `EXPIRED`, `REVOKED` | Terminal; no claim or consumption |
+
+The final consume uses a conditional update on the same Mongo grant document as revocation, within the credential insertion transaction. If revocation commits first, a previously issued capability and any started registration fail; if consumption commits first, grant revocation cannot erase the credential. An IdP mandate change alone does not instantly cancel existing bearer grants. Incident operators must search and revoke them explicitly; already enrolled credentials require the separate compromise/revocation procedure. The system does not claim instantaneous Keycloak role-revocation propagation.
+
+Keycloak imports the fixture when the realm is created; an already-persisted local realm is not silently rewritten. Add the security-operator users, credential-holder group and dedicated incident-revoker group to an existing local realm through Keycloak administration, or recreate only that local development realm deliberately after preserving needed data.
 
 | Situation | Required proof | Result |
 | --- | --- | --- |

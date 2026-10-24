@@ -17,7 +17,22 @@ public record PolicyCredentialSecurityEventDocument(
         String reviewerActorId,
         String approvalReference,
         String credentialId,
-        Instant occurredAt
+        Instant occurredAt,
+        String grantId,
+        String operationId,
+        String reason,
+        String caseReference,
+        String originalApprovalReference,
+        PolicyCredentialEnrollmentGrantDocument.RevocationKind revocationKind
 ) {
     public static final String COLLECTION = "model_policy_credential_security_events";
+
+    public PolicyCredentialSecurityEventDocument(String id, String action,
+            String targetActorId, String targetIssuer, String targetSubject,
+            String actorId, String reviewerActorId, String approvalReference,
+            String credentialId, Instant occurredAt) {
+        this(id, action, targetActorId, targetIssuer, targetSubject, actorId,
+                reviewerActorId, approvalReference, credentialId, occurredAt,
+                null, null, null, null, null, null);
+    }
 }

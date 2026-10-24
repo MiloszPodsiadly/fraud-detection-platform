@@ -139,6 +139,37 @@ describe("Security workspace", () => {
     expect(screen.queryByText(/One-time grant token/)).not.toBeInTheDocument();
   });
 
+  it("shows exact grant status and revokes a claimed capability with an auditable intent", async () => {
+    const apiClient = client(["model-policy:credential:admin", "model-policy:credential:incident-revoke"]);
+    const status = { requestId: "grant-3", state: "CLAIMED", purpose: "FIRST",
+      targetIssuer: "https://issuer.example", targetSubject: "target", requestedBy: other,
+      approvedBy: own, approvalReference: "grant-review:proof-3", caseReference: "case-3",
+      expiresAt: "2026-11-01T11:00:00Z", consumedAt: null,
+      history: [{ action: "GRANT_CLAIMED", actorId: other, occurredAt: "2026-11-01T10:00:00Z" }] };
+    apiClient.getPolicyCredentialGrantStatus = vi.fn().mockResolvedValue(status);
+    apiClient.revokePolicyCredentialGrant = vi.fn().mockImplementation(async (_, command) => ({
+      ...status, state: "REVOKED", revokedBy: own, revocationOperationId: command.operationId
+    }));
+    apiClient.findPolicyCredentialIncidentGrants = vi.fn().mockResolvedValue({
+      grants: [status], nextAfterId: null
+    });
+    render(<PolicySecurityPage apiClient={apiClient} enabled />);
+    fireEvent.change(await screen.findByLabelText("Exact actor ID"), { target: { value: other } });
+    fireEvent.click(screen.getByRole("button", { name: "Find active grants" }));
+    await waitFor(() => expect(apiClient.findPolicyCredentialIncidentGrants).toHaveBeenCalledWith(other));
+    fireEvent.change(await screen.findByLabelText("Grant ID"), { target: { value: "grant-3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect status and audit" }));
+    expect(await screen.findByText(/approval reference grant-review:proof-3/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Revocation reason"), { target: { value: "Compromised actor" } });
+    fireEvent.change(screen.getByLabelText("Incident or administrative case"),
+      { target: { value: "incident-3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Revoke for security incident" }));
+    await waitFor(() => expect(apiClient.revokePolicyCredentialGrant).toHaveBeenCalledWith("grant-3",
+      expect.objectContaining({ targetIssuer: "https://issuer.example", targetSubject: "target",
+        reason: "Compromised actor", caseReference: "incident-3", kind: "SECURITY_INCIDENT" })));
+    expect(screen.queryByText(/grant-3.secret/)).not.toBeInTheDocument();
+  });
+
   it("hides self-review and calls approved trust pending operator action, not deployed", async () => {
     const apiClient = client(["model-policy:trust:read", "model-policy:trust:approve"]);
     render(<PolicySecurityPage apiClient={apiClient} enabled />);

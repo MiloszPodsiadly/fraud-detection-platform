@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /** Institutional approval and target-only one-time claim; secrets never reach the reviewer. */
 @RestController
@@ -47,6 +48,28 @@ public class PolicyCredentialEnrollmentGrantController {
     public PolicyCredentialEnrollmentGrantService.GrantReviewView reviewView(
             Authentication authentication, @PathVariable String id) {
         return grants.reviewView(PolicyGovernanceActor.fromOidcSession(authentication), id);
+    }
+
+    @AuditedSensitiveRead
+    @GetMapping("/{id}/status")
+    public PolicyCredentialEnrollmentGrantService.GrantStatus status(Authentication authentication,
+            @PathVariable String id) {
+        return grants.status(PolicyGovernanceActor.fromOidcSession(authentication), id);
+    }
+
+    @PostMapping("/{id}/revoke")
+    public PolicyCredentialEnrollmentGrantService.GrantStatus revoke(Authentication authentication,
+            @PathVariable String id,
+            @RequestBody PolicyCredentialEnrollmentGrantService.RevocationCommand command) {
+        return grants.revoke(PolicyGovernanceActor.fromOidcSession(authentication), id, command);
+    }
+
+    @AuditedSensitiveRead
+    @GetMapping("/incidents")
+    public PolicyCredentialEnrollmentGrantService.IncidentGrantPage incidentGrants(
+            Authentication authentication, @RequestParam String actorId,
+            @RequestParam(required = false) String afterId) {
+        return grants.incidentGrants(PolicyGovernanceActor.fromOidcSession(authentication), actorId, afterId);
     }
 
     @PostMapping("/{id}/review/challenges")
