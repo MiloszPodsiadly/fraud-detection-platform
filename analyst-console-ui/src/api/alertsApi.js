@@ -70,8 +70,18 @@ export function createAlertsApiClient({
     authorizeEmergencyModelRetirement: (authorizationId, command, requestOptions) => modelPromotionCommandRequest(
       request, `/emergency-authorizations/${encodeURIComponent(authorizationId)}/approve`, command, requestOptions
     ),
+    claimEmergencyModelRetirement: (authorizationId, requestOptions) => modelPromotionCommandRequest(
+      request, `/emergency-authorizations/${encodeURIComponent(authorizationId)}/claim`, {}, requestOptions
+    ),
     revokeEmergencyModelRetirement: (authorizationId, requestOptions) => modelPromotionCommandRequest(
       request, `/emergency-authorizations/${encodeURIComponent(authorizationId)}/revoke`, {}, requestOptions
+    ),
+    findAffectedEmergencyModelRetirements: (actorId, incidentId, requestOptions) => request(
+      `/api/v1/governance/model-promotion/emergency-authorizations/active?`
+      + new URLSearchParams({ ...(actorId ? { actorId } : {}), ...(incidentId ? { incidentId } : {}) }), requestOptions
+    ),
+    revokeAffectedEmergencyModelRetirements: (selector, requestOptions) => modelPromotionCommandRequest(
+      request, "/emergency-authorizations/active/revoke", selector, requestOptions
     ),
     consumeEmergencyModelRetirement: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
       request, `/proposals/${encodeURIComponent(proposalId)}/reviews/emergency`, command, requestOptions
@@ -96,6 +106,8 @@ export function createAlertsApiClient({
     getPolicyPublicationRecovery: (id, options) => request(`${policyProposalPath(id)}/publication/recovery`, options),
     requestPolicyPublicationRecovery: (id, command, options) => policyCommand(request,
       `/${encodeURIComponent(id)}/publication/recovery`, "POST", command, options),
+    reconcileCommittedPolicyPublication: (id, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/publication/recovery/reconcile`, "POST", command, options),
     createPolicyDraft: (command, options) => policyCommand(request, "/drafts", "POST", command, options),
     updatePolicyDraft: (id, command, options) => policyCommand(request, `/drafts/${encodeURIComponent(id)}`, "PUT", command, options),
     startPolicyAction: (id, action, command, options) => policyCommand(request,
@@ -124,6 +136,13 @@ export function createAlertsApiClient({
       `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/claim`, "POST", {}, options),
     getPolicyCredentialGrantReview: (grantId, options) => request(
       `/api/v1/governance/model-policies/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/review`, options),
+    getPolicyCredentialGrantStatus: (grantId, options) => request(
+      `/api/v1/governance/model-policies/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/status`, options),
+    revokePolicyCredentialGrant: (grantId, command, options) => policyCommand(request,
+      `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/revoke`, "POST", command, options),
+    findPolicyCredentialIncidentGrants: (actorId, afterId, options) => request(
+      `/api/v1/governance/model-policies/webauthn/enrollment-grants/incidents?actorId=${encodeURIComponent(actorId)}`
+        + (afterId ? `&afterId=${encodeURIComponent(afterId)}` : ""), options),
     startPolicyCredentialGrantReview: (grantId, intent, options) => policyCommand(request,
       `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/review/challenges`, "POST", intent, options),
     finishPolicyCredentialGrantReview: (grantId, command, options) => policyCommand(request,

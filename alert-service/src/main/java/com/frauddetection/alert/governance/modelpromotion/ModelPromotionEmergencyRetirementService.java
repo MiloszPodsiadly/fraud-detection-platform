@@ -1,10 +1,13 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
+import com.frauddetection.alert.governance.audit.GovernanceEventCommitment;
+
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.MongoTransactionManager;
@@ -41,17 +44,22 @@ public class ModelPromotionEmergencyRetirementService {
     private final ModelPromotionAuthorization authorization;
     private final ObjectMapper mapper;
     private final Clock clock;
+    private final ModelPromotionEmergencyAssurancePolicy assurance;
     private final SecureRandom random = new SecureRandom();
 
+    @Autowired
     public ModelPromotionEmergencyRetirementService(MongoTemplate mongo, MongoTransactionManager manager,
             MongoModelPromotionStore store, ModelPromotionWorkflowService workflow,
-            ModelPromotionAuthorization authorization, ObjectMapper mapper) {
-        this(mongo, new TransactionTemplate(manager), store, workflow, authorization, mapper, Clock.systemUTC());
+            ModelPromotionAuthorization authorization, ObjectMapper mapper,
+            ModelPromotionEmergencyAssurancePolicy assurance) {
+        this(mongo, new TransactionTemplate(manager), store, workflow, authorization, mapper,
+                Clock.systemUTC(), assurance);
     }
 
     ModelPromotionEmergencyRetirementService(MongoTemplate mongo, TransactionTemplate transactions,
             MongoModelPromotionStore store, ModelPromotionWorkflowService workflow,
-            ModelPromotionAuthorization authorization, ObjectMapper mapper, Clock clock) {
+            ModelPromotionAuthorization authorization, ObjectMapper mapper, Clock clock,
+            ModelPromotionEmergencyAssurancePolicy assurance) {
         this.mongo = mongo;
         this.transactions = transactions;
         this.store = store;
@@ -59,6 +67,7 @@ public class ModelPromotionEmergencyRetirementService {
         this.authorization = authorization;
         this.mapper = mapper;
         this.clock = clock;
+        this.assurance = assurance;
     }
 
     @PostConstruct
@@ -76,6 +85,7 @@ public class ModelPromotionEmergencyRetirementService {
 
     public Summary request(PolicyGovernanceActor actor, String proposalId, Request command) {
         requireRequester(actor);
+        assurance.require(actor, clock.instant());
         validate(command);
         ModelPromotionProposalDocument proposal = pendingRetirement(proposalId);
         requireReviewerFor(actor, proposal);
@@ -89,14 +99,17 @@ public class ModelPromotionEmergencyRetirementService {
                 command.approvalId(), actor.id(), actor.issuer(), actor.subject(), command.incidentId(),
                 command.incidentEvidenceReference(), command.reason(), reasonSha256, null,
                 createdAt, expiresAt, ModelPromotionEmergencyAuthorizationDocument.Status.REQUESTED,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null,
+                actor.authenticationEvidence().acr(), actor.authenticationEvidence().authenticatedAt(),
+                null, null, null);
         var document = new ModelPromotionEmergencyAuthorizationDocument(draft.id(), draft.version(),
                 draft.proposalId(), draft.proposalSha256(), draft.transition(), draft.currentState(),
                 draft.currentRevision(), draft.reviewOperationId(), draft.approvalId(),
                 draft.requesterActorId(), draft.requesterIssuer(), draft.requesterSubject(),
                 draft.incidentId(), draft.incidentEvidenceReference(), draft.reason(), draft.reasonSha256(),
                 intentSha256(draft), draft.createdAt(), draft.expiresAt(), draft.status(),
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null,
+                draft.requesterAcr(), draft.requesterAuthenticatedAt(), null, null, null);
         try {
             return transactions.execute(ignored -> {
                 mongo.insert(document);
@@ -121,9 +134,10 @@ public class ModelPromotionEmergencyRetirementService {
         }
     }
 
-    public IssuedGrant authorize(PolicyGovernanceActor actor, String authorizationId,
+    public Summary authorize(PolicyGovernanceActor actor, String authorizationId,
             AuthorizationAttestation attestation) {
         requireAuthorizer(actor);
+        assurance.require(actor, clock.instant());
         if (attestation == null || attestation.intentSha256() == null
                 || attestation.incidentEvidenceReference() == null
                 || attestation.authorizationRationale() == null
@@ -131,12 +145,19 @@ public class ModelPromotionEmergencyRetirementService {
                 || attestation.authorizationRationale().length() > 4096) {
             throw new IllegalArgumentException("Independent incident-evidence attestation required");
         }
-        byte[] secret = new byte[32];
-        random.nextBytes(secret);
-        String token = authorizationId + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
         Instant now = clock.instant();
         return transactions.execute(ignored -> {
             var grant = requireIntact(authorizationId);
+            if ((grant.status() == ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED
+                    || grant.status() == ModelPromotionEmergencyAuthorizationDocument.Status.CLAIMED
+                    || grant.status() == ModelPromotionEmergencyAuthorizationDocument.Status.CONSUMED)
+                    && actor.id().equals(grant.authorizedByActorId())
+                    && actor.issuer().equals(grant.authorizedByIssuer())
+                    && actor.subject().equals(grant.authorizedBySubject())
+                    && grant.intentSha256().equals(attestation.intentSha256())
+                    && grant.incidentEvidenceReference().equals(attestation.incidentEvidenceReference())
+                    && grant.authorizationRationale().equals(attestation.authorizationRationale().trim()))
+                return summary(grant);
             if (grant.status() != ModelPromotionEmergencyAuthorizationDocument.Status.REQUESTED
                     || !now.isBefore(grant.expiresAt())
                     || !grant.intentSha256().equals(attestation.intentSha256())
@@ -156,17 +177,57 @@ public class ModelPromotionEmergencyRetirementService {
                             .set("authorizedByActorId", actor.id()).set("authorizedByIssuer", actor.issuer())
                             .set("authorizedBySubject", actor.subject())
                             .set("authorizationRationale", attestation.authorizationRationale().trim())
-                            .set("authorizedAt", now).set("tokenSha256", sha256(token)),
+                            .set("authorizedAt", now)
+                            .set("authorizerAcr", actor.authenticationEvidence().acr())
+                            .set("authorizerAuthenticatedAt", actor.authenticationEvidence().authenticatedAt())
+                            .set("authorizationEvidenceSha256", authorizationEvidenceSha256(
+                                    grant.intentSha256(), actor.id(), actor.issuer(), actor.subject(),
+                                    attestation.authorizationRationale().trim(), now,
+                                    actor.authenticationEvidence().acr(),
+                                    actor.authenticationEvidence().authenticatedAt())),
                     FindAndModifyOptions.options().returnNew(true),
                     ModelPromotionEmergencyAuthorizationDocument.class);
             if (updated == null) throw new ModelPromotionPersistenceConflictException("Emergency request changed");
             audit(updated, "AUTHORIZED", actor, now);
-            return new IssuedGrant(updated.id(), token, updated.expiresAt());
+            return summary(updated);
+        });
+    }
+
+    /** The approved requester receives the one-use secret directly; the authorizer never handles it. */
+    public IssuedGrant claim(PolicyGovernanceActor actor, String authorizationId) {
+        requireRequester(actor);
+        assurance.require(actor, clock.instant());
+        Instant now = clock.instant();
+        byte[] secret = new byte[32];
+        random.nextBytes(secret);
+        String token = authorizationId + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
+        return transactions.execute(ignored -> {
+            var grant = requireIntact(authorizationId);
+            if (grant.status() != ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED
+                    || !now.isBefore(grant.expiresAt())
+                    || !actor.id().equals(grant.requesterActorId())
+                    || !actor.issuer().equals(grant.requesterIssuer())
+                    || !actor.subject().equals(grant.requesterSubject()))
+                throw new AccessDeniedException("Only the approved requester may claim this active grant");
+            var proposal = pendingRetirement(grant.proposalId());
+            requireReviewerFor(actor, proposal);
+            requireExactProposalAndState(grant, proposal);
+            var claimed = mongo.findAndModify(Query.query(Criteria.where("_id").is(grant.id())
+                            .and("status").is(ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED)
+                            .and("expiresAt").gt(now).and("intentSha256").is(grant.intentSha256())),
+                    new Update().set("status", ModelPromotionEmergencyAuthorizationDocument.Status.CLAIMED)
+                            .set("claimedAt", now).set("tokenSha256", sha256(token)),
+                    FindAndModifyOptions.options().returnNew(true),
+                    ModelPromotionEmergencyAuthorizationDocument.class);
+            if (claimed == null) throw new ModelPromotionPersistenceConflictException("Emergency claim raced or was used");
+            audit(claimed, "CLAIMED", actor, now);
+            return new IssuedGrant(claimed.id(), token, claimed.expiresAt());
         });
     }
 
     public AuthorizationReviewView inspect(PolicyGovernanceActor actor, String authorizationId) {
         requireAuthorizer(actor);
+        assurance.require(actor, clock.instant());
         var grant = requireIntact(authorizationId);
         var transition = grant.transition();
         return new AuthorizationReviewView(grant.id(), grant.proposalId(), grant.proposalSha256(),
@@ -179,11 +240,13 @@ public class ModelPromotionEmergencyRetirementService {
 
     public Summary revoke(PolicyGovernanceActor actor, String authorizationId) {
         requireAuthorizer(actor);
+        assurance.require(actor, clock.instant());
         Instant now = clock.instant();
         return transactions.execute(ignored -> {
             var grant = requireIntact(authorizationId);
             if (grant.status() != ModelPromotionEmergencyAuthorizationDocument.Status.REQUESTED
-                    && grant.status() != ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED) {
+                    && grant.status() != ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED
+                    && grant.status() != ModelPromotionEmergencyAuthorizationDocument.Status.CLAIMED) {
                 throw new ModelPromotionPersistenceConflictException("Emergency authorization is no longer revocable");
             }
             if (actor.id().equals(grant.requesterActorId())) {
@@ -201,9 +264,73 @@ public class ModelPromotionEmergencyRetirementService {
         });
     }
 
+    /** Bounded incident response; a concurrent consume conflicts with the revocation transaction. */
+    public AffectedGrants affected(PolicyGovernanceActor actor, AffectedSelector selector) {
+        requireAuthorizer(actor);
+        assurance.require(actor, clock.instant());
+        validateSelector(selector);
+        var grants = mongo.find(affectedQuery(selector).limit(101),
+                ModelPromotionEmergencyAuthorizationDocument.class);
+        return new AffectedGrants(grants.stream().limit(100).map(this::summary).toList(),
+                grants.size() > 100);
+    }
+
+    public AffectedGrants revokeAffected(PolicyGovernanceActor actor, AffectedSelector selector) {
+        requireAuthorizer(actor);
+        assurance.require(actor, clock.instant());
+        validateSelector(selector);
+        return transactions.execute(ignored -> {
+            var grants = mongo.find(affectedQuery(selector).limit(101),
+                    ModelPromotionEmergencyAuthorizationDocument.class);
+            Instant now = clock.instant();
+            var revoked = new java.util.ArrayList<Summary>();
+            for (var grant : grants.stream().limit(100).toList()) {
+                if (actor.id().equals(grant.requesterActorId()))
+                    throw new AccessDeniedException("Requester cannot revoke their own emergency grant");
+                var updated = mongo.findAndModify(Query.query(Criteria.where("_id").is(grant.id())
+                                .and("status").is(grant.status())
+                                .and("intentSha256").is(grant.intentSha256())),
+                        new Update().set("status", ModelPromotionEmergencyAuthorizationDocument.Status.REVOKED)
+                                .set("revokedAt", now).unset("tokenSha256"),
+                        FindAndModifyOptions.options().returnNew(true),
+                        ModelPromotionEmergencyAuthorizationDocument.class);
+                if (updated == null) throw new ModelPromotionPersistenceConflictException(
+                        "Emergency grant changed during incident revocation");
+                audit(updated, "REVOKED", actor, now);
+                revoked.add(summary(updated));
+            }
+            return new AffectedGrants(List.copyOf(revoked), grants.size() > 100);
+        });
+    }
+
+    private Query affectedQuery(AffectedSelector selector) {
+        Criteria active = Criteria.where("status").in(
+                ModelPromotionEmergencyAuthorizationDocument.Status.REQUESTED,
+                ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED,
+                ModelPromotionEmergencyAuthorizationDocument.Status.CLAIMED);
+        Criteria match = selector.actorId() == null
+                ? Criteria.where("incidentId").is(selector.incidentId())
+                : new Criteria().orOperator(Criteria.where("requesterActorId").is(selector.actorId()),
+                        Criteria.where("authorizedByActorId").is(selector.actorId()));
+        Criteria criteria = new Criteria().andOperator(active, match);
+        if (selector.incidentId() != null && selector.actorId() != null)
+            criteria = new Criteria().andOperator(criteria,
+                    Criteria.where("incidentId").is(selector.incidentId()));
+        return Query.query(criteria).with(Sort.by(Sort.Direction.ASC, "_id"));
+    }
+
+    private void validateSelector(AffectedSelector selector) {
+        if (selector == null || selector.actorId() == null && selector.incidentId() == null
+                || selector.actorId() != null && !selector.actorId().matches("^oidc:[0-9a-f]{64}$")
+                || selector.incidentId() != null
+                    && !selector.incidentId().matches("^[A-Za-z0-9._:-]{6,128}$"))
+            throw new IllegalArgumentException("Exact affected OIDC actor or incident is required");
+    }
+
     public ModelPromotionProposalResult retire(PolicyGovernanceActor actor, String proposalId,
             String authorizationId, String token) {
         requireRequester(actor);
+        assurance.require(actor, clock.instant());
         var grant = requireIntact(authorizationId);
         if (!proposalId.equals(grant.proposalId()) || !actor.id().equals(grant.requesterActorId())
                 || !actor.issuer().equals(grant.requesterIssuer())
@@ -226,7 +353,7 @@ public class ModelPromotionEmergencyRetirementService {
         }
         var grant = requireIntact(authorizationId);
         List<ModelPromotionEmergencyAuditDocument> events = mongo.find(Query.query(Criteria.where("authorizationId")
-                        .is(authorizationId)).with(Sort.by(Sort.Direction.ASC, "occurredAt")).limit(4),
+                        .is(authorizationId)).with(Sort.by(Sort.Direction.ASC, "occurredAt")).limit(5),
                 ModelPromotionEmergencyAuditDocument.class);
         if (events.stream().anyMatch(event -> !grant.id().equals(event.authorizationId())
                 || !grant.proposalId().equals(event.proposalId())
@@ -234,6 +361,7 @@ public class ModelPromotionEmergencyRetirementService {
                 || !grant.incidentId().equals(event.incidentId()))
                 || !hasEvent(events, "REQUESTED", grant.requesterActorId())
                 || grant.authorizedAt() != null && !hasEvent(events, "AUTHORIZED", grant.authorizedByActorId())
+                || grant.claimedAt() != null && !hasEvent(events, "CLAIMED", grant.requesterActorId())
                 || grant.consumedAt() != null && !hasEvent(events, "CONSUMED", grant.requesterActorId())
                 || grant.revokedAt() != null && events.stream().noneMatch(event -> "REVOKED".equals(event.action()))) {
             throw new SecurityException("Emergency authorization audit trail is incomplete or inconsistent");
@@ -258,7 +386,12 @@ public class ModelPromotionEmergencyRetirementService {
                 grant.intentSha256(), grant.status().name(), grant.createdAt(), grant.expiresAt(),
                 grant.authorizedAt(), grant.consumedAt(), grant.revokedAt(),
                 committed ? "INDEPENDENT_AUTHORIZATION_AND_RETIREMENT_COMMITTED"
-                        : "NO_COMMITTED_EMERGENCY_RETIREMENT_PROOF", List.copyOf(events));
+                        : "NO_COMMITTED_EMERGENCY_RETIREMENT_PROOF", List.copyOf(events),
+                grant.authorizedAt() == null ? "INCIDENT_REFERENCE_DECLARED"
+                        : "INDEPENDENT_HUMAN_ATTESTATION",
+                grant.requesterAcr(), grant.requesterAuthenticatedAt(),
+                grant.authorizerAcr(), grant.authorizerAuthenticatedAt(),
+                grant.authorizationEvidenceSha256());
     }
 
     private boolean hasEvent(List<ModelPromotionEmergencyAuditDocument> events, String action, String actorId) {
@@ -292,7 +425,7 @@ public class ModelPromotionEmergencyRetirementService {
         }
         Instant now = clock.instant();
         var current = requireIntact(expected.id());
-        if (current.status() != ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED
+        if (current.status() != ModelPromotionEmergencyAuthorizationDocument.Status.CLAIMED
                 || current.authorizedByActorId() == null || current.authorizedByActorId().equals(actor.id())
                 || !current.requesterActorId().equals(actor.id())
                 || !now.isBefore(current.expiresAt()) || current.tokenSha256() == null
@@ -302,7 +435,7 @@ public class ModelPromotionEmergencyRetirementService {
             throw new AccessDeniedException("Active exact emergency authorization required");
         }
         var updated = mongo.findAndModify(Query.query(Criteria.where("_id").is(current.id())
-                        .and("status").is(ModelPromotionEmergencyAuthorizationDocument.Status.AUTHORIZED)
+                        .and("status").is(ModelPromotionEmergencyAuthorizationDocument.Status.CLAIMED)
                         .and("intentSha256").is(current.intentSha256())
                         .and("tokenSha256").is(current.tokenSha256()).and("expiresAt").gt(now)),
                 new Update().set("status", ModelPromotionEmergencyAuthorizationDocument.Status.CONSUMED)
@@ -320,7 +453,21 @@ public class ModelPromotionEmergencyRetirementService {
         var grant = mongo.findById(id, ModelPromotionEmergencyAuthorizationDocument.class);
         if (grant == null || !ModelPromotionEmergencyAuthorizationDocument.VERSION.equals(grant.version())
                 || !grant.intentSha256().equals(intentSha256(grant))
-                || !grant.reasonSha256().equals(ModelPromotionDecisionRationale.sha256(grant.reason()))) {
+                || !grant.reasonSha256().equals(ModelPromotionDecisionRationale.sha256(grant.reason()))
+                || grant.requesterAcr() == null || grant.requesterAuthenticatedAt() == null
+                || grant.requesterAuthenticatedAt().isAfter(grant.createdAt().plusSeconds(30))
+                || grant.requesterAuthenticatedAt().isBefore(grant.createdAt().minusSeconds(300))
+                || grant.authorizedAt() == null && grant.authorizationEvidenceSha256() != null
+                || grant.authorizedAt() != null && (grant.authorizedByActorId() == null
+                    || grant.authorizedByIssuer() == null || grant.authorizedBySubject() == null
+                    || grant.authorizationRationale() == null || grant.authorizerAcr() == null
+                    || grant.authorizerAuthenticatedAt() == null
+                    || grant.authorizerAuthenticatedAt().isAfter(grant.authorizedAt().plusSeconds(30))
+                    || grant.authorizerAuthenticatedAt().isBefore(grant.authorizedAt().minusSeconds(300))
+                    || !authorizationEvidenceSha256(grant.intentSha256(), grant.authorizedByActorId(),
+                            grant.authorizedByIssuer(), grant.authorizedBySubject(),
+                            grant.authorizationRationale(), grant.authorizedAt(), grant.authorizerAcr(),
+                            grant.authorizerAuthenticatedAt()).equals(grant.authorizationEvidenceSha256()))) {
             throw new SecurityException("Exact emergency authorization is unavailable or changed");
         }
         return grant;
@@ -425,6 +572,8 @@ public class ModelPromotionEmergencyRetirementService {
         contract.put("requesterActorId", grant.requesterActorId());
         contract.put("requesterIssuer", grant.requesterIssuer());
         contract.put("requesterSubject", grant.requesterSubject());
+        contract.put("requesterAcr", grant.requesterAcr());
+        contract.put("requesterAuthenticatedAt", grant.requesterAuthenticatedAt());
         contract.put("incidentId", grant.incidentId());
         contract.put("incidentEvidenceReference", grant.incidentEvidenceReference());
         contract.put("reason", grant.reason());
@@ -438,11 +587,30 @@ public class ModelPromotionEmergencyRetirementService {
         return ModelPromotionDecisionRationale.sha256(value);
     }
 
+    private String authorizationEvidenceSha256(String intentSha256, String actorId, String issuer,
+            String subject, String rationale, Instant authorizedAt, String acr, Instant authenticatedAt) {
+        var contract = new LinkedHashMap<String, Object>();
+        contract.put("domain", "com.frauddetection.model-promotion.emergency-authorization.v1");
+        contract.put("intentSha256", intentSha256);
+        contract.put("actorId", actorId);
+        contract.put("issuer", issuer);
+        contract.put("subject", subject);
+        contract.put("rationale", rationale);
+        contract.put("authorizedAt", authorizedAt);
+        contract.put("acr", acr);
+        contract.put("authenticatedAt", authenticatedAt);
+        return GovernanceCanonicalJson.sha256(mapper, contract);
+    }
+
     private void audit(ModelPromotionEmergencyAuthorizationDocument grant, String action,
             PolicyGovernanceActor actor, Instant at) {
-        mongo.insert(new ModelPromotionEmergencyAuditDocument(grant.id() + ":" + action.toLowerCase(),
+        var event = new ModelPromotionEmergencyAuditDocument(grant.id() + ":" + action.toLowerCase(),
                 grant.id(), grant.proposalId(), action, actor.id(), actor.issuer(), actor.subject(),
-                grant.intentSha256(), grant.incidentId(), at));
+                grant.intentSha256(), grant.incidentId(), at);
+        mongo.insert(event);
+        GovernanceEventCommitment.record(mongo, GovernanceEventCommitment.Kind.EMERGENCY_RETIREMENT,
+                event.id(), event, "CURRENT_INSTITUTION", actor.id(), grant.proposalId(),
+                event.id(), grant.intentSha256(), grant.id(), at);
     }
 
     private Summary summary(ModelPromotionEmergencyAuthorizationDocument grant) {
@@ -456,6 +624,8 @@ public class ModelPromotionEmergencyRetirementService {
     public record Consume(String authorizationId, String token) { }
     public record Summary(String authorizationId, String proposalId, String status, Instant expiresAt) { }
     public record IssuedGrant(String authorizationId, String token, Instant expiresAt) { }
+    public record AffectedSelector(String actorId, String incidentId) { }
+    public record AffectedGrants(List<Summary> grants, boolean hasMore) { }
     public record AuthorizationReviewView(String authorizationId, String proposalId, String proposalSha256,
             com.frauddetection.alert.governance.ExactModelArtifactIdentity artifactIdentity,
             ModelGovernanceScope governanceScope, ModelPromotionIntendedUse intendedUse,
@@ -471,5 +641,8 @@ public class ModelPromotionEmergencyRetirementService {
             String requesterActorId, String authorizedByActorId, String reviewOperationId,
             String intentSha256, String status, Instant createdAt, Instant expiresAt,
             Instant authorizedAt, Instant consumedAt, Instant revokedAt,
-            String proofStatus, List<ModelPromotionEmergencyAuditDocument> events) { }
+            String proofStatus, List<ModelPromotionEmergencyAuditDocument> events,
+            String incidentEvidenceState, String requesterAcr, Instant requesterAuthenticatedAt,
+            String authorizerAcr, Instant authorizerAuthenticatedAt,
+            String authorizationEvidenceSha256) { }
 }

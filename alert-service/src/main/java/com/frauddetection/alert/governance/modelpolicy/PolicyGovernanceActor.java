@@ -8,14 +8,22 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Stable issuer+subject identity from an authenticated OIDC/JWT principal only. */
-public record PolicyGovernanceActor(String id, Set<String> authorities, String issuer, String subject) {
+public record PolicyGovernanceActor(String id, Set<String> authorities, String issuer, String subject,
+        AuthenticationEvidence authenticationEvidence) {
+    public record AuthenticationEvidence(String acr, Instant authenticatedAt) { }
+
     public PolicyGovernanceActor(String id, Set<String> authorities) {
-        this(id, authorities, null, null);
+        this(id, authorities, null, null, null);
+    }
+
+    public PolicyGovernanceActor(String id, Set<String> authorities, String issuer, String subject) {
+        this(id, authorities, issuer, subject, null);
     }
 
     public static PolicyGovernanceActor from(Authentication authentication) {
@@ -24,10 +32,13 @@ public record PolicyGovernanceActor(String id, Set<String> authorities, String i
         }
         String issuer = null;
         String subject = null;
+        AuthenticationEvidence evidence = null;
         if (authentication.getPrincipal() instanceof OidcUser user && user.getIdToken() != null
                 && user.getIdToken().getIssuer() != null && user.getIdToken().getSubject() != null) {
             issuer = user.getIdToken().getIssuer().toString();
             subject = user.getIdToken().getSubject();
+            evidence = new AuthenticationEvidence(user.getIdToken().getClaimAsString("acr"),
+                    user.getIdToken().getClaimAsInstant("auth_time"));
         } else if (authentication.getPrincipal() instanceof AnalystPrincipal analyst) {
             String identity = analyst.institutionalActorId();
             int separator = identity == null ? -1 : identity.lastIndexOf('#');
@@ -41,7 +52,7 @@ public record PolicyGovernanceActor(String id, Set<String> authorities, String i
         }
         return new PolicyGovernanceActor(identityId(issuer, subject),
                 authentication.getAuthorities().stream().map(authority -> authority.getAuthority())
-                        .collect(Collectors.toUnmodifiableSet()), issuer, subject);
+                        .collect(Collectors.toUnmodifiableSet()), issuer, subject, evidence);
     }
 
     public static String identityId(String issuer, String subject) {

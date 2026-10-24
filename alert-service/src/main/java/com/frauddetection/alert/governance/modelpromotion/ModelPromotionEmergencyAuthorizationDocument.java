@@ -35,10 +35,16 @@ public record ModelPromotionEmergencyAuthorizationDocument(
         Instant authorizedAt,
         String tokenSha256,
         Instant consumedAt,
-        Instant revokedAt
+        Instant revokedAt,
+        Instant claimedAt,
+        String requesterAcr,
+        Instant requesterAuthenticatedAt,
+        String authorizerAcr,
+        Instant authorizerAuthenticatedAt,
+        String authorizationEvidenceSha256
 ) {
     public static final String COLLECTION = "model_promotion_emergency_authorizations";
     public static final String VERSION = "model-promotion-emergency-authorization-v1";
 
-    public enum Status { REQUESTED, AUTHORIZED, CONSUMED, REVOKED }
+    public enum Status { REQUESTED, AUTHORIZED, CLAIMED, CONSUMED, REVOKED }
 }

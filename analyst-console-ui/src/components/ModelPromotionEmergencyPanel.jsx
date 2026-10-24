@@ -15,8 +15,10 @@ export function ModelPromotionEmergencyPanel({ workflow, state, pending = [], ca
   const [authorizationId, setAuthorizationId] = useState("");
   const [inspected, setInspected] = useState(null);
   const [authorizationRationale, setAuthorizationRationale] = useState("");
-  const [issued, setIssued] = useState(null);
-  const [grantToken, setGrantToken] = useState("");
+  const [authorized, setAuthorized] = useState(null);
+  const [affectedActorId, setAffectedActorId] = useState("");
+  const [affectedIncidentId, setAffectedIncidentId] = useState("");
+  const [affected, setAffected] = useState(null);
   const [auditAuthorizationId, setAuditAuthorizationId] = useState("");
   const [audit, setAudit] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -54,7 +56,7 @@ export function ModelPromotionEmergencyPanel({ workflow, state, pending = [], ca
 
   function inspect() {
     return perform(async () => {
-      setIssued(null);
+      setAuthorized(null);
       const result = await client.inspectEmergencyModelRetirement(authorizationId.trim());
       setInspected(result);
       setNotice("Compare the incident evidence, exact artifact SHA-256, production scope and revision before authorizing.");
@@ -72,8 +74,9 @@ export function ModelPromotionEmergencyPanel({ workflow, state, pending = [], ca
         incidentEvidenceReference: inspected.incidentEvidenceReference,
         authorizationRationale: authorizationRationale.trim()
       });
-      setIssued(result);
-      setNotice("Grant issued once. Deliver the token to the requester through a controlled channel before expiry.");
+      setAuthorized(result);
+      setInspected({ ...inspected, status: result.status });
+      setNotice("Exact intent authorized. The requester can claim the one-use capability in their own session.");
     });
   }
 
@@ -83,21 +86,42 @@ export function ModelPromotionEmergencyPanel({ workflow, state, pending = [], ca
         throw new Error("Inspect the exact authorization before revoking it.");
       }
       await client.revokeEmergencyModelRetirement(inspected.authorizationId);
-      setIssued(null); setInspected(null);
+      setAuthorized(null); setInspected(null);
       setNotice("Emergency authorization revoked; it cannot be used for retirement.");
     });
   }
 
   function retire() {
     return perform(async () => {
-      if (!selectedProposal || !authorizationId.trim() || !grantToken.trim()) {
-        throw new Error("Select the bound retirement proposal and enter the issued grant ID and token.");
+      if (!selectedProposal || !authorizationId.trim()) {
+        throw new Error("Select the bound retirement proposal and approved authorization ID.");
       }
+      const claimed = await client.claimEmergencyModelRetirement(authorizationId.trim());
       await client.consumeEmergencyModelRetirement(selectedProposal.proposalId,
-        { authorizationId: authorizationId.trim(), token: grantToken.trim() });
-      setGrantToken(""); setRequested(null);
+        { authorizationId: authorizationId.trim(), token: claimed.token });
+      setRequested(null);
       setNotice("Emergency retirement committed. Confirm the authoritative lifecycle and audit record.");
       await workflow.load();
+    });
+  }
+
+  function findAffected() {
+    return perform(async () => {
+      if (!affectedActorId.trim() && !affectedIncidentId.trim())
+        throw new Error("Enter an affected OIDC actor or incident ID.");
+      setAffected(await client.findAffectedEmergencyModelRetirements(
+        affectedActorId.trim(), affectedIncidentId.trim()));
+    });
+  }
+
+  function revokeAffected() {
+    return perform(async () => {
+      if (!affected || !window.confirm("Revoke the listed active emergency authorizations?")) return;
+      const result = await client.revokeAffectedEmergencyModelRetirements({
+        actorId: affectedActorId.trim() || null, incidentId: affectedIncidentId.trim() || null
+      });
+      setAffected(null);
+      setNotice(`Revoked ${result.grants.length} active grants. ${result.hasMore ? "Repeat to process remaining grants." : "Recheck for new grants."}`);
     });
   }
 
@@ -111,7 +135,7 @@ export function ModelPromotionEmergencyPanel({ workflow, state, pending = [], ca
   if (!canRequestHere && canAuthorize !== true && canAudit !== true) return null;
   return <section className="shadowPerformanceSubpanel" aria-label="Emergency model retirement">
     <h3>Exceptional production retirement</h3>
-    <p className="sectionCopy">Use the normal signed review when WebAuthn works. If it is unavailable, a dedicated requester and a different institutional authorizer must approve a five-minute, exact-model grant. An incident ID or rationale alone never bypasses WebAuthn.</p>
+    <p className="sectionCopy">Use the normal signed review when WebAuthn works. Emergency retirement requires two dedicated operators with fresh IdP-verified step-up assurance and an exact five-minute grant. The local password-only realm does not meet that requirement. An incident ID or rationale alone never authorizes retirement.</p>
     {canRequestHere && <div className="shadowPerformanceStack">
       <label className="filterField"><span>Pending RETIRED proposal</span><select value={proposalId} onChange={(event) => { setProposalId(event.target.value); setRequestCommand(null); }}><option value="">Select proposal</option>{retirementProposals.map((proposal) => <option key={proposal.proposalId} value={proposal.proposalId}>{proposal.proposalId}</option>)}</select></label>
       <label className="filterField"><span>Incident / case ID</span><input value={incidentId} onChange={(event) => { setIncidentId(event.target.value); setRequestCommand(null); }} /></label>
@@ -120,8 +144,7 @@ export function ModelPromotionEmergencyPanel({ workflow, state, pending = [], ca
       <button className="secondaryButton" type="button" disabled={busy} onClick={request}>{requestCommand ? "Retry the same request" : "Request independent emergency authorization"}</button>
       {requested && <p role="status">Authorization ID: <code>{requested.authorizationId}</code>; expires {requested.expiresAt}.</p>}
       <label className="filterField"><span>Approved authorization ID</span><input value={authorizationId} onChange={(event) => setAuthorizationId(event.target.value)} /></label>
-      <label className="filterField"><span>One-time grant token</span><input type="password" value={grantToken} onChange={(event) => setGrantToken(event.target.value)} autoComplete="off" /></label>
-      <button className="secondaryButton" type="button" disabled={busy} onClick={retire}>Consume grant and retire exact model</button>
+      <button className="secondaryButton" type="button" disabled={busy} onClick={retire}>Claim and retire exact model</button>
     </div>}
     {canAuthorize === true && <div className="shadowPerformanceStack">
       {!canRequestHere && <label className="filterField"><span>Emergency authorization ID</span><input value={authorizationId} onChange={(event) => { setAuthorizationId(event.target.value); setInspected(null); }} /></label>}
@@ -137,8 +160,16 @@ export function ModelPromotionEmergencyPanel({ workflow, state, pending = [], ca
         <div><dt>Expiry</dt><dd>{inspected.expiresAt}</dd></div>
         <div><dt>Exact intent SHA-256</dt><dd>{inspected.intentSha256}</dd></div>
       </dl>}
-      {inspected?.status === "REQUESTED" && <><label className="filterField"><span>Independent incident-evidence review rationale</span><textarea value={authorizationRationale} onChange={(event) => setAuthorizationRationale(event.target.value)} /></label><button className="secondaryButton" type="button" disabled={busy} onClick={authorize}>Authorize exact emergency grant</button><button className="secondaryButton" type="button" disabled={busy} onClick={revoke}>Revoke request</button></>}
-      {issued && <p role="status">One-time token (deliver securely): <code>{issued.token}</code>; expires {issued.expiresAt}.</p>}
+      {inspected?.status === "REQUESTED" && <><label className="filterField"><span>Independent incident-evidence review rationale</span><textarea value={authorizationRationale} onChange={(event) => setAuthorizationRationale(event.target.value)} /></label><button className="secondaryButton" type="button" disabled={busy} onClick={authorize}>Authorize exact emergency grant</button></>}
+      {["REQUESTED", "AUTHORIZED", "CLAIMED"].includes(inspected?.status) && <button className="secondaryButton" type="button" disabled={busy} onClick={revoke}>Revoke request</button>}
+      {authorized && <p role="status">Authorization recorded; expires {authorized.expiresAt}. The requester claims the capability in their own session.</p>}
+      <h4>Incident grant revocation</h4>
+      <label className="filterField"><span>Affected OIDC actor ID</span><input value={affectedActorId} onChange={(event) => { setAffectedActorId(event.target.value); setAffected(null); }} /></label>
+      <label className="filterField"><span>Affected incident ID</span><input value={affectedIncidentId} onChange={(event) => { setAffectedIncidentId(event.target.value); setAffected(null); }} /></label>
+      <button className="secondaryButton" type="button" disabled={busy} onClick={findAffected}>Find active emergency grants</button>
+      {affected && <><p>{affected.grants.length} active grants listed{affected.hasMore ? "; more remain" : ""}.</p>
+        <ol>{affected.grants.map((grant) => <li key={grant.authorizationId}>{grant.authorizationId}: {grant.status}</li>)}</ol>
+        <button className="secondaryButton" type="button" disabled={busy || !affected.grants.length} onClick={revokeAffected}>Revoke listed grants</button></>}
     </div>}
     {canAudit === true && <div className="shadowPerformanceStack">
       <h4>Emergency retirement audit</h4>
@@ -146,6 +177,8 @@ export function ModelPromotionEmergencyPanel({ workflow, state, pending = [], ca
       <button className="secondaryButton" type="button" disabled={busy || !auditAuthorizationId.trim()} onClick={loadAudit}>Verify recorded emergency decision</button>
       {audit && <dl className="shadowPerformanceDefinitionList">
         <div><dt>Proof status</dt><dd>{audit.proofStatus}</dd></div>
+        <div><dt>Incident evidence</dt><dd>{audit.incidentEvidenceState || "INCIDENT_REFERENCE_DECLARED"}</dd></div>
+        <div><dt>OIDC assurance</dt><dd>{audit.requesterAcr || "Unavailable"} / {audit.authorizerAcr || "Unavailable"}</dd></div>
         <div><dt>Incident / evidence</dt><dd>{audit.incidentId} / {audit.incidentEvidenceReference}</dd></div>
         <div><dt>Emergency reason</dt><dd>{audit.reason}</dd></div>
         <div><dt>Independent authorization rationale</dt><dd>{audit.authorizationRationale || "Not authorized"}</dd></div>

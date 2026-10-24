@@ -268,7 +268,7 @@ class ModelPromotionWorkflowServiceTest {
         when(store.findProposal(proposal.proposalId())).thenReturn(Optional.of(proposal));
         when(policyResolver.resolve(scope(ModelGovernanceEnvironment.PRODUCTION), use(), NOW))
                 .thenReturn(ModelPromotionPolicyResolution.available(proposal.policySnapshot()));
-        when(store.reviewProposal(any(), any(), any())).thenAnswer(invocation -> {
+        when(store.reviewProposal(any(), any(), any(), any())).thenAnswer(invocation -> {
             authenticate(
                     "reviewer",
                     Set.of(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION),
@@ -346,7 +346,7 @@ class ModelPromotionWorkflowServiceTest {
                 "proposer", ModelGovernanceEnvironment.PRODUCTION
         );
         when(store.findProposal(proposal.proposalId())).thenReturn(Optional.of(proposal));
-        when(store.reviewProposal(any(), any(), any())).thenAnswer(invocation -> {
+        when(store.reviewProposal(any(), any(), any(), any())).thenAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();
             return proposal.toResult(false);
         });
@@ -469,7 +469,7 @@ class ModelPromotionWorkflowServiceTest {
     }
 
     private void reviewProposalRunsPreconditions(ModelPromotionProposalDocument proposal) {
-        when(store.reviewProposal(any(), any(), any())).thenAnswer(invocation -> {
+        when(store.reviewProposal(any(), any(), any(), any())).thenAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();
             return proposal.toResult(false);
         });

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -43,12 +44,37 @@ public class ModelPromotionEmergencyRetirementController {
     }
 
     @PostMapping("/emergency-authorizations/{authorizationId}/approve")
-    public ModelPromotionEmergencyRetirementService.IssuedGrant authorize(
+    public ModelPromotionEmergencyRetirementService.Summary authorize(
             Authentication authentication, @PathVariable @NotBlank @Pattern(regexp = ID) String authorizationId,
             @Valid @RequestBody ModelPromotionEmergencyRetirementService.AuthorizationAttestation attestation) {
         requireRateLimit(authentication);
         return emergency.authorize(PolicyGovernanceActor.fromOidcSession(authentication),
                 authorizationId, attestation);
+    }
+
+    @PostMapping("/emergency-authorizations/{authorizationId}/claim")
+    public ModelPromotionEmergencyRetirementService.IssuedGrant claim(
+            Authentication authentication, @PathVariable @NotBlank @Pattern(regexp = ID) String authorizationId) {
+        requireRateLimit(authentication);
+        return emergency.claim(PolicyGovernanceActor.fromOidcSession(authentication), authorizationId);
+    }
+
+    @GetMapping("/emergency-authorizations/active")
+    @AuditedSensitiveRead
+    public ModelPromotionEmergencyRetirementService.AffectedGrants affected(
+            Authentication authentication, @RequestParam(required = false) String actorId,
+            @RequestParam(required = false) String incidentId) {
+        requireRateLimit(authentication);
+        return emergency.affected(PolicyGovernanceActor.fromOidcSession(authentication),
+                new ModelPromotionEmergencyRetirementService.AffectedSelector(actorId, incidentId));
+    }
+
+    @PostMapping("/emergency-authorizations/active/revoke")
+    public ModelPromotionEmergencyRetirementService.AffectedGrants revokeAffected(
+            Authentication authentication,
+            @Valid @RequestBody ModelPromotionEmergencyRetirementService.AffectedSelector selector) {
+        requireRateLimit(authentication);
+        return emergency.revokeAffected(PolicyGovernanceActor.fromOidcSession(authentication), selector);
     }
 
     @GetMapping("/emergency-authorizations/{authorizationId}")

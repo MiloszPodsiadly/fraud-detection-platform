@@ -18,9 +18,10 @@ function storedPending(actorId) {
   try {
     const value = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
     if (value?.actorId !== actorId || !/^[A-Za-z0-9._:-]{1,128}$/.test(value.operationId)
-        || !["policy", "recovery"].includes(value.kind)) return null;
+        || !["policy", "recovery", "reconciliation"].includes(value.kind)) return null;
     if (value.kind === "policy" && !STATUS.includes(value.expected?.status)) return null;
-    if (value.kind === "recovery" && typeof value.proposalId !== "string") return null;
+    if (["recovery", "reconciliation"].includes(value.kind)
+        && typeof value.proposalId !== "string") return null;
     return { ...value, requestFn: null };
   } catch { return null; }
 }
@@ -224,9 +225,11 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
     await act(async () => {
       if (pending.actorId && pending.actorId !== actor?.actorId)
         throw new Error("The signed-in actor changed; this operation cannot be resumed here.");
-      if (pending.kind === "recovery") {
+      if (pending.kind === "recovery" || pending.kind === "reconciliation") {
         let result = await apiClient.getPolicyPublicationRecovery(pending.proposalId);
-        if (!result.recoveryHistory?.some((event) => event.operationId === pending.operationId)) {
+        const history = pending.kind === "reconciliation"
+          ? result.reconciliationHistory : result.recoveryHistory;
+        if (!history?.some((event) => event.operationId === pending.operationId)) {
           if (!pending.requestFn) throw new Error(`Recovery operation ${pending.operationId} remains uncertain; check its durable history again.`);
           result = await pending.requestFn();
         }
@@ -235,7 +238,9 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
         forgetPending(pending.operationId);
         setRecovery(result);
         setPublication(await apiClient.getPolicyPublication(pending.proposalId));
-        setReceipt(`Recovery request confirmed for job ${result.publicationRequestId}; worker outcome remains ${result.state}.`);
+        setReceipt(pending.kind === "reconciliation"
+          ? `Committed publication reconciliation confirmed: ${result.state}.`
+          : `Recovery request confirmed for job ${result.publicationRequestId}; worker outcome remains ${result.state}.`);
         return;
       }
       let result;
@@ -350,6 +355,36 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
     });
   }
 
+  async function reconcileCommittedPublication() {
+    if (!selected || !recovery?.reconcileSafe || !window.confirm(
+      `Reconcile the exact committed publication ${recovery.publicationRequestId}?`)) return;
+    await act(async () => {
+      const operationId = createId();
+      const requestFn = () => apiClient.reconcileCommittedPolicyPublication(selected.id, { operationId });
+      let result;
+      try {
+        result = await requestFn();
+      } catch (failure) {
+        if (failure?.status === 401 || failure?.status === 403) throw failure;
+        try {
+          const observed = await apiClient.getPolicyPublicationRecovery(selected.id);
+          if (observed.reconciliationHistory?.some((event) => event.operationId === operationId))
+            result = observed;
+        } catch { /* Durable outcome remains uncertain. */ }
+        if (!result) {
+          pendingMutationRef.current = { operationId, requestFn, kind: "reconciliation",
+            proposalId: selected.id, actorId: actor?.actorId };
+          rememberPending(pendingMutationRef.current);
+          setPendingMutation({ operationId });
+          throw new Error(`Outcome uncertain for reconciliation ${operationId}. Check its durable receipt.`);
+        }
+      }
+      setRecovery(result);
+      setPublication(await apiClient.getPolicyPublication(selected.id));
+      setReceipt(`Committed publication reconciliation confirmed: ${result.state}.`);
+    });
+  }
+
   if (!enabled) return <section className="panel"><h2>Policy Governance</h2><p>Policy read authority is required.</p></section>;
   const queue = policies.filter((item) => item.status === "SUBMITTED"
     && item.draft?.approverIdentity === actor?.actorId && item.authorActorId !== actor?.actorId);
@@ -425,12 +460,18 @@ export function PolicyGovernancePage({ apiClient, enabled }) {
         {publication?.state === "RETRYABLE" && <p>Publication is awaiting a bounded worker retry.</p>}
         {publication?.state === "PUBLISHED" && <p role="status">The policy publication commit and job acknowledgement are confirmed.</p>}
         {can("publication:recover") && recovery && <div>
-          <p>Recovery: {recovery.retrySafe ? "request allowed" : "request unavailable"}; attempts {recovery.attempts}; recoveries {recovery.recoveryCount}; committed evidence {recovery.alreadyCommitted ? "present" : "not found"}.</p>
-          <button type="button" disabled={busy || !!pendingMutation || !recovery.retrySafe} onClick={requestRecovery}>Request recovery</button>
+          <p>Job {recovery.state}; proposal {recovery.proposalState || "unknown"}; attempts {recovery.attempts}; recoveries {recovery.recoveryCount}; reconciliations {recovery.reconciliationCount ?? "unknown"}.</p>
+          <p>Committed publication: {recovery.classification || "OUTCOME_UNKNOWN"}; historical integrity {recovery.classificationDiagnostic || "unavailable"}.</p>
+          {recovery.publicationReceipt && <p>Immutable receipt: {recovery.publicationReceipt.policyId} revision {recovery.publicationReceipt.revision}; SHA-256 {recovery.publicationReceipt.canonicalSha256}; published {recovery.publicationReceipt.publishedAt}.</p>}
+          <p>{recovery.classification === "IMMUTABLE_CONFLICT" ? "Immutable conflict requires incident investigation." : ""}</p>
+          <button type="button" disabled={busy || !!pendingMutation || !recovery.reconcileSafe} onClick={reconcileCommittedPublication}>Reconcile committed publication</button>
+          <button type="button" disabled={busy || !!pendingMutation || !recovery.retrySafe} onClick={requestRecovery}>Retry new signing attempt</button>
           {recovery.attemptHistory?.length > 0 && <ol>{recovery.attemptHistory.map((attempt) =>
             <li key={attempt.id}>Attempt {attempt.attempt}: {attempt.outcome}; {attempt.failureCode || "no failure code"}</li>)}</ol>}
           {recovery.recoveryHistory?.length > 0 && <ol>{recovery.recoveryHistory.map((event) =>
             <li key={event.operationId}>{event.requestedAt}; {event.previousFailureCode}; attempt {event.previousAttempts}; operator {event.actorId}</li>)}</ol>}
+          {recovery.reconciliationHistory?.length > 0 && <ol>{recovery.reconciliationHistory.map((event) =>
+            <li key={event.operationId}>Reconciled {event.reconciledAt} by {event.actorId}; SHA-256 {event.policyCanonicalSha256}</li>)}</ol>}
         </div>}
         <p>Job: {publication?.state || "Loading"}{publication?.failureCode ? ` · ${publication.failureCode}` : ""}</p>
         <p>Issuer signature: {publication?.signatureStatus || "UNAVAILABLE"}</p>

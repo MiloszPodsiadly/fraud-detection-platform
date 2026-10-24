@@ -156,6 +156,9 @@
       "name": "model-policy-credential-admin"
     },
     {
+      "name": "model-policy-credential-incident-revoker"
+    },
+    {
       "name": "model-policy-credential-holder"
     },
     {
@@ -346,7 +349,8 @@
       "emailVerified": true,
       "requiredActions": [],
       "credentials": [{ "type": "password", "value": "policy-security-c", "temporary": false }],
-      "groups": ["model-policy-credential-admin", "model-policy-credential-holder"]
+      "groups": ["model-policy-credential-admin", "model-policy-credential-holder",
+        "model-policy-credential-incident-revoker"]
     },
     {
       "id": "34d6645e-5fd7-44c2-ae66-1e9f4fc45483",

@@ -14,7 +14,8 @@ export const MODEL_POLICY_AUTHORITIES = Object.freeze({
   AUDIT_READ: "model-policy:audit:read",
   PRODUCTION: "model-policy:scope:production",
   CREDENTIAL_ENROLL: "model-policy:credential:enroll",
-  CREDENTIAL_ADMIN: "model-policy:credential:admin"
+  CREDENTIAL_ADMIN: "model-policy:credential:admin",
+  CREDENTIAL_INCIDENT_REVOKE: "model-policy:credential:incident-revoke"
 });
 
 export const MODEL_POLICY_AUTHORITY_PREFIX = "model-policy:";

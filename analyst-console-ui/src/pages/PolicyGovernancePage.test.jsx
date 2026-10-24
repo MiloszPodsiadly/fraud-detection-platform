@@ -135,7 +135,7 @@ describe("Policy Governance workspace", () => {
     render(<PolicyGovernancePage apiClient={client} enabled />);
     fireEvent.click(await screen.findByRole("button", { name: /risk-policy.*revision 1.*PUBLICATION_PENDING/ }));
     expect(await screen.findByText(/Publication is blocked/)).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: "Request recovery" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry new signing attempt" }));
     await waitFor(() => expect(client.requestPolicyPublicationRecovery).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/Recovery queued for worker/)).toBeInTheDocument();
   });
@@ -154,9 +154,34 @@ describe("Policy Governance workspace", () => {
     fireEvent.click(await screen.findByRole("button", { name: /risk-policy.*revision 1.*PUBLICATION_PENDING/ }));
     expect(await screen.findByText(/commit outcome may be uncertain/i)).toBeInTheDocument();
     expect(screen.getByText(/Attempt 1: LEASE_EXPIRED_UNCONFIRMED/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Request recovery" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Retry new signing attempt" })).toBeDisabled();
     expect(screen.queryByText(/publication commit and job acknowledgement are confirmed/i))
       .not.toBeInTheDocument();
+  });
+
+  it("reconciles an exact committed publication without requesting another signing attempt", async () => {
+    const client = api({ actorId: "oidc:" + "c".repeat(64),
+      authorities: ["model-policy:read", "model-policy:publication:recover"],
+      items: [proposal("PUBLICATION_PENDING")], publication: {
+        requestId: "job-1", state: "BLOCKED", failureCode: "RECONCILIATION_UNAVAILABLE",
+        verificationStatus: "UNAVAILABLE" } });
+    client.getPolicyPublicationRecovery.mockResolvedValue({ publicationRequestId: "job-1",
+      state: "BLOCKED", proposalState: "PUBLICATION_PENDING", attempts: 1, recoveryCount: 0,
+      reconciliationCount: 3, classification: "COMMITTED_EXACT",
+      classificationDiagnostic: "SIGNED_PUBLICATION_VERIFIED", reconcileSafe: true,
+      retrySafe: false, publicationReceipt: { policyId: "risk-policy", revision: 1,
+        canonicalSha256: "a".repeat(64), publishedAt: "2026-11-01T10:00:00Z" },
+      attemptHistory: [], recoveryHistory: [], reconciliationHistory: [] });
+    client.reconcileCommittedPolicyPublication = vi.fn().mockResolvedValue({
+      publicationRequestId: "job-1", state: "PUBLISHED", reconciliationHistory: []
+    });
+    render(<PolicyGovernancePage apiClient={client} enabled />);
+    fireEvent.click(await screen.findByRole("button", { name: /risk-policy.*revision 1.*PUBLICATION_PENDING/ }));
+    expect(await screen.findByText(/Committed publication: COMMITTED_EXACT/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry new signing attempt" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Reconcile committed publication" }));
+    await waitFor(() => expect(client.reconcileCommittedPolicyPublication).toHaveBeenCalledTimes(1));
+    expect(client.requestPolicyPublicationRecovery).not.toHaveBeenCalled();
   });
 
   it("prevents duplicate clicks and reports a backend conflict without claiming approval", async () => {

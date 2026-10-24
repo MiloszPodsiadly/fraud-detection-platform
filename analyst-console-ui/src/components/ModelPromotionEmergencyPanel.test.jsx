@@ -35,7 +35,7 @@ describe("ModelPromotionEmergencyPanel", () => {
     expect(await screen.findByText(/Authorization ID:/)).toHaveTextContent("grant-1");
   });
 
-  it("makes an independent authorizer inspect the exact intent before issuing a one-time token", async () => {
+  it("makes an independent authorizer inspect the exact intent without receiving a token", async () => {
     const apiClient = {
       inspectEmergencyModelRetirement: vi.fn().mockResolvedValue({
         authorizationId: "grant-1", proposalId: "retirement-1", proposalSha256: "a".repeat(64),
@@ -48,7 +48,7 @@ describe("ModelPromotionEmergencyPanel", () => {
         intentSha256: "c".repeat(64), status: "REQUESTED"
       }),
       authorizeEmergencyModelRetirement: vi.fn().mockResolvedValue({
-        authorizationId: "grant-1", token: "one-time-secret", expiresAt: "2026-10-23T12:05:00Z"
+        authorizationId: "grant-1", status: "AUTHORIZED", expiresAt: "2026-10-23T12:05:00Z"
       })
     };
     vi.mocked(useOptionalWorkspaceRuntime).mockReturnValue({ apiClient });
@@ -63,7 +63,48 @@ describe("ModelPromotionEmergencyPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Authorize exact emergency grant" }));
     await waitFor(() => expect(apiClient.authorizeEmergencyModelRetirement).toHaveBeenCalledWith(
       "grant-1", expect.objectContaining({ intentSha256: "c".repeat(64) })));
-    expect(await screen.findByText(/One-time token/)).toHaveTextContent("one-time-secret");
+    expect(await screen.findByText(/Authorization recorded/)).toBeInTheDocument();
+    expect(screen.queryByText(/one-time-secret/)).not.toBeInTheDocument();
+  });
+
+  it("claims the capability in the requester session and immediately retires the bound model", async () => {
+    const apiClient = {
+      claimEmergencyModelRetirement: vi.fn().mockResolvedValue({ authorizationId: "grant-1", token: "one-time-secret" }),
+      consumeEmergencyModelRetirement: vi.fn().mockResolvedValue({})
+    };
+    const workflow = { load: vi.fn().mockResolvedValue() };
+    vi.mocked(useOptionalWorkspaceRuntime).mockReturnValue({ apiClient });
+    render(<ModelPromotionEmergencyPanel workflow={workflow} state={state}
+      pending={[proposal]} canRequest canAuthorize={false} />);
+    fireEvent.change(screen.getByLabelText("Pending RETIRED proposal"), { target: { value: "retirement-1" } });
+    fireEvent.change(screen.getByLabelText("Approved authorization ID"), { target: { value: "grant-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Claim and retire exact model" }));
+    await waitFor(() => expect(apiClient.consumeEmergencyModelRetirement).toHaveBeenCalledWith(
+      "retirement-1", { authorizationId: "grant-1", token: "one-time-secret" }));
+    expect(apiClient.claimEmergencyModelRetirement).toHaveBeenCalledWith("grant-1");
+  });
+
+  it("lets an incident operator find and revoke bounded active grants", async () => {
+    const apiClient = {
+      findAffectedEmergencyModelRetirements: vi.fn().mockResolvedValue({
+        grants: [{ authorizationId: "grant-1", status: "CLAIMED" }], hasMore: false
+      }),
+      revokeAffectedEmergencyModelRetirements: vi.fn().mockResolvedValue({
+        grants: [{ authorizationId: "grant-1", status: "REVOKED" }], hasMore: false
+      })
+    };
+    vi.mocked(useOptionalWorkspaceRuntime).mockReturnValue({ apiClient });
+    window.confirm = vi.fn().mockReturnValue(true);
+    render(<ModelPromotionEmergencyPanel workflow={{ load: vi.fn() }} state={null}
+      pending={[]} canRequest={false} canAuthorize />);
+    fireEvent.change(screen.getByLabelText("Affected incident ID"),
+      { target: { value: "case-compromise-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find active emergency grants" }));
+    expect(await screen.findByText(/grant-1: CLAIMED/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Revoke listed grants" }));
+    await waitFor(() => expect(apiClient.revokeAffectedEmergencyModelRetirements).toHaveBeenCalledWith({
+      actorId: null, incidentId: "case-compromise-123"
+    }));
   });
 
   it("shows incident and committed proof to a dedicated auditor without a grant token", async () => {
