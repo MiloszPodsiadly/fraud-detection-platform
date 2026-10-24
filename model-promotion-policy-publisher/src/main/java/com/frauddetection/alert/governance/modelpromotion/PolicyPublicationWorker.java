@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.modelpromotion;
 
 import com.mongodb.MongoException;
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
+import com.frauddetection.alert.governance.audit.GovernanceEventCommitment;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceHistoryDocument;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceState;
 import com.frauddetection.alert.governance.modelpolicy.PolicyProposalDocument;
@@ -43,6 +44,7 @@ final class PolicyPublicationWorker {
     private final String workerId;
     private final Checkpoints checkpoints;
     private final BooleanSupplier fleetConsistent;
+    private final CommittedPolicyPublicationClassifier committed;
 
     PolicyPublicationWorker(MongoTemplate mongo, TransactionTemplate transactions,
             ModelPromotionPolicyPublisher publisher, OnlinePolicyApprovalVerifier approval,
@@ -72,6 +74,7 @@ final class PolicyPublicationWorker {
         this.workerId = Objects.requireNonNull(workerId);
         this.checkpoints = Objects.requireNonNull(checkpoints);
         this.fleetConsistent = Objects.requireNonNull(fleetConsistent);
+        this.committed = new CommittedPolicyPublicationClassifier(mongo, mapper, approval, issuerVerifier);
     }
 
     boolean runOnce() {
@@ -180,28 +183,70 @@ final class PolicyPublicationWorker {
 
     private Claimed claimTransactional(boolean allowNewAttempt) {
         Instant now = clock.instant();
-        var eligible = new java.util.ArrayList<Criteria>();
-        eligible.add(new Criteria().andOperator(Criteria.where("attempts")
-                .lt(PolicyPublicationLimits.BASE_ATTEMPTS),
-                Criteria.where("state").is(PolicyPublicationJobDocument.State.PENDING)));
+        Query pending = Query.query(Criteria.where("state").is(PolicyPublicationJobDocument.State.PENDING)
+                        .and("attempts").lt(PolicyPublicationLimits.BASE_ATTEMPTS))
+                .with(Sort.by(Sort.Direction.ASC, "requestedAt"));
+        var retryBudgets = new java.util.ArrayList<Criteria>();
         for (int recoveries = 0; recoveries <= PolicyPublicationLimits.MAX_RECOVERIES; recoveries++) {
             var budget = new Criteria().andOperator(
                     Criteria.where("recoveryCount").is(recoveries),
                     Criteria.where("attempts").lt(PolicyPublicationLimits.authorizedAttempts(recoveries)),
                     Criteria.where("state").is(PolicyPublicationJobDocument.State.RETRYABLE));
-            eligible.add(budget);
+            retryBudgets.add(budget);
         }
-        Query normal = Query.query(new Criteria().orOperator(eligible.toArray(Criteria[]::new)))
+        Query retryable = Query.query(new Criteria().orOperator(retryBudgets.toArray(Criteria[]::new)))
                 .with(Sort.by(Sort.Direction.ASC, "requestedAt"));
         Query reconcile = Query.query(Criteria.where("state").is(PolicyPublicationJobDocument.State.CLAIMED)
-                        .and("leaseUntil").lt(now))
+                        .and("leaseUntil").lt(now)
+                        .and("reconciliationCount").lt(PolicyPublicationLimits.MAX_RECONCILIATIONS))
                 .with(Sort.by(Sort.Direction.ASC, "requestedAt"));
         return transactions.execute(ignored -> {
-            PolicyPublicationJobDocument job = allowNewAttempt ? mongo.findAndModify(normal,
+            PolicyPublicationJobDocument job = allowNewAttempt ? mongo.findAndModify(pending,
                     new Update().set("state", PolicyPublicationJobDocument.State.CLAIMED)
                             .set("leaseOwner", workerId).set("leaseUntil", now.plusSeconds(PolicyPublicationLimits.LEASE_SECONDS))
                             .inc("attempts", 1).unset("failureCode"),
                     FindAndModifyOptions.options().returnNew(true), PolicyPublicationJobDocument.class) : null;
+            if (job == null && allowNewAttempt) {
+                var candidate = mongo.findOne(retryable, PolicyPublicationJobDocument.class);
+                if (candidate != null) {
+                    var classification = committed.classify(candidate);
+                    var exact = Query.query(Criteria.where("_id").is(candidate.id())
+                            .and("state").is(PolicyPublicationJobDocument.State.RETRYABLE)
+                            .and("attempts").is(candidate.attempts())
+                            .and("recoveryCount").is(candidate.recoveryCount())
+                            .and("publicationFence").is(candidate.publicationFence()));
+                    if (classification.exact()
+                            && candidate.reconciliationCount() < PolicyPublicationLimits.MAX_RECONCILIATIONS) {
+                        job = mongo.findAndModify(exact, new Update()
+                                        .set("state", PolicyPublicationJobDocument.State.CLAIMED)
+                                        .set("leaseOwner", workerId)
+                                        .set("leaseUntil", now.plusSeconds(PolicyPublicationLimits.LEASE_SECONDS))
+                                        .inc("reconciliationCount", 1),
+                                FindAndModifyOptions.options().returnNew(true),
+                                PolicyPublicationJobDocument.class);
+                        if (job == null) throw new IllegalStateException("Retryable job changed during reconciliation");
+                        return new Claimed(job, true);
+                    }
+                    if (classification.kind() != CommittedPolicyPublicationClassifier.Kind.NO_COMMIT_PROVEN) {
+                        String reason = classification.kind()
+                                == CommittedPolicyPublicationClassifier.Kind.IMMUTABLE_CONFLICT
+                                ? "IMMUTABLE_CONFLICT" : "RECONCILIATION_UNAVAILABLE";
+                        var blocked = mongo.updateFirst(exact, new Update()
+                                .set("state", PolicyPublicationJobDocument.State.BLOCKED)
+                                .set("failureCode", reason), PolicyPublicationJobDocument.class);
+                        if (blocked.getModifiedCount() != 1)
+                            throw new IllegalStateException("Retryable job changed before blocking unsafe retry");
+                        return null;
+                    }
+                    job = mongo.findAndModify(exact, new Update()
+                                    .set("state", PolicyPublicationJobDocument.State.CLAIMED)
+                                    .set("leaseOwner", workerId)
+                                    .set("leaseUntil", now.plusSeconds(PolicyPublicationLimits.LEASE_SECONDS))
+                                    .inc("attempts", 1).unset("failureCode"),
+                            FindAndModifyOptions.options().returnNew(true), PolicyPublicationJobDocument.class);
+                    if (job == null) throw new IllegalStateException("Retryable job changed before new attempt");
+                }
+            }
             if (job != null) {
                 if (job.attempts() > 1) mongo.updateFirst(Query.query(Criteria.where("_id")
                                 .is(job.id() + ":" + (job.attempts() - 1)).and("outcome").is("CLAIMED")),
@@ -257,49 +302,21 @@ final class PolicyPublicationWorker {
     }
 
     private boolean recoverCommitted(PolicyPublicationJobDocument job) {
-        try {
-            String key = ModelPromotionPolicyDocument.policyKey(job.draft().governanceScope(),
-                    job.draft().intendedUse(), job.draft().policyId(), job.draft().revision());
-            ModelPromotionPolicyDocument saved = mongo.findById(key, ModelPromotionPolicyDocument.class);
-            if (saved == null) return false;
-            InternalPolicyApprovalEvidenceDocument evidence = mongo.findById(key,
-                    InternalPolicyApprovalEvidenceDocument.class);
-            if (evidence == null || evidence.onlineApprovalProof() == null
-                    || !job.id().equals(evidence.onlineApprovalProof().publicationRequestId())
-                    || !job.draftSha256().equals(evidence.onlineApprovalProof().draftSha256())
-                    || !job.draft().equals(evidence.onlineApprovalProof().draft())
-                    || !job.submissionEvidenceReference().equals("webauthn:"
-                            + evidence.onlineApprovalProof().submission().evidence().id())
-                    || !job.approvalEvidenceReference().equals("webauthn:"
-                            + evidence.onlineApprovalProof().approval().evidence().id())
-                    || !job.decidedAt().equals(evidence.onlineApprovalProof().approval().evidence().acceptedAt())
-                    || !GovernanceCanonicalJson.sha256(mapper, evidence.onlineApprovalProof())
-                            .equals(evidence.approvalProofSha256())
-                    || !job.draft().approvedContent(job.decidedAt()).equals(saved.policy().content())
-                    || !job.draft().issuerIdentity().equals(saved.policy().authorizationEvidence().authorityIdentity())
-                    || !job.draft().issuerKeyId().equals(saved.policy().authorizationEvidence().keyId())
-                    || !saved.policy().canonicalSha256().equals(evidence.policyCanonicalSha256())
-                    || !saved.policy().authorizationEvidence().signature().equals(evidence.policySignature())
-                    || !saved.publishedAt().equals(evidence.publishedAt())
-                    || !issuerVerifier.inspectHistoricalIntegrity(saved.policy()).status().name()
-                            .startsWith("INTACT_")) {
-                throw new SecurityException("Published revision or approval evidence conflicts with the job");
-            }
-            PolicyPublicationJobDocument current = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
-            PolicyProposalDocument proposal = mongo.findById(job.proposalId(), PolicyProposalDocument.class);
-            if (current != null && current.state() == PolicyPublicationJobDocument.State.PUBLISHED
-                    && proposal != null && proposal.status() == PolicyGovernanceState.PUBLISHED
-                    && saved.policy().canonicalSha256().equals(current.publishedPolicySha256())) {
-                return true;
-            }
-            complete(job, new ModelPromotionPolicyPublicationReceipt(job.draft().policyId(),
-                    job.draft().revision(), saved.policy().canonicalSha256(),
-                    saved.policy().authorizationEvidence().authorityIdentity(),
-                    saved.policy().authorizationEvidence().keyId(), saved.publishedAt(), true));
-            return true;
-        } catch (SecurityException conflict) {
-            throw conflict;
-        }
+        var result = committed.classify(job);
+        if (result.kind() == CommittedPolicyPublicationClassifier.Kind.NO_COMMIT_PROVEN) return false;
+        if (result.kind() == CommittedPolicyPublicationClassifier.Kind.IMMUTABLE_CONFLICT)
+            throw new SecurityException(result.diagnostic());
+        if (!result.exact()) throw new IllegalStateException(result.diagnostic());
+        PolicyPublicationJobDocument current = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        PolicyProposalDocument proposal = mongo.findById(job.proposalId(), PolicyProposalDocument.class);
+        if (current != null && current.state() == PolicyPublicationJobDocument.State.PUBLISHED
+                && proposal != null && proposal.status() == PolicyGovernanceState.PUBLISHED
+                && result.receipt().canonicalSha256().equals(current.publishedPolicySha256())) return true;
+        complete(job, new ModelPromotionPolicyPublicationReceipt(result.receipt().policyId(),
+                result.receipt().revision(), result.receipt().canonicalSha256(),
+                result.receipt().issuerIdentity(), result.receipt().issuerKeyId(),
+                result.receipt().publishedAt(), true));
+        return true;
     }
 
     private void complete(PolicyPublicationJobDocument job, ModelPromotionPolicyPublicationReceipt receipt) {
@@ -327,12 +344,18 @@ final class PolicyPublicationWorker {
                             .inc("version", 1).set("updatedAt", clock.instant()),
                     FindAndModifyOptions.options().returnNew(true), PolicyProposalDocument.class);
             if (committed == null) throw new SecurityException("Publication proposal changed before acknowledgement");
-            mongo.insert(new PolicyGovernanceHistoryDocument(UUID.randomUUID().toString(), committed.id(),
+            var history = new PolicyGovernanceHistoryDocument(UUID.randomUUID().toString(), committed.id(),
                     committed.version(), "PUBLISH_POLICY", PolicyGovernanceState.PUBLICATION_PENDING,
                     PolicyGovernanceState.PUBLISHED, job.draft().publisherIdentity(), "publish:" + job.id(),
                     GovernanceCanonicalJson.sha256(mapper, Map.of("jobId", job.id(),
                             "policySha256", receipt.canonicalSha256())), job.draftSha256(),
-                    job.approvalEvidenceReference(), clock.instant(), null));
+                    job.approvalEvidenceReference(), clock.instant(), null);
+            mongo.insert(history);
+            GovernanceEventCommitment.record(mongo, GovernanceEventCommitment.Kind.POLICY_PUBLICATION,
+                    history.id(), history, job.draft().governanceScope().institutionalScope(),
+                    job.draft().publisherIdentity(), committed.id(), "publish:" + job.id(),
+                    receipt.canonicalSha256(), receipt.policyId() + ":" + receipt.revision(),
+                    history.committedAt());
         });
     }
 

@@ -315,7 +315,7 @@ public final class ModelPromotionPolicyPublisherCli {
         SimpleMongoClientDatabaseFactory factory = new SimpleMongoClientDatabaseFactory(mongoUri);
         try {
             MongoModelPromotionPolicyPublicationStore store = new MongoModelPromotionPolicyPublicationStore(
-                    new MongoTemplate(factory), new TransactionTemplate(new MongoTransactionManager(factory)));
+                    new MongoTemplate(factory), new TransactionTemplate(new MongoTransactionManager(factory)), mapper);
             System.out.println(mapper.writeValueAsString(store.publish(prepared.policy(), CLOCK.instant(),
                     prepared.approvalArtifact(), prepared.authorization())));
         } finally {
@@ -337,12 +337,17 @@ public final class ModelPromotionPolicyPublisherCli {
                 generationFloor("MODEL_PROMOTION_TRUST_MIN_GENERATION"));
         PrivateKey publisherKey = privateKey(options, "--publisher-private-key");
         PrivateKey issuerKey = privateKey(options, "--issuer-private-key");
+        var observationProof = PolicyTrustObservationProof.load(Path.of(
+                System.getenv("MODEL_PROMOTION_OBSERVATION_KEYS_PATH")));
+        PrivateKey observationKey = PolicyTrustObservationProof.privateKey(Path.of(
+                System.getenv("MODEL_PROMOTION_OBSERVATION_PRIVATE_KEY_PATH")));
+        String observationKeyId = System.getenv("MODEL_PROMOTION_OBSERVATION_KEY_ID");
         SimpleMongoClientDatabaseFactory factory = new SimpleMongoClientDatabaseFactory(mongoUri);
         try {
             MongoTemplate mongo = new MongoTemplate(factory);
             TransactionTemplate transactions = new TransactionTemplate(new MongoTransactionManager(factory));
             var verifier = new Ed25519ModelPromotionPolicyAuthorityVerifier(mapper, issuers, CLOCK);
-            var publicationStore = new MongoModelPromotionPolicyPublicationStore(mongo, transactions);
+            var publicationStore = new MongoModelPromotionPolicyPublicationStore(mongo, transactions, mapper);
             var publisher = new ModelPromotionPolicyPublisher(mapper, new ModelPromotionPolicyValidator(mapper),
                     verifier, publicationStore, CLOCK);
             var approval = new OnlinePolicyApprovalVerifier(mongo, mapper, CLOCK,
@@ -365,7 +370,8 @@ public final class ModelPromotionPolicyPublisherCli {
                             approvalTrust.canonicalSha256(), generationFloor("MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION")),
                     PolicyTrustRegistrySnapshotService.Registry.ISSUER_KEYS,
                     new PolicyTrustFleetGuard.ExpectedRegistry(issuers.generation(),
-                            issuers.canonicalSha256(), generationFloor("MODEL_PROMOTION_TRUST_MIN_GENERATION"))), CLOCK);
+                            issuers.canonicalSha256(), generationFloor("MODEL_PROMOTION_TRUST_MIN_GENERATION"))),
+                    CLOCK, observationProof);
             var processStartedAt = CLOCK.instant();
             var worker = new PolicyPublicationWorker(mongo, transactions, publisher, approval, verifier,
                     issuerKey, publisherKey, approvalTrust, CLOCK, mapper, workerId, fleet::consistent);
@@ -374,15 +380,18 @@ public final class ModelPromotionPolicyPublisherCli {
                 PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", instanceId,
                         deploymentId, workerId, processStartedAt,
                         PolicyTrustRegistrySnapshotService.Registry.ONLINE_ACTORS,
-                        actorTrust.generation(), actorTrust.canonicalSha256(), CLOCK);
+                        actorTrust.generation(), actorTrust.canonicalSha256(), CLOCK,
+                        observationProof, observationKeyId, observationKey);
                 PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", instanceId,
                         deploymentId, workerId, processStartedAt,
                         PolicyTrustRegistrySnapshotService.Registry.APPROVAL_KEYS,
-                        approvalTrust.generation(), approvalTrust.canonicalSha256(), CLOCK);
+                        approvalTrust.generation(), approvalTrust.canonicalSha256(), CLOCK,
+                        observationProof, observationKeyId, observationKey);
                 PolicyTrustRuntimeReporter.record(mongo, "PUBLISHER", instanceId,
                         deploymentId, workerId, processStartedAt,
                         PolicyTrustRegistrySnapshotService.Registry.ISSUER_KEYS,
-                        issuers.generation(), issuers.canonicalSha256(), CLOCK);
+                        issuers.generation(), issuers.canonicalSha256(), CLOCK,
+                        observationProof, observationKeyId, observationKey);
                 boolean ready = fleet.consistent();
                 if (ready != !fleetPaused) {
                     System.err.println(ready ? "Online policy publication resumed: fleet trust observations match"

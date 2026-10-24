@@ -33,6 +33,13 @@ public class PolicyPublicationRecoveryController {
         return recovery.request(PolicyGovernanceActor.fromOidcSession(authentication), id, request.operationId());
     }
 
+    @PostMapping("/reconcile")
+    public PolicyPublicationRecoveryService.Diagnostics reconcile(Authentication authentication,
+            @PathVariable String id, @Valid @RequestBody RecoveryRequest request) {
+        return recovery.reconcileCommitted(PolicyGovernanceActor.fromOidcSession(authentication),
+                id, request.operationId());
+    }
+
     public record RecoveryRequest(@NotBlank @Pattern(regexp = "^[A-Za-z0-9._:-]{1,128}$")
             String operationId) { }
 }

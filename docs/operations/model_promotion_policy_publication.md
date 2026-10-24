@@ -20,11 +20,13 @@ to the separate `REVIEW_APPROVE` history event.
 | --- | --- | --- | --- |
 | PENDING | Worker atomically claims the frozen request | CLAIMED | One lease and attempt number exist. |
 | CLAIMED | Operational failure before commit, with attempts 1–4 | RETRYABLE | Worker may claim another attempt. |
-| RETRYABLE | Worker claims within the authorized budget | CLAIMED | Prior attempts remain in the ledger. |
+| RETRYABLE | No commit proven; worker claims within the authorized budget | CLAIMED | Prior attempts remain in the ledger. |
+| RETRYABLE | Exact immutable commit proven | CLAIMED, then PUBLISHED | Reconciliation consumes no new signing attempt. |
 | CLAIMED | Exact policy and evidence commit, followed by atomic job, proposal and audit acknowledgement | PUBLISHED | Authoritative publication is complete. |
 | CLAIMED | Lost commit acknowledgement or failed durable read | CLAIMED | Outcome is uncertain; wait for lease expiry and reconcile durable data. |
 | CLAIMED | Expired final attempt with no matching commit, invalid current trust, immutable conflict, or three failed reconciliation cycles | BLOCKED | No further automatic signing or reconciliation. |
 | BLOCKED | Independent operator requests recovery for `ATTEMPTS_EXHAUSTED` | RETRYABLE | Exactly one extra attempt is authorized; at most three recoveries. |
+| BLOCKED or stale CLAIMED/RETRYABLE | Independent operator verifies an exact committed publication | PUBLISHED | Job, proposal, attempt and history are acknowledged atomically; no new signature or recovery allowance. |
 
 The normal budget is five attempts, plus one for each authorized recovery, capped at eight total. A recovery
 operation ID replays only for the same actor, proposal, request and draft; each accepted request has one durable
@@ -34,17 +36,20 @@ budget are retryable; an unknown commit result remains uncertain until the origi
 approval proof can be read. A matching committed revision is acknowledged without signing again. The signed policy,
 approval evidence and lease fence write share one Mongo transaction; job acknowledgement, proposal transition and
 `PUBLISH_POLICY` audit share another. Three failed lease reconciliation cycles end in
-`RECONCILIATION_UNAVAILABLE`; operators must investigate the durable policy and audit state before intervention.
-Operators can inspect failure codes and attempt/recovery history in the
+`RECONCILIATION_UNAVAILABLE`; its durable claim predicate prevents further automatic loops if the final block write fails. An independent operator can use the [committed-publication reconciliation](model_policy_publication_recovery.md) route after the database is restored and the exact immutable commit verifies.
+Operators can inspect classified commit outcomes, failure codes and attempt/recovery history in the
 governance UI; only the isolated worker holds the issuer private key. A `PUBLISHED` job still requires current
 `FULLY_AUTHORIZED` verification for model decisions.
 
-In the local Compose stack, a network-isolated, one-shot key loader copies only the publisher's two signing keys
-and three trust registries into a dedicated Docker volume. It sets UID/GID `10001:10001` and file mode `0400`;
-the non-root publisher mounts that volume read-only. The host bootstrap rejects missing, malformed or symlinked
-local credentials, and `alert-service` receives only public registries. Docker Desktop may display Windows bind
+In the local Compose stack, a network-isolated, one-shot key loader copies the publisher's two policy signing keys,
+its separate fleet reporting key and four public trust registries into a dedicated Docker volume. It sets UID/GID
+`10001:10001` and file mode `0400`; the non-root publisher mounts that volume read-only. The host bootstrap rejects
+missing, malformed or symlinked local credentials. `alert-service` receives the public registries and only its own
+reporting key through a separate protected volume. Docker Desktop may display Windows bind
 sources as `0777` inside the short-lived loader, so the protected volume—not bind-file mode—is the publisher's
 runtime boundary. The fixture is local-only and does not replace production secret management.
+The fleet evidence boundary and local MongoDB privilege limits are described in
+[fleet admission](../security/model_promotion_fleet_admission.md).
 
 The commands below are a controlled **offline emergency/fixture path** for `DEVELOPMENT`/`TEST`, not the normal
 online approval route. Its author and approver must be different people controlling different private keys.

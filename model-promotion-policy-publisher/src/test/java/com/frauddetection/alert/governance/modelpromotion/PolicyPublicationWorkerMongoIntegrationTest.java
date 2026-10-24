@@ -422,6 +422,29 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         assertThat(mongo.count(new Query(), ModelPromotionPolicyDocument.class)).isEqualTo(1);
         assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
                 PolicyGovernanceHistoryDocument.class)).isZero();
+        var recovery = recoveryWithTrust();
+        var operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        var diagnosis = recovery.inspect(operator, job.proposalId());
+        assertThat(diagnosis.classification())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.COMMITTED_EXACT);
+        assertThat(diagnosis.reconcileSafe()).isTrue();
+        assertThat(diagnosis.retrySafe()).isFalse();
+        String key = ModelPromotionPolicyDocument.policyKey(job.draft().governanceScope(),
+                job.draft().intendedUse(), job.draft().policyId(), job.draft().revision());
+        var originalPolicy = mongo.findById(key, ModelPromotionPolicyDocument.class);
+        var originalEvidence = mongo.findById(key, InternalPolicyApprovalEvidenceDocument.class);
+        var restored = recovery.reconcileCommitted(operator, job.proposalId(), "reconcile-after-repair");
+        assertThat(restored.state()).isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(restored.recoveryCount()).isZero();
+        assertThat(restored.attempts()).isEqualTo(1);
+        assertThat(restored.reconciliationCount()).isEqualTo(3);
+        assertThat(mongo.findById(key, ModelPromotionPolicyDocument.class)).isEqualTo(originalPolicy);
+        assertThat(mongo.findById(key, InternalPolicyApprovalEvidenceDocument.class)).isEqualTo(originalEvidence);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isEqualTo(1);
+        assertThat(recovery.reconcileCommitted(operator, job.proposalId(), "reconcile-after-repair")
+                .reconciliationHistory()).hasSize(1);
     }
 
     @Test void interruptedPolicyTransactionLeavesNoPartialPolicyOrEvidence() throws Exception {
@@ -442,6 +465,277 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         assertThat(mongo.count(new Query(), InternalPolicyApprovalEvidenceDocument.class)).isZero();
         assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
                 PolicyGovernanceHistoryDocument.class)).isZero();
+    }
+
+    @Test void recoveryRequestReconcilesExistingExactCommitWithoutSpendingBudget() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        assertThatThrownBy(worker("commit-without-ack", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_COMMIT)
+                throw new AssertionError("lost acknowledgement");
+        }, issuerKey.getPrivate())::runOnce).isInstanceOf(AssertionError.class);
+        String key = ModelPromotionPolicyDocument.policyKey(job.draft().governanceScope(),
+                job.draft().intendedUse(), job.draft().policyId(), job.draft().revision());
+        var originalPolicy = mongo.findById(key, ModelPromotionPolicyDocument.class);
+        var originalEvidence = mongo.findById(key, InternalPolicyApprovalEvidenceDocument.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().set("state", PolicyPublicationJobDocument.State.BLOCKED)
+                        .set("failureCode", "ATTEMPTS_EXHAUSTED")
+                        .unset("leaseOwner").unset("leaseUntil"), PolicyPublicationJobDocument.class);
+        var recovery = recoveryWithTrust();
+        var operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        var result = recovery.request(operator, job.proposalId(), "recovery-detects-commit");
+        assertThat(result.state()).isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(result.recoveryCount()).isZero();
+        assertThat(result.attempts()).isEqualTo(1);
+        assertThat(result.reconciliationHistory()).hasSize(1);
+        assertThat(result.recoveryHistory()).isEmpty();
+        assertThat(mongo.findById(key, ModelPromotionPolicyDocument.class)).isEqualTo(originalPolicy);
+        assertThat(mongo.findById(key, InternalPolicyApprovalEvidenceDocument.class)).isEqualTo(originalEvidence);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isEqualTo(1);
+    }
+
+    @Test void retryableExistingCommitAcknowledgesWithoutClaimingAnotherSigningAttempt() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        assertThatThrownBy(worker("first-commit", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_COMMIT)
+                throw new AssertionError("acknowledgement interrupted");
+        }, issuerKey.getPrivate())::runOnce).isInstanceOf(AssertionError.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().set("state", PolicyPublicationJobDocument.State.RETRYABLE)
+                        .set("failureCode", "OPERATIONAL_RETRYABLE")
+                        .unset("leaseOwner").unset("leaseUntil"), PolicyPublicationJobDocument.class);
+        assertThat(worker("retry-with-commit", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.BEFORE_SIGN)
+                throw new AssertionError("an existing commit must not be signed again");
+        }, issuerKey.getPrivate()).runOnce()).isTrue();
+        var published = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        assertThat(published.state()).isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(published.attempts()).isEqualTo(1);
+        assertThat(published.reconciliationCount()).isEqualTo(1);
+        assertThat(mongo.count(Query.query(Criteria.where("publicationRequestId").is(job.id())),
+                com.frauddetection.alert.governance.modelpolicy.PolicyPublicationAttemptDocument.class))
+                .isEqualTo(1);
+    }
+
+    @Test void concurrentOperatorsReconcileOneHistoryAndOneDurableReceipt() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        assertThatThrownBy(worker("commit-race", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_COMMIT)
+                throw new AssertionError("lost acknowledgement");
+        }, issuerKey.getPrivate())::runOnce).isInstanceOf(AssertionError.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().set("state", PolicyPublicationJobDocument.State.BLOCKED)
+                        .set("failureCode", "RECONCILIATION_UNAVAILABLE")
+                        .unset("leaseOwner").unset("leaseUntil"), PolicyPublicationJobDocument.class);
+        var recovery = recoveryWithTrust();
+        var first = actor("recovery-one", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        var second = actor("recovery-two", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        CountDownLatch start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var one = pool.submit(() -> {
+                start.await();
+                try { return (Object) recovery.reconcileCommitted(first, job.proposalId(), "reconcile-one"); }
+                catch (RuntimeException failure) { return failure; }
+            });
+            var two = pool.submit(() -> {
+                start.await();
+                try { return (Object) recovery.reconcileCommitted(second, job.proposalId(), "reconcile-two"); }
+                catch (RuntimeException failure) { return failure; }
+            });
+            start.countDown();
+            List<Object> results = List.of(one.get(20, TimeUnit.SECONDS), two.get(20, TimeUnit.SECONDS));
+            assertThat(results.stream().filter(PolicyPublicationRecoveryService.Diagnostics.class::isInstance)
+                    .count()).isEqualTo(1);
+        }
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isEqualTo(1);
+        assertThat(mongo.count(new Query(),
+                com.frauddetection.alert.governance.modelpolicy.PolicyPublicationReconciliationEventDocument.class))
+                .isEqualTo(1);
+    }
+
+    @Test void reconciliationAuditFailureRollsBackJobAndProposalThenCanResume() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        assertThatThrownBy(worker("commit-rollback", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_COMMIT)
+                throw new AssertionError("lost acknowledgement");
+        }, issuerKey.getPrivate())::runOnce).isInstanceOf(AssertionError.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().set("state", PolicyPublicationJobDocument.State.BLOCKED)
+                        .set("failureCode", "RECONCILIATION_UNAVAILABLE")
+                        .unset("leaseOwner").unset("leaseUntil"), PolicyPublicationJobDocument.class);
+        MongoTemplate injected = new MongoTemplate(factory) {
+            @Override public <T> T insert(T objectToSave) {
+                if (objectToSave instanceof PolicyGovernanceHistoryDocument)
+                    throw new IllegalStateException("simulated reconciliation audit failure");
+                return super.insert(objectToSave);
+            }
+        };
+        var verifier = new OnlinePolicyApprovalVerifier(injected, mapper, clock,
+                "localhost", ORIGIN, actors, approvalTrust);
+        var failedRecovery = new PolicyPublicationRecoveryService(injected, transactions, governance, clock,
+                new CommittedPolicyPublicationClassifier(injected, mapper, verifier, issuerVerifier));
+        var operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        assertThatThrownBy(() -> failedRecovery.reconcileCommitted(operator, job.proposalId(), "rollback-op"))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.BLOCKED);
+        assertThat(mongo.findById(job.proposalId(), PolicyProposalDocument.class).status())
+                .isEqualTo(PolicyGovernanceState.PUBLICATION_PENDING);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isZero();
+        assertThat(mongo.count(new Query(),
+                com.frauddetection.alert.governance.modelpolicy.PolicyPublicationReconciliationEventDocument.class))
+                .isZero();
+        assertThat(recoveryWithTrust().reconcileCommitted(operator, job.proposalId(), "rollback-op").state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+    }
+
+    @Test void unknownReconciliationCommitResponseReplaysExactReceiptAfterRestart() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        assertThatThrownBy(worker("commit-unknown-reconcile", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_COMMIT)
+                throw new AssertionError("lost acknowledgement");
+        }, issuerKey.getPrivate())::runOnce).isInstanceOf(AssertionError.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().set("state", PolicyPublicationJobDocument.State.BLOCKED)
+                        .set("failureCode", "RECONCILIATION_UNAVAILABLE")
+                        .unset("leaseOwner").unset("leaseUntil"), PolicyPublicationJobDocument.class);
+        AtomicBoolean loseReply = new AtomicBoolean(true);
+        TransactionTemplate uncertain = new TransactionTemplate(new MongoTransactionManager(factory)) {
+            @Override public <T> T execute(TransactionCallback<T> action) {
+                T result = super.execute(action);
+                if (loseReply.getAndSet(false)) {
+                    MongoException unknown = new MongoException("reconciliation commit reply lost");
+                    unknown.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL);
+                    throw unknown;
+                }
+                return result;
+            }
+        };
+        var verifier = new OnlinePolicyApprovalVerifier(mongo, mapper, clock,
+                "localhost", ORIGIN, actors, approvalTrust);
+        var recovery = new PolicyPublicationRecoveryService(mongo, uncertain, governance, clock,
+                new CommittedPolicyPublicationClassifier(mongo, mapper, verifier, issuerVerifier));
+        var operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        assertThat(recovery.reconcileCommitted(operator, job.proposalId(), "unknown-reconcile").state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(loseReply).isFalse();
+        assertThat(recoveryWithTrust().reconcileCommitted(operator, job.proposalId(), "unknown-reconcile")
+                .reconciliationHistory()).hasSize(1);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isEqualTo(1);
+    }
+
+    @Test void workerAndOperatorRaceCannotAcknowledgeTwice() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        assertThatThrownBy(worker("commit-before-race", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_COMMIT)
+                throw new AssertionError("lost acknowledgement");
+        }, issuerKey.getPrivate())::runOnce).isInstanceOf(AssertionError.class);
+        clock.set(clock.instant().plusSeconds(121));
+        var operator = actor("recovery", Set.of(ModelPolicyAuthority.READ,
+                ModelPolicyAuthority.PUBLICATION_RECOVER));
+        var recovery = recoveryWithTrust();
+        var worker = worker("racing-worker", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.BEFORE_SIGN)
+                throw new AssertionError("committed publication must not be signed again");
+        }, issuerKey.getPrivate());
+        CountDownLatch start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var automatic = pool.submit(() -> {
+                start.await();
+                try { return (Object) worker.runOnce(); }
+                catch (RuntimeException failure) { return failure; }
+            });
+            var manual = pool.submit(() -> {
+                start.await();
+                try { return (Object) recovery.reconcileCommitted(operator, job.proposalId(), "worker-race"); }
+                catch (RuntimeException failure) { return failure; }
+            });
+            start.countDown();
+            automatic.get(20, TimeUnit.SECONDS);
+            manual.get(20, TimeUnit.SECONDS);
+        }
+        var durable = mongo.findById(job.id(), PolicyPublicationJobDocument.class);
+        if (durable.state() == PolicyPublicationJobDocument.State.CLAIMED) {
+            clock.set(clock.instant().plusSeconds(121));
+            worker("race-restart", ignored -> { }, issuerKey.getPrivate()).runOnce();
+        }
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).state())
+                .isEqualTo(PolicyPublicationJobDocument.State.PUBLISHED);
+        assertThat(mongo.count(Query.query(Criteria.where("action").is("PUBLISH_POLICY")),
+                PolicyGovernanceHistoryDocument.class)).isEqualTo(1);
+        assertThat(mongo.findById(job.id(), PolicyPublicationJobDocument.class).attempts()).isEqualTo(1);
+    }
+
+    @Test void classifierSeparatesAbsentPartialTamperedAndUnavailableEvidence() throws Exception {
+        PolicyPublicationJobDocument job = approvedJob();
+        var classifier = new CommittedPolicyPublicationClassifier(mongo, mapper,
+                new OnlinePolicyApprovalVerifier(mongo, mapper, clock, "localhost", ORIGIN,
+                        actors, approvalTrust), issuerVerifier);
+        assertThat(classifier.classify(job).kind())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.NO_COMMIT_PROVEN);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().set("publishedPolicySha256", "a".repeat(64)),
+                PolicyPublicationJobDocument.class);
+        assertThat(classifier.classify(mongo.findById(job.id(), PolicyPublicationJobDocument.class)).kind())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.IMMUTABLE_CONFLICT);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(job.id())),
+                new Update().unset("publishedPolicySha256"), PolicyPublicationJobDocument.class);
+        assertThatThrownBy(worker("classification-commit", checkpoint -> {
+            if (checkpoint == PolicyPublicationWorker.Stage.AFTER_COMMIT)
+                throw new AssertionError("lost acknowledgement");
+        }, issuerKey.getPrivate())::runOnce).isInstanceOf(AssertionError.class);
+        assertThat(classifier.classify(job).kind())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.COMMITTED_EXACT);
+        String key = ModelPromotionPolicyDocument.policyKey(job.draft().governanceScope(),
+                job.draft().intendedUse(), job.draft().policyId(), job.draft().revision());
+        var evidence = mongo.findById(key, InternalPolicyApprovalEvidenceDocument.class);
+        String approvalCredential = evidence.onlineApprovalProof().approval().evidence().credentialId();
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(approvalCredential)),
+                new Update().set("revoked", true).set("status", "REVOKED"),
+                PolicyWebAuthnCredential.class);
+        assertThat(classifier.classify(job).kind())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.COMMITTED_EXACT);
+        mongo.remove(Query.query(Criteria.where("_id").is(key)), InternalPolicyApprovalEvidenceDocument.class);
+        assertThat(classifier.classify(job).kind())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.INCOMPLETE_OR_UNAVAILABLE_EVIDENCE);
+        mongo.insert(evidence);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(key)),
+                new Update().set("approvalProofSha256", "a".repeat(64)),
+                InternalPolicyApprovalEvidenceDocument.class);
+        assertThat(classifier.classify(job).kind())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.IMMUTABLE_CONFLICT);
+        String invalidSignature = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(new byte[64]);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(key)),
+                new Update().set("approvalProofSha256", evidence.approvalProofSha256())
+                        .set("policySignature", invalidSignature),
+                InternalPolicyApprovalEvidenceDocument.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(key)),
+                new Update().set("policy.authorizationEvidence.signature", invalidSignature),
+                ModelPromotionPolicyDocument.class);
+        assertThat(classifier.classify(job).kind())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.IMMUTABLE_CONFLICT);
+        MongoTemplate unavailable = new MongoTemplate(factory) {
+            @Override public <T> T findById(Object id, Class<T> entityClass) {
+                if (entityClass == ModelPromotionPolicyDocument.class)
+                    throw new org.springframework.dao.DataAccessResourceFailureException("Mongo primary unavailable");
+                return super.findById(id, entityClass);
+            }
+        };
+        assertThat(new CommittedPolicyPublicationClassifier(unavailable, mapper, null, issuerVerifier)
+                .classify(job).kind())
+                .isEqualTo(CommittedPolicyPublicationClassifier.Kind.OUTCOME_UNKNOWN);
     }
 
     @Test void expiredFinalAttemptReconcilesCommitWithoutSigningAgain() throws Exception {
@@ -679,6 +973,13 @@ class PolicyPublicationWorkerMongoIntegrationTest {
         var pending = governance.requestPublication(requester, draft.id(),
                 new TransitionCommand("publish-" + UUID.randomUUID(), approved.version()));
         return mongo.findById(pending.publicationRequestId(), PolicyPublicationJobDocument.class);
+    }
+
+    private PolicyPublicationRecoveryService recoveryWithTrust() {
+        var verifier = new OnlinePolicyApprovalVerifier(mongo, mapper, clock,
+                "localhost", ORIGIN, actors, approvalTrust);
+        return new PolicyPublicationRecoveryService(mongo, transactions, governance, clock,
+                new CommittedPolicyPublicationClassifier(mongo, mapper, verifier, issuerVerifier));
     }
 
     private PolicyPublicationWorker worker(String workerId, PolicyPublicationWorker.Checkpoints checkpoints,

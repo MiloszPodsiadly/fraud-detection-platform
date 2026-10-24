@@ -27,10 +27,17 @@ final class MongoModelPromotionPolicyPublicationStore {
 
     private final MongoTemplate mongoTemplate;
     private final TransactionTemplate transactions;
+    private final ObjectMapper mapper;
 
     MongoModelPromotionPolicyPublicationStore(MongoTemplate mongoTemplate, TransactionTemplate transactions) {
+        this(mongoTemplate, transactions, new ObjectMapper());
+    }
+
+    MongoModelPromotionPolicyPublicationStore(MongoTemplate mongoTemplate, TransactionTemplate transactions,
+            ObjectMapper mapper) {
         this.mongoTemplate = Objects.requireNonNull(mongoTemplate);
         this.transactions = Objects.requireNonNull(transactions);
+        this.mapper = Objects.requireNonNull(mapper);
     }
 
     ModelPromotionPolicyPublicationReceipt publish(ModelPromotionPolicy policy, Instant publicationTime,
@@ -165,7 +172,7 @@ final class MongoModelPromotionPolicyPublicationStore {
         InternalPolicyApprovalArtifact.ApprovalDecision decision = proof.approvalDecision();
         if (!author.draftCanonicalSha256().equals(ModelPromotionPolicyDraft.fromApprovedContent(
                     signed.content(), author.publisherIdentity(), author.publisherKeyId(),
-                    author.issuerIdentity(), author.issuerKeyId()).canonicalSha256(new ObjectMapper()))
+                    author.issuerIdentity(), author.issuerKeyId()).canonicalSha256(mapper))
                 || !author.policyId().equals(signed.content().policyId())
                 || author.revision() != signed.content().revision()
                 || !decision.decidedAt().equals(signed.content().provenance().approvedAt())
@@ -181,7 +188,7 @@ final class MongoModelPromotionPolicyPublicationStore {
             throw new PublicationConflictException("Approval proof does not identify the signed policy");
         }
         return new InternalPolicyApprovalEvidenceDocument(policy.policyKey(), signed.canonicalSha256(),
-                InternalPolicyApprovalArtifact.proofSha256(new ObjectMapper(), proof), proof,
+                InternalPolicyApprovalArtifact.proofSha256(mapper, proof), proof,
                 decision.approverIdentity(), decision.approverKeyId(), authorization.approverPublicKeySha256(),
                 author.publisherIdentity(), author.publisherKeyId(), authorization.publisherPublicKeySha256(),
                 authorization.approvalTrustGeneration(), authorization.approvalTrustSha256(),
@@ -199,7 +206,7 @@ final class MongoModelPromotionPolicyPublicationStore {
         var approval = proof.approval().evidence();
         var content = signed.content();
         if (!"POLICY_SUBMIT".equals(submission.action()) || !"POLICY_APPROVE".equals(approval.action())
-                || !proof.draftSha256().equals(proof.draft().canonicalSha256(new ObjectMapper()))
+                || !proof.draftSha256().equals(proof.draft().canonicalSha256(mapper))
                 || !proof.draft().approvedContent(approval.acceptedAt()).equals(content)
                 || !proof.draftSha256().equals(submission.draftSha256())
                 || !proof.draftSha256().equals(approval.draftSha256())
@@ -218,7 +225,7 @@ final class MongoModelPromotionPolicyPublicationStore {
             throw new PublicationConflictException("Online approval proof does not identify the signed policy");
         }
         return new InternalPolicyApprovalEvidenceDocument(policy.policyKey(), signed.canonicalSha256(),
-                GovernanceCanonicalJson.sha256(new ObjectMapper(), proof), null,
+                GovernanceCanonicalJson.sha256(mapper, proof), null,
                 approval.actorId(), approval.credentialId(), authorization.approverPublicKeySha256(),
                 authorization.publisherIdentity(), proof.draft().publisherKeyId(),
                 authorization.publisherPublicKeySha256(), authorization.approvalTrustGeneration(),
@@ -230,8 +237,8 @@ final class MongoModelPromotionPolicyPublicationStore {
 
     private String proofSha256(InternalPolicyApprovalEvidenceDocument evidence) {
         return evidence.onlineApprovalProof() == null
-                ? InternalPolicyApprovalArtifact.proofSha256(new ObjectMapper(), evidence.approvalProof())
-                : GovernanceCanonicalJson.sha256(new ObjectMapper(), evidence.onlineApprovalProof());
+                ? InternalPolicyApprovalArtifact.proofSha256(mapper, evidence.approvalProof())
+                : GovernanceCanonicalJson.sha256(mapper, evidence.onlineApprovalProof());
     }
 
     private boolean sameEvidence(InternalPolicyApprovalEvidenceDocument proposed,
