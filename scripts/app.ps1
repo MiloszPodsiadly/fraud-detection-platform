@@ -21,8 +21,8 @@ $composeArgs = @(
     "-f", "deployment/docker-compose.oidc.yml",
     "-f", "deployment/docker-compose.service-identity-mtls.yml",
     "-f", "deployment/docker-compose.trust-authority-jwt.yml",
-    "-f", "deployment/docker-compose.model-promotion-policy-trust.yml",
     "-f", "deployment/docker-compose.hardened.yml",
+    "-f", "deployment/docker-compose.model-promotion-policy-trust.yml",
     "-f", "deployment/docker-compose.shadow-performance-generated.yml"
 )
 
@@ -119,6 +119,10 @@ try {
             & node "./scripts/bootstrap-local-model-promotion-keys.mjs" "--ensure"
             if ($LASTEXITCODE -ne 0) {
                 throw "Local model-promotion key generation failed with exit code $LASTEXITCODE."
+            }
+            & node "./scripts/bootstrap-local-audit-trust-key.mjs" "--ensure"
+            if ($LASTEXITCODE -ne 0) {
+                throw "Local audit-trust key generation failed with exit code $LASTEXITCODE."
             }
             Invoke-ShadowPerformanceSummaryGeneration
             if (-not (Test-Path -LiteralPath $generatedSummaryFile)) {

@@ -19,11 +19,12 @@ public final class ModelPolicyAuthority {
     public static final String PRODUCTION = "model-policy:scope:production";
     public static final String CREDENTIAL_ENROLL = "model-policy:credential:enroll";
     public static final String CREDENTIAL_ADMIN = "model-policy:credential:admin";
+    public static final String CREDENTIAL_INCIDENT_REVOKE = "model-policy:credential:incident-revoke";
 
     public static final Set<String> ALL = Set.of(READ, CREATE, SUBMIT, APPROVE, REJECT,
             PUBLISH_REQUEST, PUBLICATION_RECOVER, DIRECTORY_READ, TRUST_READ, TRUST_REQUEST,
             TRUST_APPROVE, AUDIT_READ, PRODUCTION,
-            CREDENTIAL_ENROLL, CREDENTIAL_ADMIN);
+            CREDENTIAL_ENROLL, CREDENTIAL_ADMIN, CREDENTIAL_INCIDENT_REVOKE);
 
     private ModelPolicyAuthority() {
     }

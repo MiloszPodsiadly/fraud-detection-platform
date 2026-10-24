@@ -124,6 +124,39 @@ services:
       TRUST_AUTHORITY_AUDIT_PATH: /tmp/audit-trust-authority/trust-authority-audit.jsonl
     healthcheck: *java-healthcheck
 
+  # Activated by the JWT trust overlay; copies protected local keys for uid 10001.
+  audit-trust-key-loader:
+    profiles:
+      - audit-trust-loader
+    image: eclipse-temurin:21-jre
+    restart: "no"
+    network_mode: none
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        for file in ed25519-private.key ed25519-public.key; do
+          source="/run/audit-trust-source/$${file}"
+          test -f "$${source}" && test ! -L "$${source}" && test -s "$${source}"
+          temporary="$$(mktemp /run/audit-trust-keys/.key.XXXXXX)"
+          cp "$${source}" "$${temporary}"
+          chown 10001:10001 "$${temporary}"
+          chmod 0400 "$${temporary}"
+          mv -f "$${temporary}" "/run/audit-trust-keys/$${file}"
+        done
+        chown 10001:10001 /run/audit-trust-keys
+        chmod 0500 /run/audit-trust-keys
+    volumes:
+      - type: bind
+        source: ./.local/audit-trust-authority
+        target: /run/audit-trust-source
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: audit-trust-keys
+        target: /run/audit-trust-keys
+
   prometheus:
     <<: *service-defaults
     image: prom/prometheus:v3.14.0
@@ -348,6 +381,7 @@ networks:
   edge:
 
 volumes:
+  audit-trust-keys:
   mongodb-data:
   redis-data:
   prometheus-data:

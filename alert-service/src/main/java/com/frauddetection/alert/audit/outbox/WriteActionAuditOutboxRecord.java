@@ -17,7 +17,6 @@ import java.time.Instant;
 public class WriteActionAuditOutboxRecord {
 
     @Id
-    @Field("outbox_id")
     private String outboxId;
 
     @Indexed(unique = true)
@@ -40,6 +39,33 @@ public class WriteActionAuditOutboxRecord {
 
     private String actor;
     private AuditOutcome outcome;
+
+    @Field("governance_event_kind")
+    private String governanceEventKind;
+
+    @Field("governance_evidence_hash")
+    private String governanceEvidenceHash;
+
+    @Field("governance_event_id")
+    private String governanceEventId;
+
+    @Field("governance_scope")
+    private String governanceScope;
+
+    @Field("governance_object_id")
+    private String governanceObjectId;
+
+    @Field("governance_operation_id")
+    private String governanceOperationId;
+
+    @Field("governance_proof_digest")
+    private String governanceProofDigest;
+
+    @Field("governance_result_id")
+    private String governanceResultId;
+
+    @Field("governance_occurred_at")
+    private Instant governanceOccurredAt;
 
     @Field("metadata_summary")
     private AuditEventMetadataSummary metadataSummary;
@@ -97,6 +123,24 @@ public class WriteActionAuditOutboxRecord {
     public void setActor(String actor) { this.actor = actor; }
     public AuditOutcome getOutcome() { return outcome; }
     public void setOutcome(AuditOutcome outcome) { this.outcome = outcome; }
+    public String getGovernanceEventKind() { return governanceEventKind; }
+    public void setGovernanceEventKind(String governanceEventKind) { this.governanceEventKind = governanceEventKind; }
+    public String getGovernanceEvidenceHash() { return governanceEvidenceHash; }
+    public void setGovernanceEvidenceHash(String governanceEvidenceHash) { this.governanceEvidenceHash = governanceEvidenceHash; }
+    public String getGovernanceEventId() { return governanceEventId; }
+    public void setGovernanceEventId(String governanceEventId) { this.governanceEventId = governanceEventId; }
+    public String getGovernanceScope() { return governanceScope; }
+    public void setGovernanceScope(String governanceScope) { this.governanceScope = governanceScope; }
+    public String getGovernanceObjectId() { return governanceObjectId; }
+    public void setGovernanceObjectId(String governanceObjectId) { this.governanceObjectId = governanceObjectId; }
+    public String getGovernanceOperationId() { return governanceOperationId; }
+    public void setGovernanceOperationId(String governanceOperationId) { this.governanceOperationId = governanceOperationId; }
+    public String getGovernanceProofDigest() { return governanceProofDigest; }
+    public void setGovernanceProofDigest(String governanceProofDigest) { this.governanceProofDigest = governanceProofDigest; }
+    public String getGovernanceResultId() { return governanceResultId; }
+    public void setGovernanceResultId(String governanceResultId) { this.governanceResultId = governanceResultId; }
+    public Instant getGovernanceOccurredAt() { return governanceOccurredAt; }
+    public void setGovernanceOccurredAt(Instant governanceOccurredAt) { this.governanceOccurredAt = governanceOccurredAt; }
     public AuditEventMetadataSummary getMetadataSummary() { return metadataSummary; }
     public void setMetadataSummary(AuditEventMetadataSummary metadataSummary) { this.metadataSummary = metadataSummary; }
     public WriteActionAuditOutboxStatus getStatus() { return status; }

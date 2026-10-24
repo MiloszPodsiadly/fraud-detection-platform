@@ -1,6 +1,9 @@
 package com.frauddetection.alert.audit.outbox;
 
 import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditEventHasher;
+import com.frauddetection.alert.audit.AuditEventRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
@@ -25,6 +28,7 @@ public class WriteActionAuditOutboxPublisher {
     private final WriteActionAuditOutboxRepository repository;
     private final WriteActionAuditOutboxClaimStore claimStore;
     private final AuditService auditService;
+    private final AuditEventRepository auditEvents;
     private final Clock clock;
     private final String claimOwner;
     private final Duration claimLeaseDuration;
@@ -34,9 +38,11 @@ public class WriteActionAuditOutboxPublisher {
             WriteActionAuditOutboxRepository repository,
             WriteActionAuditOutboxClaimStore claimStore,
             AuditService auditService,
+            AuditEventRepository auditEvents,
             @Value("${app.audit.outbox.publisher.claim-lease-ms:300000}") long claimLeaseMs
     ) {
-        this(repository, claimStore, auditService, Clock.systemUTC(), "alert-service-" + UUID.randomUUID(), Duration.ofMillis(claimLeaseMs));
+        this(repository, claimStore, auditService, auditEvents, Clock.systemUTC(),
+                "alert-service-" + UUID.randomUUID(), Duration.ofMillis(claimLeaseMs));
     }
 
     WriteActionAuditOutboxPublisher(
@@ -45,7 +51,7 @@ public class WriteActionAuditOutboxPublisher {
             AuditService auditService,
             Clock clock
     ) {
-        this(repository, claimStore, auditService, clock, "test-publisher");
+        this(repository, claimStore, auditService, null, clock, "test-publisher", DEFAULT_CLAIM_LEASE_DURATION);
     }
 
     WriteActionAuditOutboxPublisher(
@@ -55,7 +61,7 @@ public class WriteActionAuditOutboxPublisher {
             Clock clock,
             String claimOwner
     ) {
-        this(repository, claimStore, auditService, clock, claimOwner, DEFAULT_CLAIM_LEASE_DURATION);
+        this(repository, claimStore, auditService, null, clock, claimOwner, DEFAULT_CLAIM_LEASE_DURATION);
     }
 
     WriteActionAuditOutboxPublisher(
@@ -66,9 +72,17 @@ public class WriteActionAuditOutboxPublisher {
             String claimOwner,
             Duration claimLeaseDuration
     ) {
+        this(repository, claimStore, auditService, null, clock, claimOwner, claimLeaseDuration);
+    }
+
+    public WriteActionAuditOutboxPublisher(WriteActionAuditOutboxRepository repository,
+            WriteActionAuditOutboxClaimStore claimStore, AuditService auditService,
+            AuditEventRepository auditEvents, Clock clock, String claimOwner,
+            Duration claimLeaseDuration) {
         this.repository = Objects.requireNonNull(repository, "repository is required");
         this.claimStore = Objects.requireNonNull(claimStore, "claimStore is required");
         this.auditService = Objects.requireNonNull(auditService, "auditService is required");
+        this.auditEvents = auditEvents;
         this.clock = clock == null ? Clock.systemUTC() : clock;
         this.claimOwner = (claimOwner == null || claimOwner.isBlank()) ? "alert-service" : claimOwner;
         this.claimLeaseDuration = normalizeClaimLeaseDuration(claimLeaseDuration);
@@ -102,23 +116,69 @@ public class WriteActionAuditOutboxPublisher {
             }
             try {
                 WriteActionAuditOutboxRecord claimedRecord = claimed.get();
-                auditService.audit(
-                        claimedRecord.getAction(),
-                        claimedRecord.getResourceType(),
-                        claimedRecord.getResourceId(),
-                        claimedRecord.getCorrelationId(),
-                        claimedRecord.getActor(),
-                        claimedRecord.getOutcome(),
-                        null,
-                        claimedRecord.getMetadataSummary()
-                );
+                String governanceRequestId = governanceRequestId(claimedRecord);
+                if (governanceRequestId != null && confirmedAudit(claimedRecord, governanceRequestId)) {
+                    markPublished(claimedRecord, now);
+                    published++;
+                    continue;
+                }
+                if (governanceRequestId == null) {
+                    auditService.audit(claimedRecord.getAction(), claimedRecord.getResourceType(),
+                            claimedRecord.getResourceId(), claimedRecord.getCorrelationId(),
+                            claimedRecord.getActor(), claimedRecord.getOutcome(), null,
+                            claimedRecord.getMetadataSummary());
+                } else {
+                    auditService.audit(claimedRecord.getAction(), claimedRecord.getResourceType(),
+                            claimedRecord.getResourceId(), claimedRecord.getCorrelationId(),
+                            claimedRecord.getActor(), claimedRecord.getOutcome(), null,
+                            claimedRecord.getMetadataSummary(), governanceRequestId);
+                }
+                if (governanceRequestId != null && auditEvents != null
+                        && !confirmedAudit(claimedRecord, governanceRequestId)) {
+                    throw new IllegalStateException("Governance audit acknowledgement not durable");
+                }
                 markPublished(claimedRecord, now);
                 published++;
             } catch (RuntimeException exception) {
-                markFailed(claimed.get(), now);
+                WriteActionAuditOutboxRecord current = claimed.get();
+                try {
+                    String governanceRequestId = governanceRequestId(current);
+                    if (governanceRequestId != null && confirmedAudit(current, governanceRequestId)) {
+                        markPublished(current, now);
+                        published++;
+                    } else {
+                        markFailed(current, now);
+                    }
+                } catch (RuntimeException reconciliationUnavailable) {
+                    markFailed(current, now);
+                }
             }
         }
         return published;
+    }
+
+    private String governanceRequestId(WriteActionAuditOutboxRecord record) {
+        if (record.getAction() != AuditAction.COMMIT_GOVERNANCE_EVENT) return null;
+        String hash = record.getGovernanceEvidenceHash();
+        if (hash == null || !hash.matches("[0-9a-f]{64}")
+                || record.getGovernanceEventKind() == null) {
+            throw new SecurityException("Invalid governance audit commitment");
+        }
+        return "gov:" + hash;
+    }
+
+    private boolean confirmedAudit(WriteActionAuditOutboxRecord record, String requestId) {
+        if (auditEvents == null) return false;
+        var existing = auditEvents.findByRequestId(requestId).orElse(null);
+        if (existing == null) return false;
+        if (existing.action() != record.getAction()
+                || existing.resourceType() != record.getResourceType()
+                || !Objects.equals(existing.resourceId(), record.getResourceId())
+                || !Objects.equals(existing.actorId(), record.getActor())
+                || !AuditEventHasher.matches(existing)) {
+            throw new SecurityException("Governance audit acknowledgement differs from committed evidence");
+        }
+        return true;
     }
 
     private void markPublished(WriteActionAuditOutboxRecord record, Instant now) {

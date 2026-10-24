@@ -83,6 +83,12 @@ final class SecurityRouteOwnershipRegistry {
                 "GovernanceAuthorizationRules");
         route(routes, "POST", "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/emergency",
                 "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/claim",
+                "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/model-promotion/emergency-authorizations/active",
+                "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/model-promotion/emergency-authorizations/active/revoke",
+                "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}",
                 "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/audit",
@@ -94,6 +100,8 @@ final class SecurityRouteOwnershipRegistry {
         policyGovernanceRoutes(routes, "/api/v1/governance/model-policies");
         route(routes, "GET", "/api/v1/governance/policy-security/me", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-security/operations", "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/audit/commitments/{kind}/{eventId}",
+                "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-trust/registries", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-trust/requests", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-trust/requests/{id}/audit", "GovernanceAuthorizationRules");
@@ -154,6 +162,7 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "GET", base + "/{id}/publication", "GovernanceAuthorizationRules");
         route(routes, "GET", base + "/{id}/publication/recovery", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/{id}/publication/recovery", "GovernanceAuthorizationRules");
+        route(routes, "POST", base + "/{id}/publication/recovery/reconcile", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/drafts", "GovernanceAuthorizationRules");
         route(routes, "PUT", base + "/drafts/{id}", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/{id}/submit", "GovernanceAuthorizationRules");
@@ -171,7 +180,10 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "POST", base + "/webauthn/credentials/{credentialId}/protected-revoke", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/webauthn/enrollment-grants", "GovernanceAuthorizationRules");
         route(routes, "GET", base + "/webauthn/enrollment-grants/mine", "GovernanceAuthorizationRules");
+        route(routes, "GET", base + "/webauthn/enrollment-grants/incidents", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/claim", "GovernanceAuthorizationRules");
+        route(routes, "GET", base + "/webauthn/enrollment-grants/{id}/status", "GovernanceAuthorizationRules");
+        route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/revoke", "GovernanceAuthorizationRules");
         route(routes, "GET", base + "/webauthn/enrollment-grants/{id}/review", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/review/challenges", "GovernanceAuthorizationRules");
         route(routes, "POST", base + "/webauthn/enrollment-grants/{id}/review", "GovernanceAuthorizationRules");

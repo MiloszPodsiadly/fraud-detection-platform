@@ -6,8 +6,8 @@ SECURITY_HARDENED_BASE_COMPOSE = docker compose --project-name $(COMPOSE_PROJECT
 	-f deployment/docker-compose.oidc.yml \
 	-f deployment/docker-compose.service-identity-mtls.yml \
 	-f deployment/docker-compose.trust-authority-jwt.yml \
-	-f deployment/docker-compose.model-promotion-policy-trust.yml \
-	-f deployment/docker-compose.hardened.yml
+	-f deployment/docker-compose.hardened.yml \
+	-f deployment/docker-compose.model-promotion-policy-trust.yml
 
 SHADOW_PERFORMANCE_DEMO_COMPOSE = $(SECURITY_HARDENED_BASE_COMPOSE) \
 	-f deployment/docker-compose.shadow-performance-demo.yml
@@ -34,6 +34,7 @@ deployment/.env:
 local-runtime-fixtures:
 	bash scripts/bootstrap-local-fixtures.sh --ensure
 	node scripts/bootstrap-local-model-promotion-keys.mjs --ensure
+	node scripts/bootstrap-local-audit-trust-key.mjs --ensure
 
 model-promotion-trust-check: local-runtime-fixtures
 	mvn -pl model-promotion-policy-publisher -am -DskipTests package
@@ -44,7 +45,7 @@ model-promotion-trust-check: local-runtime-fixtures
 regenerate-local-runtime-fixtures:
 	bash scripts/bootstrap-local-fixtures.sh --force
 
-app-up: deployment/.env shadow-performance-summary
+app-up: deployment/.env local-runtime-fixtures shadow-performance-summary
 	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
 		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
 	@test -f deployment/local-generated/shadow-performance/manifest.json || \

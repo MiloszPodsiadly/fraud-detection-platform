@@ -173,7 +173,8 @@ function assertModelPromotionPolicyTrustMount() {
   const expected = new Map([
     [`${targetRoot}/trusted-issuers.json`, path.join(sourceRoot, "trusted-issuers.json")],
     [`${targetRoot}/trusted-approvals.json`, path.join(sourceRoot, "approval", "trusted-approvals.json")],
-    [`${targetRoot}/online-actor-trust.json`, path.join(sourceRoot, "approval", "online-actor-trust.json")]
+    [`${targetRoot}/online-actor-trust.json`, path.join(sourceRoot, "approval", "online-actor-trust.json")],
+    [`${targetRoot}/trusted-reporters.json`, path.join(sourceRoot, "fleet-observation", "trusted-reporters.json")]
   ]);
   assertDeclarativeModelPromotionPolicyTrustMount();
   expectEqual("model-promotion trusted issuer path",
@@ -191,7 +192,7 @@ function assertModelPromotionPolicyTrustMount() {
       || pathsOverlap(String(mount.target ?? ""), targetRoot);
   });
   if (mounts.length !== expected.size) {
-    fail("alert-service must mount exactly three public model-promotion registries, never a private key or directory");
+    fail("alert-service must mount exactly four public model-promotion registries, never a private key or directory");
   }
   const seen = new Set();
   for (const mount of mounts) {
@@ -270,12 +271,19 @@ function assertModelPromotionPublisherIsolation() {
     ["/run/policy-publication-source/online-actor-trust.json",
       path.join(root, "approval", "online-actor-trust.json")],
     ["/run/policy-publication-source/trusted-issuers.json",
-      path.join(root, "trusted-issuers.json")]
+      path.join(root, "trusted-issuers.json")],
+    ["/run/policy-publication-source/observation.private-key.pkcs8.base64",
+      path.join(root, "fleet-observation", "publisher.private-key.pkcs8.base64")],
+    ["/run/policy-publication-source/trusted-reporters.json",
+      path.join(root, "fleet-observation", "trusted-reporters.json")]
   ]);
-  if (loaderMounts.length !== 6 || (loader.ports ?? []).length || loader.network_mode !== "none") {
-    fail("one-shot key loader must have exactly five source files, one private volume, no network and no ports");
+  if (loaderMounts.length !== signingSources.size + 1 || (loader.ports ?? []).length || loader.network_mode !== "none") {
+    fail("one-shot key loader must have exact source files, one private volume, no network and no ports");
   }
   if (loader.restart !== "no" || loader.read_only !== true
+      || loader.pids_limit !== 64
+      || !(loader.cap_drop ?? []).includes("ALL")
+      || JSON.stringify((loader.cap_add ?? []).slice().sort()) !== JSON.stringify(["CHOWN", "DAC_OVERRIDE", "FOWNER"])
       || !(loader.security_opt ?? []).includes("no-new-privileges:true")) {
     fail("key loader must be one-shot, read-only and prohibit privilege escalation");
   }
@@ -327,6 +335,103 @@ function assertModelPromotionPublisherIsolation() {
   }
 }
 
+function assertObservationKeyIsolation() {
+  const alert = service("alert-service");
+  const loaderName = "model-promotion-observation-key-loader";
+  const loader = service(loaderName);
+  const volume = "model-promotion-alert-observation-key";
+  const root = path.resolve("deployment", ".local", "model-promotion-policy", "fleet-observation");
+  const privateSource = path.join(root, "alert.private-key.pkcs8.base64");
+  const alertMount = (alert.volumes ?? []).find(mount => mount.target === "/run/policy-observation");
+  if (alertMount?.type !== "volume" || alertMount.source !== volume || alertMount.read_only !== true
+      || alert.depends_on?.[loaderName]?.condition !== "service_completed_successfully") {
+    fail("alert-service must wait for its dedicated read-only observation key volume");
+  }
+  const loaderMounts = loader.volumes ?? [];
+  const source = loaderMounts.find(mount => mount.target === "/run/observation-source/alert.private-key.pkcs8.base64");
+  const destination = loaderMounts.find(mount => mount.target === "/run/policy-observation");
+  if (loaderMounts.length !== 2 || loader.network_mode !== "none" || (loader.ports ?? []).length
+      || loader.restart !== "no" || loader.read_only !== true || loader.pids_limit !== 64
+      || !(loader.cap_drop ?? []).includes("ALL")
+      || JSON.stringify((loader.cap_add ?? []).slice().sort()) !== JSON.stringify(["CHOWN", "DAC_OVERRIDE", "FOWNER"])
+      || !(loader.security_opt ?? []).includes("no-new-privileges:true")
+      || source?.type !== "bind" || source.read_only !== true
+      || normalizeComparablePath(source.source) !== normalizeComparablePath(privateSource)
+      || source.bind?.create_host_path !== false
+      || destination?.type !== "volume" || destination.source !== volume || destination.read_only === true) {
+    fail("observation key loader must have only its exact private source and dedicated writable volume");
+  }
+  try {
+    const stat = fs.lstatSync(privateSource);
+    if (!stat.isFile() || stat.isSymbolicLink() || !stat.size
+        || (process.platform !== "win32" && (stat.mode & 0o077) !== 0)) {
+      fail("alert observation private source is missing or insufficiently protected");
+    }
+  } catch (error) {
+    fail(`alert observation private source cannot be inspected: ${error.message}`);
+  }
+  for (const [name, definition] of Object.entries(services)) {
+    if (name === loaderName || name === "alert-service") continue;
+    for (const mount of definition.volumes ?? []) {
+      if (normalizeComparablePath(mount.source) === normalizeComparablePath(privateSource)
+          || (mount.type === "volume" && mount.source === volume)) {
+        fail(`${name} must not mount the alert observation private key`);
+      }
+    }
+  }
+}
+
+function assertAuditTrustKeyIsolation() {
+  const name = "audit-trust-authority";
+  const loaderName = "audit-trust-key-loader";
+  const volume = "audit-trust-keys";
+  const sourceRoot = path.resolve("deployment", ".local", "audit-trust-authority");
+  const authority = service(name);
+  const loader = service(loaderName);
+  const authorityMount = (authority.volumes ?? []).find(mount => mount.target === "/run/audit-trust-keys");
+  if (authority.depends_on?.[loaderName]?.condition !== "service_completed_successfully"
+      || authorityMount?.type !== "volume" || authorityMount.source !== volume
+      || authorityMount.read_only !== true
+      || env(name, "TRUST_AUTHORITY_ACTIVE_PRIVATE_KEY_PATH") !== "/run/audit-trust-keys/ed25519-private.key"
+      || env(name, "TRUST_AUTHORITY_ACTIVE_PUBLIC_KEY_PATH") !== "/run/audit-trust-keys/ed25519-public.key") {
+    fail("audit trust authority must wait for its dedicated read-only key volume");
+  }
+  const source = (loader.volumes ?? []).find(mount => mount.target === "/run/audit-trust-source");
+  const destination = (loader.volumes ?? []).find(mount => mount.target === "/run/audit-trust-keys");
+  if ((loader.profiles ?? []).length || (loader.volumes ?? []).length !== 2
+      || loader.network_mode !== "none" || (loader.ports ?? []).length
+      || loader.restart !== "no" || loader.read_only !== true || loader.pids_limit !== 64
+      || !(loader.cap_drop ?? []).includes("ALL")
+      || JSON.stringify((loader.cap_add ?? []).slice().sort()) !== JSON.stringify(["CHOWN", "DAC_OVERRIDE", "FOWNER"])
+      || !(loader.security_opt ?? []).includes("no-new-privileges:true")
+      || source?.type !== "bind" || source.read_only !== true
+      || normalizeComparablePath(source.source) !== normalizeComparablePath(sourceRoot)
+      || source.bind?.create_host_path !== false
+      || destination?.type !== "volume" || destination.source !== volume || destination.read_only === true) {
+    fail("audit trust key loader must have only its protected source and dedicated writable volume");
+  }
+  for (const file of ["ed25519-private.key", "ed25519-public.key"]) {
+    try {
+      const stat = fs.lstatSync(path.join(sourceRoot, file));
+      if (!stat.isFile() || stat.isSymbolicLink() || !stat.size
+          || (file === "ed25519-private.key" && process.platform !== "win32" && (stat.mode & 0o077) !== 0)) {
+        fail(`audit trust ${file} is missing or insufficiently protected`);
+      }
+    } catch (error) {
+      fail(`audit trust ${file} cannot be inspected: ${error.message}`);
+    }
+  }
+  for (const [otherName, definition] of Object.entries(services)) {
+    if (otherName === loaderName || otherName === name) continue;
+    for (const mount of definition.volumes ?? []) {
+      if (normalizeComparablePath(mount.source) === normalizeComparablePath(sourceRoot)
+          || (mount.type === "volume" && mount.source === volume)) {
+        fail(`${otherName} must not mount audit trust authority keys`);
+      }
+    }
+  }
+}
+
 function assertDeclarativeModelPromotionPolicyTrustMount() {
   const file = path.resolve("deployment", "docker-compose.model-promotion-policy-trust.yml");
   let source;
@@ -349,12 +454,21 @@ function assertDeclarativeModelPromotionPolicyTrustMount() {
   const expected = new Map([
     ["/run/model-promotion-policy/trusted-issuers.json", "./.local/model-promotion-policy/trusted-issuers.json"],
     ["/run/model-promotion-policy/trusted-approvals.json", "./.local/model-promotion-policy/approval/trusted-approvals.json"],
-    ["/run/model-promotion-policy/online-actor-trust.json", "./.local/model-promotion-policy/approval/online-actor-trust.json"]
+    ["/run/model-promotion-policy/online-actor-trust.json", "./.local/model-promotion-policy/approval/online-actor-trust.json"],
+    ["/run/model-promotion-policy/trusted-reporters.json", "./.local/model-promotion-policy/fleet-observation/trusted-reporters.json"]
   ]);
-  if (mounts.length !== expected.size || mounts.some((mount) => mount.type !== "bind"
+  const publicMounts = mounts.filter((mount) => mount.type === "bind");
+  if (publicMounts.length !== expected.size || publicMounts.some((mount) => mount.type !== "bind"
       || expected.get(mount.target) !== mount.source
       || mount.read_only !== true || mount.bind?.create_host_path !== false)) {
-    fail("model-promotion trust overlay must declare only three exact read-only public file binds");
+    fail("model-promotion trust overlay must declare four exact read-only public file binds");
+  }
+  const privateMounts = mounts.filter((mount) => mount.type !== "bind");
+  if (privateMounts.length !== 1 || privateMounts[0].type !== "volume"
+      || privateMounts[0].source !== "model-promotion-alert-observation-key"
+      || privateMounts[0].target !== "/run/policy-observation"
+      || privateMounts[0].read_only !== true) {
+    fail("alert-service must read only its dedicated private observation volume");
   }
 }
 
@@ -783,6 +897,8 @@ if (variant === "security-hardened" || variant === "security-hardened-model-shad
   assertGeneratedIdentityMount("audit-trust-authority", "/run/service-identity/jwks.json", "/deployment/.local/service-identity/jwks.json");
   assertModelPromotionPolicyTrustMount();
   assertModelPromotionPublisherIsolation();
+  assertObservationKeyIsolation();
+  assertAuditTrustKeyIsolation();
   assertLocalBindings();
   assertUiLocalPort();
   assertHardening();

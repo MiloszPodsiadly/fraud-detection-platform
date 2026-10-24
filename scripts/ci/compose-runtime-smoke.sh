@@ -19,8 +19,8 @@ elif [[ "$variant" == "full-security-hardened" ]]; then
     -f deployment/docker-compose.oidc.yml
     -f deployment/docker-compose.service-identity-mtls.yml
     -f deployment/docker-compose.trust-authority-jwt.yml
-    -f deployment/docker-compose.model-promotion-policy-trust.yml
     -f deployment/docker-compose.hardened.yml
+    -f deployment/docker-compose.model-promotion-policy-trust.yml
   )
 fi
 
@@ -30,7 +30,7 @@ if [[ "$variant" == "app-hardening" ]]; then
   services+=(transaction-simulator-service)
   health_services+=(transaction-simulator-service)
 elif [[ "$variant" == "full-security-hardened" ]]; then
-  services=(mongodb redis kafka keycloak ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service fraud-scoring-service alert-service analyst-console-ui model-promotion-policy-key-loader model-promotion-policy-publisher)
+  services=(mongodb redis kafka keycloak ml-inference-service audit-trust-key-loader audit-trust-authority transaction-ingest-service feature-enricher-service fraud-scoring-service alert-service analyst-console-ui model-promotion-policy-key-loader model-promotion-policy-publisher)
   health_services=(ml-inference-service audit-trust-authority transaction-ingest-service feature-enricher-service fraud-scoring-service alert-service analyst-console-ui)
 fi
 

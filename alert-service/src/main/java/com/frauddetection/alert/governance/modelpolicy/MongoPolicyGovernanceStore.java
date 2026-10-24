@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
+import com.frauddetection.alert.governance.audit.GovernanceEventCommitment;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionPolicyDraft;
 import com.mongodb.MongoException;
 import jakarta.annotation.PostConstruct;
@@ -258,9 +259,13 @@ public class MongoPolicyGovernanceStore {
 
     private void record(PolicyProposalDocument state, PolicyGovernanceState from, String action,
             String actor, String operationId, String commandSha256, Instant now) {
-        mongo.insert(new PolicyGovernanceHistoryDocument(UUID.randomUUID().toString(), state.id(), state.version(),
+        var history = new PolicyGovernanceHistoryDocument(UUID.randomUUID().toString(), state.id(), state.version(),
                 action, from, state.status(), actor, operationId, commandSha256, state.draftSha256(),
-                state.approvalEvidenceReference(), now, null));
+                state.approvalEvidenceReference(), now, null);
+        mongo.insert(history);
+        GovernanceEventCommitment.record(mongo, GovernanceEventCommitment.Kind.POLICY_GOVERNANCE,
+                history.id(), history, state.draft().governanceScope().institutionalScope(),
+                actor, state.id(), operationId, commandSha256, state.id(), now);
         mongo.insert(new PolicyGovernanceOperationDocument(operationId, state.id(), commandSha256, actor, state, now));
     }
 

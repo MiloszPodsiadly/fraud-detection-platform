@@ -10,6 +10,8 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
 
     public void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
         authorize
+                .requestMatchers(HttpMethod.GET, "/api/v1/governance/audit/commitments/*/*")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/model-policies")
                 .hasAuthority(ModelPolicyAuthority.READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/model-policies/page")
@@ -52,10 +54,17 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
                 .requestMatchers(HttpMethod.GET,
                         "/api/v1/governance/model-policies/webauthn/enrollment-grants/mine")
                 .hasAuthority(ModelPolicyAuthority.CREDENTIAL_ENROLL)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/incidents")
+                .hasAuthority(ModelPolicyAuthority.CREDENTIAL_INCIDENT_REVOKE)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/status")
+                .hasAnyAuthority(ModelPolicyAuthority.CREDENTIAL_ADMIN, ModelPolicyAuthority.AUDIT_READ)
                 .requestMatchers(HttpMethod.POST, "/api/v1/governance/model-policies/webauthn/enrollment-grants",
                         "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/review/challenges",
                         "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/review",
-                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/bootstrap-approval")
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/bootstrap-approval",
+                        "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/revoke")
                 .hasAuthority(ModelPolicyAuthority.CREDENTIAL_ADMIN)
                 .requestMatchers(HttpMethod.POST,
                         "/api/v1/governance/model-policies/webauthn/enrollment-grants/*/claim")
@@ -82,7 +91,8 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
                 .hasAuthority(ModelPolicyAuthority.READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/model-policies/*/publication/recovery")
                 .hasAuthority(ModelPolicyAuthority.PUBLICATION_RECOVER)
-                .requestMatchers(HttpMethod.POST, "/api/v1/governance/model-policies/*/publication/recovery")
+                .requestMatchers(HttpMethod.POST, "/api/v1/governance/model-policies/*/publication/recovery",
+                        "/api/v1/governance/model-policies/*/publication/recovery/reconcile")
                 .hasAuthority(ModelPolicyAuthority.PUBLICATION_RECOVER)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/model-policies/*")
                 .hasAuthority(ModelPolicyAuthority.READ)
@@ -129,11 +139,18 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
                 .hasAnyAuthority(AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_REJECT)
                 .requestMatchers(HttpMethod.POST,
                         "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/emergency-authorizations",
-                        "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/emergency")
+                        "/api/v1/governance/model-promotion/proposals/{proposalId}/reviews/emergency",
+                        "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/claim")
                 .hasAuthority(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_REQUEST)
+                .requestMatchers(HttpMethod.POST,
+                        "/api/v1/governance/model-promotion/emergency-authorizations/active/revoke")
+                .hasAuthority(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE)
                 .requestMatchers(HttpMethod.POST,
                         "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/approve",
                         "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}/revoke")
+                .hasAuthority(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/model-promotion/emergency-authorizations/active")
                 .hasAuthority(AnalystAuthority.MODEL_PROMOTION_EMERGENCY_AUTHORIZE)
                 .requestMatchers(HttpMethod.GET,
                         "/api/v1/governance/model-promotion/emergency-authorizations/{authorizationId}")

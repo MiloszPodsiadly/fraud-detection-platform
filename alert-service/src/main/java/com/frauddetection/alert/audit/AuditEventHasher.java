@@ -15,7 +15,7 @@ import java.util.HexFormat;
 import java.util.Map;
 import java.util.TreeMap;
 
-final class AuditEventHasher {
+public final class AuditEventHasher {
 
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
             .findAndAddModules()
@@ -35,7 +35,7 @@ final class AuditEventHasher {
         }
     }
 
-    static boolean matches(AuditEventDocument document) {
+    public static boolean matches(AuditEventDocument document) {
         return document.eventHash() != null && document.eventHash().equals(hash(document.withEventHash(null)));
     }
 

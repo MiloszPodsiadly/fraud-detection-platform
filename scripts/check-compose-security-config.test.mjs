@@ -322,8 +322,8 @@ test("hardening alone does not activate a partial publisher, while policy trust 
     ["development", [], false],
     ["app hardening", ["deployment/docker-compose.hardened.yml"], false],
     ["policy trust", ["deployment/docker-compose.model-promotion-policy-trust.yml"], true],
-    ["policy trust hardened", ["deployment/docker-compose.model-promotion-policy-trust.yml",
-      "deployment/docker-compose.hardened.yml"], true]
+    ["policy trust hardened", ["deployment/docker-compose.hardened.yml",
+      "deployment/docker-compose.model-promotion-policy-trust.yml"], true]
   ]) {
     const args = ["compose", "--env-file", "deployment/.env.example",
       ...[...baseFiles, ...overlays].flatMap(file => ["-f", file]), "config", "--services"];
@@ -369,7 +369,7 @@ test("model-promotion public registry rejects missing and symbolic-link sources"
       "utf8");
     const unsafeDeclaration = runChecker(missing, "security-hardened", temporary);
     assert.notEqual(unsafeDeclaration.status, 0);
-    assert.match(unsafeDeclaration.stderr, /model-promotion trust overlay must declare only three exact read-only public file binds/);
+    assert.match(unsafeDeclaration.stderr, /model-promotion trust overlay must declare four exact read-only public file binds/);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
@@ -393,7 +393,7 @@ test("model-promotion checker detects a private source hidden behind an external
     });
     const checked = runChecker(config, "security-hardened");
     assert.notEqual(checked.status, 0);
-    assert.match(checked.stderr, /alert-service must mount exactly three public model-promotion registries/);
+    assert.match(checked.stderr, /alert-service must mount exactly four public model-promotion registries/);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
@@ -503,8 +503,8 @@ function resolveHardenedCompose() {
     "-f", "deployment/docker-compose.oidc.yml",
     "-f", "deployment/docker-compose.service-identity-mtls.yml",
     "-f", "deployment/docker-compose.trust-authority-jwt.yml",
-    "-f", "deployment/docker-compose.model-promotion-policy-trust.yml",
     "-f", "deployment/docker-compose.hardened.yml",
+    "-f", "deployment/docker-compose.model-promotion-policy-trust.yml",
     "config", "--format", "json"
   ], {
     cwd: repositoryRoot,

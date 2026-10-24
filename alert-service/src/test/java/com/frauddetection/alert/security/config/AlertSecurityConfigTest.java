@@ -66,6 +66,8 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditController;
 import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditEventResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAuditService;
+import com.frauddetection.alert.governance.audit.GovernanceEventVerificationController;
+import com.frauddetection.alert.governance.audit.GovernanceEventVerificationService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceController;
 import com.frauddetection.alert.governance.modelpolicy.PolicySecurityActorController;
 import com.frauddetection.alert.governance.modelpromotion.PolicySecurityOperationsController;
@@ -75,6 +77,7 @@ import com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySna
 import org.springframework.data.mongodb.core.MongoTemplate;
 import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantController;
 import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialGrantReviewService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusController;
@@ -193,6 +196,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class,
+        GovernanceEventVerificationController.class,
         PolicyGovernanceController.class,
         PolicySecurityActorController.class,
         PolicySecurityOperationsController.class,
@@ -323,6 +327,9 @@ class AlertSecurityConfigTest {
     private GovernanceAuditService governanceAuditService;
 
     @MockitoBean
+    private GovernanceEventVerificationService governanceEventVerificationService;
+
+    @MockitoBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
 
     @MockitoBean
@@ -333,6 +340,9 @@ class AlertSecurityConfigTest {
 
     @MockitoBean
     private PolicyCredentialEnrollmentGrantService policyCredentialEnrollmentGrantService;
+
+    @MockitoBean
+    private PolicyCredentialGrantReviewService policyCredentialGrantReviewService;
 
     @MockitoBean
     private PolicyPublicationStatusService policyPublicationStatusService;
@@ -369,6 +379,12 @@ class AlertSecurityConfigTest {
                         .with(policyActor(ModelPolicyAuthority.READ)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/governance/model-policies/proposal-1/history")
+                        .with(policyActor(ModelPolicyAuthority.AUDIT_READ)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/governance/audit/commitments/TRUST_CHANGE/event-1")
+                        .with(policyActor(ModelPolicyAuthority.READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/governance/audit/commitments/TRUST_CHANGE/event-1")
                         .with(policyActor(ModelPolicyAuthority.AUDIT_READ)))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/governance/model-policies/proposal-1/unexpected")

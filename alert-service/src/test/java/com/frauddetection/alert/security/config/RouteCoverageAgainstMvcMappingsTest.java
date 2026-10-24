@@ -40,6 +40,8 @@ import com.frauddetection.alert.governance.audit.GovernanceAdvisoryController;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryProjectionService;
 import com.frauddetection.alert.governance.audit.GovernanceAuditController;
 import com.frauddetection.alert.governance.audit.GovernanceAuditService;
+import com.frauddetection.alert.governance.audit.GovernanceEventVerificationController;
+import com.frauddetection.alert.governance.audit.GovernanceEventVerificationService;
 import com.frauddetection.alert.governance.exactmodelshadowperformance.ExactModelShadowPerformanceController;
 import com.frauddetection.alert.governance.exactmodelshadowperformance.ExactModelShadowPerformanceReadService;
 import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionReviewReadinessReportController;
@@ -153,6 +155,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class,
+        GovernanceEventVerificationController.class,
         ShadowPerformanceSummaryController.class,
         PromotionReviewReadinessReportController.class,
         ModelCardController.class,
@@ -344,6 +347,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockitoBean
     private GovernanceAuditService governanceAuditService;
+
+    @MockitoBean
+    private GovernanceEventVerificationService governanceEventVerificationService;
 
     @MockitoBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
