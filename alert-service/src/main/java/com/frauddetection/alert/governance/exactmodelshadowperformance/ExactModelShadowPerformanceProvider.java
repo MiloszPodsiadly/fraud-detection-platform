@@ -5,5 +5,12 @@ import tools.jackson.databind.JsonNode;
 import java.util.Optional;
 
 public interface ExactModelShadowPerformanceProvider {
-    Optional<JsonNode> find(ExactModelShadowPerformanceSelector selector);
+
+    Optional<VerifiedExactModelShadowPerformanceArtifact> findArtifact(
+            ExactModelShadowPerformanceSelector selector
+    );
+
+    default Optional<JsonNode> find(ExactModelShadowPerformanceSelector selector) {
+        return findArtifact(selector).map(VerifiedExactModelShadowPerformanceArtifact::summary);
+    }
 }

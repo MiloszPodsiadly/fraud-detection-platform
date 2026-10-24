@@ -62,7 +62,9 @@ final class ArtifactBackedExactModelShadowPerformanceProvider implements ExactMo
     }
 
     @Override
-    public Optional<JsonNode> find(ExactModelShadowPerformanceSelector selector) {
+    public Optional<VerifiedExactModelShadowPerformanceArtifact> findArtifact(
+            ExactModelShadowPerformanceSelector selector
+    ) {
         try {
             String selectionKey = selector.selectionKey();
             Path root = Path.of(properties.baseDir()).toAbsolutePath().normalize();
@@ -93,7 +95,7 @@ final class ArtifactBackedExactModelShadowPerformanceProvider implements ExactMo
             if (!Arrays.equals(firstManifest, secondManifest) || !Arrays.equals(firstSummary, secondSummary)) {
                 throw unavailable();
             }
-            return Optional.of(summary);
+            return Optional.of(new VerifiedExactModelShadowPerformanceArtifact(summary, sha256(firstManifest)));
         } catch (GovernanceArtifactReadException | ExactModelShadowPerformanceValidationException
                  | InvalidPathException | SecurityException exception) {
             throw unavailable();

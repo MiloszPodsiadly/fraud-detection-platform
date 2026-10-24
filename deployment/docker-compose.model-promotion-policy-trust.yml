@@ -1,0 +1,129 @@
+# Local development trust material and signing worker; not production key custody.
+services:
+  alert-service:
+    environment:
+      MODEL_PROMOTION_TRUST_DEPLOYMENT_ID: ${MODEL_PROMOTION_TRUST_DEPLOYMENT_ID:-local-compose}
+      MODEL_PROMOTION_TRUST_INSTANCE_ID: alert-service
+      MODEL_PROMOTION_TRUST_EXPECTED_ALERT_INSTANCES: alert-service
+      MODEL_PROMOTION_TRUST_EXPECTED_PUBLISHER_INSTANCES: model-promotion-policy-publisher
+      MODEL_PROMOTION_TRUSTED_ISSUERS_PATH: /run/model-promotion-policy/trusted-issuers.json
+      MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
+      MODEL_PROMOTION_APPROVAL_TRUST_PATH: /run/model-promotion-policy/trusted-approvals.json
+      MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION: "1"
+      MODEL_PROMOTION_ONLINE_ACTOR_TRUST_PATH: /run/model-promotion-policy/online-actor-trust.json
+      MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION: "1"
+    volumes:
+      - type: bind
+        source: ./.local/model-promotion-policy/trusted-issuers.json
+        target: /run/model-promotion-policy/trusted-issuers.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/trusted-approvals.json
+        target: /run/model-promotion-policy/trusted-approvals.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/online-actor-trust.json
+        target: /run/model-promotion-policy/online-actor-trust.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+  model-promotion-policy-key-loader:
+    image: eclipse-temurin:21-jre
+    restart: "no"
+    network_mode: none
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        for file in publisher.private-key.pkcs8.base64 issuer.private-key.pkcs8.base64 trusted-approvals.json online-actor-trust.json trusted-issuers.json; do
+          source="/run/policy-publication-source/$${file}"
+          test -f "$${source}" && test ! -L "$${source}" && test -s "$${source}"
+          temporary="$$(mktemp /run/policy-publication/.key.XXXXXX)"
+          cp "$${source}" "$${temporary}"
+          chown 10001:10001 "$${temporary}"
+          chmod 0400 "$${temporary}"
+          mv -f "$${temporary}" "/run/policy-publication/$${file}"
+        done
+        chown 10001:10001 /run/policy-publication
+        chmod 0500 /run/policy-publication
+    volumes:
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/publisher.private-key.pkcs8.base64
+        target: /run/policy-publication-source/publisher.private-key.pkcs8.base64
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/private-key.pkcs8.base64
+        target: /run/policy-publication-source/issuer.private-key.pkcs8.base64
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/trusted-approvals.json
+        target: /run/policy-publication-source/trusted-approvals.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/approval/online-actor-trust.json
+        target: /run/policy-publication-source/online-actor-trust.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.local/model-promotion-policy/trusted-issuers.json
+        target: /run/policy-publication-source/trusted-issuers.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: model-promotion-policy-signing-keys
+        target: /run/policy-publication
+
+  model-promotion-policy-publisher:
+    profiles: !reset []
+    depends_on:
+      model-promotion-policy-key-loader:
+        condition: service_completed_successfully
+    environment:
+      MODEL_PROMOTION_TRUST_DEPLOYMENT_ID: ${MODEL_PROMOTION_TRUST_DEPLOYMENT_ID:-local-compose}
+      MODEL_PROMOTION_TRUST_INSTANCE_ID: model-promotion-policy-publisher
+      MODEL_PROMOTION_TRUST_EXPECTED_ALERT_INSTANCES: alert-service
+      MODEL_PROMOTION_TRUST_EXPECTED_PUBLISHER_INSTANCES: model-promotion-policy-publisher
+      MODEL_PROMOTION_PUBLISH_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
+      MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION: "1"
+      MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION: "1"
+    command:
+      - worker
+      - --approval-trust
+      - /run/policy-publication/trusted-approvals.json
+      - --online-actor-trust
+      - /run/policy-publication/online-actor-trust.json
+      - --trusted-issuers
+      - /run/policy-publication/trusted-issuers.json
+      - --publisher-private-key
+      - /run/policy-publication/publisher.private-key.pkcs8.base64
+      - --issuer-private-key
+      - /run/policy-publication/issuer.private-key.pkcs8.base64
+      - --webauthn-rp-id
+      - localhost
+      - --webauthn-origin
+      - http://localhost:4173
+    volumes:
+      - type: volume
+        source: model-promotion-policy-signing-keys
+        target: /run/policy-publication
+        read_only: true
+
+volumes:
+  model-promotion-policy-signing-keys:

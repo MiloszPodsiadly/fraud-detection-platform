@@ -46,6 +46,31 @@ import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionRev
 import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionReviewReadinessReportReadService;
 import com.frauddetection.alert.governance.modelcard.ModelCardController;
 import com.frauddetection.alert.governance.modelcard.ModelCardReadService;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiController;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionSignedReviewController;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionEmergencyRetirementController;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionSignedReviewService;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionEmergencyRetirementService;
+import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectory;
+import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectoryController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyPublicationRecoveryService;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiRateLimiter;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceController;
+import com.frauddetection.alert.governance.modelpolicy.PolicySecurityActorController;
+import com.frauddetection.alert.governance.modelpromotion.PolicySecurityOperationsController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustAdministrationController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialGrantReviewService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationRecoveryController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryController;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryReadService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -132,6 +157,17 @@ import static org.assertj.core.api.Assertions.assertThat;
         PromotionReviewReadinessReportController.class,
         ModelCardController.class,
         ExactModelShadowPerformanceController.class,
+        ModelPromotionApiController.class,
+        ModelPromotionSignedReviewController.class,
+        ModelPromotionEmergencyRetirementController.class,
+        PolicyGovernanceController.class,
+        PolicySecurityActorController.class,
+        PolicySecurityOperationsController.class,
+        PolicyTrustAdministrationController.class,
+        OnlinePolicyApproverDirectoryController.class,
+        PolicyCredentialEnrollmentGrantController.class,
+        PolicyPublicationStatusController.class,
+        PolicyPublicationRecoveryController.class,
         SuspiciousTransactionReadController.class,
         AnalystSessionController.class
 })
@@ -262,6 +298,48 @@ class RouteCoverageAgainstMvcMappingsTest {
     private ExactModelShadowPerformanceReadService exactModelShadowPerformanceReadService;
 
     @MockitoBean
+    private ModelPromotionApiService modelPromotionApiService;
+
+    @MockitoBean
+    private ModelPromotionSignedReviewService modelPromotionSignedReviewService;
+
+    @MockitoBean
+    private ModelPromotionEmergencyRetirementService modelPromotionEmergencyRetirementService;
+
+    @MockitoBean
+    private ModelPromotionApiRateLimiter modelPromotionApiRateLimiter;
+
+    @MockitoBean
+    private PolicyGovernanceService policyGovernanceService;
+
+    @MockitoBean
+    private PolicyWebAuthnService policyWebAuthnService;
+
+    @MockitoBean
+    private PolicyCredentialEnrollmentGrantService policyCredentialEnrollmentGrantService;
+
+    @MockitoBean
+    private PolicyCredentialGrantReviewService policyCredentialGrantReviewService;
+
+    @MockitoBean
+    private PolicyPublicationStatusService policyPublicationStatusService;
+
+    @MockitoBean
+    private PolicyPublicationRecoveryService policyPublicationRecoveryService;
+
+    @MockitoBean
+    private OnlinePolicyApproverDirectory onlinePolicyApproverDirectory;
+
+    @MockitoBean
+    private PolicyTrustChangeService policyTrustChangeService;
+
+    @MockitoBean
+    private PolicyTrustRegistrySnapshotService policyTrustRegistrySnapshotService;
+
+    @MockitoBean
+    private MongoTemplate policySecurityMongoTemplate;
+
+    @MockitoBean
     private AlertRepository alertRepository;
 
     @MockitoBean
@@ -329,7 +407,12 @@ class RouteCoverageAgainstMvcMappingsTest {
                         "GET /api/v1/fraud-cases/{caseId}",
                         "PATCH /api/v1/fraud-cases/{caseId}",
                         "GET /api/v1/fraud-cases/{caseId}/evidence-summary",
-                        "GET /api/v1/fraud-cases/{caseId}/evidence-timeline"
+                        "GET /api/v1/fraud-cases/{caseId}/evidence-timeline",
+                        "GET /api/v1/governance/model-policies",
+                        "GET /api/v1/governance/model-policies/me",
+                        "GET /api/v1/governance/model-policies/{id}",
+                        "GET /api/v1/governance/model-policies/{id}/history",
+                        "GET /api/v1/governance/model-policies/{id}/publication"
                 );
     }
 

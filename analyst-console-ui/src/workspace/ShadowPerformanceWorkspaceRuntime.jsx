@@ -3,6 +3,7 @@ import { usePromotionReviewReadinessReport } from "./usePromotionReviewReadiness
 import { useModelCard } from "./useModelCard.js";
 import { useShadowPerformanceSummary } from "./useShadowPerformanceSummary.js";
 import { useExactModelShadowPerformance } from "./useExactModelShadowPerformance.js";
+import { useModelPromotionWorkflow } from "./useModelPromotionWorkflow.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 import { createWorkspaceRuntimeResult } from "./workspaceRuntimeResult.js";
 
@@ -13,6 +14,15 @@ export function ShadowPerformanceWorkspaceRuntime({
 }) {
   const {
     canReadExactModelShadowPerformance,
+    canReadModelPromotion,
+    canRegisterModelPromotion,
+    canProposeModelPromotion,
+    canApproveModelPromotion,
+    canRejectModelPromotion,
+    canRetireModelPromotion,
+    canRequestEmergencyModelRetirement,
+    canAuthorizeEmergencyModelRetirement,
+    canAuditEmergencyModelRetirement,
     canReadModelCard,
     canReadPromotionReadiness,
     canReadShadowPerformance
@@ -29,12 +39,16 @@ export function ShadowPerformanceWorkspaceRuntime({
   const exactModelShadowPerformanceState = useExactModelShadowPerformance({
     enabled: sharedWorkspaceReadsEnabled && canReadExactModelShadowPerformance === true
   });
+  const modelPromotionWorkflow = useModelPromotionWorkflow({
+    enabled: sharedWorkspaceReadsEnabled && canReadModelPromotion === true
+  });
 
   function refreshWorkspace() {
     summaryState.refresh();
     promotionReadinessState.refresh();
     modelCardState.refresh();
     exactModelShadowPerformanceState.refresh();
+    modelPromotionWorkflow.load();
   }
 
   return children(createWorkspaceRuntimeResult({
@@ -49,6 +63,16 @@ export function ShadowPerformanceWorkspaceRuntime({
         canReadPromotionReadiness={canReadPromotionReadiness}
         canReadModelCard={canReadModelCard}
         canReadExactModelShadowPerformance={canReadExactModelShadowPerformance}
+        modelPromotionWorkflow={modelPromotionWorkflow}
+        canReadModelPromotion={canReadModelPromotion}
+        canRegisterModelPromotion={canRegisterModelPromotion}
+        canProposeModelPromotion={canProposeModelPromotion}
+        canApproveModelPromotion={canApproveModelPromotion}
+        canRejectModelPromotion={canRejectModelPromotion}
+        canRetireModelPromotion={canRetireModelPromotion}
+        canRequestEmergencyModelRetirement={canRequestEmergencyModelRetirement}
+        canAuthorizeEmergencyModelRetirement={canAuthorizeEmergencyModelRetirement}
+        canAuditEmergencyModelRetirement={canAuditEmergencyModelRetirement}
       />
     ),
     error: summaryState.error,

@@ -97,6 +97,22 @@ public class ReadAccessAuditClassifier {
                     request
             ));
         }
+        if ("/api/v1/governance/model-promotion/state".equals(pattern)) {
+            return Optional.of(target(
+                    ReadAccessEndpointCategory.MODEL_PROMOTION_STATE,
+                    ReadAccessResourceType.MODEL_PROMOTION,
+                    request.getParameter("modelArtifactSha256"),
+                    request
+            ));
+        }
+        if ("/api/v1/governance/model-promotion/assessment".equals(pattern)) {
+            return Optional.of(target(
+                    ReadAccessEndpointCategory.MODEL_PROMOTION_ASSESSMENT,
+                    ReadAccessResourceType.MODEL_PROMOTION,
+                    request.getParameter("modelArtifactSha256"),
+                    request
+            ));
+        }
         return Optional.empty();
     }
 

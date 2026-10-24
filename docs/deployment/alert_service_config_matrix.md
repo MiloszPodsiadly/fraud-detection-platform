@@ -21,3 +21,16 @@ promote. Release readiness and external platform controls are documented under [
 `bank` means the strict bank-grade runtime closure gate. It requires FDP-24 external anchoring publication to be enabled, required, and fail-closed; the sink must be production-capable and not `disabled`, `noop`, `local-file`, `in-memory`, or `same-database`. `bank-local` is smoke-only and must not be described as regulator-grade.
 
 Prod-like profiles must not use local/noop/in-memory/same-database external evidence sinks. FDP-27 is a production closure gate; it does not add KMS/HSM, legal notarization, WORM storage, broker-side verification, or a pre-commit/finalize redesign.
+
+## Model-promotion issuer trust (separate from audit trust)
+
+| Setting | Local default | Production deployment requirement |
+| --- | --- | --- |
+| `MODEL_PROMOTION_TRUSTED_ISSUERS_PATH` | Read-only `deployment/.local` public fixture via Compose | Read-only reviewed public registry outside the image; absent path means `UNAVAILABLE` |
+| `MODEL_PROMOTION_TRUST_MIN_GENERATION` | `1` in the local overlay | Independently protected monotonic floor, raised with every approved registry change |
+| `model_promotion_policy_trust_registry_generation` | Loaded generation gauge | Check per instance after restart and compare mounted file SHA-256 separately |
+
+The publisher additionally needs its separate public approval registry and protected
+`MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION`; neither is mounted into `alert-service`. Private issuer/actor keys
+remain offline. The local Compose overlay and its generation-1 fixture are not a production configuration. Full
+provisioning and recovery steps are in [trust operations](../operations/model_promotion_trust_operations.md).

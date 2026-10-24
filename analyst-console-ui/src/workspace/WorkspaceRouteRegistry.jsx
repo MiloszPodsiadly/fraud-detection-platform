@@ -5,6 +5,8 @@ import { ReportsWorkspaceRuntime } from "./ReportsWorkspaceRuntime.jsx";
 import { ShadowPerformanceWorkspaceRuntime } from "./ShadowPerformanceWorkspaceRuntime.jsx";
 import { SuspiciousTransactionWorkspaceRuntime } from "./SuspiciousTransactionWorkspaceRuntime.jsx";
 import { TransactionScoringWorkspaceRuntime } from "./TransactionScoringWorkspaceRuntime.jsx";
+import { PolicyGovernanceWorkspaceRuntime } from "./PolicyGovernanceWorkspaceRuntime.jsx";
+import { PolicySecurityWorkspaceRuntime } from "./PolicySecurityWorkspaceRuntime.jsx";
 
 const DEFAULT_WORKSPACE_KEY = "analyst";
 
@@ -69,6 +71,28 @@ export const WORKSPACE_ROUTE_REGISTRY = Object.freeze({
     heading: Object.freeze({ label: "Model Governance Evidence" }),
     Runtime: ShadowPerformanceWorkspaceRuntime
   }),
+  policyGovernance: Object.freeze({
+    key: "policyGovernance",
+    label: "Policy Governance",
+    navigationLabel: "Policy governance",
+    routeValue: "policy-governance",
+    href: "?workspace=policy-governance",
+    capabilityKey: "canReadPolicyGovernance",
+    heading: Object.freeze({ label: "Institutional policy governance" }),
+    showWorkspaceCounters: false,
+    Runtime: PolicyGovernanceWorkspaceRuntime
+  }),
+  policySecurity: Object.freeze({
+    key: "policySecurity",
+    label: "Security & Operations",
+    navigationLabel: "Security settings",
+    routeValue: "policy-security",
+    href: "?workspace=policy-security",
+    capabilityKey: "canReadPolicySecurity",
+    heading: Object.freeze({ label: "Institutional security administration" }),
+    showWorkspaceCounters: false,
+    Runtime: PolicySecurityWorkspaceRuntime
+  }),
   compliance: Object.freeze({
     key: "compliance",
     label: "Compliance",
@@ -88,6 +112,8 @@ export const WORKSPACE_ROUTE_ORDER = Object.freeze([
   "analyst",
   "reports",
   "shadowPerformance",
+  "policyGovernance",
+  "policySecurity",
   "compliance"
 ]);
 

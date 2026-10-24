@@ -1,7 +1,9 @@
 package com.frauddetection.alert.security.auth;
 
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -13,6 +15,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.net.URL;
 import java.util.stream.Collectors;
 
 @Component
@@ -20,13 +23,22 @@ public class JwtAnalystAuthenticationConverter {
 
     private final JwtSecurityProperties properties;
     private final AnalystAuthenticationFactory authenticationFactory;
+    private final ModelPolicyIamMapping policyIamMapping;
 
+    @Autowired
     public JwtAnalystAuthenticationConverter(
             JwtSecurityProperties properties,
-            AnalystAuthenticationFactory authenticationFactory
+            AnalystAuthenticationFactory authenticationFactory,
+            ModelPolicyIamMapping policyIamMapping
     ) {
         this.properties = properties;
         this.authenticationFactory = authenticationFactory;
+        this.policyIamMapping = policyIamMapping;
+    }
+
+    JwtAnalystAuthenticationConverter(JwtSecurityProperties properties,
+            AnalystAuthenticationFactory authenticationFactory) {
+        this(properties, authenticationFactory, new ModelPolicyIamMapping(Map.of()));
     }
 
     public UsernamePasswordAuthenticationToken convert(Jwt jwt) {
@@ -36,7 +48,17 @@ public class JwtAnalystAuthenticationConverter {
         Set<String> authorities = roles.stream()
                 .flatMap(role -> role.authorities().stream())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities);
+        if (externalAccessValues.stream().anyMatch(properties::grantsProductionPromotionAccess)) {
+            authorities.add(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+        }
+        authorities.addAll(policyIamMapping.authorities(externalAccessValues));
+        URL issuer = jwt.getIssuer();
+        String subject = jwt.getSubject();
+        String stableActor = issuer == null || !StringUtils.hasText(subject)
+                || !StringUtils.hasText(properties.issuerUri())
+                || !properties.issuerUri().trim().equals(issuer.toString())
+                ? null : issuer + "#" + subject;
+        AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities, stableActor);
         return (UsernamePasswordAuthenticationToken) authenticationFactory.authenticated(principal);
     }
 

@@ -19,6 +19,10 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnavailableException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionPersistenceConflictException;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionWorkflowBlockedException;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiNotFoundException;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiUnavailableException;
 import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
 import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
 import com.frauddetection.alert.regulated.ConflictingResourceMutationException;
@@ -34,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
@@ -52,6 +57,12 @@ public class AlertServiceExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(AlertServiceExceptionHandler.class);
 
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleApplicationAccessDenied(AccessDeniedException exception) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                new ApiErrorResponse(Instant.now(), 403, "Forbidden", "Access denied.", List.of()));
+    }
+
     @ExceptionHandler(AlertNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleNotFound(AlertNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
@@ -63,6 +74,59 @@ public class AlertServiceExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleGovernanceAdvisoryNotFound(GovernanceAdvisoryNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
                 new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of())
+        );
+    }
+
+    @ExceptionHandler(ModelPromotionApiNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelPromotionNotFound(ModelPromotionApiNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", exception.getMessage(), List.of())
+        );
+    }
+
+    @ExceptionHandler(ModelPromotionApiUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelPromotionUnavailable(
+            ModelPromotionApiUnavailableException exception
+    ) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        503,
+                        "Service Unavailable",
+                        "Model promotion state or mandatory governance evidence is unavailable.",
+                        List.of("reason:MODEL_PROMOTION_DEPENDENCY_UNAVAILABLE")
+                )
+        );
+    }
+
+    @ExceptionHandler(ModelPromotionPersistenceConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelPromotionConflict(
+            ModelPromotionPersistenceConflictException exception
+    ) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                new ApiErrorResponse(Instant.now(), 409, "Conflict", exception.getMessage(), List.of())
+        );
+    }
+
+    @ExceptionHandler(ModelPromotionWorkflowBlockedException.class)
+    public ResponseEntity<ApiErrorResponse> handleModelPromotionBlocked(
+            ModelPromotionWorkflowBlockedException exception
+    ) {
+        HttpStatus status = switch (exception.reason()) {
+            case UNAUTHENTICATED -> HttpStatus.UNAUTHORIZED;
+            case UNAUTHORIZED, UNSUPPORTED_PRINCIPAL -> HttpStatus.FORBIDDEN;
+            case PROPOSAL_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case POLICY_UNAVAILABLE, EVIDENCE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+            case POLICY_CHANGED, EVIDENCE_CHANGED -> HttpStatus.CONFLICT;
+        };
+        return ResponseEntity.status(status).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        status.value(),
+                        status.getReasonPhrase(),
+                        exception.getMessage(),
+                        List.of("reason:" + exception.reason().name())
+                )
         );
     }
 
