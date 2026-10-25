@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -13,7 +14,11 @@ import org.springframework.data.mongodb.core.mapping.Field;
 import java.time.Instant;
 
 @Document(collection = "write_action_audit_outbox")
-@CompoundIndex(name = "write_action_audit_publishable_v2_idx", def = "{'status': 1, 'next_attempt_at': 1, 'claim_expires_at': 1, 'created_at': 1}")
+@CompoundIndexes({
+        @CompoundIndex(name = "write_action_audit_publishable_v2_idx",
+                def = "{'status': 1, 'next_attempt_at': 1, 'claim_expires_at': 1, 'created_at': 1}"),
+        @CompoundIndex(name = "write_action_audit_recovery_queue_idx", def = "{'status': 1, 'created_at': 1}")
+})
 public class WriteActionAuditOutboxRecord {
 
     @Id
@@ -78,6 +83,9 @@ public class WriteActionAuditOutboxRecord {
     @Field("max_attempts")
     private int maxAttempts;
 
+    @Field("recovery_count")
+    private int recoveryCount;
+
     @Field("next_attempt_at")
     private Instant nextAttemptAt;
 
@@ -92,6 +100,12 @@ public class WriteActionAuditOutboxRecord {
 
     @Field("claim_owner")
     private String claimOwner;
+
+    @Field("claim_token")
+    private String claimToken;
+
+    @Field("claim_generation")
+    private long claimGeneration;
 
     @Field("claim_expires_at")
     private Instant claimExpiresAt;
@@ -149,6 +163,8 @@ public class WriteActionAuditOutboxRecord {
     public void setAttemptCount(int attemptCount) { this.attemptCount = attemptCount; }
     public int getMaxAttempts() { return maxAttempts; }
     public void setMaxAttempts(int maxAttempts) { this.maxAttempts = maxAttempts; }
+    public int getRecoveryCount() { return recoveryCount; }
+    public void setRecoveryCount(int recoveryCount) { this.recoveryCount = recoveryCount; }
     public Instant getNextAttemptAt() { return nextAttemptAt; }
     public void setNextAttemptAt(Instant nextAttemptAt) { this.nextAttemptAt = nextAttemptAt; }
     public Instant getCreatedAt() { return createdAt; }
@@ -159,6 +175,10 @@ public class WriteActionAuditOutboxRecord {
     public void setClaimedAt(Instant claimedAt) { this.claimedAt = claimedAt; }
     public String getClaimOwner() { return claimOwner; }
     public void setClaimOwner(String claimOwner) { this.claimOwner = claimOwner; }
+    public String getClaimToken() { return claimToken; }
+    public void setClaimToken(String claimToken) { this.claimToken = claimToken; }
+    public long getClaimGeneration() { return claimGeneration; }
+    public void setClaimGeneration(long claimGeneration) { this.claimGeneration = claimGeneration; }
     public Instant getClaimExpiresAt() { return claimExpiresAt; }
     public void setClaimExpiresAt(Instant claimExpiresAt) { this.claimExpiresAt = claimExpiresAt; }
     public Instant getPublishedAt() { return publishedAt; }

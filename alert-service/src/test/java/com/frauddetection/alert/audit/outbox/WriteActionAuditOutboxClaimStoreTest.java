@@ -1,12 +1,14 @@
 package com.frauddetection.alert.audit.outbox;
 
 import org.bson.Document;
+import com.mongodb.client.result.UpdateResult;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.UpdateDefinition;
+import org.springframework.data.mongodb.core.query.Update;
 
 import java.time.Instant;
 import java.time.Duration;
@@ -63,6 +65,8 @@ class WriteActionAuditOutboxClaimStoreTest {
                 .contains("last_attempt_at")
                 .contains("claimed_at")
                 .contains("claim_owner")
+                .contains("claim_token")
+                .contains("claim_generation")
                 .contains("claim_expires_at")
                 .contains(NOW.plus(CLAIM_LEASE).toString());
     }
@@ -127,5 +131,57 @@ class WriteActionAuditOutboxClaimStoreTest {
         assertThat(query.getValue().getQueryObject().toString())
                 .doesNotContain("PUBLISHED")
                 .doesNotContain("FAILED_PERMANENT");
+    }
+
+    @Test
+    void terminalCasRequiresTheExactLiveClaimAndNeverUsesSave() {
+        WriteActionAuditOutboxRecord claim = validClaim("claim-1", 4L);
+        when(mongoTemplate.updateFirst(
+                org.mockito.ArgumentMatchers.any(Query.class),
+                org.mockito.ArgumentMatchers.any(Update.class),
+                eq(WriteActionAuditOutboxRecord.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        assertThat(store.markPublished(claim, NOW)).isTrue();
+
+        ArgumentCaptor<Query> query = ArgumentCaptor.forClass(Query.class);
+        ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).updateFirst(query.capture(), update.capture(), eq(WriteActionAuditOutboxRecord.class));
+        assertThat(query.getValue().getQueryObject().toString())
+                .contains("_id=wao-1", "PUBLISHING", "claim_owner=publisher-1", "claim_token=claim-1",
+                        "claim_generation=4", "claimed_at=" + NOW.minusSeconds(2), "claim_expires_at", "attempt_count=2");
+        assertThat(update.getValue().getUpdateObject().toString())
+                .contains("PUBLISHED", "published_at", "$unset", "claim_token");
+    }
+
+    @Test
+    void staleClaimCannotMarkFailedAndDoesNotMutateDurableState() {
+        WriteActionAuditOutboxRecord claim = validClaim("stale-token", 1L);
+        when(mongoTemplate.updateFirst(
+                org.mockito.ArgumentMatchers.any(Query.class),
+                org.mockito.ArgumentMatchers.any(Update.class),
+                eq(WriteActionAuditOutboxRecord.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 0L, null));
+
+        assertThat(store.markFailed(claim, NOW.plusSeconds(1), "AUDIT_SERVICE_UNAVAILABLE")).isFalse();
+
+        ArgumentCaptor<Query> query = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).updateFirst(query.capture(), org.mockito.ArgumentMatchers.any(Update.class),
+                eq(WriteActionAuditOutboxRecord.class));
+        assertThat(query.getValue().getQueryObject().toString()).contains("stale-token", "claim_generation=1");
+    }
+
+    private WriteActionAuditOutboxRecord validClaim(String token, long generation) {
+        WriteActionAuditOutboxRecord claim = new WriteActionAuditOutboxRecord();
+        claim.setOutboxId("wao-1");
+        claim.setStatus(WriteActionAuditOutboxStatus.PUBLISHING);
+        claim.setClaimOwner("publisher-1");
+        claim.setClaimToken(token);
+        claim.setClaimGeneration(generation);
+        claim.setClaimedAt(NOW.minusSeconds(2));
+        claim.setClaimExpiresAt(NOW.plus(CLAIM_LEASE));
+        claim.setAttemptCount(2);
+        claim.setMaxAttempts(5);
+        return claim;
     }
 }

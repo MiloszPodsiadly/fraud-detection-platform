@@ -4,11 +4,13 @@ Status: FDP-122 infrastructure foundation.
 
 ## Scope
 
-FDP-122 adds an alert-service-owned write-action audit outbox for bounded business writes that must not return success
-unless the business record and durable audit intent are both persisted.
+The alert-service-owned write-action audit outbox supports bounded business writes that must not return success unless
+the business record and durable audit intent are both persisted. Governance obligations also expose a narrowly scoped
+operator recovery path after bounded publication attempts are exhausted.
 
-This is not a public API, not a public recovery API, not an admin UI, not a Kafka outbox, not a dataset export, not ML
-evaluation, and not a training-label pipeline. It is not a replacement for the existing decision event outbox in
+There is no general outbox API or unrestricted admin UI. Recovery controls are limited to the authenticated Security /
+Operations workspace and dedicated audit-recovery authority. This is not a Kafka outbox, dataset export, ML evaluation,
+or training-label pipeline. It is not a replacement for the existing decision event outbox in
 `transactional_outbox_records`. The existing decision outbox remains owned by submit-decision publication and recovery.
 
 ## Model
@@ -35,6 +37,8 @@ Each record contains:
 - `lastAttemptAt`
 - `claimedAt`
 - `claimOwner`
+- `claimToken`
+- `claimGeneration`
 - `claimExpiresAt`
 - `publishedAt`
 - `lastErrorCode`
@@ -86,13 +90,21 @@ Unsafe metadata is rejected before persistence with `WRITE_ACTION_AUDIT_OUTBOX_M
 
 It can be disabled by setting `app.audit.outbox.publisher.enabled=false`.
 
-No public recovery endpoint, admin UI, public outbox API, or Kafka publication is added in FDP-122.
+The Security / Operations workspace exposes a narrowly authorized recovery path for governance audit obligations in
+`FAILED_PERMANENT`. The `model-policy:audit:recover` authority is separate from ordinary audit read, publication
+recovery, analyst roles, and unscoped fraud operations. Recovery also requires audit-read and production scope so the
+operator can inspect the evidence being acted on.
 
-`PUBLISHING` is a leased claim state, not a terminal state. A successful claim stores `claimedAt`, `claimOwner`, and
-`claimExpiresAt`; the default lease is five minutes. If a publisher process crashes after the claim and before
+`PUBLISHING` is a leased claim state, not a terminal state. A successful claim stores `claimedAt`, `claimOwner`, a
+unique `claimToken`, incremented `claimGeneration`, and `claimExpiresAt`; the default lease is five minutes. Terminal
+updates use Mongo CAS over the outbox id, `PUBLISHING` status, exact owner, token, generation, claim time, unexpired
+lease, and expected retry counters. A stale claim can neither complete nor clear a newer worker's lease. No terminal
+transition falls back to `save`.
+
+If a publisher process crashes after the claim and before
 `AuditService` publication or before marking the record published/failed, a later scheduler run can recover stale
-`PUBLISHING` records after `claimExpiresAt <= now`. The recovery is internal to the scheduled publisher. FDP-122 adds
-no public recovery endpoint and no manual recovery API for this outbox.
+`PUBLISHING` records after `claimExpiresAt <= now`. This lease recovery is internal to the scheduled publisher;
+operator recovery applies only after an obligation reaches `FAILED_PERMANENT`.
 
 The publisher:
 
@@ -105,15 +117,23 @@ The publisher:
 - uses a bounded batch size of 50
 - uses an injected `Clock` for deterministic tests
 - calls `AuditService`
-- marks records `PUBLISHED` on success and clears `claimedAt`, `claimOwner`, and `claimExpiresAt`
+- marks records `PUBLISHED` only when its current claim CAS succeeds and clears claim fields atomically
 - increments `attemptCount` on failure
 - sets `lastAttemptAt`, `nextAttemptAt`, and `lastErrorCode`
-- keeps failures `FAILED_RETRYABLE` while attempts remain and clears `claimedAt`, `claimOwner`, and `claimExpiresAt`
-- marks records `FAILED_PERMANENT` after `maxAttempts` and clears `claimedAt`, `claimOwner`, and `claimExpiresAt`
+- keeps transient failures `FAILED_RETRYABLE` while attempts remain and clears claim fields atomically
+- marks records `FAILED_PERMANENT` after `maxAttempts`; cryptographic hash failures and immutable receipt conflicts are permanent immediately
 - never retries forever
 - stores only safe bounded error codes and messages
 
-Publication is at-least-once. A crash after `AuditService.audit` but before marking the outbox record `PUBLISHED` can
-cause re-publication after lease expiry. Exact-once audit effects require downstream `AuditService` idempotency or
-equivalent consumer-side deduplication. Metrics and stale-pending monitoring are not added in FDP-122; they remain
-future operational hardening scope. Stale `PUBLISHING` recovery is implemented in FDP-122 and is not future scope.
+Governance audit appends keep the deterministic request id derived from their immutable event commitment. After a
+crash or lost acknowledgement, a later claim verifies and reconciles that exact append before attempting publication.
+Operator recovery classifies the commitment and deterministic request ID before changing state. A verified existing
+append only changes the outbox acknowledgement to `PUBLISHED`; a verified absent request can queue at most three
+bounded retries. Attempt counters and original commitment fields are retained, and each retry extends the total attempt
+threshold by one. Recovery uses CAS from `FAILED_PERMANENT`, so it cannot take over an active claim. A Mongo transaction
+updates the obligation and stores an immutable, hashed recovery receipt under its operation ID. The receipt is the
+terminal evidence for the recovery action and deliberately creates no second audit obligation.
+
+Conflicting operation ID reuse, an active/stale claim, exhausted recovery budget, unavailable evidence, or invalid
+commitment evidence fails closed. An unavailable Mongo read is not treated as proof that no append exists. Non-governance
+audit outbox behavior retains its existing at-least-once semantics.
