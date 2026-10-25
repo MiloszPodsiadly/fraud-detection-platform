@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Git Bash rewrites absolute Linux container paths passed to docker.exe unless disabled.
+export MSYS_NO_PATHCONV=1
+
 variant="${1:-dev}"
 case "$variant" in
   dev|app-hardening|full-security-hardened) ;;
