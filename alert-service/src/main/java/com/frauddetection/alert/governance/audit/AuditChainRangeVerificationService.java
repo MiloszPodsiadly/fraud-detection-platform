@@ -67,19 +67,20 @@ public class AuditChainRangeVerificationService {
             return result(Status.INVALID, startPosition, endPosition, null, null, 0,
                     initialHead == null ? null : initialHead.chainPosition(), false, "CURRENT_HEAD_INVALID");
         }
-        long boundaryPosition = requestedBoundaryPosition == null
-                ? initialHead.chainPosition() : requestedBoundaryPosition;
-        String boundaryHash = requestedBoundaryHash == null ? initialHead.eventHash() : requestedBoundaryHash;
-        if (boundaryPosition < endPosition || boundaryPosition > initialHead.chainPosition()) {
+        long boundaryPosition = requestedBoundaryPosition == null ? endPosition : requestedBoundaryPosition;
+        String boundaryHash = requestedBoundaryHash;
+        if (boundaryPosition != endPosition) {
             return result(Status.INVALID_REQUEST, startPosition, endPosition, boundaryPosition, boundaryHash, 0,
-                    initialHead.chainPosition(), false, "RANGE_OUTSIDE_STABLE_BOUNDARY");
+                    initialHead.chainPosition(), false, "BOUNDARY_MUST_EQUAL_RANGE_END");
         }
         AuditEventDocument boundary = exactEvent(boundaryPosition);
-        if (boundary == null || !Objects.equals(boundaryHash, boundary.eventHash()) || !validEvent(boundary)
+        if (boundary == null || requestedBoundaryHash != null
+                && !Objects.equals(requestedBoundaryHash, boundary.eventHash()) || !validEvent(boundary)
                 || !validAnchor(exactAnchor(boundaryPosition), boundary)) {
             return result(Status.INVALID, startPosition, endPosition, boundaryPosition, boundaryHash, 0,
                     initialHead.chainPosition(), false, "STABLE_BOUNDARY_INVALID");
         }
+        boundaryHash = boundary.eventHash();
 
         long queryFrom = startPosition == 1 ? 1 : startPosition - 1;
         List<AuditEventDocument> rows = events.findByPartitionKeyAndChainPositionBetween(
@@ -138,7 +139,11 @@ public class AuditChainRangeVerificationService {
         AuditEventDocument finalHead = finalSnapshot.head();
         AuditEventDocument boundaryAfter = exactEvent(boundaryPosition);
         AuditAnchorDocument boundaryAnchorAfter = exactAnchor(boundaryPosition);
-        if (!finalSnapshot.stable() || !validHead(finalHead) || boundaryAfter == null || !validEvent(boundaryAfter)
+        if (!finalSnapshot.stable() || !validHead(finalHead)
+                || finalHead.chainPosition() < initialHead.chainPosition()
+                || finalHead.chainPosition().equals(initialHead.chainPosition())
+                    && !Objects.equals(finalHead.eventHash(), initialHead.eventHash())
+                || boundaryAfter == null || !validEvent(boundaryAfter)
                 || !Objects.equals(boundaryHash, boundaryAfter.eventHash())
                 || !validAnchor(boundaryAnchorAfter, boundaryAfter)) {
             return result(Status.UNSTABLE_BOUNDARY, startPosition, endPosition, boundaryPosition, boundaryHash,
@@ -173,12 +178,9 @@ public class AuditChainRangeVerificationService {
     private HeadSnapshot stableHead() {
         for (int attempt = 0; attempt < 3; attempt++) {
             AuditEventDocument first = events.findLatestByPartitionKey(PARTITION).orElse(null);
-            long count = events.countByPartitionKey(PARTITION);
             AuditEventDocument second = events.findLatestByPartitionKey(PARTITION).orElse(null);
-            if (first == null && second == null && count == 0) return new HeadSnapshot(null, true);
-            if (sameHead(first, second) && first != null && first.chainPosition() != null
-                    && first.chainPosition() == count)
-                return new HeadSnapshot(first, true);
+            if (first == null && second == null) return new HeadSnapshot(null, true);
+            if (sameHead(first, second)) return new HeadSnapshot(first, true);
         }
         return new HeadSnapshot(events.findLatestByPartitionKey(PARTITION).orElse(null), false);
     }
@@ -222,6 +224,7 @@ public class AuditChainRangeVerificationService {
 
     private record HeadSnapshot(AuditEventDocument head, boolean stable) { }
 
+    /** boundaryPosition/boundarySha256 identify the checked range endpoint; observedHead is not a linked boundary. */
     public record Result(Status chainRangeIntegrity, Dimension eventIntegrity,
             Dimension historicalActionProof, Dimension externalWitness, Dimension currentAuthorization,
             long startPosition, long endPosition, Long boundaryPosition, String boundarySha256,

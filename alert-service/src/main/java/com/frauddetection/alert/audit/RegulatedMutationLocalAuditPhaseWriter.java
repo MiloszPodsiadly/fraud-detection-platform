@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -22,7 +23,8 @@ public class RegulatedMutationLocalAuditPhaseWriter {
     private final AuditChainLockRepository lockRepository;
     private final AlertServiceMetrics metrics;
     private final LocalAuditPhaseWriterProperties properties;
-    private final ThreadLocal<String> activeChainLockOwner = new ThreadLocal<>();
+    private final AuditMongoTransactionRunner transactionRunner;
+    private final ThreadLocal<AuditChainLockDocument> activeChainLease = new ThreadLocal<>();
 
     @Autowired
     public RegulatedMutationLocalAuditPhaseWriter(
@@ -30,13 +32,25 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             AuditAnchorRepository auditAnchorRepository,
             AuditChainLockRepository lockRepository,
             AlertServiceMetrics metrics,
-            LocalAuditPhaseWriterProperties properties
+            LocalAuditPhaseWriterProperties properties,
+            AuditMongoTransactionRunner transactionRunner
     ) {
         this.auditEventRepository = auditEventRepository;
         this.auditAnchorRepository = auditAnchorRepository;
         this.lockRepository = lockRepository;
         this.metrics = metrics;
         this.properties = properties == null ? new LocalAuditPhaseWriterProperties() : properties;
+        this.transactionRunner = transactionRunner == null ? new AuditMongoTransactionRunner() : transactionRunner;
+    }
+
+    public RegulatedMutationLocalAuditPhaseWriter(
+            AuditEventRepository auditEventRepository,
+            AuditAnchorRepository auditAnchorRepository,
+            AuditChainLockRepository lockRepository,
+            AlertServiceMetrics metrics,
+            LocalAuditPhaseWriterProperties properties
+    ) {
+        this(auditEventRepository, auditAnchorRepository, lockRepository, metrics, properties, new AuditMongoTransactionRunner());
     }
 
     public RegulatedMutationLocalAuditPhaseWriter(
@@ -44,7 +58,8 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             AuditAnchorRepository auditAnchorRepository,
             AuditChainLockRepository lockRepository
     ) {
-        this(auditEventRepository, auditAnchorRepository, lockRepository, null, new LocalAuditPhaseWriterProperties());
+        this(auditEventRepository, auditAnchorRepository, lockRepository, null, new LocalAuditPhaseWriterProperties(),
+                new AuditMongoTransactionRunner());
     }
 
     public String recordSuccessPhase(
@@ -57,41 +72,74 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         AuditEventDocument existingPhase = auditEventRepository.findByRequestId(phaseKey).orElse(null);
         if (existingPhase != null) {
             requireCanonical(existingPhase);
+            requireMatchingRequest(command, action, resourceType, phaseKey, existingPhase);
+            requireMatchingAnchor(existingPhase);
             recordAppend("DUPLICATE_PHASE", startedAt);
             return existingPhase.auditId();
         }
-        if (activeChainLockOwner.get() != null) {
-            return appendLocalSuccess(command, action, resourceType, phaseKey, startedAt);
+        AuditEvent event = new AuditEvent(
+                new AuditActor(command.getActorId(), Set.of(), Set.of()),
+                action,
+                resourceType,
+                command.getResourceId(),
+                Instant.now(),
+                command.getCorrelationId(),
+                phaseKey,
+                AuditOutcome.SUCCESS,
+                AuditFailureCategory.NONE,
+                null,
+                new AuditEventMetadataSummary(
+                        command.getCorrelationId(),
+                        phaseKey,
+                        "alert-service",
+                        "1.0",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                )
+        );
+        String auditId = UUID.randomUUID().toString();
+        String anchorId = UUID.randomUUID().toString();
+        if (activeChainLease.get() != null) {
+            return appendLocalSuccess(command, event, auditId, anchorId, phaseKey, startedAt);
         }
-        return withChainLock(() -> appendLocalSuccess(command, action, resourceType, phaseKey, startedAt));
+        return withChainLock(() -> appendLocalSuccess(command, event, auditId, anchorId, phaseKey, startedAt));
     }
 
     public <T> T withChainLock(Supplier<T> callback) {
-        if (activeChainLockOwner.get() != null) {
+        if (activeChainLease.get() != null) {
             return callback.get();
         }
-        String lockOwner = acquireChainLock();
-        activeChainLockOwner.set(lockOwner);
+        AuditChainLockDocument lease = acquireChainLock();
+        activeChainLease.set(lease);
         try {
             return callback.get();
         } finally {
-            activeChainLockOwner.remove();
-            try {
-                lockRepository.release(AuditEventDocument.PARTITION_KEY, lockOwner);
-            } catch (DataAccessException ignored) {
-                recordAppendAttempt("LOCK_RELEASE_FAILED");
-                recordLockReleaseFailure();
-            }
+            activeChainLease.remove();
+            AtomicBoolean released = new AtomicBoolean();
+            Runnable release = () -> {
+                if (released.get()) return;
+                try {
+                    boolean success = transactionRunner.requiresNew(() -> releaseChainLock(lease));
+                    if (success) released.set(true);
+                } catch (RuntimeException failure) {
+                    recordAppendAttempt("LOCK_RELEASE_FAILED");
+                    recordLockReleaseFailure();
+                }
+            };
+            transactionRunner.afterCommit(release);
+            transactionRunner.afterCompletion(release);
         }
     }
 
-    private String acquireChainLock() {
+    private AuditChainLockDocument acquireChainLock() {
         long startedAt = System.nanoTime();
         String lockOwner = UUID.randomUUID().toString();
         for (int attempt = 1; attempt <= properties.getMaxAppendAttempts(); attempt++) {
             try {
-                lockRepository.acquire(AuditEventDocument.PARTITION_KEY, lockOwner);
-                return lockOwner;
+                return lockRepository.acquire(AuditEventDocument.PARTITION_KEY, lockOwner);
             } catch (AuditChainConflictException conflict) {
                 if (attempt == properties.getMaxAppendAttempts() || retryBudgetExhausted(startedAt)) {
                     recordAppend("CHAIN_CONFLICT_EXHAUSTED", startedAt);
@@ -114,16 +162,60 @@ public class RegulatedMutationLocalAuditPhaseWriter {
 
     private String appendLocalSuccess(
             RegulatedMutationCommandDocument command,
-            AuditAction action,
-            AuditResourceType resourceType,
+            AuditEvent event,
+            String auditId,
+            String anchorId,
+            String phaseKey,
+            long startedAt
+    ) {
+        try {
+            return transactionRunner.required(() -> appendLocalSuccessInTransaction(
+                    command, event, auditId, anchorId, phaseKey, startedAt
+            ));
+        } catch (RuntimeException exception) {
+            AuditEventDocument reconciled = auditEventRepository.findByRequestId(phaseKey).orElse(null);
+            if (reconciled != null && matchesRequest(command, event, reconciled)) {
+                requireMatchingAnchor(reconciled);
+                transactionRunner.afterCommit(() -> recordAppend("SUCCESS", startedAt));
+                return reconciled.auditId();
+            }
+            throw exception;
+        }
+    }
+
+    private boolean releaseChainLock(AuditChainLockDocument lease) {
+        try {
+            lockRepository.release(lease);
+            return true;
+        } catch (DataAccessException ignored) {
+            recordAppendAttempt("LOCK_RELEASE_FAILED");
+            recordLockReleaseFailure();
+            return false;
+        }
+    }
+
+    private String appendLocalSuccessInTransaction(
+            RegulatedMutationCommandDocument command,
+            AuditEvent event,
+            String auditId,
+            String anchorId,
             String phaseKey,
             long startedAt
     ) {
         boolean auditEventInserted = false;
         try {
+            AuditChainLockDocument lease = activeChainLease.get();
+            if (transactionRunner.transactionActive()) {
+                if (lease == null) {
+                    throw new AuditPersistenceUnavailableException("Audit chain lease is missing.", null);
+                }
+                lockRepository.fence(lease);
+            }
             AuditEventDocument existingPhaseEvent = auditEventRepository.findByRequestId(phaseKey).orElse(null);
             if (existingPhaseEvent != null) {
                 requireCanonical(existingPhaseEvent);
+                requireMatchingRequest(command, event.action(), event.resourceType(), phaseKey, existingPhaseEvent);
+                requireMatchingAnchor(existingPhaseEvent);
                 recordAppend("DUPLICATE_PHASE", startedAt);
                 return existingPhaseEvent.auditId();
             }
@@ -132,43 +224,22 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             requireCanonical(previous);
             String previousHash = previous == null ? null : previous.eventHash();
             long chainPosition = nextChainPosition(previous);
-            AuditEvent event = new AuditEvent(
-                    new AuditActor(command.getActorId(), Set.of(), Set.of()),
-                    action,
-                    resourceType,
-                    command.getResourceId(),
-                    Instant.now(),
-                    command.getCorrelationId(),
-                    phaseKey,
-                    AuditOutcome.SUCCESS,
-                    AuditFailureCategory.NONE,
-                    null,
-                    new AuditEventMetadataSummary(
-                            command.getCorrelationId(),
-                            phaseKey,
-                            "alert-service",
-                            "1.0",
-                            null,
-                            null,
-                            null,
-                            null,
-                            null
-                    )
-            );
             AuditEventDocument document = auditEventRepository.insert(AuditEventDocument.from(
-                    UUID.randomUUID().toString(),
+                    auditId,
                     event,
                     previousHash,
                     chainPosition
             ));
             auditEventInserted = true;
-            auditAnchorRepository.insert(AuditAnchorDocument.from(UUID.randomUUID().toString(), document));
-            recordAppend("SUCCESS", startedAt);
+            auditAnchorRepository.insert(AuditAnchorDocument.from(anchorId, document));
+            transactionRunner.afterCommit(() -> recordAppend("SUCCESS", startedAt));
             return document.auditId();
         } catch (DuplicateKeyException duplicate) {
             return auditEventRepository.findByRequestId(phaseKey)
                     .map(document -> {
                         requireCanonical(document);
+                        requireMatchingRequest(command, event.action(), event.resourceType(), phaseKey, document);
+                        requireMatchingAnchor(document);
                         recordAppend("DUPLICATE_PHASE", startedAt);
                         return document.auditId();
                     })
@@ -180,6 +251,62 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         } catch (DataAccessException exception) {
             recordAppend(auditEventInserted ? "ANCHOR_INSERT_FAILED" : "AUDIT_INSERT_FAILED", startedAt);
             throw new AuditPersistenceUnavailableException("Local success audit persistence failed.", exception);
+        }
+    }
+
+    private boolean matchesRequest(
+            RegulatedMutationCommandDocument command,
+            AuditEvent event,
+            AuditEventDocument document
+    ) {
+        if (!AuditEventHasher.matches(document)
+                || !java.util.Objects.equals(document.action(), event.action())
+                || !java.util.Objects.equals(document.resourceType(), event.resourceType())
+                || !java.util.Objects.equals(document.resourceId(), event.resourceId())
+                || !java.util.Objects.equals(document.actorId(), command.getActorId())
+                || !java.util.Objects.equals(document.correlationId(), command.getCorrelationId())
+                || !java.util.Objects.equals(document.requestId(), event.requestId())
+                || document.outcome() != AuditOutcome.SUCCESS
+                || !java.util.Objects.equals(document.metadataSummary(), event.metadataSummary())) {
+            return false;
+        }
+        return true;
+    }
+
+    private void requireMatchingRequest(
+            RegulatedMutationCommandDocument command,
+            AuditAction action,
+            AuditResourceType resourceType,
+            String phaseKey,
+            AuditEventDocument event
+    ) {
+        if (!java.util.Objects.equals(event.action(), action)
+                || !java.util.Objects.equals(event.resourceType(), resourceType)
+                || !java.util.Objects.equals(event.resourceId(), command.getResourceId())
+                || !java.util.Objects.equals(event.actorId(), command.getActorId())
+                || !java.util.Objects.equals(event.correlationId(), command.getCorrelationId())
+                || !java.util.Objects.equals(event.requestId(), phaseKey)
+                || event.outcome() != AuditOutcome.SUCCESS) {
+            throw new AuditPersistenceUnavailableException("Existing success phase does not match the request identity.", null);
+        }
+    }
+
+    private void requireMatchingAnchor(AuditEventDocument event) {
+        if (event.chainPosition() == null) {
+            throw new AuditPersistenceUnavailableException("Existing audit event has no chain position.", null);
+        }
+        java.util.List<AuditAnchorDocument> anchors = auditAnchorRepository.findByPartitionKeyAndChainPositionBetween(
+                event.partitionKey(), event.chainPosition(), event.chainPosition(), 2
+        );
+        if (anchors.size() != 1) {
+            throw new AuditPersistenceUnavailableException("Existing audit event has no unique matching local anchor.", null);
+        }
+        AuditAnchorDocument anchor = anchors.getFirst();
+        if (!java.util.Objects.equals(anchor.partitionKey(), event.partitionKey())
+                || anchor.chainPosition() != event.chainPosition()
+                || !java.util.Objects.equals(anchor.lastEventHash(), event.eventHash())
+                || !java.util.Objects.equals(anchor.previousEventHash(), event.previousEventHash())) {
+            throw new AuditPersistenceUnavailableException("Existing audit event has no matching local anchor.", null);
         }
     }
 

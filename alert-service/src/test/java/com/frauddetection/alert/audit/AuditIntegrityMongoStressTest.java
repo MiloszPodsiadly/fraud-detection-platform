@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 
@@ -109,7 +110,8 @@ class AuditIntegrityMongoStressTest extends AbstractIntegrationTest {
                 repository,
                 anchorRepository,
                 new AuditChainLockRepository(mongoTemplate),
-                new AlertServiceMetrics(new SimpleMeterRegistry())
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                new AuditMongoTransactionRunner(new MongoTransactionManager(mongoClientDatabaseFactory))
         );
         AtomicInteger sequence = new AtomicInteger();
         CountDownLatch start = new CountDownLatch(1);

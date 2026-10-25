@@ -17,7 +17,8 @@ transaction-mode `REQUIRED` so command, business, local evidence, outbox, and sn
 transaction boundary. This does not expand transaction scope beyond Mongo and does not provide a distributed lock or
 distributed ACID.
 
-There is no distributed lock.
+The regulated-command lease transition design does not provide a distributed lock. Audit-chain appends use a separate Mongo-backed,
+generation-fenced partition lease; it serializes only audit-chain event and anchor writes and does not fence unrelated business writes.
 
 Missing, null, retired, unknown, or mismatched model versions fail closed. The read-only persisted-model preflight
 identifies unsupported retained records; lease fencing never reinterprets them.

@@ -47,13 +47,13 @@ class PersistentAuditEventPublisherTest {
             "updateOne(",
             "findAndModify("
     );
-    private static final Pattern UPDATED_FIELD = Pattern.compile("\\.(?:set|unset|setOnInsert)\\(\"([^\"]+)\"");
+    private static final Pattern UPDATED_FIELD = Pattern.compile("\\.(?:set|unset|setOnInsert|inc)\\(\"([^\"]+)\"");
     private static final Map<String, MutableAuditComponentPolicy> MUTABLE_AUDIT_COMPONENTS = Map.of(
             "AuditChainLockRepository.java",
             new MutableAuditComponentPolicy(
                     "AuditChainLockDocument",
                     Set.of("findAndModify(", "updateFirst("),
-                    Set.of("_id", "owner_token", "locked_until")
+                    Set.of("_id", "owner_token", "locked_until", "generation", "last_fenced_at", "fence_revision")
             ),
             "WriteActionAuditOutboxClaimStore.java",
             new MutableAuditComponentPolicy(
@@ -62,6 +62,13 @@ class PersistentAuditEventPublisherTest {
                     Set.of("status", "last_attempt_at", "claimed_at", "claim_owner", "claim_token",
                             "claim_generation", "claim_expires_at", "published_at", "next_attempt_at",
                             "last_error_code", "last_error_message", "attempt_count")
+            ),
+            "WriteActionAuditOutboxRecoveryService.java",
+            new MutableAuditComponentPolicy(
+                    "WriteActionAuditOutboxRecord",
+                    Set.of("findAndModify("),
+                    Set.of("last_recovery_at", "status", "published_at", "next_attempt_at",
+                            "last_error_code", "last_error_message", "recovery_count")
             ),
             "ExternalAuditHeadRecoveryStore.java",
             new MutableAuditComponentPolicy(
@@ -307,12 +314,12 @@ class PersistentAuditEventPublisherTest {
         Semaphore lock = new Semaphore(1);
         doAnswer(invocation -> {
             lock.acquire();
-            return new AuditChainLockDocument(invocation.getArgument(0), invocation.getArgument(1), Instant.now().plusSeconds(30));
+            return new AuditChainLockDocument(invocation.getArgument(0), invocation.getArgument(1), Instant.now().plusSeconds(30), 1L);
         }).when(lockRepository).acquire(eq(AuditEventDocument.PARTITION_KEY), any(String.class));
         doAnswer(invocation -> {
             lock.release();
             return null;
-        }).when(lockRepository).release(eq(AuditEventDocument.PARTITION_KEY), any(String.class));
+        }).when(lockRepository).release(any(AuditChainLockDocument.class));
         when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenAnswer(invocation -> Optional.ofNullable(latest.get()));
         when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> {
             AuditEventDocument document = invocation.getArgument(0);
@@ -406,6 +413,10 @@ class PersistentAuditEventPublisherTest {
         org.mockito.Mockito.doThrow(new ExternalAuditAnchorPublicationRequiredException("WRITE_NOT_VERIFIED"))
                 .when(externalAnchorPublisher)
                 .publishRequired(anchor);
+        when(lockRepository.acquire(eq(AuditEventDocument.PARTITION_KEY), any(String.class)))
+                .thenAnswer(invocation -> new AuditChainLockDocument(
+                        invocation.getArgument(0), invocation.getArgument(1), Instant.now().plusSeconds(30), 1L
+                ));
         PersistentAuditEventPublisher publisher = new PersistentAuditEventPublisher(
                 repository,
                 anchorRepository,
@@ -423,7 +434,7 @@ class PersistentAuditEventPublisherTest {
                 .isEqualTo("WRITE_NOT_VERIFIED");
         verify(externalAnchorPublisher).publishRequired(anchor);
         verify(lockRepository, times(2)).acquire(eq(AuditEventDocument.PARTITION_KEY), any(String.class));
-        verify(lockRepository, times(2)).release(eq(AuditEventDocument.PARTITION_KEY), any(String.class));
+        verify(lockRepository, times(2)).release(any(AuditChainLockDocument.class));
         assertThat(inserted).hasSize(2);
         assertThat(inserted).extracting(AuditEventDocument::outcome)
                 .containsExactly(AuditOutcome.ATTEMPTED, AuditOutcome.ABORTED_EXTERNAL_ANCHOR_REQUIRED);

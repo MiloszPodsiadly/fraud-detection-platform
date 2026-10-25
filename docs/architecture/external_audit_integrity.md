@@ -13,9 +13,11 @@ binding, and unavailable stores remain fail closed.
 
 Governance event reads distinguish selected-event integrity from full-range integrity. The bounded governance chain
 range endpoint traverses each requested position, recomputes the canonical `AuditEventHasher` digest, validates every
-previous-hash link, and requires one matching local anchor per event. It is pinned to a stable head position/hash and
-rechecks that boundary after reading; appends beyond the pinned boundary are reported as concurrent. The configured
-range length defaults to 1000 (`AUDIT_CHAIN_RANGE_MAX_LENGTH`) and is hard-capped at 10000. This local range result
+previous-hash link, and requires one matching local anchor per event. It rechecks the observed head before and after
+reading; the reported cryptographic boundary remains the requested range
+endpoint, and appends beyond the observed head are reported as concurrent. Head stability uses indexed latest-event
+reads and does not count the full audit history. The configured range length defaults to 1000
+(`AUDIT_CHAIN_RANGE_MAX_LENGTH`) and is hard-capped at 10000. This local range result
 does not imply historical WebAuthn proof verification, independent witness verification, or current authorization.
 
 ## Canonical signature cutover

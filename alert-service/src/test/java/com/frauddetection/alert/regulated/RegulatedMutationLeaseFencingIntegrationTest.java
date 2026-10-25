@@ -3,10 +3,17 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.regulated.status.RegulatedMutationPublicStatusMapper;
 
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditActor;
+import com.frauddetection.alert.audit.AuditAnchorDocument;
+import com.frauddetection.alert.audit.AuditAnchorRepository;
+import com.frauddetection.alert.audit.AuditChainLockRepository;
+import com.frauddetection.alert.audit.AuditEvent;
 import com.frauddetection.alert.audit.AuditEventDocument;
+import com.frauddetection.alert.audit.AuditEventHasher;
+import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.AuditFailureCategory;
-import com.frauddetection.alert.audit.AuditOutcome;
+import com.frauddetection.alert.audit.PersistentAuditEventPublisher;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
@@ -540,36 +547,51 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
     void completeDurableLocalFinalizationProofLoadsFromRealMongoCollections() {
         RegulatedMutationCommandDocument command = committedCommand("idem-durable-proof");
         command.setCorrelationId("corr-durable-proof");
-        mongoTemplate.save(command);
-
-        AuditEventDocument audit = new AuditEventDocument(
-                command.getSuccessAuditId(),
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                command.getActorId(),
-                command.getActorId(),
-                List.of("FRAUD_OPS_ADMIN"),
-                "HUMAN",
-                List.of("decision:write"),
+        mongoTemplate.indexOps(AuditEventDocument.class).ensureIndex(new Index()
+                .on("partition_key", Sort.Direction.ASC)
+                .on("chain_position", Sort.Direction.ASC)
+                .unique()
+                .sparse()
+                .named("audit_partition_chain_position_uidx_test"));
+        mongoTemplate.indexOps(AuditAnchorDocument.class).ensureIndex(new Index()
+                .on("partition_key", Sort.Direction.ASC)
+                .on("chain_position", Sort.Direction.ASC)
+                .unique()
+                .sparse()
+                .named("audit_anchor_partition_chain_position_uidx_test"));
+        AuditEventRepository auditRepository = new AuditEventRepository(mongoTemplate);
+        PersistentAuditEventPublisher auditPublisher = new PersistentAuditEventPublisher(
+                auditRepository,
+                new AuditAnchorRepository(mongoTemplate),
+                new AuditChainLockRepository(mongoTemplate),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                null,
+                false,
+                false,
+                new com.frauddetection.alert.audit.AuditMongoTransactionRunner(new org.springframework.data.mongodb.MongoTransactionManager(mongoClientDatabaseFactory))
+        );
+        auditPublisher.publish(new AuditEvent(
+                new AuditActor(command.getActorId(), java.util.Set.of("FRAUD_OPS_ADMIN"), java.util.Set.of("decision:write")),
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT,
                 command.getResourceId(),
                 command.getLocalCommittedAt(),
                 command.getCorrelationId(),
                 command.getId() + ":SUCCESS",
-                "alert-service",
-                "source_service:alert-service",
-                1L,
                 AuditOutcome.SUCCESS,
                 AuditFailureCategory.NONE,
-                null,
-                null,
-                null,
-                "event-hash",
-                "SHA-256",
-                "1.0"
-        );
-        AuditEventRepository auditRepository = new AuditEventRepository(mongoTemplate);
-        auditRepository.insert(audit);
+                null
+        ));
+        AuditEventDocument audit = auditRepository.findByRequestId(command.getId() + ":SUCCESS").orElseThrow();
+        command.setSuccessAuditId(audit.auditId());
+        mongoTemplate.save(command);
+        assertThat(AuditEventHasher.matches(audit)).isTrue();
+        assertThat(mongoTemplate.count(
+                org.springframework.data.mongodb.core.query.Query.query(
+                        org.springframework.data.mongodb.core.query.Criteria.where("last_event_hash").is(audit.eventHash())
+                ),
+                AuditAnchorDocument.class
+        )).isEqualTo(1L);
 
         TransactionalOutboxRecordDocument outbox = new TransactionalOutboxRecordDocument();
         outbox.setEventId(command.getOutboxEventId());

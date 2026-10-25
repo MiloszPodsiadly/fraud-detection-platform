@@ -14,6 +14,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AuditChainRangeVerificationServiceTest {
@@ -32,6 +34,49 @@ class AuditChainRangeVerificationServiceTest {
                 .isEqualTo(AuditChainRangeVerificationService.Status.CHAIN_RANGE_VERIFIED);
         assertThat(result.checkedEvents()).isEqualTo(3);
         assertThat(result.concurrentAppendObserved()).isFalse();
+        verify(events, never()).countByPartitionKey(PARTITION);
+    }
+
+    @Test
+    void omittedBoundaryUsesCheckedEndpointAndReportsHeadOnlyAsObservation() {
+        stubStore(chain);
+
+        var result = service(5).verify(auditor(), 1, 3, null, null);
+
+        assertThat(result.chainRangeIntegrity())
+                .isEqualTo(AuditChainRangeVerificationService.Status.CHAIN_RANGE_VERIFIED);
+        assertThat(result.boundaryPosition()).isEqualTo(3L);
+        assertThat(result.boundarySha256()).isEqualTo(chain.get(2).eventHash());
+        assertThat(result.observedHeadPosition()).isEqualTo(4L);
+    }
+
+    @Test
+    void rejectsBindingRangeToLaterUncheckedCheckpointButAcceptsContiguousContinuation() {
+        List<AuditEventDocument> longChain = chain(500);
+        stubStore(longChain);
+
+        var skipped = service(500).verify(auditor(), 100, 200, 500L, longChain.get(499).eventHash());
+        assertThat(skipped.chainRangeIntegrity())
+                .isEqualTo(AuditChainRangeVerificationService.Status.INVALID_REQUEST);
+        assertThat(skipped.reason()).isEqualTo("BOUNDARY_MUST_EQUAL_RANGE_END");
+
+        stubStore(longChain);
+        var continuation = service(500).verify(auditor(), 200, 500, 500L, longChain.get(499).eventHash());
+        assertThat(continuation.chainRangeIntegrity())
+                .isEqualTo(AuditChainRangeVerificationService.Status.CHAIN_RANGE_VERIFIED);
+        assertThat(continuation.boundaryPosition()).isEqualTo(500L);
+        assertThat(continuation.checkedEvents()).isEqualTo(301);
+    }
+
+    @Test
+    void missingIntermediatePositionPreventsRangeVerification() {
+        List<AuditEventDocument> longChain = chain(400);
+        stubStore(longChain.stream().filter(event -> event.chainPosition() != 350L).toList());
+
+        var result = service(400).verify(auditor(), 100, 400, 400L, longChain.get(399).eventHash());
+
+        assertThat(result.chainRangeIntegrity())
+                .isEqualTo(AuditChainRangeVerificationService.Status.TRUNCATED);
     }
 
     @Test
@@ -87,7 +132,7 @@ class AuditChainRangeVerificationServiceTest {
     }
 
     @Test
-    void duplicatePositionAndInconsistentHeadFailClosed() {
+    void duplicatePositionAndUnstableHeadFailClosed() {
         stubStore(chain);
         when(events.findByPartitionKeyAndChainPositionBetween(PARTITION, 1L, 3L, 4))
                 .thenReturn(List.of(chain.get(0), chain.get(1), chain.get(1), chain.get(2)));
@@ -95,7 +140,11 @@ class AuditChainRangeVerificationServiceTest {
                 .isEqualTo(AuditChainRangeVerificationService.Status.INVALID);
 
         stubStore(chain);
-        when(events.countByPartitionKey(PARTITION)).thenReturn(3L);
+        when(events.findLatestByPartitionKey(PARTITION)).thenReturn(
+                java.util.Optional.of(chain.get(3)), java.util.Optional.of(chain.get(2)),
+                java.util.Optional.of(chain.get(3)), java.util.Optional.of(chain.get(2)),
+                java.util.Optional.of(chain.get(3)), java.util.Optional.of(chain.get(2)),
+                java.util.Optional.of(chain.get(3)));
         assertThat(service(5).verify(auditor(), 1, 3, 3L, chain.get(2).eventHash()).chainRangeIntegrity())
                 .isEqualTo(AuditChainRangeVerificationService.Status.UNSTABLE_BOUNDARY);
     }
@@ -122,14 +171,24 @@ class AuditChainRangeVerificationServiceTest {
         when(events.findLatestByPartitionKey(PARTITION))
                 .thenReturn(java.util.Optional.of(chain.get(3)), java.util.Optional.of(chain.get(3)),
                         java.util.Optional.of(withAppend.get(4)), java.util.Optional.of(withAppend.get(4)));
-        when(events.countByPartitionKey(PARTITION)).thenReturn(4L, 5L);
-
         var result = service(5).verify(auditor(), 1, 3, 3L, chain.get(2).eventHash());
 
         assertThat(result.chainRangeIntegrity())
                 .isEqualTo(AuditChainRangeVerificationService.Status.CHAIN_RANGE_VERIFIED);
         assertThat(result.concurrentAppendObserved()).isTrue();
         assertThat(result.boundaryPosition()).isEqualTo(3L);
+    }
+
+    @Test
+    void changedRangeEndpointDuringVerificationIsNotReportedVerified() {
+        stubStore(chain);
+        when(events.findByPartitionKeyAndChainPositionBetween(PARTITION, 3L, 3L, 2))
+                .thenReturn(List.of(chain.get(2)), List.of(chain.get(2).withEventHash("f".repeat(64))));
+
+        var result = service(5).verify(auditor(), 1, 3, 3L, chain.get(2).eventHash());
+
+        assertThat(result.chainRangeIntegrity())
+                .isEqualTo(AuditChainRangeVerificationService.Status.UNSTABLE_BOUNDARY);
     }
 
     private AuditChainRangeVerificationService service(int maxRange) {
@@ -139,7 +198,6 @@ class AuditChainRangeVerificationServiceTest {
     private void stubStore(List<AuditEventDocument> stored) {
         var head = stored.stream().max(java.util.Comparator.comparing(AuditEventDocument::chainPosition)).orElse(null);
         when(events.findLatestByPartitionKey(PARTITION)).thenReturn(java.util.Optional.ofNullable(head));
-        when(events.countByPartitionKey(PARTITION)).thenReturn(head == null ? 0L : head.chainPosition());
         when(events.findByPartitionKeyAndChainPositionBetween(anyString(), anyLong(), anyLong(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenAnswer(call -> stored.stream()
                         .filter(e -> e.chainPosition() >= (long) call.getArgument(1)
@@ -156,9 +214,13 @@ class AuditChainRangeVerificationServiceTest {
     }
 
     private static List<AuditEventDocument> chain() {
+        return chain(4);
+    }
+
+    private static List<AuditEventDocument> chain(int count) {
         var result = new java.util.ArrayList<AuditEventDocument>();
         String previous = null;
-        for (long position = 1; position <= 4; position++) {
+        for (long position = 1; position <= count; position++) {
             var event = AuditEventDocument.from("event-" + position, new AuditEvent(
                     new AuditActor("actor", Set.of(), Set.of()), AuditAction.READ_AUDIT_EVENTS,
                     AuditResourceType.AUDIT_EVENT, "audit", Instant.parse("2026-10-25T10:00:00Z").plusSeconds(position),
