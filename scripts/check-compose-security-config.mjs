@@ -85,6 +85,22 @@ function expectEqual(label, actual, expected) {
   }
 }
 
+function expectResolved(label, actual, expected) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    fail(`${label}: expected ${formatResolved(expected)}, resolved ${formatResolved(actual)}`);
+  }
+}
+
+function expectNotResolved(label, actual, forbidden) {
+  if (actual === forbidden) {
+    fail(`${label}: expected a value other than ${formatResolved(forbidden)}, resolved ${formatResolved(actual)}`);
+  }
+}
+
+function formatResolved(value) {
+  return value === undefined ? "undefined" : JSON.stringify(value);
+}
+
 function assertNoContainerNames() {
   for (const [name, definition] of Object.entries(services)) {
     if (definition.container_name) {
@@ -343,24 +359,38 @@ function assertObservationKeyIsolation() {
   const root = path.resolve("deployment", ".local", "model-promotion-policy", "fleet-observation");
   const privateSource = path.join(root, "alert.private-key.pkcs8.base64");
   const alertMount = (alert.volumes ?? []).find(mount => mount.target === "/run/policy-observation");
-  if (alertMount?.type !== "volume" || alertMount.source !== volume || alertMount.read_only !== true
-      || alert.depends_on?.[loaderName]?.condition !== "service_completed_successfully") {
-    fail("alert-service must wait for its dedicated read-only observation key volume");
-  }
+  expectResolved("alert-service observation volume type", alertMount?.type, "volume");
+  expectResolved("alert-service observation volume source", alertMount?.source, volume);
+  expectResolved("alert-service observation volume read_only", alertMount?.read_only, true);
+  expectResolved("alert-service observation loader dependency",
+    alert.depends_on?.[loaderName]?.condition, "service_completed_successfully");
   const loaderMounts = loader.volumes ?? [];
   const source = loaderMounts.find(mount => mount.target === "/run/observation-source/alert.private-key.pkcs8.base64");
   const destination = loaderMounts.find(mount => mount.target === "/run/policy-observation");
-  if (loaderMounts.length !== 2 || loader.network_mode !== "none" || (loader.ports ?? []).length
-      || loader.restart !== "no" || loader.read_only !== true || loader.pids_limit !== 64
-      || !(loader.cap_drop ?? []).includes("ALL")
-      || JSON.stringify((loader.cap_add ?? []).slice().sort()) !== JSON.stringify(["CHOWN", "DAC_OVERRIDE", "FOWNER"])
-      || !(loader.security_opt ?? []).includes("no-new-privileges:true")
-      || source?.type !== "bind" || source.read_only !== true
-      || normalizeComparablePath(source.source) !== normalizeComparablePath(privateSource)
-      || source.bind?.create_host_path !== false
-      || destination?.type !== "volume" || destination.source !== volume || destination.read_only === true) {
-    fail("observation key loader must have only its exact private source and dedicated writable volume");
-  }
+  expectResolved(`${loaderName} profile list`, loader.profiles ?? [], []);
+  expectResolved(`${loaderName} mount count`, loaderMounts.length, 2);
+  expectResolved(`${loaderName}.network_mode`, loader.network_mode, "none");
+  expectResolved(`${loaderName} published ports`, loader.ports ?? [], []);
+  expectResolved(`${loaderName}.restart`, loader.restart, "no");
+  expectResolved(`${loaderName}.read_only`, loader.read_only, true);
+  expectResolved(`${loaderName}.pids_limit`, loader.pids_limit, 64);
+  expectNotResolved(`${loaderName}.privileged`, loader.privileged, true);
+  expectResolved(`${loaderName}.cap_drop`, (loader.cap_drop ?? []).slice().sort(), ["ALL"]);
+  expectResolved(`${loaderName}.cap_add`, (loader.cap_add ?? []).slice().sort(),
+    ["CHOWN", "DAC_OVERRIDE", "FOWNER"]);
+  expectResolved(`${loaderName}.security_opt`, loader.security_opt ?? [], ["no-new-privileges:true"]);
+  expectResolved(`${loaderName}.tmpfs`, loader.tmpfs ?? [], ["/tmp:rw,noexec,nosuid,size=6m"]);
+  expectResolved(`${loaderName} private source mount type`, source?.type, "bind");
+  expectResolved(`${loaderName} private source mount target`, source?.target,
+    "/run/observation-source/alert.private-key.pkcs8.base64");
+  expectResolved(`${loaderName} private source mount read_only`, source?.read_only, true);
+  expectResolved(`${loaderName} private source path`, normalizeComparablePath(source?.source),
+    normalizeComparablePath(privateSource));
+  expectResolved(`${loaderName} private source create_host_path`, source?.bind?.create_host_path, false);
+  expectResolved(`${loaderName} destination mount type`, destination?.type, "volume");
+  expectResolved(`${loaderName} destination mount source`, destination?.source, volume);
+  expectResolved(`${loaderName} destination mount target`, destination?.target, "/run/policy-observation");
+  expectNotResolved(`${loaderName} destination mount read_only`, destination?.read_only, true);
   try {
     const stat = fs.lstatSync(privateSource);
     if (!stat.isFile() || stat.isSymbolicLink() || !stat.size
@@ -389,27 +419,41 @@ function assertAuditTrustKeyIsolation() {
   const authority = service(name);
   const loader = service(loaderName);
   const authorityMount = (authority.volumes ?? []).find(mount => mount.target === "/run/audit-trust-keys");
-  if (authority.depends_on?.[loaderName]?.condition !== "service_completed_successfully"
-      || authorityMount?.type !== "volume" || authorityMount.source !== volume
-      || authorityMount.read_only !== true
-      || env(name, "TRUST_AUTHORITY_ACTIVE_PRIVATE_KEY_PATH") !== "/run/audit-trust-keys/ed25519-private.key"
-      || env(name, "TRUST_AUTHORITY_ACTIVE_PUBLIC_KEY_PATH") !== "/run/audit-trust-keys/ed25519-public.key") {
-    fail("audit trust authority must wait for its dedicated read-only key volume");
-  }
+  expectResolved(`${name} loader dependency`, authority.depends_on?.[loaderName]?.condition,
+    "service_completed_successfully");
+  expectResolved(`${name} key volume type`, authorityMount?.type, "volume");
+  expectResolved(`${name} key volume source`, authorityMount?.source, volume);
+  expectResolved(`${name} key volume target`, authorityMount?.target, "/run/audit-trust-keys");
+  expectResolved(`${name} key volume read_only`, authorityMount?.read_only, true);
+  expectResolved(`${name}.TRUST_AUTHORITY_ACTIVE_PRIVATE_KEY_PATH`,
+    env(name, "TRUST_AUTHORITY_ACTIVE_PRIVATE_KEY_PATH"), "/run/audit-trust-keys/ed25519-private.key");
+  expectResolved(`${name}.TRUST_AUTHORITY_ACTIVE_PUBLIC_KEY_PATH`,
+    env(name, "TRUST_AUTHORITY_ACTIVE_PUBLIC_KEY_PATH"), "/run/audit-trust-keys/ed25519-public.key");
   const source = (loader.volumes ?? []).find(mount => mount.target === "/run/audit-trust-source");
   const destination = (loader.volumes ?? []).find(mount => mount.target === "/run/audit-trust-keys");
-  if ((loader.profiles ?? []).length || (loader.volumes ?? []).length !== 2
-      || loader.network_mode !== "none" || (loader.ports ?? []).length
-      || loader.restart !== "no" || loader.read_only !== true || loader.pids_limit !== 64
-      || !(loader.cap_drop ?? []).includes("ALL")
-      || JSON.stringify((loader.cap_add ?? []).slice().sort()) !== JSON.stringify(["CHOWN", "DAC_OVERRIDE", "FOWNER"])
-      || !(loader.security_opt ?? []).includes("no-new-privileges:true")
-      || source?.type !== "bind" || source.read_only !== true
-      || normalizeComparablePath(source.source) !== normalizeComparablePath(sourceRoot)
-      || source.bind?.create_host_path !== false
-      || destination?.type !== "volume" || destination.source !== volume || destination.read_only === true) {
-    fail("audit trust key loader must have only its protected source and dedicated writable volume");
-  }
+  expectResolved(`${loaderName} profile list`, loader.profiles ?? [], []);
+  expectResolved(`${loaderName} mount count`, (loader.volumes ?? []).length, 2);
+  expectResolved(`${loaderName}.network_mode`, loader.network_mode, "none");
+  expectResolved(`${loaderName} published ports`, loader.ports ?? [], []);
+  expectResolved(`${loaderName}.restart`, loader.restart, "no");
+  expectResolved(`${loaderName}.read_only`, loader.read_only, true);
+  expectResolved(`${loaderName}.pids_limit`, loader.pids_limit, 64);
+  expectNotResolved(`${loaderName}.privileged`, loader.privileged, true);
+  expectResolved(`${loaderName}.cap_drop`, (loader.cap_drop ?? []).slice().sort(), ["ALL"]);
+  expectResolved(`${loaderName}.cap_add`, (loader.cap_add ?? []).slice().sort(),
+    ["CHOWN", "DAC_OVERRIDE", "FOWNER"]);
+  expectResolved(`${loaderName}.security_opt`, loader.security_opt ?? [], ["no-new-privileges:true"]);
+  expectResolved(`${loaderName}.tmpfs`, loader.tmpfs ?? [], ["/tmp:rw,noexec,nosuid,size=6m"]);
+  expectResolved(`${loaderName} source mount type`, source?.type, "bind");
+  expectResolved(`${loaderName} source mount target`, source?.target, "/run/audit-trust-source");
+  expectResolved(`${loaderName} source mount read_only`, source?.read_only, true);
+  expectResolved(`${loaderName} protected source path`, normalizeComparablePath(source?.source),
+    normalizeComparablePath(sourceRoot));
+  expectResolved(`${loaderName} protected source create_host_path`, source?.bind?.create_host_path, false);
+  expectResolved(`${loaderName} destination mount type`, destination?.type, "volume");
+  expectResolved(`${loaderName} destination mount source`, destination?.source, volume);
+  expectResolved(`${loaderName} destination mount target`, destination?.target, "/run/audit-trust-keys");
+  expectNotResolved(`${loaderName} destination mount read_only`, destination?.read_only, true);
   for (const file of ["ed25519-private.key", "ed25519-public.key"]) {
     try {
       const stat = fs.lstatSync(path.join(sourceRoot, file));

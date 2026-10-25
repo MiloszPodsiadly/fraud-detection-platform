@@ -316,6 +316,65 @@ test("publisher signing keys stay in the isolated non-root worker", () => {
   }
 });
 
+test("key-loader assertions identify the first resolved private-source and hardening mismatch", () => {
+  const resolved = resolveHardenedCompose();
+  assert.equal(resolved.status, 0, resolved.stderr || resolved.error?.message);
+  const config = JSON.parse(resolved.stdout);
+  assert.equal(runChecker(config, "security-hardened").status, 0);
+
+  const observationLoader = "model-promotion-observation-key-loader";
+  const auditLoader = "audit-trust-key-loader";
+  const observationSource = (value) => value.services[observationLoader].volumes.find(
+    ({ target }) => target === "/run/observation-source/alert.private-key.pkcs8.base64"
+  );
+  const auditSource = (value) => value.services[auditLoader].volumes.find(
+    ({ target }) => target === "/run/audit-trust-source"
+  );
+  const mutations = [
+    ["extra observation mount", (value) => value.services[observationLoader].volumes.push(
+      { type: "tmpfs", target: "/tmp/extra" }), /model-promotion-observation-key-loader mount count: expected 2, resolved 3/],
+    ["substituted observation private source", (value) => {
+      observationSource(value).source = path.join(repositoryRoot, "deployment", ".env.example");
+    }, /model-promotion-observation-key-loader private source path: expected .*resolved/],
+    ["writable observation source", (value) => { observationSource(value).read_only = false; },
+      /model-promotion-observation-key-loader private source mount read_only: expected true, resolved false/],
+    ["observation loader profile", (value) => { value.services[observationLoader].profiles = ["policy-trust-loader"]; },
+      /model-promotion-observation-key-loader profile list/],
+    ["observation destination made read-only", (value) => {
+      value.services[observationLoader].volumes.find(({ target }) => target === "/run/policy-observation").read_only = true;
+    }, /model-promotion-observation-key-loader destination mount read_only/],
+    ["observation loader network enabled", (value) => { value.services[observationLoader].network_mode = "bridge"; },
+      /model-promotion-observation-key-loader.network_mode: expected "none", resolved "bridge"/],
+    ["observation loader privileged", (value) => { value.services[observationLoader].privileged = true; },
+      /model-promotion-observation-key-loader.privileged/],
+    ["audit source path substituted", (value) => {
+      auditSource(value).source = path.join(repositoryRoot, "deployment", ".env.example");
+    }, /audit-trust-key-loader protected source path/],
+    ["audit loader source made writable", (value) => { auditSource(value).read_only = false; },
+      /audit-trust-key-loader source mount read_only: expected true, resolved false/],
+    ["audit loader source creation enabled", (value) => { auditSource(value).bind.create_host_path = true; },
+      /audit-trust-key-loader protected source create_host_path: expected false, resolved true/],
+    ["audit destination made read-only", (value) => {
+      value.services[auditLoader].volumes.find(({ target }) => target === "/run/audit-trust-keys").read_only = true;
+    }, /audit-trust-key-loader destination mount read_only/],
+    ["audit loader profile", (value) => { value.services[auditLoader].profiles = ["audit-trust-loader"]; },
+      /audit-trust-key-loader profile list/],
+    ["audit loader no-new-privileges removed", (value) => {
+      value.services[auditLoader].security_opt = [];
+    }, /audit-trust-key-loader.security_opt/],
+    ["audit loader broad tmpfs", (value) => { value.services[auditLoader].tmpfs = ["/tmp", "/run/audit-trust-keys"]; },
+      /audit-trust-key-loader.tmpfs/]
+  ];
+
+  for (const [label, mutate, expectedDiagnostic] of mutations) {
+    const candidate = structuredClone(config);
+    mutate(candidate);
+    const checked = runChecker(candidate, "security-hardened");
+    assert.notEqual(checked.status, 0, `${label} unexpectedly passed`);
+    assert.match(checked.stderr, expectedDiagnostic, `${label} did not identify the resolved mismatch`);
+  }
+});
+
 test("hardening alone does not activate a partial publisher, while policy trust does", () => {
   const baseFiles = ["deployment/docker-compose.yml", "deployment/docker-compose.dev.yml"];
   for (const [label, overlays, expected] of [
