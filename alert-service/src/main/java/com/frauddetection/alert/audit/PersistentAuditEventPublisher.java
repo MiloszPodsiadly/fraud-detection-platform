@@ -154,6 +154,11 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             lockRepository.acquire(AuditEventDocument.PARTITION_KEY, lockOwner);
             lockAcquired = true;
             AuditEventDocument previous = repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY).orElse(null);
+            if (previous != null && !AuditEventHasher.matches(previous)) {
+                metrics.recordPlatformAuditPersistenceFailure(event.action());
+                throw new AuditPersistenceUnavailableException(
+                        "Audit chain head does not satisfy the canonical hash contract.", null);
+            }
             String previousHash = previous == null ? null : previous.eventHash();
             long chainPosition = nextChainPosition(previous);
             AuditEventDocument document = repository.insert(AuditEventDocument.from(

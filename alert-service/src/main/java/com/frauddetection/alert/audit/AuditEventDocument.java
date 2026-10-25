@@ -120,7 +120,7 @@ public record AuditEventDocument(
                 null,
                 null
         );
-        return new AuditEventDocument(
+        AuditEventDocument unhashed = new AuditEventDocument(
                 auditId,
                 event.action(),
                 event.actor().userId(),
@@ -145,13 +145,8 @@ public record AuditEventDocument(
                 null,
                 HASH_ALGORITHM,
                 SCHEMA_VERSION
-        ).withEventHash(AuditEventHasher.hash(thisWithoutHashPlaceholder(
-                auditId,
-                event,
-                previousEventHash,
-                chainPosition,
-                metadataSummary
-        )));
+        );
+        return unhashed.withEventHash(AuditEventHasher.hash(unhashed));
     }
 
     static AuditEventDocument from(String auditId, AuditEvent event, String previousEventHash) {
@@ -188,43 +183,6 @@ public record AuditEventDocument(
                 eventHash,
                 hashAlgorithm,
                 schemaVersion
-        );
-    }
-
-    private static AuditEventDocument thisWithoutHashPlaceholder(
-            String auditId,
-            AuditEvent event,
-            String previousEventHash,
-            long chainPosition,
-            AuditEventMetadataSummary metadataSummary
-    ) {
-        return new AuditEventDocument(
-                auditId,
-                event.action(),
-                event.actor().userId(),
-                event.actor().userId(),
-                sorted(event.actor().roles()),
-                "HUMAN",
-                sorted(event.actor().authorities()),
-                event.action(),
-                event.resourceType(),
-                event.resourceId(),
-                event.timestamp(),
-                event.correlationId(),
-                bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
-                SOURCE_SERVICE,
-                PARTITION_KEY,
-                chainPosition,
-                event.outcome(),
-                event.failureCategory() == null
-                        ? AuditEvent.failureCategory(event.outcome(), event.failureReason())
-                        : event.failureCategory(),
-                event.failureReason(),
-                metadataSummary,
-                previousEventHash,
-                null,
-                HASH_ALGORITHM,
-                SCHEMA_VERSION
         );
     }
 

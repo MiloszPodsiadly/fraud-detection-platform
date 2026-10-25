@@ -62,16 +62,22 @@ public class GovernanceExternalAnchorVerifier {
                     reference.externalHash(), sink.immutabilityLevel());
             var verified = trust.verify(payload, signature);
             if (!"VALID".equals(verified.status())) {
-                return new Result(verified.status(), verified.reasonCode());
+                return new Result(verified.status(), verified.reasonCode(), status.signingAuthority(),
+                        status.signingKeyId());
             }
             // The issuing authority checks this signature. An independent verifier needs
             // its own trusted public-key set and separately retained witness material.
             return new Result(sink.immutabilityLevel() == ExternalImmutabilityLevel.ENFORCED
-                    ? "SIGNED_ENFORCED_WITNESS" : "SIGNED_LOCAL_OR_UNENFORCED", null);
+                    ? "SIGNED_ENFORCED_WITNESS" : "SIGNED_LOCAL_OR_UNENFORCED", null,
+                    status.signingAuthority(), status.signingKeyId());
         } catch (RuntimeException unavailable) {
             return new Result("UNAVAILABLE", "EXTERNAL_VERIFICATION_UNAVAILABLE");
         }
     }
 
-    public record Result(String status, String reason) { }
+    public record Result(String status, String reason, String signingAuthority, String signingKeyId) {
+        public Result(String status, String reason) {
+            this(status, reason, null, null);
+        }
+    }
 }

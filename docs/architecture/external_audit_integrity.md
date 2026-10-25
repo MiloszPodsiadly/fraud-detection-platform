@@ -11,6 +11,13 @@ These boundaries do not conflate an immutable anchor object, navigation-manifest
 or an independent external witness guarantee. Degraded manifest publication remains distinct from invalid anchor
 binding, and unavailable stores remain fail closed.
 
+Governance event reads distinguish selected-event integrity from full-range integrity. The bounded governance chain
+range endpoint traverses each requested position, recomputes the canonical `AuditEventHasher` digest, validates every
+previous-hash link, and requires one matching local anchor per event. It is pinned to a stable head position/hash and
+rechecks that boundary after reading; appends beyond the pinned boundary are reported as concurrent. The configured
+range length defaults to 1000 (`AUDIT_CHAIN_RANGE_MAX_LENGTH`) and is hard-capped at 10000. This local range result
+does not imply historical WebAuthn proof verification, independent witness verification, or current authorization.
+
 ## Canonical signature cutover
 
 Trust Authority signs the canonical `anchor_id`, `chain_position`, `partition_key`, `payload_hash`, `purpose` and
@@ -31,3 +38,22 @@ does not clear them. The repository Compose default does not configure a product
 local deployment with a fresh `mongodb-data` volume, fresh containers and no reused external sink or bind mount satisfies
 the cutover precondition. This statement establishes support for that clean deployment path; it does not assert that an
 arbitrary existing environment is empty.
+
+## Canonical audit-event hash cutover
+
+`AuditEventHasher` has one SHA-256 contract over every evidence-bearing field persisted in `audit_events`, including
+the direct actor authorities and failure fields and the complete `metadata_summary`. The event hash itself is the sole
+persisted field excluded to avoid circular input. Roles and authorities are ordered before UTF-8 JSON serialization,
+map keys are ordered, nulls are explicit, enums use their names, and timestamps use MongoDB millisecond precision.
+
+This correction is intentionally incompatible with audit-event hashes produced by the earlier incomplete contract.
+It consequently invalidates their chain links, `audit_chain_anchors`, external witnesses, governance commitment audit
+bindings and retained exports. There is no legacy verifier and no automatic rewrite. Before a pre-production operator
+adopts this cutover, they must confirm that all affected Mongo collections, Trust Authority records, external object
+stores, bind-mounted witness files and exported evidence are disposable development data. If any evidence is durable or
+institutional, stop and arrange a separately authorized migration instead of resetting it.
+
+For disposable local data, stop the stack and explicitly start a new lineage by removing the project's Compose data
+volumes and any configured local witness files, then bootstrap the stack and keys again. This destructive action is
+operator-owned and is deliberately not performed by application startup or repository scripts. Merely replacing
+containers is insufficient because the Mongo volume persists the old chain.

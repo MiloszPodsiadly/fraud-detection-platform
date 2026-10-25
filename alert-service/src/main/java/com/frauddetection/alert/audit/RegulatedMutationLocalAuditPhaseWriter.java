@@ -56,6 +56,7 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         String phaseKey = phaseKey(command, "SUCCESS");
         AuditEventDocument existingPhase = auditEventRepository.findByRequestId(phaseKey).orElse(null);
         if (existingPhase != null) {
+            requireCanonical(existingPhase);
             recordAppend("DUPLICATE_PHASE", startedAt);
             return existingPhase.auditId();
         }
@@ -122,11 +123,13 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         try {
             AuditEventDocument existingPhaseEvent = auditEventRepository.findByRequestId(phaseKey).orElse(null);
             if (existingPhaseEvent != null) {
+                requireCanonical(existingPhaseEvent);
                 recordAppend("DUPLICATE_PHASE", startedAt);
                 return existingPhaseEvent.auditId();
             }
             AuditEventDocument previous = auditEventRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)
                     .orElse(null);
+            requireCanonical(previous);
             String previousHash = previous == null ? null : previous.eventHash();
             long chainPosition = nextChainPosition(previous);
             AuditEvent event = new AuditEvent(
@@ -165,6 +168,7 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         } catch (DuplicateKeyException duplicate) {
             return auditEventRepository.findByRequestId(phaseKey)
                     .map(document -> {
+                        requireCanonical(document);
                         recordAppend("DUPLICATE_PHASE", startedAt);
                         return document.auditId();
                     })
@@ -176,6 +180,14 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         } catch (DataAccessException exception) {
             recordAppend(auditEventInserted ? "ANCHOR_INSERT_FAILED" : "AUDIT_INSERT_FAILED", startedAt);
             throw new AuditPersistenceUnavailableException("Local success audit persistence failed.", exception);
+        }
+    }
+
+    private void requireCanonical(AuditEventDocument document) {
+        if (document != null && !AuditEventHasher.matches(document)) {
+            recordAppendAttempt("CHAIN_HEAD_INVALID");
+            throw new AuditPersistenceUnavailableException(
+                    "Audit event does not satisfy the canonical hash contract.", null);
         }
     }
 

@@ -379,8 +379,10 @@ public class PolicyCredentialEnrollmentGrantService {
                 grant.targetActorId(), grant.approvedBy(), credentialId, now);
     }
 
-    public void audit(String id, String action, PolicyCredentialEnrollmentGrantDocument grant,
+    void audit(String id, String action, PolicyCredentialEnrollmentGrantDocument grant,
             String actorId, String reviewerId, String credentialId, Instant now) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive())
+            throw new IllegalStateException("Credential grant audit requires a Mongo transaction");
         var event = new PolicyCredentialSecurityEventDocument(id, action, grant.targetActorId(),
                 grant.targetIssuer(), grant.targetSubject(), actorId, reviewerId,
                 grant.caseReference(), credentialId, now);

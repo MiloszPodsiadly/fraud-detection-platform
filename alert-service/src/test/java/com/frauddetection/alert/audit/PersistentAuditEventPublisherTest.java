@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,8 +58,10 @@ class PersistentAuditEventPublisherTest {
             "WriteActionAuditOutboxClaimStore.java",
             new MutableAuditComponentPolicy(
                     "WriteActionAuditOutboxRecord",
-                    Set.of("findAndModify("),
-                    Set.of("status", "last_attempt_at", "claimed_at", "claim_owner", "claim_expires_at")
+                    Set.of("findAndModify(", "updateFirst("),
+                    Set.of("status", "last_attempt_at", "claimed_at", "claim_owner", "claim_token",
+                            "claim_generation", "claim_expires_at", "published_at", "next_attempt_at",
+                            "last_error_code", "last_error_message", "attempt_count")
             ),
             "ExternalAuditHeadRecoveryStore.java",
             new MutableAuditComponentPolicy(
@@ -138,7 +141,7 @@ class PersistentAuditEventPublisherTest {
     }
 
     @Test
-    void shouldContinueChainAfterLegacyHeadWithoutChainPosition() {
+    void shouldRejectHeadProducedByObsoleteHashContract() {
         AuditEventRepository repository = mock(AuditEventRepository.class);
         AuditAnchorRepository anchorRepository = mock(AuditAnchorRepository.class);
         AuditChainLockRepository lockRepository = mock(AuditChainLockRepository.class);
@@ -187,15 +190,10 @@ class PersistentAuditEventPublisherTest {
         );
 
         when(repository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(Optional.of(legacyHead));
-        when(repository.countByPartitionKey(AuditEventDocument.PARTITION_KEY)).thenReturn(7L);
-        when(repository.insert(any(AuditEventDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        publisher.publish(event);
-
-        ArgumentCaptor<AuditEventDocument> documentCaptor = ArgumentCaptor.forClass(AuditEventDocument.class);
-        verify(repository).insert(documentCaptor.capture());
-        assertThat(documentCaptor.getValue().chainPosition()).isEqualTo(8L);
-        assertThat(documentCaptor.getValue().previousEventHash()).isEqualTo(legacyHead.eventHash());
+        assertThatThrownBy(() -> publisher.publish(event))
+                .isInstanceOf(AuditPersistenceUnavailableException.class)
+                .hasMessageContaining("canonical hash contract");
+        verify(repository, never()).insert(any(AuditEventDocument.class));
     }
 
     @Test
