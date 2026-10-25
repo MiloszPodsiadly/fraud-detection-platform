@@ -4,14 +4,20 @@ import com.frauddetection.alert.governance.audit.GovernanceEventCommitment;
 import com.frauddetection.alert.governance.audit.GovernanceEventVerificationService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
+import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.containers.MongoDBContainer;
@@ -26,10 +32,16 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Testcontainers
@@ -121,6 +133,22 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
         assertThat(obligation.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.PUBLISHED);
         assertThat(obligation.getAttemptCount()).isEqualTo(5);
         assertThat(obligation.getRecoveryCount()).isZero();
+        assertThat(mongo.count(new org.springframework.data.mongodb.core.query.Query(),
+                com.frauddetection.alert.audit.AuditEventDocument.class)).isZero();
+    }
+
+    @Test
+    void exactCommittedAppendCannotBeQueuedAgainAsRetry() {
+        when(verifier.verify(OPERATOR, KIND, EVENT_ID)).thenReturn(exactAppend());
+
+        assertThatThrownBy(() -> recovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
+                        "exact-cannot-retry", "Append already committed", "RETRY")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Requested action does not match");
+        assertThat(mongo.findById(GovernanceEventCommitment.idFor(KIND, EVENT_ID), WriteActionAuditOutboxRecord.class)
+                .getStatus()).isEqualTo(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
+        assertThat(mongo.findById("exact-cannot-retry", WriteActionAuditRecoveryEvent.class)).isNull();
     }
 
     @Test
@@ -144,6 +172,44 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
     }
 
     @Test
+    void concurrentOperatorsCannotBothConsumeOneRecoveryCycle() throws Exception {
+        when(verifier.verify(OPERATOR, KIND, EVENT_ID)).thenReturn(noAppend());
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> recoverAfter(start, "operator-race-a"));
+            var second = executor.submit(() -> recoverAfter(start, "operator-race-b"));
+            start.countDown();
+            Object firstResult = first.get(15, TimeUnit.SECONDS);
+            Object secondResult = second.get(15, TimeUnit.SECONDS);
+
+            assertThat(java.util.stream.Stream.of(firstResult, secondResult)
+                    .filter(WriteActionAuditOutboxRecoveryService.RecoveryView.class::isInstance)).hasSize(1);
+            assertThat(java.util.stream.Stream.of(firstResult, secondResult)
+                    .filter(RuntimeException.class::isInstance)).hasSize(1);
+        }
+        var obligation = mongo.findById(GovernanceEventCommitment.idFor(KIND, EVENT_ID), WriteActionAuditOutboxRecord.class);
+        assertThat(obligation.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.PENDING);
+        assertThat(obligation.getRecoveryCount()).isEqualTo(1);
+        assertThat(mongo.count(new org.springframework.data.mongodb.core.query.Query(), WriteActionAuditRecoveryEvent.class))
+                .isEqualTo(1L);
+    }
+
+    @Test
+    void unavailableMongoEvidenceDoesNotBecomeProofOfNoAppend() {
+        when(verifier.verify(OPERATOR, KIND, EVENT_ID))
+                .thenThrow(new DataAccessResourceFailureException("mongo unavailable"));
+
+        assertThatThrownBy(() -> recovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
+                        "mongo-unavailable", "Retry after Mongo outage", "RETRY")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Audit evidence is unavailable");
+        assertThat(mongo.findById(GovernanceEventCommitment.idFor(KIND, EVENT_ID), WriteActionAuditOutboxRecord.class)
+                .getStatus()).isEqualTo(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
+        assertThat(mongo.findById("mongo-unavailable", WriteActionAuditRecoveryEvent.class)).isNull();
+    }
+
+    @Test
     void recoveryCasRejectsCommitmentFieldChangedAfterEvidenceVerification() {
         when(verifier.verify(OPERATOR, KIND, EVENT_ID)).thenAnswer(invocation -> {
             var changed = mongo.findById(GovernanceEventCommitment.idFor(KIND, EVENT_ID),
@@ -164,6 +230,163 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
     }
 
     @Test
+    void recoveryRechecksSourceAuditEventAndAnchorAfterInitialEvidenceRead() throws Exception {
+        CountDownLatch initialEvidenceRead = new CountDownLatch(1);
+        CountDownLatch continueRecovery = new CountDownLatch(1);
+        AtomicInteger verificationCalls = new AtomicInteger();
+        mongo.getCollection("model_policy_governance_history").insertOne(new Document("_id", EVENT_ID)
+                .append("rationale", "before"));
+        mongo.getCollection("audit_events").insertOne(new Document("_id", "referenced-audit-event")
+                .append("event_hash", "a".repeat(64)));
+        mongo.getCollection("audit_chain_anchors").insertOne(new Document("_id", "referenced-anchor")
+                .append("last_event_hash", "b".repeat(64)));
+        when(verifier.verify(OPERATOR, KIND, EVENT_ID)).thenAnswer(invocation -> {
+            if (verificationCalls.incrementAndGet() == 1) {
+                var initialEvidence = noAppend();
+                initialEvidenceRead.countDown();
+                if (!continueRecovery.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to resume recovery");
+                }
+                return initialEvidence;
+            }
+            assertThat(mongo.getCollection("model_policy_governance_history")
+                    .find(new Document("_id", EVENT_ID)).first().getString("rationale"))
+                    .isEqualTo("changed-after-first-read");
+            assertThat(mongo.getCollection("audit_events")
+                    .find(new Document("_id", "referenced-audit-event")).first().getString("event_hash"))
+                    .isEqualTo("f".repeat(64));
+            assertThat(mongo.getCollection("audit_chain_anchors")
+                    .find(new Document("_id", "referenced-anchor")).first().getString("last_event_hash"))
+                    .isEqualTo("e".repeat(64));
+            return tampered();
+        });
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var pending = executor.submit(() -> recovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                    new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
+                            "changed-evidence", "Retry after evidence change", "RETRY")));
+            assertThat(initialEvidenceRead.await(10, TimeUnit.SECONDS)).isTrue();
+            mongo.getCollection("model_policy_governance_history").updateOne(new Document("_id", EVENT_ID),
+                    new Document("$set", new Document("rationale", "changed-after-first-read")));
+            mongo.getCollection("audit_events").updateOne(new Document("_id", "referenced-audit-event"),
+                    new Document("$set", new Document("event_hash", "f".repeat(64))));
+            mongo.getCollection("audit_chain_anchors").updateOne(new Document("_id", "referenced-anchor"),
+                    new Document("$set", new Document("last_event_hash", "e".repeat(64))));
+            continueRecovery.countDown();
+            assertThatThrownBy(() -> pending.get(15, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(ResponseStatusException.class);
+        } finally {
+            continueRecovery.countDown();
+        }
+        verify(verifier, times(2)).verify(OPERATOR, KIND, EVENT_ID);
+        assertThat(mongo.findById(GovernanceEventCommitment.idFor(KIND, EVENT_ID),
+                WriteActionAuditOutboxRecord.class).getStatus())
+                .isEqualTo(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
+        assertThat(mongo.findById("changed-evidence", WriteActionAuditRecoveryEvent.class)).isNull();
+        assertThat(mongo.getCollection("model_policy_governance_history")
+                .find(new Document("_id", EVENT_ID)).first().getString("rationale"))
+                .isEqualTo("changed-after-first-read");
+        assertThat(mongo.getCollection("audit_events")
+                .find(new Document("_id", "referenced-audit-event")).first().getString("event_hash"))
+                .isEqualTo("f".repeat(64));
+        assertThat(mongo.getCollection("audit_chain_anchors")
+                .find(new Document("_id", "referenced-anchor")).first().getString("last_event_hash"))
+                .isEqualTo("e".repeat(64));
+    }
+
+    @Test
+    void transactionalRecheckRejectsAppendThatAppearedAfterNoAppendPreflight() {
+        when(verifier.verify(OPERATOR, KIND, EVENT_ID)).thenReturn(noAppend(), exactAppend());
+
+        assertThatThrownBy(() -> recovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
+                        "append-race", "Append raced with retry", "RETRY")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("evidence changed");
+
+        verify(verifier, times(2)).verify(OPERATOR, KIND, EVENT_ID);
+        assertThat(mongo.findById(GovernanceEventCommitment.idFor(KIND, EVENT_ID),
+                WriteActionAuditOutboxRecord.class).getStatus())
+                .isEqualTo(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
+        assertThat(mongo.findById("append-race", WriteActionAuditRecoveryEvent.class)).isNull();
+    }
+
+    @Test
+    void exactAppendRacingReconcileProducesOneReceiptAndNoSecondAuditAppend() throws Exception {
+        CountDownLatch initialEvidenceRead = new CountDownLatch(1);
+        CountDownLatch continueRecovery = new CountDownLatch(1);
+        AtomicInteger verificationCalls = new AtomicInteger();
+        when(verifier.verify(OPERATOR, KIND, EVENT_ID)).thenAnswer(invocation -> {
+            if (verificationCalls.incrementAndGet() == 1) {
+                var initialEvidence = exactAppend();
+                initialEvidenceRead.countDown();
+                if (!continueRecovery.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to resume reconciliation");
+                }
+                return initialEvidence;
+            }
+            assertThat(mongo.getCollection("audit_events")
+                    .find(new Document("request_id", "gov:" + COMMITMENT)).first()).isNotNull();
+            return exactAppend();
+        });
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var pending = executor.submit(() -> recovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                    new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
+                            "reconcile-append-race", "Reconcile publisher append", "RECONCILE")));
+            assertThat(initialEvidenceRead.await(10, TimeUnit.SECONDS)).isTrue();
+            mongo.getCollection("audit_events").insertOne(new Document("_id", "committed-audit-event")
+                    .append("request_id", "gov:" + COMMITMENT).append("event_hash", "d".repeat(64)));
+            continueRecovery.countDown();
+            assertThat(pending.get(15, TimeUnit.SECONDS).classification())
+                    .isEqualTo("ACKNOWLEDGEMENT_RECONCILED");
+        } finally {
+            continueRecovery.countDown();
+        }
+        verify(verifier, times(2)).verify(OPERATOR, KIND, EVENT_ID);
+        assertThat(mongo.getCollection("audit_events")
+                .countDocuments(new Document("request_id", "gov:" + COMMITMENT))).isEqualTo(1L);
+        assertThat(mongo.findById("reconcile-append-race", WriteActionAuditRecoveryEvent.class)).isNotNull();
+        assertThat(mongo.findById(GovernanceEventCommitment.idFor(KIND, EVENT_ID),
+                WriteActionAuditOutboxRecord.class).getStatus()).isEqualTo(WriteActionAuditOutboxStatus.PUBLISHED);
+    }
+
+    @Test
+    void uncertainCommitIsResolvedFromTheCommittedImmutableReceipt() {
+        when(verifier.verify(OPERATOR, KIND, EVENT_ID)).thenReturn(noAppend());
+        MongoTransactionManager delegate = new MongoTransactionManager(factory);
+        PlatformTransactionManager commitThenLoseAcknowledgement = new PlatformTransactionManager() {
+            @Override
+            public TransactionStatus getTransaction(TransactionDefinition definition) {
+                return delegate.getTransaction(definition);
+            }
+
+            @Override
+            public void commit(TransactionStatus status) {
+                delegate.commit(status);
+                throw new TransactionSystemException("Simulated lost commit acknowledgement");
+            }
+
+            @Override
+            public void rollback(TransactionStatus status) {
+                delegate.rollback(status);
+            }
+        };
+        var uncertainRecovery = new WriteActionAuditOutboxRecoveryService(mongo,
+                new TransactionTemplate(commitThenLoseAcknowledgement), verifier,
+                Clock.fixed(NOW, ZoneOffset.UTC), new ObjectMapper());
+
+        var result = uncertainRecovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
+                        "lost-commit-ack", "Retry after uncertain commit", "RETRY"));
+
+        assertThat(result.classification()).isEqualTo("RETRY_QUEUED");
+        assertThat(result.receiptSha256()).matches("[0-9a-f]{64}");
+        assertThat(mongo.count(new org.springframework.data.mongodb.core.query.Query(),
+                WriteActionAuditRecoveryEvent.class)).isEqualTo(1L);
+        assertThat(mongo.findById(GovernanceEventCommitment.idFor(KIND, EVENT_ID),
+                WriteActionAuditOutboxRecord.class).getStatus()).isEqualTo(WriteActionAuditOutboxStatus.PENDING);
+    }
+
+    @Test
     void historyReportsMalformedReceiptFieldsAsIntegrityFailure() {
         mongo.insert(new WriteActionAuditRecoveryEvent("malformed-1", "outbox-1", KIND.name(), EVENT_ID,
                 COMMITMENT, "gov:" + COMMITMENT, "operator-a", null, "RETRY", "RETRY_QUEUED",
@@ -175,6 +398,11 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
                 .extracting(WriteActionAuditOutboxRecoveryService.RecoveryView::classification)
                 .isEqualTo("RECOVERY_RECEIPT_INTEGRITY_FAILURE");
         assertThat(history.getFirst().receiptSha256()).isNull();
+        assertThatThrownBy(() -> recovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
+                        "malformed-1", "retry", "RETRY")))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("receipt integrity failure");
     }
 
     @Test
@@ -238,5 +466,18 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
     private GovernanceEventVerificationService.Verification tampered() {
         return new GovernanceEventVerificationService.Verification(KIND.name(), EVENT_ID, "TAMPERED",
                 null, null, null, null, "NOT_VERIFIED", "EVENT_HASH_MISMATCH", "NOT_REVERIFIED");
+    }
+
+    private Object recoverAfter(CountDownLatch start, String operationId) {
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("operator race start timed out");
+            return recovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                    new WriteActionAuditOutboxRecoveryService.RecoveryCommand(operationId, "concurrent retry", "RETRY"));
+        } catch (RuntimeException exception) {
+            return exception;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return new IllegalStateException(exception);
+        }
     }
 }

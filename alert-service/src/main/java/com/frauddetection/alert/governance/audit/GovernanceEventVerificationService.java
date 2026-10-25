@@ -5,6 +5,8 @@ import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventHasher;
 import com.frauddetection.alert.audit.AuditEventRepository;
+import com.frauddetection.alert.audit.AuditAnchorDocument;
+import com.frauddetection.alert.audit.AuditChainLockDocument;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.external.GovernanceExternalAnchorVerifier;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRecord;
@@ -21,17 +23,13 @@ import com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeAudit
 import com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService;
 import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
-
+import org.springframework.transaction.support.TransactionTemplate;
 import java.util.Objects;
 import java.util.Set;
-import java.util.Map;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 
 /** Historical evidence read. Local chain verification is distinct from independent external anchoring. */
@@ -44,12 +42,13 @@ public class GovernanceEventVerificationService {
     private final PolicyTrustChangeService trustChanges;
     private final GovernanceExternalAnchorVerifier externalAnchors;
     private final ModelPromotionSignedReviewService signedReviews;
+    private final TransactionTemplate snapshotTransaction;
 
     @Autowired
     public GovernanceEventVerificationService(MongoTemplate mongo, AuditEventRepository auditEvents,
             AuditAnchorRepository anchors, PolicyCredentialGrantReviewService grantReviews,
             PolicyTrustChangeService trustChanges, GovernanceExternalAnchorVerifier externalAnchors,
-            ModelPromotionSignedReviewService signedReviews) {
+            ModelPromotionSignedReviewService signedReviews, MongoTransactionManager transactionManager) {
         this.mongo = mongo;
         this.auditEvents = auditEvents;
         this.anchors = anchors;
@@ -57,6 +56,14 @@ public class GovernanceEventVerificationService {
         this.trustChanges = trustChanges;
         this.externalAnchors = externalAnchors;
         this.signedReviews = signedReviews;
+        this.snapshotTransaction = transactionManager == null ? null : new TransactionTemplate(transactionManager);
+    }
+
+    public GovernanceEventVerificationService(MongoTemplate mongo, AuditEventRepository auditEvents,
+            AuditAnchorRepository anchors, PolicyCredentialGrantReviewService grantReviews,
+            PolicyTrustChangeService trustChanges, GovernanceExternalAnchorVerifier externalAnchors,
+            ModelPromotionSignedReviewService signedReviews) {
+        this(mongo, auditEvents, anchors, grantReviews, trustChanges, externalAnchors, signedReviews, null);
     }
 
     public GovernanceEventVerificationService(MongoTemplate mongo, AuditEventRepository auditEvents,
@@ -80,8 +87,9 @@ public class GovernanceEventVerificationService {
             throw new IllegalArgumentException("Valid governance audit event required");
         }
         String outboxId = GovernanceEventCommitment.idFor(kind, eventId);
-        var obligation = mongo.findById(outboxId, WriteActionAuditOutboxRecord.class);
-        Object event = event(kind, eventId);
+        VerificationSnapshot snapshot = readSnapshot(kind, eventId);
+        var obligation = snapshot.obligation();
+        Object event = snapshot.governanceEvent();
         if (obligation == null || event == null) {
             return new Verification(kind.name(), eventId, "MISSING_EVIDENCE", null, null,
                     null, null, "NOT_VERIFIED", obligation == null ? "AUDIT_OBLIGATION_MISSING" : "BUSINESS_EVENT_MISSING");
@@ -105,61 +113,84 @@ public class GovernanceEventVerificationService {
             return failure(kind, eventId, "EVENT_HASH_MISMATCH");
         }
         String requestId = "gov:" + hash;
-        AuditEventDocument audit = auditEvents.findByRequestId(requestId).orElse(null);
+        AuditEventDocument audit = snapshot.auditEvent();
         String state = obligationState(obligation.getStatus());
         if (audit == null) {
-            String chainStatus = completeAuditChain("source_service:alert-service");
-            if ("INVALID".equals(chainStatus)) {
-                return failure(kind, eventId, "AUDIT_CHAIN_INVALID_OR_INCOMPLETE");
+            if (!validHeadSnapshot(snapshot)) {
+                return failure(kind, eventId, "AUDIT_HEAD_BROKEN_OR_INCOMPLETE");
             }
-            if ("INCOMPLETE".equals(chainStatus)) {
+            if (!safeToProveAbsence(snapshot)) {
                 return new Verification(kind.name(), eventId, "OUTCOME_UNKNOWN", hash,
-                        null, null, null, "NOT_VERIFIED", "AUDIT_CHAIN_EXCEEDS_VERIFICATION_BOUND");
+                        null, null, null, "NOT_VERIFIED", "APPEND_OR_CLAIM_MAY_STILL_BE_IN_FLIGHT");
             }
             return new Verification(kind.name(), eventId,
                     "CONFIRMED".equals(state) ? "AUDIT_EVENT_MISSING" : state,
                     hash, null, null, null, "NOT_VERIFIED", null);
         }
-        if (audit.action() != AuditAction.COMMIT_GOVERNANCE_EVENT
+        if (!Objects.equals(audit.requestId(), requestId)
+                || audit.action() != AuditAction.COMMIT_GOVERNANCE_EVENT
+                || audit.eventType() != AuditAction.COMMIT_GOVERNANCE_EVENT
                 || audit.resourceType() != AuditResourceType.MODEL_GOVERNANCE_EVENT
                 || !Objects.equals(audit.resourceId(), obligation.getResourceId())
                 || !Objects.equals(audit.actorId(), obligation.getActor())
+                || !Objects.equals(audit.correlationId(), obligation.getCorrelationId())
+                || audit.outcome() != obligation.getOutcome()
+                || audit.failureReason() != null
+                || obligation.getMetadataSummary() != null
+                    && !Objects.equals(audit.metadataSummary(), obligation.getMetadataSummary())
+                || !Objects.equals(audit.sourceService(), "alert-service")
+                || !Objects.equals(audit.partitionKey(), "source_service:alert-service")
                 || !"SHA-256".equals(audit.hashAlgorithm()) || !"1.0".equals(audit.schemaVersion())
                 || !AuditEventHasher.matches(audit)
                 || audit.chainPosition() == null || audit.chainPosition() < 1) {
             return failure(kind, eventId, "AUDIT_EVENT_MISMATCH");
         }
-        long countAtPosition = mongo.count(Query.query(Criteria.where("partition_key").is(audit.partitionKey())
-                .and("chain_position").is(audit.chainPosition())), AuditEventDocument.class);
-        if (countAtPosition != 1 || audit.chainPosition() > 1
-                && (audit.previousEventHash() == null || auditEvents.findByPartitionKeyAndEventHash(
-                        audit.partitionKey(), audit.previousEventHash())
-                    .filter(previous -> previous.chainPosition() != null
-                            && previous.chainPosition() + 1 == audit.chainPosition()
-                            && AuditEventHasher.matches(previous)).isEmpty())) {
+        AuditEventDocument predecessor = snapshot.predecessor();
+        if (audit.chainPosition() == 1L ? audit.previousEventHash() != null
+                : predecessor == null || predecessor.chainPosition() == null
+                    || predecessor.chainPosition() != audit.chainPosition() - 1
+                    || !Objects.equals(predecessor.eventHash(), audit.previousEventHash())
+                    || !AuditEventHasher.matches(predecessor)) {
             return failure(kind, eventId, "AUDIT_CHAIN_BROKEN_OR_REPLAYED");
         }
-        var matchingAnchors = anchors.findByPartitionKeyAndChainPositionIn(
-                audit.partitionKey(), Set.of(audit.chainPosition()));
+        List<AuditAnchorDocument> matchingAnchors = snapshot.eventAnchors();
         if (matchingAnchors.size() != 1
                 || !audit.eventHash().equals(matchingAnchors.getFirst().lastEventHash())
                 || !Objects.equals(audit.previousEventHash(), matchingAnchors.getFirst().previousEventHash())
                 || !Objects.equals(audit.hashAlgorithm(), matchingAnchors.getFirst().hashAlgorithm())) {
             return failure(kind, eventId, "LOCAL_ANCHOR_MISSING_OR_MISMATCHED");
         }
-        var head = auditEvents.findLatestByPartitionKey(audit.partitionKey()).orElse(null);
+        var head = snapshot.head();
+        var headAnchors = snapshot.headAnchors();
         if (head == null || head.chainPosition() == null
                 || head.chainPosition() < audit.chainPosition()
-                || auditEvents.countByPartitionKey(audit.partitionKey()) != head.chainPosition()
                 || !"SHA-256".equals(head.hashAlgorithm()) || !"1.0".equals(head.schemaVersion())
                 || !AuditEventHasher.matches(head)
-                || anchors.findLatestByPartitionKey(audit.partitionKey())
-                    .filter(anchor -> anchor.chainPosition() == head.chainPosition()
-                            && Objects.equals(anchor.lastEventHash(), head.eventHash())).isEmpty()) {
+                || headAnchors.size() != 1
+                || headAnchors.getFirst().chainPosition() != head.chainPosition()
+                || !Objects.equals(headAnchors.getFirst().lastEventHash(), head.eventHash())
+                || snapshot.latestAnchor() == null
+                || snapshot.latestAnchor().chainPosition() != head.chainPosition()
+                || !Objects.equals(snapshot.latestAnchor().lastEventHash(), head.eventHash())
+                || head.chainPosition() > 1L
+                    && (snapshot.headPredecessor() == null
+                        || snapshot.headPredecessor().chainPosition() != head.chainPosition() - 1L
+                        || !Objects.equals(snapshot.headPredecessor().eventHash(), head.previousEventHash())
+                        || !AuditEventHasher.matches(snapshot.headPredecessor()))
+                || audit.chainPosition() < head.chainPosition()
+                    && !validImmediateSuccessor(audit, snapshot.successor())) {
             return failure(kind, eventId, "AUDIT_HEAD_BROKEN_OR_INCOMPLETE");
         }
-        var external = externalAnchors == null ? null : externalAnchors.verify(matchingAnchors.getFirst());
-        String externalStatus = external == null ? "NOT_VERIFIED" : external.status();
+        com.frauddetection.alert.audit.external.GovernanceExternalAnchorVerifier.Result external = null;
+        String externalStatus = "NOT_VERIFIED";
+        if (externalAnchors != null) {
+            try {
+                external = externalAnchors.verify(matchingAnchors.getFirst());
+                externalStatus = external == null ? "NOT_VERIFIED" : external.status();
+            } catch (RuntimeException unavailable) {
+                externalStatus = "UNAVAILABLE";
+            }
+        }
         if ("INVALID".equals(externalStatus)) {
             return new Verification(kind.name(), eventId, "TAMPERED", hash,
                     audit.eventHash(), audit.chainPosition(), matchingAnchors.getFirst().anchorId(),
@@ -193,6 +224,111 @@ public class GovernanceEventVerificationService {
                 external == null ? null : external.signingKeyId());
     }
 
+    private VerificationSnapshot readSnapshot(GovernanceEventCommitment.Kind kind, String eventId) {
+        java.util.function.Supplier<VerificationSnapshot> load = () -> loadSnapshot(kind, eventId);
+        return snapshotTransaction == null ? load.get() : snapshotTransaction.execute(status -> load.get());
+    }
+
+    private VerificationSnapshot loadSnapshot(GovernanceEventCommitment.Kind kind, String eventId) {
+        String outboxId = GovernanceEventCommitment.idFor(kind, eventId);
+        WriteActionAuditOutboxRecord obligation = mongo.findById(outboxId, WriteActionAuditOutboxRecord.class);
+        Object source = event(kind, eventId);
+        AuditEventDocument audit = null;
+        if (obligation != null && source != null && obligation.getGovernanceOccurredAt() != null) {
+            String hash = GovernanceEventCommitment.hash(kind, eventId, source,
+                    obligation.getGovernanceScope(), obligation.getActor(),
+                    obligation.getGovernanceObjectId(), obligation.getGovernanceOperationId(),
+                    obligation.getGovernanceProofDigest(), obligation.getGovernanceResultId(),
+                    obligation.getGovernanceOccurredAt());
+            if (Objects.equals(hash, obligation.getGovernanceEvidenceHash())) {
+                audit = auditEvents.findByRequestId("gov:" + hash).orElse(null);
+            }
+        }
+
+        AuditEventDocument head = auditEvents.findLatestByPartitionKey("source_service:alert-service").orElse(null);
+        List<AuditAnchorDocument> eventAnchors = audit == null || audit.chainPosition() == null ? List.of()
+                : anchors.findByPartitionKeyAndChainPositionIn(audit.partitionKey(), Set.of(audit.chainPosition()));
+        AuditEventDocument predecessor = null;
+        AuditEventDocument successor = null;
+        if (audit != null && audit.chainPosition() != null && audit.chainPosition() > 1L) {
+            List<AuditEventDocument> rows = auditEvents.findByPartitionKeyAndChainPositionBetween(
+                    audit.partitionKey(), audit.chainPosition() - 1L, audit.chainPosition() - 1L, 2);
+            predecessor = rows.size() == 1 ? rows.getFirst() : null;
+        }
+        if (audit != null && head != null && audit.chainPosition() != null
+                && audit.chainPosition() < head.chainPosition()) {
+            List<AuditEventDocument> rows = auditEvents.findByPartitionKeyAndChainPositionBetween(
+                    audit.partitionKey(), audit.chainPosition() + 1L, audit.chainPosition() + 1L, 2);
+            successor = rows.size() == 1 ? rows.getFirst() : null;
+        }
+        AuditEventDocument headPredecessor = null;
+        if (head != null && head.chainPosition() != null && head.chainPosition() > 1L) {
+            if (audit != null && Objects.equals(audit.chainPosition(), head.chainPosition())) {
+                headPredecessor = predecessor;
+            } else {
+                List<AuditEventDocument> rows = auditEvents.findByPartitionKeyAndChainPositionBetween(
+                        head.partitionKey(), head.chainPosition() - 1L, head.chainPosition() - 1L, 2);
+                headPredecessor = rows.size() == 1 ? rows.getFirst() : null;
+            }
+        }
+        List<AuditAnchorDocument> headAnchors = head == null || head.chainPosition() == null ? List.of()
+                : anchors.findByPartitionKeyAndChainPositionIn(head.partitionKey(), Set.of(head.chainPosition()));
+        AuditAnchorDocument latestAnchor = anchors.findLatestByPartitionKey("source_service:alert-service").orElse(null);
+        AuditChainLockDocument lock = mongo.findById("source_service:alert-service", AuditChainLockDocument.class);
+        return new VerificationSnapshot(obligation, source, audit, eventAnchors, predecessor, successor,
+                head, headPredecessor, headAnchors, latestAnchor, lock);
+    }
+
+    private boolean safeToProveAbsence(VerificationSnapshot snapshot) {
+        WriteActionAuditOutboxRecord obligation = snapshot.obligation();
+        if (obligation == null
+                || !(obligation.getStatus() == WriteActionAuditOutboxStatus.FAILED_PERMANENT
+                    || obligation.getStatus() == WriteActionAuditOutboxStatus.FAILED_RETRYABLE)
+                || obligation.getClaimOwner() != null
+                || obligation.getClaimToken() != null
+                || obligation.getClaimedAt() != null
+                || obligation.getClaimExpiresAt() != null) {
+            return false;
+        }
+        AuditChainLockDocument lock = snapshot.lock();
+        return lock == null || (lock.ownerToken() == null || lock.ownerToken().isBlank())
+                && (lock.lockedUntil() == null || !lock.lockedUntil().isAfter(java.time.Instant.EPOCH));
+    }
+
+    private boolean validHeadSnapshot(VerificationSnapshot snapshot) {
+        AuditEventDocument head = snapshot.head();
+        if (head == null) {
+            return snapshot.headAnchors().isEmpty() && snapshot.latestAnchor() == null;
+        }
+        return head.chainPosition() != null && head.chainPosition() > 0L
+                && "SHA-256".equals(head.hashAlgorithm()) && "1.0".equals(head.schemaVersion())
+                && AuditEventHasher.matches(head)
+                && snapshot.headAnchors().size() == 1
+                && snapshot.latestAnchor() != null
+                && snapshot.headAnchors().getFirst().chainPosition() == head.chainPosition()
+                && Objects.equals(snapshot.headAnchors().getFirst().lastEventHash(), head.eventHash())
+                && snapshot.latestAnchor().chainPosition() == head.chainPosition()
+                && Objects.equals(snapshot.latestAnchor().lastEventHash(), head.eventHash())
+                && (head.chainPosition() == 1L || snapshot.headPredecessor() != null
+                    && snapshot.headPredecessor().chainPosition() == head.chainPosition() - 1L
+                    && Objects.equals(snapshot.headPredecessor().eventHash(), head.previousEventHash())
+                    && AuditEventHasher.matches(snapshot.headPredecessor()));
+    }
+
+    private boolean validImmediateSuccessor(AuditEventDocument audit, AuditEventDocument successor) {
+        return successor != null
+                && successor.chainPosition() != null
+                && successor.chainPosition() == audit.chainPosition() + 1L
+                && Objects.equals(successor.previousEventHash(), audit.eventHash())
+                && AuditEventHasher.matches(successor);
+    }
+
+    private record VerificationSnapshot(WriteActionAuditOutboxRecord obligation, Object governanceEvent,
+            AuditEventDocument auditEvent, List<AuditAnchorDocument> eventAnchors,
+            AuditEventDocument predecessor, AuditEventDocument successor, AuditEventDocument head,
+            AuditEventDocument headPredecessor, List<AuditAnchorDocument> headAnchors, AuditAnchorDocument latestAnchor,
+            AuditChainLockDocument lock) { }
+
     /** Historical proof-only verification; it deliberately makes no event-chain or current-authorization claim. */
     public HistoricalProofVerification verifyModelPromotionReviewProof(PolicyGovernanceActor actor,
             String proposalId) {
@@ -221,49 +357,6 @@ public class GovernanceEventVerificationService {
                     WitnessAssurance.NOT_ASSESSED, CurrentAuthorization.NOT_ASSESSED,
                     "MODEL_PROMOTION_SIGNED_REVIEW_VERIFIER", "REFERENCED_PROOF_FAILED_OR_UNAVAILABLE");
         }
-    }
-
-    /** Absence is retry-safe only when the complete bounded local chain and every local anchor verify. */
-    private String completeAuditChain(String partitionKey) {
-        long count = auditEvents.countByPartitionKey(partitionKey);
-        if (count > 10_000) return "INCOMPLETE";
-        List<AuditEventDocument> events = auditEvents.findFullChain(partitionKey, 10_001);
-        if (events.size() != count) return "INVALID";
-        AuditEventDocument previous = null;
-        for (int offset = 0; offset < events.size(); offset += 100) {
-            List<AuditEventDocument> batch = events.subList(offset, Math.min(events.size(), offset + 100));
-            Set<Long> positions = batch.stream().map(AuditEventDocument::chainPosition)
-                    .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
-            var matching = anchors.findByPartitionKeyAndChainPositionIn(partitionKey, positions);
-            Map<Long, List<com.frauddetection.alert.audit.AuditAnchorDocument>> byPosition = new HashMap<>();
-            matching.forEach(anchor -> byPosition.computeIfAbsent(anchor.chainPosition(), ignored -> new ArrayList<>()).add(anchor));
-            for (int index = 0; index < batch.size(); index++) {
-                AuditEventDocument current = batch.get(index);
-                long expectedPosition = offset + index + 1L;
-                if (!Objects.equals(current.partitionKey(), partitionKey)
-                        || current.chainPosition() == null || current.chainPosition() != expectedPosition
-                        || !"SHA-256".equals(current.hashAlgorithm()) || !"1.0".equals(current.schemaVersion())
-                        || !AuditEventHasher.matches(current)
-                        || !Objects.equals(current.previousEventHash(), previous == null ? null : previous.eventHash()))
-                    return "INVALID";
-                List<com.frauddetection.alert.audit.AuditAnchorDocument> atPosition = byPosition.get(current.chainPosition());
-                if (atPosition == null || atPosition.size() != 1
-                        || !Objects.equals(atPosition.getFirst().lastEventHash(), current.eventHash())
-                        || !Objects.equals(atPosition.getFirst().previousEventHash(), current.previousEventHash())
-                        || !Objects.equals(atPosition.getFirst().hashAlgorithm(), current.hashAlgorithm()))
-                    return "INVALID";
-                previous = current;
-            }
-        }
-        var head = auditEvents.findLatestByPartitionKey(partitionKey).orElse(null);
-        var anchor = anchors.findLatestByPartitionKey(partitionKey).orElse(null);
-        boolean complete = count == 0 ? head == null && anchor == null
-                : previous != null && head != null && anchor != null
-                    && Objects.equals(head.eventHash(), previous.eventHash())
-                    && Objects.equals(anchor.lastEventHash(), head.eventHash())
-                    && Objects.equals(anchor.chainPosition(), head.chainPosition())
-                    && anchor.chainPosition() == count;
-        return complete ? "VALID" : "INVALID";
     }
 
     private String historicalProofStatus(PolicyGovernanceActor actor,

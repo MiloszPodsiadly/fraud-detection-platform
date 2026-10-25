@@ -137,3 +137,26 @@ terminal evidence for the recovery action and deliberately creates no second aud
 Conflicting operation ID reuse, an active/stale claim, exhausted recovery budget, unavailable evidence, or invalid
 commitment evidence fails closed. An unavailable Mongo read is not treated as proof that no append exists. Non-governance
 audit outbox behavior retains its existing at-least-once semantics.
+
+## Exact-obligation recovery evidence
+
+Recovery verifies one immutable obligation in a Mongo read transaction using the unique audit `request_id`, its exact local
+anchor position, adjacent chain positions, current head and anchor, plus outbox claim and audit-chain lock state. It does not
+scan the audit partition. `NO_APPEND_PROVEN` requires the original business event and outbox commitment to match, no event for
+the unique request id, a terminal retryable/permanent outbox state with all claim fields cleared, an unowned and released
+audit-chain lease, and a canonical head with its matching anchor and immediate predecessor. A live or retained lock owner,
+an unreleased lock expiry, publishing claim,
+read failure, or unresolved snapshot yields `OUTCOME_UNKNOWN`/`INFRASTRUCTURE_UNAVAILABLE`; it is never treated as absence.
+
+`EXACT_AUDIT_APPEND_COMMITTED` requires the event payload and hash to match the commitment, a valid adjacent predecessor,
+the exact local anchor, and a consistent current head. Missing or mismatched local anchors and invalid hashes remain integrity
+failures. Independent witness availability is reported separately from the local append result. This exact-obligation result
+does not claim that the entire historical chain was verified; full-chain and bounded-range verification remain separate,
+explicit operations.
+
+Authorized recovery performs an initial eligibility check, then repeats cryptographic evidence verification inside the same
+Mongo transaction as the outbox compare-and-set and immutable recovery receipt. The transaction snapshot binds ordinary
+application reads of the governance source, commitment, audit event, local anchor, chain head, and lock to that decision;
+the compare-and-set also rejects changed commitment fields, attempts, recovery count, status, or publisher claims. A snapshot
+does not protect against a privileged database administrator rewriting all related evidence or trust roots, and an external
+witness cannot participate in Mongo atomicity. Those cases remain outside this guarantee.

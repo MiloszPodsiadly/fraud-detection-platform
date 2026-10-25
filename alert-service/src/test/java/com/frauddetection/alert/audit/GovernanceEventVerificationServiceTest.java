@@ -5,6 +5,7 @@ import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxStatus;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxPublisher;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRepository;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxClaimStore;
+import com.frauddetection.alert.audit.external.GovernanceExternalAnchorVerifier;
 import com.frauddetection.alert.governance.audit.GovernanceEventCommitment;
 import com.frauddetection.alert.governance.audit.GovernanceEventVerificationService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
@@ -14,7 +15,6 @@ import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
 
 import java.time.Instant;
 import java.time.Clock;
@@ -27,6 +27,8 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -58,11 +60,9 @@ class GovernanceEventVerificationServiceTest {
                 AuditFailureCategory.NONE, null, null), null, 1);
         when(auditEvents.findByRequestId("gov:" + obligation.getGovernanceEvidenceHash()))
                 .thenReturn(Optional.of(audit));
-        when(mongo.count(any(Query.class), eq(AuditEventDocument.class))).thenReturn(1L);
         when(anchors.findByPartitionKeyAndChainPositionIn(eq(audit.partitionKey()), eq(Set.of(1L))))
                 .thenReturn(java.util.List.of(AuditAnchorDocument.from("anchor-1", audit)));
         when(auditEvents.findLatestByPartitionKey(audit.partitionKey())).thenReturn(Optional.of(audit));
-        when(auditEvents.countByPartitionKey(audit.partitionKey())).thenReturn(1L);
         when(anchors.findLatestByPartitionKey(audit.partitionKey()))
                 .thenReturn(Optional.of(AuditAnchorDocument.from("head-anchor", audit)));
 
@@ -82,7 +82,9 @@ class GovernanceEventVerificationServiceTest {
         assertThat(verification.verify(auditor(), KIND, source.id()).eventIntegrity())
                 .isEqualTo(GovernanceEventVerificationService.EventIntegrity.INVALID);
 
-        when(auditEvents.countByPartitionKey(audit.partitionKey())).thenReturn(0L);
+        when(anchors.findLatestByPartitionKey(audit.partitionKey()))
+                .thenReturn(Optional.of(new AuditAnchorDocument("wrong-head-anchor", NOW, audit.partitionKey(),
+                        "f".repeat(64), audit.previousEventHash(), 1L, "SHA-256")));
         assertThat(verification.verify(auditor(), KIND, source.id()).reason())
                 .isEqualTo("AUDIT_HEAD_BROKEN_OR_INCOMPLETE");
     }
@@ -93,7 +95,7 @@ class GovernanceEventVerificationServiceTest {
         when(mongo.findById(obligation.getOutboxId(), WriteActionAuditOutboxRecord.class))
                 .thenReturn(obligation);
         when(mongo.findById(source.id(), PolicyTrustChangeAuditDocument.class)).thenReturn(source);
-        assertThat(verification.verify(auditor(), KIND, source.id()).status()).isEqualTo("PENDING");
+        assertThat(verification.verify(auditor(), KIND, source.id()).status()).isEqualTo("OUTCOME_UNKNOWN");
 
         obligation.setGovernanceOperationId("changed-operation");
         assertThat(verification.verify(auditor(), KIND, source.id()).reason())
@@ -105,6 +107,110 @@ class GovernanceEventVerificationServiceTest {
         when(mongo.findById(source.id(), PolicyTrustChangeAuditDocument.class))
                 .thenReturn(null);
         assertThat(verification.verify(auditor(), KIND, source.id()).status()).isEqualTo("MISSING_EVIDENCE");
+    }
+
+    @Test void missingExactRequestUsesBoundedIndexedEvidenceInsteadOfFullChainScan() {
+        var source = event("a".repeat(64));
+        var obligation = obligation(source);
+        obligation.setStatus(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
+        when(mongo.findById(obligation.getOutboxId(), WriteActionAuditOutboxRecord.class))
+                .thenReturn(obligation);
+        when(mongo.findById(source.id(), PolicyTrustChangeAuditDocument.class)).thenReturn(source);
+        when(auditEvents.findByRequestId("gov:" + obligation.getGovernanceEvidenceHash()))
+                .thenReturn(Optional.empty());
+
+        var result = verification.verify(auditor(), KIND, source.id());
+
+        assertThat(result.status()).isEqualTo("BLOCKED");
+        assertThat(result.canonicalSha256()).isEqualTo(obligation.getGovernanceEvidenceHash());
+        verify(auditEvents, never()).findFullChain(anyString(), anyInt());
+        verify(auditEvents, never()).countByPartitionKey(anyString());
+    }
+
+    @Test void activeAuditLeaseOrPublisherClaimKeepsMissingAppendOutcomeUnknown() {
+        var source = event("a".repeat(64));
+        var obligation = obligation(source);
+        obligation.setStatus(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
+        when(mongo.findById(obligation.getOutboxId(), WriteActionAuditOutboxRecord.class))
+                .thenReturn(obligation);
+        when(mongo.findById(source.id(), PolicyTrustChangeAuditDocument.class)).thenReturn(source);
+        when(auditEvents.findByRequestId("gov:" + obligation.getGovernanceEvidenceHash()))
+                .thenReturn(Optional.empty());
+        var activeLease = new AuditChainLockDocument("source_service:alert-service", "active-writer",
+                NOW.plusSeconds(30), 7L);
+        var lockRead = new java.util.concurrent.atomic.AtomicInteger();
+        when(mongo.findById("source_service:alert-service", AuditChainLockDocument.class))
+                .thenAnswer(ignored -> lockRead.getAndIncrement() == 0 ? activeLease : null);
+
+        assertThat(verification.verify(auditor(), KIND, source.id()).status()).isEqualTo("OUTCOME_UNKNOWN");
+
+        var ownerlessActiveLease = new AuditChainLockDocument("source_service:alert-service", null,
+                Instant.now().plusSeconds(30), 8L);
+        when(mongo.findById("source_service:alert-service", AuditChainLockDocument.class))
+                .thenReturn(ownerlessActiveLease);
+        assertThat(verification.verify(auditor(), KIND, source.id()).status()).isEqualTo("OUTCOME_UNKNOWN");
+
+        obligation.setStatus(WriteActionAuditOutboxStatus.PUBLISHING);
+        obligation.setClaimOwner("publisher");
+        obligation.setClaimToken("live-token");
+        obligation.setClaimedAt(NOW);
+        obligation.setClaimExpiresAt(NOW.plusSeconds(30));
+        assertThat(verification.verify(auditor(), KIND, source.id()).status()).isEqualTo("OUTCOME_UNKNOWN");
+    }
+
+    @Test void missingExactLocalAnchorIsIntegrityFailureEvenWhenEventHashIsValid() {
+        var source = event("a".repeat(64));
+        var obligation = obligation(source);
+        var audit = AuditEventDocument.from("audit-missing-anchor", new AuditEvent(
+                new AuditActor(source.actorId(), Set.of(), Set.of()),
+                AuditAction.COMMIT_GOVERNANCE_EVENT, AuditResourceType.MODEL_GOVERNANCE_EVENT,
+                obligation.getResourceId(), NOW, obligation.getCorrelationId(),
+                "gov:" + obligation.getGovernanceEvidenceHash(), AuditOutcome.SUCCESS,
+                AuditFailureCategory.NONE, null, null), null, 1);
+        when(mongo.findById(obligation.getOutboxId(), WriteActionAuditOutboxRecord.class))
+                .thenReturn(obligation);
+        when(mongo.findById(source.id(), PolicyTrustChangeAuditDocument.class)).thenReturn(source);
+        when(auditEvents.findByRequestId("gov:" + obligation.getGovernanceEvidenceHash()))
+                .thenReturn(Optional.of(audit));
+        when(auditEvents.findLatestByPartitionKey(audit.partitionKey())).thenReturn(Optional.of(audit));
+        when(anchors.findByPartitionKeyAndChainPositionIn(audit.partitionKey(), Set.of(1L)))
+                .thenReturn(List.of());
+        when(anchors.findLatestByPartitionKey(audit.partitionKey())).thenReturn(Optional.empty());
+
+        var result = verification.verify(auditor(), KIND, source.id());
+
+        assertThat(result.status()).isEqualTo("TAMPERED");
+        assertThat(result.reason()).isEqualTo("LOCAL_ANCHOR_MISSING_OR_MISMATCHED");
+    }
+
+    @Test void unavailableExternalWitnessDoesNotEraseVerifiedLocalAppend() {
+        var source = event("a".repeat(64));
+        var obligation = obligation(source);
+        var audit = AuditEventDocument.from("audit-local-only", new AuditEvent(
+                new AuditActor(source.actorId(), Set.of(), Set.of()),
+                AuditAction.COMMIT_GOVERNANCE_EVENT, AuditResourceType.MODEL_GOVERNANCE_EVENT,
+                obligation.getResourceId(), NOW, obligation.getCorrelationId(),
+                "gov:" + obligation.getGovernanceEvidenceHash(), AuditOutcome.SUCCESS,
+                AuditFailureCategory.NONE, null, null), null, 1);
+        var anchor = AuditAnchorDocument.from("anchor-local-only", audit);
+        var external = mock(GovernanceExternalAnchorVerifier.class);
+        when(mongo.findById(obligation.getOutboxId(), WriteActionAuditOutboxRecord.class)).thenReturn(obligation);
+        when(mongo.findById(source.id(), PolicyTrustChangeAuditDocument.class)).thenReturn(source);
+        when(auditEvents.findByRequestId("gov:" + obligation.getGovernanceEvidenceHash())).thenReturn(Optional.of(audit));
+        when(auditEvents.findLatestByPartitionKey(audit.partitionKey())).thenReturn(Optional.of(audit));
+        when(anchors.findByPartitionKeyAndChainPositionIn(audit.partitionKey(), Set.of(1L))).thenReturn(List.of(anchor));
+        when(anchors.findLatestByPartitionKey(audit.partitionKey())).thenReturn(Optional.of(anchor));
+        org.mockito.Mockito.doThrow(new IllegalStateException("witness backend unavailable"))
+                .when(external).verify(anchor);
+        var service = new GovernanceEventVerificationService(mongo, auditEvents, anchors,
+                null, null, external, null);
+
+        var result = service.verify(auditor(), KIND, source.id());
+
+        assertThat(result.auditEventSha256()).isEqualTo(audit.eventHash());
+        assertThat(result.chainPosition()).isEqualTo(1L);
+        assertThat(result.independentAnchorStatus()).isEqualTo("UNAVAILABLE");
+        assertThat(result.externalWitness()).isEqualTo(GovernanceEventVerificationService.WitnessAssurance.UNAVAILABLE);
     }
 
     @Test void unauthorizedReadIsDeniedBeforeDatabaseAccess() {

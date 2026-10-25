@@ -95,6 +95,8 @@ public class WriteActionAuditOutboxRecoveryService {
             initial = mongo.findById(outboxId, WriteActionAuditOutboxRecord.class);
         } catch (ResponseStatusException conflict) {
             throw conflict;
+        } catch (AccessDeniedException | IllegalArgumentException invalidRequest) {
+            throw invalidRequest;
         } catch (RuntimeException unavailable) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Audit recovery evidence is unavailable; no state was changed", unavailable);
@@ -109,7 +111,7 @@ public class WriteActionAuditOutboxRecoveryService {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Audit evidence is unavailable; no recovery action was taken", unavailable);
         }
-        Classification classification = classify(evidence);
+        Classification classification = classify(evidence, kind, eventId, initial.getGovernanceEvidenceHash());
         String expectedAction = classification == Classification.EXACT_AUDIT_APPEND_COMMITTED ? "RECONCILE"
                 : classification == Classification.NO_APPEND_PROVEN ? "RETRY" : null;
         if (expectedAction == null) {
@@ -128,6 +130,28 @@ public class WriteActionAuditOutboxRecoveryService {
                 if (replay != null) {
                     ensureSameIntent(replay, actor, outboxId, kind, eventId, command);
                     return replay;
+                }
+                final GovernanceEventVerificationService.Verification currentEvidence;
+                try {
+                    currentEvidence = verification.verify(actor, kind, eventId);
+                } catch (AccessDeniedException | IllegalArgumentException invalidRequest) {
+                    throw invalidRequest;
+                } catch (RuntimeException unavailable) {
+                    throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                            "Audit evidence is unavailable inside recovery transaction; no state was changed", unavailable);
+                }
+                Classification currentClassification = classify(currentEvidence, kind, eventId,
+                        initial.getGovernanceEvidenceHash());
+                String currentExpectedAction = currentClassification == Classification.EXACT_AUDIT_APPEND_COMMITTED
+                        ? "RECONCILE" : currentClassification == Classification.NO_APPEND_PROVEN ? "RETRY" : null;
+                if (currentExpectedAction == null) {
+                    throw new ResponseStatusException(currentClassification == Classification.INFRASTRUCTURE_UNAVAILABLE
+                            ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.CONFLICT,
+                            "Audit obligation changed or is no longer safely recoverable: " + currentClassification);
+                }
+                if (!currentExpectedAction.equals(command.action())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Audit evidence changed before recovery commit: " + currentClassification);
                 }
                 Criteria recoveryCount = initial.getRecoveryCount() == 0
                         ? new Criteria().orOperator(Criteria.where("recovery_count").is(0),
@@ -154,6 +178,8 @@ public class WriteActionAuditOutboxRecoveryService {
                         Criteria.where("governance_result_id").is(initial.getGovernanceResultId()),
                         Criteria.where("governance_occurred_at").is(initial.getGovernanceOccurredAt()),
                         Criteria.where("status").is(WriteActionAuditOutboxStatus.FAILED_PERMANENT),
+                        Criteria.where("claim_owner").is(null),
+                        Criteria.where("claimed_at").is(null),
                         Criteria.where("attempt_count").is(initial.getAttemptCount()),
                         Criteria.where("max_attempts").is(initial.getMaxAttempts()),
                         recoveryCount,
@@ -205,6 +231,8 @@ public class WriteActionAuditOutboxRecoveryService {
                     result.recoveryOrdinal(), result.actorId(), result.reason(), result.occurredAt(), result.receiptSha256());
         } catch (ResponseStatusException conflict) {
             throw conflict;
+        } catch (AccessDeniedException | IllegalArgumentException invalidRequest) {
+            throw invalidRequest;
         } catch (RuntimeException unavailable) {
             final WriteActionAuditRecoveryEvent committed;
             try {
@@ -227,7 +255,8 @@ public class WriteActionAuditOutboxRecoveryService {
                 record.getAttemptCount(), record.getRecoveryCount(), null, record.getLastErrorCode(), null, null);
         try {
             var evidence = verification.verify(actor, GovernanceEventCommitment.Kind.valueOf(kind), eventId);
-            Classification status = classify(evidence);
+            Classification status = classify(evidence, GovernanceEventCommitment.Kind.valueOf(kind), eventId,
+                    record.getGovernanceEvidenceHash());
             if (status == Classification.NO_APPEND_PROVEN && record.getRecoveryCount() >= MAX_RECOVERIES)
                 status = Classification.OPERATIONAL_RETRY_EXHAUSTED;
             return new RecoveryView(null, record.getOutboxId(), kind, eventId, record.getGovernanceEvidenceHash(),
@@ -243,10 +272,15 @@ public class WriteActionAuditOutboxRecoveryService {
         }
     }
 
-    private Classification classify(GovernanceEventVerificationService.Verification evidence) {
+    private Classification classify(GovernanceEventVerificationService.Verification evidence,
+            GovernanceEventCommitment.Kind kind, String eventId, String commitmentSha256) {
         if (evidence == null) return Classification.OUTCOME_UNKNOWN;
         if ("TAMPERED".equals(evidence.status()) || "HISTORICAL_PROOF_INVALID".equals(evidence.status()))
             return Classification.CRYPTOGRAPHIC_INTEGRITY_FAILURE;
+        if (!kind.name().equals(evidence.kind()) || !eventId.equals(evidence.eventId())
+                || !java.util.Objects.equals(commitmentSha256, evidence.canonicalSha256())) {
+            return Classification.IMMUTABLE_CONFLICT;
+        }
         if (evidence.auditEventSha256() != null && evidence.chainPosition() != null)
             return Classification.EXACT_AUDIT_APPEND_COMMITTED;
         if (evidence.canonicalSha256() != null && evidence.auditEventSha256() == null
@@ -259,8 +293,6 @@ public class WriteActionAuditOutboxRecoveryService {
     private RecoveryView replay(WriteActionAuditRecoveryEvent event, PolicyGovernanceActor actor, String outboxId,
             GovernanceEventCommitment.Kind kind, String eventId, RecoveryCommand command) {
         ensureSameIntent(event, actor, outboxId, kind, eventId, command);
-        if (!validReceipt(event)) throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Recovery receipt integrity failure; incident investigation required");
         return new RecoveryView(event.operationId(), event.outboxId(), event.governanceEventKind(), event.governanceEventId(),
                 event.commitmentSha256(), event.auditRequestId(), event.action(), event.result(), event.attemptCount(), event.recoveryOrdinal(),
                 event.actorId(), event.reason(), event.occurredAt(), event.receiptSha256());
@@ -268,6 +300,8 @@ public class WriteActionAuditOutboxRecoveryService {
 
     private void ensureSameIntent(WriteActionAuditRecoveryEvent event, PolicyGovernanceActor actor, String outboxId,
             GovernanceEventCommitment.Kind kind, String eventId, RecoveryCommand command) {
+        if (!validReceipt(event)) throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Recovery receipt integrity failure; incident investigation required");
         if (!event.outboxId().equals(outboxId) || !event.governanceEventKind().equals(kind.name())
                 || !event.governanceEventId().equals(eventId) || !event.actorId().equals(actor.id())
                 || !event.reason().equals(command.reason()) || !event.action().equals(command.action())) {
