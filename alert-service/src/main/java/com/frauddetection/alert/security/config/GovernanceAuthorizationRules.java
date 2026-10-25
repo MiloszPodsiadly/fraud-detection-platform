@@ -12,6 +12,17 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
         authorize
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/audit/commitments/*/*")
                 .hasAuthority(ModelPolicyAuthority.AUDIT_READ)
+                .requestMatchers(HttpMethod.GET, "/api/v1/governance/audit/commitments/chain-ranges")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_READ)
+                .requestMatchers(HttpMethod.GET,
+                        "/api/v1/governance/audit/commitments/model-promotion-reviews/*/proof")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_READ)
+                .requestMatchers(HttpMethod.GET, "/api/v1/governance/audit/recovery")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_RECOVER)
+                .requestMatchers(HttpMethod.GET, "/api/v1/governance/audit/recovery/history")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_RECOVER)
+                .requestMatchers(HttpMethod.POST, "/api/v1/governance/audit/commitments/*/*/recovery")
+                .hasAuthority(ModelPolicyAuthority.AUDIT_RECOVER)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/model-policies")
                 .hasAuthority(ModelPolicyAuthority.READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/model-policies/page")

@@ -155,6 +155,11 @@ export function createAlertsApiClient({
       "/webauthn/registrations/complete", "POST", command, options),
     getPolicySecurityActor: (options) => request("/api/v1/governance/policy-security/me", options),
     getPolicySecurityOperations: (options) => request("/api/v1/governance/policy-security/operations", options),
+    listAuditRecoveryObligations: (options) => request("/api/v1/governance/audit/recovery", options),
+    listAuditRecoveryHistory: (options) => request("/api/v1/governance/audit/recovery/history", options),
+    recoverAuditObligation: (kind, eventId, command, options = {}) => request(
+      `/api/v1/governance/audit/commitments/${encodeURIComponent(kind)}/${encodeURIComponent(eventId)}/recovery`,
+      { ...options, method: "POST", body: JSON.stringify(command) }),
     getPolicyTrustRegistries: (options) => request("/api/v1/governance/policy-trust/registries", options),
     listPolicyTrustChanges: (options) => request("/api/v1/governance/policy-trust/requests", options),
     getPolicyTrustChangeAudit: (id, options) => request(

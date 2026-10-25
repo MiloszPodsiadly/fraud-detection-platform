@@ -121,6 +121,8 @@ app:
     preview:
       max-per-minute: ${TRUST_INCIDENTS_PREVIEW_MAX_PER_MINUTE:30}
   audit:
+    integrity:
+      max-range-length: ${AUDIT_CHAIN_RANGE_MAX_LENGTH:1000}
     bank-mode:
       fail-closed: ${AUDIT_BANK_MODE_FAIL_CLOSED:false}
     local-phase-writer:
@@ -216,6 +218,7 @@ app:
         model-policy-approver: ["model-policy:read", "model-policy:approve", "model-policy:reject", "model-policy:credential:enroll"]
         model-policy-publisher: ["model-policy:read", "model-policy:publish:request"]
         model-policy-recovery: ["model-policy:read", "model-policy:publication:recover", "model-policy:audit:read"]
+        model-policy-audit-recovery: ["model-policy:audit:recover"]
         model-policy-credential-admin: ["model-policy:credential:admin"]
         model-policy-credential-incident-revoker: ["model-policy:credential:incident-revoke"]
         model-policy-credential-holder: ["model-policy:credential:enroll"]

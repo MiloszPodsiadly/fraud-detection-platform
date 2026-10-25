@@ -283,6 +283,7 @@ Local Keycloak users for the analyst console and model-policy workflow:
 | `policy-approver` | `policy-approver` | `model-policy-approver` |
 | `policy-requester` | `policy-requester` | `model-policy-publisher` |
 | `policy-recovery` | `policy-recovery` | `model-policy-recovery`, `model-policy-production`, `model-policy-approver` |
+| `audit-recovery` | `audit-recovery` | dedicated audit recovery, audit read, production scope |
 | `policy-security-a` | `policy-security-a` | credential admin/holder, trust requester, production |
 | `policy-security-b` | `policy-security-b` | credential admin/holder, trust approver, production |
 | `policy-security-c` | `policy-security-c` | credential admin/holder |

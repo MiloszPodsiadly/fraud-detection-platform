@@ -13,6 +13,7 @@ const id = () => crypto.randomUUID();
 const can = (actor, authority) => actor?.authorities?.includes(authority);
 const explain = (error) => error?.message || "The security operation could not be completed.";
 const PENDING_KEY = "policy-security-pending-operation";
+const AUDIT_RECOVERY_PENDING_KEY = "policy-audit-recovery-pending-operation";
 function rememberSecurityPending(pending) {
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending)); }
   catch { /* The open view still retains the operation. */ }
@@ -29,6 +30,27 @@ function forgetSecurityPending(operationId) {
   try {
     if (JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null")?.operationId === operationId)
       sessionStorage.removeItem(PENDING_KEY);
+  } catch { /* Browser storage is optional. */ }
+}
+function storedAuditRecoveryPending(actorId) {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(AUDIT_RECOVERY_PENDING_KEY) || "null");
+    return value?.actorId === actorId
+      && /^[A-Za-z0-9._:-]{1,128}$/.test(value.operationId)
+      && typeof value.outboxId === "string" && value.outboxId.length <= 256
+      && typeof value.eventKind === "string" && typeof value.eventId === "string"
+      && typeof value.reason === "string" && value.reason.trim().length > 0 && value.reason.length <= 500
+      && ["RECONCILE", "RETRY"].includes(value.action) ? value : null;
+  } catch { return null; }
+}
+function rememberAuditRecoveryPending(pending) {
+  try { sessionStorage.setItem(AUDIT_RECOVERY_PENDING_KEY, JSON.stringify(pending)); }
+  catch { /* Current view still retains the operation. */ }
+}
+function forgetAuditRecoveryPending(operationId) {
+  try {
+    if (JSON.parse(sessionStorage.getItem(AUDIT_RECOVERY_PENDING_KEY) || "null")?.operationId === operationId)
+      sessionStorage.removeItem(AUDIT_RECOVERY_PENDING_KEY);
   } catch { /* Browser storage is optional. */ }
 }
 
@@ -91,27 +113,39 @@ export function PolicySecurityPage({ apiClient, enabled }) {
   const [previewedIntent, setPreviewedIntent] = useState("");
   const [reviewCandidate, setReviewCandidate] = useState(null);
   const [operations, setOperations] = useState(null);
+  const [auditRecovery, setAuditRecovery] = useState([]);
+  const [auditRecoveryHistory, setAuditRecoveryHistory] = useState([]);
+  const [auditRecoveryReasons, setAuditRecoveryReasons] = useState({});
+  const [auditRecoveryPending, setAuditRecoveryPending] = useState(null);
   const [uncertain, setUncertain] = useState(null);
 
   const refresh = useCallback(async () => {
     const me = await apiClient.getPolicySecurityActor();
     const stored = storedSecurityPending(me.actorId);
     if (stored) setUncertain((current) => current || stored);
+    const storedRecovery = storedAuditRecoveryPending(me.actorId);
+    setAuditRecoveryPending(storedRecovery);
     setActor(me);
-    const [devices, decisions, publicRegistries, requests, diagnostics, approvedGrants] = await Promise.all([
+    const [devices, decisions, publicRegistries, requests, diagnostics, approvedGrants, recoveryQueue, recoveryHistory] = await Promise.all([
       can(me, POLICY.CREDENTIAL_ENROLL) ? apiClient.listPolicyCredentials() : [],
       can(me, POLICY.CREDENTIAL_ENROLL) ? apiClient.listPolicyCredentialSecurityEvents() : [],
       can(me, POLICY.TRUST_READ) ? apiClient.getPolicyTrustRegistries() : [],
       can(me, POLICY.TRUST_READ) ? apiClient.listPolicyTrustChanges() : [],
       can(me, POLICY.TRUST_READ) && can(me, POLICY.PRODUCTION)
         ? apiClient.getPolicySecurityOperations() : null,
-      can(me, POLICY.CREDENTIAL_ENROLL) ? apiClient.listMyPolicyCredentialGrants() : []
+      can(me, POLICY.CREDENTIAL_ENROLL) ? apiClient.listMyPolicyCredentialGrants() : [],
+      can(me, POLICY.AUDIT_RECOVER) && can(me, POLICY.AUDIT_READ) && can(me, POLICY.PRODUCTION)
+        ? apiClient.listAuditRecoveryObligations() : [],
+      can(me, POLICY.AUDIT_RECOVER) && can(me, POLICY.AUDIT_READ) && can(me, POLICY.PRODUCTION)
+        ? apiClient.listAuditRecoveryHistory() : []
     ]);
     setCredentials(devices);
     setEvents(decisions);
     setRegistries(publicRegistries);
     setChanges(requests);
     setOperations(diagnostics);
+    setAuditRecovery(recoveryQueue);
+    setAuditRecoveryHistory(recoveryHistory);
     setMyGrants(approvedGrants);
   }, [apiClient]);
 
@@ -139,6 +173,20 @@ export function PolicySecurityPage({ apiClient, enabled }) {
     }
     catch (failure) { setError(explain(failure)); }
     finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function submitAuditRecovery(operation) {
+    setAuditRecoveryPending(operation);
+    rememberAuditRecoveryPending(operation);
+    await run(async () => {
+      const receipt = await apiClient.recoverAuditObligation(operation.eventKind, operation.eventId, {
+        operationId: operation.operationId, reason: operation.reason, action: operation.action
+      });
+      setAuditRecoveryPending(null);
+      forgetAuditRecoveryPending(operation.operationId);
+      setNotice(`Audit recovery ${operation.operationId}: ${receipt.classification}; receipt ${receipt.receiptSha256}.`);
+      setAuditRecoveryReasons((current) => ({ ...current, [operation.outboxId]: "" }));
+    });
   }
 
   async function settleSigned(operationId, send, receiptSpec, label) {
@@ -528,6 +576,42 @@ export function PolicySecurityPage({ apiClient, enabled }) {
         <p>Observations are operational signals, not proof of protected deployment or complete instance inventory.</p></>
         : <p>Diagnostics require production trust-read mandate. Worker, Mongo, OIDC/WebAuthn and cross-instance consistency are UNKNOWN here.</p>}
     </section>
+    {can(actor, POLICY.AUDIT_RECOVER) && can(actor, POLICY.AUDIT_READ) && can(actor, POLICY.PRODUCTION)
+      && <section className="panel"><h3>Exhausted audit obligations</h3>
+        <p>Recovery is available only when the immutable commitment verifies. A retry keeps the original event and request identity.</p>
+        {auditRecoveryPending && !auditRecovery.some((item) => item.outboxId === auditRecoveryPending.outboxId)
+          && <p role="status">Operation {auditRecoveryPending.operationId} may have completed. Replay its exact request to retrieve the durable receipt.
+            <button type="button" disabled={busy} onClick={() => submitAuditRecovery(auditRecoveryPending)}>Replay pending recovery</button>
+          </p>}
+        {auditRecovery.length === 0 ? <p>No permanently blocked audit obligations.</p> : <ul>
+          {auditRecovery.map((item) => <li key={item.outboxId}>
+            {(() => {
+              const pending = auditRecoveryPending?.outboxId === item.outboxId ? auditRecoveryPending : null;
+              const reason = pending?.reason ?? auditRecoveryReasons[item.outboxId] ?? "";
+              return <>
+            <p>{item.eventKind} / {item.eventId} — {item.classification}; attempts {item.attemptCount}; recoveries {item.recoveryCount}.</p>
+            <p>Diagnostic: {item.diagnostic || "none"}; commitment {item.commitmentSha256 || "unavailable"}</p>
+            {(pending || item.action !== "NONE") && <><label>Recovery reason <input
+              disabled={!!pending}
+              value={reason}
+              onChange={(event) => setAuditRecoveryReasons((current) => ({ ...current, [item.outboxId]: event.target.value }))} /></label>
+              <button type="button" disabled={busy || !reason.trim()}
+                onClick={() => submitAuditRecovery(pending || { actorId: actor.actorId, outboxId: item.outboxId,
+                    eventKind: item.eventKind, eventId: item.eventId, operationId: id(), reason,
+                    action: item.action })}>{pending ? `Retry operation ${pending.operationId}`
+                  : item.action === "RECONCILE" ? "Reconcile exact append" : "Request bounded retry"}</button>
+            </>}
+            </>;
+            })()}
+          </li>)}
+        </ul>}
+        <h4>Recovery history</h4>
+        {auditRecoveryHistory.length === 0 ? <p>No recovery operations recorded.</p> : <ul>
+          {auditRecoveryHistory.map((entry) => <li key={entry.operationId}>
+            Operation {entry.operationId}, {entry.eventKind}/{entry.eventId}: {entry.result} by {entry.actorId}; {entry.reason}; request {entry.auditRequestId}; receipt {entry.receiptSha256 || "INTEGRITY FAILURE"}.
+          </li>)}
+        </ul>}
+      </section>}
   </section>;
 }
 

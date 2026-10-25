@@ -16,6 +16,7 @@ public final class ModelPolicyAuthority {
     public static final String TRUST_REQUEST = "model-policy:trust:request";
     public static final String TRUST_APPROVE = "model-policy:trust:approve";
     public static final String AUDIT_READ = "model-policy:audit:read";
+    public static final String AUDIT_RECOVER = "model-policy:audit:recover";
     public static final String PRODUCTION = "model-policy:scope:production";
     public static final String CREDENTIAL_ENROLL = "model-policy:credential:enroll";
     public static final String CREDENTIAL_ADMIN = "model-policy:credential:admin";
@@ -23,7 +24,7 @@ public final class ModelPolicyAuthority {
 
     public static final Set<String> ALL = Set.of(READ, CREATE, SUBMIT, APPROVE, REJECT,
             PUBLISH_REQUEST, PUBLICATION_RECOVER, DIRECTORY_READ, TRUST_READ, TRUST_REQUEST,
-            TRUST_APPROVE, AUDIT_READ, PRODUCTION,
+            TRUST_APPROVE, AUDIT_READ, AUDIT_RECOVER, PRODUCTION,
             CREDENTIAL_ENROLL, CREDENTIAL_ADMIN, CREDENTIAL_INCIDENT_REVOKE);
 
     private ModelPolicyAuthority() {

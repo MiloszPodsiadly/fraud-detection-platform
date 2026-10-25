@@ -102,6 +102,14 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "GET", "/api/v1/governance/policy-security/operations", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/audit/commitments/{kind}/{eventId}",
                 "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/audit/commitments/chain-ranges",
+                "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/audit/commitments/model-promotion-reviews/{proposalId}/proof",
+                "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/audit/recovery", "GovernanceAuthorizationRules");
+        route(routes, "GET", "/api/v1/governance/audit/recovery/history", "GovernanceAuthorizationRules");
+        route(routes, "POST", "/api/v1/governance/audit/commitments/{kind}/{eventId}/recovery",
+                "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-trust/registries", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-trust/requests", "GovernanceAuthorizationRules");
         route(routes, "GET", "/api/v1/governance/policy-trust/requests/{id}/audit", "GovernanceAuthorizationRules");

@@ -165,6 +165,9 @@
       "name": "model-policy-recovery"
     },
     {
+      "name": "model-policy-audit-recovery"
+    },
+    {
       "name": "model-policy-production"
     },
     {
@@ -325,6 +328,17 @@
       "requiredActions": [],
       "credentials": [{ "type": "password", "value": "policy-recovery", "temporary": false }],
       "groups": ["model-policy-recovery", "model-policy-production", "model-policy-approver"]
+    },
+    {
+      "username": "audit-recovery",
+      "enabled": true,
+      "firstName": "Audit",
+      "lastName": "Recovery Operator",
+      "email": "audit-recovery@example.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "audit-recovery", "temporary": false }],
+      "groups": ["model-policy-audit-recovery", "model-policy-reader", "model-policy-production"]
     },
     {
       "id": "ca660904-365f-4ce5-bfc8-24afaa8d89bd",

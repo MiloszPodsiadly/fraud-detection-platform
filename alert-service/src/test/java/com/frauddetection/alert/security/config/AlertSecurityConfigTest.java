@@ -197,6 +197,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class,
         GovernanceEventVerificationController.class,
+        com.frauddetection.alert.governance.audit.GovernanceEventAuditRecoveryController.class,
         PolicyGovernanceController.class,
         PolicySecurityActorController.class,
         PolicySecurityOperationsController.class,
@@ -330,6 +331,12 @@ class AlertSecurityConfigTest {
     private GovernanceEventVerificationService governanceEventVerificationService;
 
     @MockitoBean
+    private com.frauddetection.alert.governance.audit.AuditChainRangeVerificationService auditChainRangeVerificationService;
+
+    @MockitoBean
+    private com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRecoveryService auditOutboxRecoveryService;
+
+    @MockitoBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
 
     @MockitoBean
@@ -387,6 +394,26 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/governance/audit/commitments/TRUST_CHANGE/event-1")
                         .with(policyActor(ModelPolicyAuthority.AUDIT_READ)))
                 .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/governance/audit/recovery")
+                        .with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/governance/audit/recovery")
+                        .with(demoUser("REVIEWER")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/governance/audit/recovery")
+                        .with(policyActor(ModelPolicyAuthority.AUDIT_READ)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/governance/audit/recovery/history")
+                        .with(policyActor(ModelPolicyAuthority.AUDIT_READ, ModelPolicyAuthority.PRODUCTION)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/governance/audit/recovery/history")
+                        .with(policyActor(ModelPolicyAuthority.AUDIT_RECOVER, ModelPolicyAuthority.AUDIT_READ,
+                                ModelPolicyAuthority.PRODUCTION)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/governance/audit/commitments/POLICY_GOVERNANCE/event-1/recovery")
+                        .with(policyActor(ModelPolicyAuthority.AUDIT_READ, ModelPolicyAuthority.PRODUCTION))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/governance/model-policies/proposal-1/unexpected")
                         .with(policyActor(ModelPolicyAuthority.READ)))
                 .andExpect(status().isForbidden());

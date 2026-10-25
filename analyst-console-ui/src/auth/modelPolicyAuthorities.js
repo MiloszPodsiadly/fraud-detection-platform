@@ -12,6 +12,7 @@ export const MODEL_POLICY_AUTHORITIES = Object.freeze({
   TRUST_REQUEST: "model-policy:trust:request",
   TRUST_APPROVE: "model-policy:trust:approve",
   AUDIT_READ: "model-policy:audit:read",
+  AUDIT_RECOVER: "model-policy:audit:recover",
   PRODUCTION: "model-policy:scope:production",
   CREDENTIAL_ENROLL: "model-policy:credential:enroll",
   CREDENTIAL_ADMIN: "model-policy:credential:admin",
