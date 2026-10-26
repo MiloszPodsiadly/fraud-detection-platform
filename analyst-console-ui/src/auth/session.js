@@ -81,10 +81,16 @@ export const AUTHORITY_LABELS = {
 
 export function normalizeSession(session) {
   const userId = (session.userId || "").trim();
+  const actorId = typeof session.actorId === "string" ? session.actorId.trim() : "";
+  const issuer = typeof session.issuer === "string" ? session.issuer.trim() : "";
+  const subject = typeof session.subject === "string" ? session.subject.trim() : "";
   const roles = userId ? normalizeRoles(session.roles) : [];
   const extraAuthorities = userId ? splitValues(session.extraAuthorities) : [];
   return {
     userId,
+    actorId,
+    issuer,
+    subject,
     roles,
     extraAuthorities,
     authorities: [...new Set([

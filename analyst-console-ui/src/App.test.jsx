@@ -224,6 +224,42 @@ describe("App", () => {
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
+  it("clears a selected detail when the OIDC callback changes the active account", async () => {
+    window.history.replaceState({}, "", "/?alertId=previous-account-alert");
+    const previousAccount = {
+      ...authenticatedSession(),
+      userId: "analyst-account-a",
+      issuer: "https://identity.example.test/realm-a",
+      subject: "account-a"
+    };
+    callbackPath.value = true;
+    completeLoginCallback.mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => {
+        callbackPath.value = false;
+        resolve({
+          ...authenticatedSession(),
+          userId: "analyst-account-b",
+          issuer: "https://identity.example.test/realm-b",
+          subject: "account-b"
+        });
+      }, 0);
+    }));
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => previousAccount,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer account-b-token" })
+    };
+    listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 });
+
+    render(<App />);
+
+    await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.location.search).not.toContain("alertId"));
+    expect(getAlert).not.toHaveBeenCalled();
+  });
+
   it("does not load dashboard data when oidc bootstrap reports an expired session", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue({

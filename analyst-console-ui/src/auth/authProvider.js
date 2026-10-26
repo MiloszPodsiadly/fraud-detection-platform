@@ -219,6 +219,7 @@ function normalizeBffSessionSnapshot(input = {}) {
   if (sessionStatus === "AUTHENTICATED") {
     session = normalizeSession({
       userId: input.userId,
+      actorId: input.actorId,
       roles: input.roles,
       extraAuthorities: input.authorities
     });

@@ -77,6 +77,8 @@ export function oidcAuthHeaders(accessToken) {
 export function mapOidcProfileToSession(profile = {}) {
   return normalizeSession({
     userId: profile.userId || profile.sub || "",
+    issuer: profile.iss || "",
+    subject: profile.sub || "",
     roles: resolveRoles(profile),
     extraAuthorities: profile.authorities || []
   });

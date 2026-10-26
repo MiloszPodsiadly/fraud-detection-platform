@@ -4,14 +4,22 @@ import { AUTHORITIES, MODEL_GOVERNANCE_READ_AUTHORITIES, hasAuthority } from "..
 import { MODEL_POLICY_AUTHORITIES as POLICY } from "../auth/modelPolicyAuthorities.js";
 import { WorkspaceRuntimeContext } from "./useWorkspaceRuntime.js";
 
-export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true, children }) {
+export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, sessionBootstrapPending = false,
+  enabled = true, children }) {
   const authenticated = Boolean(session?.userId);
+  const resolvedSessionState = sessionState || authProvider?.getSessionState?.(session) || {
+    status: authenticated ? "authenticated" : "unauthenticated"
+  };
   const apiClient = useMemo(
     () => (enabled && authenticated ? createAlertsApiClient({ session, authProvider }) : null),
     [authProvider, authenticated, enabled, session]
   );
   const workspaceSessionResetKey = useMemo(
     () => workspaceSessionResetKeyFor(session, authProvider),
+    [authProvider, session]
+  );
+  const sessionOwnerBoundaryKey = useMemo(
+    () => sessionOwnerBoundaryKeyFor(session, authProvider),
     [authProvider, session]
   );
   const shadowPerformanceRead = authorityState(session, AUTHORITIES.SHADOW_PERFORMANCE_READ);
@@ -23,8 +31,11 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
   const value = useMemo(() => ({
     session,
     authProvider,
+    sessionState: resolvedSessionState,
+    sessionBootstrapPending,
     apiClient,
     workspaceSessionResetKey,
+    sessionOwnerBoundaryKey,
     canReadAlerts: authorityState(session, AUTHORITIES.ALERT_READ),
     canReadFraudCases: authorityState(session, AUTHORITIES.FRAUD_CASE_READ),
     canReadTransactions: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
@@ -64,8 +75,11 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     modelGovernanceRead,
     promotionReadinessRead,
     session,
+    resolvedSessionState,
+    sessionBootstrapPending,
     shadowPerformanceRead,
-    workspaceSessionResetKey
+    workspaceSessionResetKey,
+    sessionOwnerBoundaryKey
   ]);
 
   return (
@@ -95,7 +109,19 @@ function workspaceSessionResetKeyFor(session, authProvider) {
   return [
     authProvider?.kind || "none",
     session?.userId || "",
+    session?.actorId || "",
+    session?.issuer || "",
+    session?.subject || "",
     roles,
     authorities
+  ].join(":");
+}
+
+function sessionOwnerBoundaryKeyFor(session, authProvider) {
+  return [
+    authProvider?.kind || "none",
+    session?.actorId || "",
+    session?.issuer || "",
+    session?.subject || ""
   ].join(":");
 }
