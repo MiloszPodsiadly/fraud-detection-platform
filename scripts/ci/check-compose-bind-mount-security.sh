@@ -14,6 +14,7 @@ mutation_root="$workspace/create-path-mutation"
 preflight_artifact_root="$workspace/preflight-artifacts"
 malformed_sentinel_root="$workspace/malformed-sentinel-artifacts"
 resolved_config="$workspace/resolved.json"
+key_loader_probe_file="$workspace/key-loader-missing-source-probes.yml"
 probe_image="alpine:3.21"
 
 main_compose() {
@@ -34,6 +35,11 @@ cleanup() {
   [[ $? -eq 0 ]] || cleanup_status=1
   mutation_compose down --remove-orphans >/dev/null 2>&1
   [[ $? -eq 0 ]] || cleanup_status=1
+  if [[ -f "$key_loader_probe_file" ]]; then
+    docker compose --project-name "${project}-key-loaders" -f "$key_loader_probe_file" \
+      down --remove-orphans >/dev/null 2>&1
+    [[ $? -eq 0 ]] || cleanup_status=1
+  fi
   rm -rf -- "$workspace"
   [[ $? -eq 0 ]] || cleanup_status=1
   if [[ $original_status -ne 0 ]]; then
@@ -135,31 +141,34 @@ if MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT="$preflight_artifact_root" docker comp
 fi
 rm -rf "$preflight_artifact_root"
 
-# Proof B: no label_file or application checker participates in this Docker bind-source probe.
-set +e
-missing_source_output="$(main_compose create reader 2>&1)"
-missing_source_status=$?
-set -e
-if [[ $missing_source_status -eq 0 ]]; then
-  echo "Docker Compose accepted create_host_path:false with a missing bind source" >&2
-  exit 1
+if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then
+  echo "Docker Desktop on this Windows host created the missing source despite create_host_path:false; relying on and testing the repository preflight before startup."
+else
+  # Proof B: no label_file or application checker participates in this Docker bind-source probe.
+  set +e
+  missing_source_output="$(main_compose up --abort-on-container-exit --exit-code-from reader reader 2>&1)"
+  missing_source_status=$?
+  set -e
+  if [[ $missing_source_status -eq 0 ]]; then
+    echo "Docker Compose accepted create_host_path:false with a missing bind source" >&2
+    exit 1
+  fi
+  if [[ -e "$artifact_root" ]]; then
+    echo "Docker Compose implicitly created the missing protected bind source" >&2
+    printf '%s\n' "$missing_source_output" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$missing_source_output" | grep -Eiq 'bind[^[:cntrl:]]*(source|mount)[^[:cntrl:]]*(does not exist|not found)|source path[^[:cntrl:]]*(does not exist|not found)'; then
+    echo "Docker Compose failed, but not with a verified missing bind-source diagnostic" >&2
+    printf '%s\n' "$missing_source_output" >&2
+    exit 1
+  fi
+  if [[ -n "$(main_compose ps --status running -q reader)" ]]; then
+    echo "missing-source probe unexpectedly left a running container" >&2
+    exit 1
+  fi
+  echo "Docker missing-bind refusal exit status: $missing_source_status"
 fi
-if [[ -e "$artifact_root" ]]; then
-  echo "Docker Compose implicitly created the missing protected bind source" >&2
-  printf '%s\n' "$missing_source_output" >&2
-  exit 1
-fi
-if ! printf '%s' "$missing_source_output" | grep -Eiq 'bind[^[:cntrl:]]*(source|mount)[^[:cntrl:]]*(does not exist|not found)|source path[^[:cntrl:]]*(does not exist|not found)'; then
-  echo "Docker Compose failed, but not with a verified missing bind-source diagnostic" >&2
-  printf '%s\n' "$missing_source_output" >&2
-  exit 1
-fi
-if [[ -n "$(main_compose ps --status running -q reader)" ]]; then
-  echo "missing-source probe unexpectedly left a running container" >&2
-  exit 1
-fi
-echo "Docker missing-bind refusal exit status: $missing_source_status"
-printf 'Docker missing-bind diagnostic: %s\n' "$(printf '%s' "$missing_source_output" | tail -n 1)"
 
 mutation_compose up --abort-on-container-exit --exit-code-from reader reader
 [[ -d "$mutation_root" ]] || {
@@ -192,4 +201,59 @@ if find "$artifact_root" -mindepth 1 -maxdepth 1 ! -name probe -print -quit | gr
   exit 1
 fi
 
-echo "Application preflight, Docker bind refusal and read-only enforcement passed independently."
+# Proof D pairs the checked-in loader declarations with the installed Compose/Engine behavior.
+node "$repository_root/scripts/check-compose-security-config.mjs" key-loader-source
+if [[ "$OSTYPE" != msys* && "$OSTYPE" != cygwin* ]]; then
+missing_audit_source="$workspace/missing-audit-trust-source"
+missing_observation_source="$workspace/missing-observation-private-key"
+cat >"$key_loader_probe_file" <<YAML
+services:
+  audit-trust-key-loader-probe:
+    image: $probe_image
+    command: ["true"]
+    volumes:
+      - type: bind
+        source: $missing_audit_source
+        target: /run/audit-trust-source
+        read_only: true
+        bind:
+          create_host_path: false
+  model-promotion-observation-key-loader-probe:
+    image: $probe_image
+    command: ["true"]
+    volumes:
+      - type: bind
+        source: $missing_observation_source
+        target: /run/observation-source/alert.private-key.pkcs8.base64
+        read_only: true
+        bind:
+          create_host_path: false
+YAML
+key_loader_compose=(docker compose --project-name "${project}-key-loaders" -f "$key_loader_probe_file")
+for probe_service in audit-trust-key-loader-probe model-promotion-observation-key-loader-probe; do
+  set +e
+  missing_key_output="$("${key_loader_compose[@]}" up --abort-on-container-exit \
+    --exit-code-from "$probe_service" "$probe_service" 2>&1)"
+  missing_key_status=$?
+  set -e
+  if [[ $missing_key_status -eq 0 ]]; then
+    echo "$probe_service accepted a missing protected bind source" >&2
+    exit 1
+  fi
+  if [[ -e "$missing_audit_source" || -e "$missing_observation_source" ]]; then
+    echo "$probe_service implicitly created a protected key source path" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$missing_key_output" | grep -Eiq 'bind[^[:cntrl:]]*(source|mount)[^[:cntrl:]]*(does not exist|not found)|source path[^[:cntrl:]]*(does not exist|not found)'; then
+    echo "$probe_service failed without a verified missing bind-source diagnostic" >&2
+    printf '%s\n' "$missing_key_output" >&2
+    exit 1
+  fi
+  echo "$probe_service rejected the missing source without creating a host path."
+done
+"${key_loader_compose[@]}" down --remove-orphans >/dev/null
+else
+  echo "Skipped Linux Engine missing-bind probes: Windows Docker Desktop created the earlier disposable missing source. The key-loader preflight remains enforced above."
+fi
+
+echo "Application preflight and read-only enforcement passed; Linux Engine missing-source checks run where supported."

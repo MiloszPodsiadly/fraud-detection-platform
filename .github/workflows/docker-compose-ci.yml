@@ -107,6 +107,9 @@ jobs:
       - name: Test Compose security assertion mutations
         run: node --test scripts/check-compose-security-config.test.mjs
 
+      - name: Test read-only audit index preflight
+        run: node --test scripts/audit-chain-index-preflight.test.mjs
+
       - name: Test local policy signing-key bootstrap fail-closed behavior
         run: node --test scripts/bootstrap-local-model-promotion-keys.test.mjs
 

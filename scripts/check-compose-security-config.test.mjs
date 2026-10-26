@@ -330,6 +330,11 @@ test("key-loader assertions identify the first resolved private-source and harde
   const auditSource = (value) => value.services[auditLoader].volumes.find(
     ({ target }) => target === "/run/audit-trust-source"
   );
+  const rendererOmission = structuredClone(config);
+  delete observationSource(rendererOmission).bind.create_host_path;
+  delete auditSource(rendererOmission).bind.create_host_path;
+  assert.equal(runChecker(rendererOmission, "security-hardened").status, 0,
+    "renderer omission passes only while the source overlays retain explicit false declarations");
   const mutations = [
     ["extra observation mount", (value) => value.services[observationLoader].volumes.push(
       { type: "tmpfs", target: "/tmp/extra" }), /model-promotion-observation-key-loader mount count: expected 2, resolved 3/],
@@ -347,13 +352,31 @@ test("key-loader assertions identify the first resolved private-source and harde
       /model-promotion-observation-key-loader.network_mode: expected "none", resolved "bridge"/],
     ["observation loader privileged", (value) => { value.services[observationLoader].privileged = true; },
       /model-promotion-observation-key-loader.privileged/],
+    ["observation source autocreation enabled", (value) => { observationSource(value).bind.create_host_path = true; },
+      /model-promotion-observation-key-loader private source create_host_path: expected false or renderer omission/],
+    ["observation private volume leaked to publisher", (value) => {
+      value.services["model-promotion-policy-publisher"].volumes.push({
+        type: "volume", source: "model-promotion-alert-observation-key",
+        target: "/run/other-observation-key", read_only: true
+      });
+    }, /model-promotion-policy-publisher must not mount the alert observation private key/],
     ["audit source path substituted", (value) => {
       auditSource(value).source = path.join(repositoryRoot, "deployment", ".env.example");
     }, /audit-trust-key-loader protected source path/],
     ["audit loader source made writable", (value) => { auditSource(value).read_only = false; },
       /audit-trust-key-loader source mount read_only: expected true, resolved false/],
     ["audit loader source creation enabled", (value) => { auditSource(value).bind.create_host_path = true; },
-      /audit-trust-key-loader protected source create_host_path: expected false, resolved true/],
+      /audit-trust-key-loader protected source create_host_path: expected false or renderer omission/],
+    ["audit trust volume leaked to Prometheus", (value) => {
+      value.services.prometheus.volumes.push({
+        type: "volume", source: "audit-trust-keys", target: "/run/other-audit-keys", read_only: true
+      });
+    }, /prometheus must not mount audit trust authority keys/],
+    ["audit source directory leaked to alert-service", (value) => {
+      value.services["alert-service"].volumes.push({
+        ...auditSource(value), target: "/run/other-audit-source"
+      });
+    }, /alert-service must not mount audit trust authority keys/],
     ["audit destination made read-only", (value) => {
       value.services[auditLoader].volumes.find(({ target }) => target === "/run/audit-trust-keys").read_only = true;
     }, /audit-trust-key-loader destination mount read_only/],
@@ -372,6 +395,63 @@ test("key-loader assertions identify the first resolved private-source and harde
     const checked = runChecker(candidate, "security-hardened");
     assert.notEqual(checked.status, 0, `${label} unexpectedly passed`);
     assert.match(checked.stderr, expectedDiagnostic, `${label} did not identify the resolved mismatch`);
+  }
+});
+
+test("key-loader source declarations and fixtures fail closed for missing, malformed, weak, or aliased sources", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "protected-key-loader-source-test-"));
+  try {
+    const cases = [
+      ["missing audit private key", (fixture) => fs.rmSync(fixture.auditPrivate), /audit trust private key is missing/],
+      ["directory instead of observation file", (fixture) => {
+        fs.rmSync(fixture.observationKey);
+        fs.mkdirSync(fixture.observationKey);
+      }, /model-promotion observation private key must be a non-empty regular file/],
+      ["empty observation file", (fixture) => fs.writeFileSync(fixture.observationKey, ""),
+        /model-promotion observation private key must be a non-empty regular file/],
+      ["wrong audit source path", (fixture) => {
+        fs.writeFileSync(fixture.auditCompose,
+          fs.readFileSync(fixture.auditCompose, "utf8").replace(
+            "source: ./.local/audit-trust-authority", "source: ./.local/wrong-source"));
+      }, /audit-trust-key-loader source overlay must explicitly bind/],
+      ["missing explicit no-create policy", (fixture) => {
+        fs.writeFileSync(fixture.auditCompose,
+          fs.readFileSync(fixture.auditCompose, "utf8").replace("          create_host_path: false\n", ""));
+      }, /audit-trust-key-loader source overlay must explicitly bind/]
+    ];
+
+    for (const [label, mutate, expected] of cases) {
+      const candidate = path.join(root, label.replaceAll(/[^a-z0-9]+/gi, "-"));
+      const fixture = createKeyLoaderSourceFixture(candidate);
+      mutate(fixture);
+      const checked = runKeyLoaderSource(candidate);
+      assert.notEqual(checked.status, 0, `${label} unexpectedly passed`);
+      assert.match(checked.stderr, expected, `${label} did not report the relevant source failure`);
+      if (label === "missing audit private key") {
+        assert.equal(fs.existsSync(fixture.auditPrivate), false,
+          "missing-source preflight must fail without recreating the private key");
+      }
+    }
+
+    if (process.platform !== "win32") {
+      const weakRoot = path.join(root, "weak-mode");
+      const weakFixture = createKeyLoaderSourceFixture(weakRoot);
+      fs.chmodSync(weakFixture.auditPrivate, 0o644);
+      const weak = runKeyLoaderSource(weakRoot);
+      assert.notEqual(weak.status, 0);
+      assert.match(weak.stderr, /audit trust private key must not grant group or other access/);
+
+      const linkRoot = path.join(root, "symlink-source");
+      const linkFixture = createKeyLoaderSourceFixture(linkRoot);
+      const realKey = path.join(linkRoot, "real-key");
+      fs.renameSync(linkFixture.observationKey, realKey);
+      fs.symlinkSync(realKey, linkFixture.observationKey);
+      const linked = runKeyLoaderSource(linkRoot);
+      assert.notEqual(linked.status, 0);
+      assert.match(linked.stderr, /model-promotion observation private key path must not traverse a symbolic link/);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -535,6 +615,59 @@ function runChecker(config, variant, cwd = repositoryRoot) {
   return spawnSync(process.execPath, [checker, variant], {
     cwd,
     input: JSON.stringify(config),
+    encoding: "utf8"
+  });
+}
+
+function createKeyLoaderSourceFixture(root) {
+  const deployment = path.join(root, "deployment");
+  const auditRoot = path.join(deployment, ".local", "audit-trust-authority");
+  const observationRoot = path.join(deployment, ".local", "model-promotion-policy", "fleet-observation");
+  fs.mkdirSync(auditRoot, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(observationRoot, { recursive: true, mode: 0o700 });
+  const auditPrivate = path.join(auditRoot, "ed25519-private.key");
+  fs.writeFileSync(auditPrivate, "private fixture\n", { mode: 0o600 });
+  fs.writeFileSync(path.join(auditRoot, "ed25519-public.key"), "public fixture\n", { mode: 0o644 });
+  const observationKey = path.join(observationRoot, "alert.private-key.pkcs8.base64");
+  fs.writeFileSync(observationKey, "observation fixture\n", { mode: 0o600 });
+  const auditCompose = path.join(deployment, "docker-compose.yml");
+  fs.writeFileSync(auditCompose, [
+    "services:",
+    "  audit-trust-key-loader:",
+    "    volumes:",
+    "      - type: bind",
+    "        source: ./.local/audit-trust-authority",
+    "        target: /run/audit-trust-source",
+    "        read_only: true",
+    "        bind:",
+    "          create_host_path: false",
+    "      - type: volume",
+    "        source: audit-trust-keys",
+    "        target: /run/audit-trust-keys",
+    ""
+  ].join("\n"));
+  const observationCompose = path.join(deployment, "docker-compose.model-promotion-policy-trust.yml");
+  fs.writeFileSync(observationCompose, [
+    "services:",
+    "  model-promotion-observation-key-loader:",
+    "    volumes:",
+    "      - type: bind",
+    "        source: ./.local/model-promotion-policy/fleet-observation/alert.private-key.pkcs8.base64",
+    "        target: /run/observation-source/alert.private-key.pkcs8.base64",
+    "        read_only: true",
+    "        bind:",
+    "          create_host_path: false",
+    "      - type: volume",
+    "        source: model-promotion-alert-observation-key",
+    "        target: /run/policy-observation",
+    ""
+  ].join("\n"));
+  return { auditPrivate, auditCompose, observationKey, observationCompose };
+}
+
+function runKeyLoaderSource(cwd) {
+  return spawnSync(process.execPath, [checker, "key-loader-source"], {
+    cwd,
     encoding: "utf8"
   });
 }

@@ -19,6 +19,7 @@ const supportedVariants = new Set([
   "dev",
   "ai",
   "security-hardened",
+  "key-loader-source",
   "model-shadow-performance-source",
   "model-shadow-performance",
   "security-hardened-model-shadow-performance"
@@ -39,7 +40,7 @@ if (variant === "model-shadow-performance-source" && !sourceFile) {
 }
 
 let config = { services: {} };
-if (variant !== "model-shadow-performance-source") {
+if (variant !== "model-shadow-performance-source" && variant !== "key-loader-source") {
   try {
     config = JSON.parse(fs.readFileSync(0, "utf8"));
   } catch (error) {
@@ -88,6 +89,12 @@ function expectEqual(label, actual, expected) {
 function expectResolved(label, actual, expected) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     fail(`${label}: expected ${formatResolved(expected)}, resolved ${formatResolved(actual)}`);
+  }
+}
+
+function expectFalseOrRendererOmitted(label, actual) {
+  if (actual !== false && actual !== undefined) {
+    fail(`${label}: expected false or renderer omission backed by explicit source policy, resolved ${formatResolved(actual)}`);
   }
 }
 
@@ -386,7 +393,7 @@ function assertObservationKeyIsolation() {
   expectResolved(`${loaderName} private source mount read_only`, source?.read_only, true);
   expectResolved(`${loaderName} private source path`, normalizeComparablePath(source?.source),
     normalizeComparablePath(privateSource));
-  expectResolved(`${loaderName} private source create_host_path`, source?.bind?.create_host_path, false);
+  expectFalseOrRendererOmitted(`${loaderName} private source create_host_path`, source?.bind?.create_host_path);
   expectResolved(`${loaderName} destination mount type`, destination?.type, "volume");
   expectResolved(`${loaderName} destination mount source`, destination?.source, volume);
   expectResolved(`${loaderName} destination mount target`, destination?.target, "/run/policy-observation");
@@ -449,7 +456,7 @@ function assertAuditTrustKeyIsolation() {
   expectResolved(`${loaderName} source mount read_only`, source?.read_only, true);
   expectResolved(`${loaderName} protected source path`, normalizeComparablePath(source?.source),
     normalizeComparablePath(sourceRoot));
-  expectResolved(`${loaderName} protected source create_host_path`, source?.bind?.create_host_path, false);
+  expectFalseOrRendererOmitted(`${loaderName} protected source create_host_path`, source?.bind?.create_host_path);
   expectResolved(`${loaderName} destination mount type`, destination?.type, "volume");
   expectResolved(`${loaderName} destination mount source`, destination?.source, volume);
   expectResolved(`${loaderName} destination mount target`, destination?.target, "/run/audit-trust-keys");
@@ -676,6 +683,131 @@ function assertDeclarativeArtifactMount(file) {
   }
 }
 
+function assertDeclarativeKeyLoaderSources() {
+  assertDeclarativeKeyLoaderMount(
+    path.resolve("deployment", "docker-compose.yml"),
+    "audit-trust-key-loader",
+    "./.local/audit-trust-authority",
+    "/run/audit-trust-source",
+    "audit-trust-keys",
+    "/run/audit-trust-keys"
+  );
+  assertDeclarativeKeyLoaderMount(
+    path.resolve("deployment", "docker-compose.model-promotion-policy-trust.yml"),
+    "model-promotion-observation-key-loader",
+    "./.local/model-promotion-policy/fleet-observation/alert.private-key.pkcs8.base64",
+    "/run/observation-source/alert.private-key.pkcs8.base64",
+    "model-promotion-alert-observation-key",
+    "/run/policy-observation"
+  );
+}
+
+function assertDeclarativeKeyLoaderMount(file, serviceName, sourcePath, sourceTarget, volumeName, volumeTarget) {
+  let source;
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    fail(`${serviceName} source overlay cannot be read: ${error.message}`);
+    return;
+  }
+  if (source.includes("\t")) {
+    fail(`${serviceName} source overlay must not use tab indentation`);
+    return;
+  }
+  const lines = source.replaceAll("\r\n", "\n").split("\n");
+  const loaderHeaders = lines.flatMap((line, index) =>
+    leadingSpaces(line) === 2 && line.trim() === `${serviceName}:` ? [index] : []);
+  if (loaderHeaders.length !== 1) {
+    fail(`${serviceName} source overlay must declare exactly one service`);
+    return;
+  }
+  const serviceStart = loaderHeaders[0] + 1;
+  let serviceEnd = lines.length;
+  for (let index = serviceStart; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() && !line.trimStart().startsWith("#") && leadingSpaces(line) <= 2) {
+      serviceEnd = index;
+      break;
+    }
+  }
+  const volumeHeaders = lines.flatMap((line, index) =>
+    index >= serviceStart && index < serviceEnd
+      && leadingSpaces(line) === 4 && line.trim() === "volumes:" ? [index] : []);
+  if (volumeHeaders.length !== 1) {
+    fail(`${serviceName} source overlay must declare exactly one volumes block`);
+    return;
+  }
+  const volumesStart = volumeHeaders[0] + 1;
+  let volumesEnd = serviceEnd;
+  for (let index = volumesStart; index < serviceEnd; index += 1) {
+    const line = lines[index];
+    if (line.trim() && !line.trimStart().startsWith("#") && leadingSpaces(line) <= 4) {
+      volumesEnd = index;
+      break;
+    }
+  }
+  const mounts = longSyntaxSequence(lines, volumesStart, volumesEnd, 6);
+  if (mounts.length !== 2) {
+    fail(`${serviceName} source overlay must declare exactly one protected bind and one dedicated key volume`);
+    return;
+  }
+  const sourceMounts = mounts.filter((mount) => mount.target === sourceTarget);
+  const keyMounts = mounts.filter((mount) => mount.target === volumeTarget);
+  if (sourceMounts.length !== 1 || sourceMounts[0].type !== "bind"
+      || sourceMounts[0].source !== sourcePath || sourceMounts[0].read_only !== true
+      || sourceMounts[0].bind?.create_host_path !== false) {
+    fail(`${serviceName} source overlay must explicitly bind ${sourcePath} read-only to ${sourceTarget} with bind.create_host_path:false`);
+  }
+  if (keyMounts.length !== 1 || keyMounts[0].type !== "volume"
+      || keyMounts[0].source !== volumeName || keyMounts[0].read_only === true) {
+    fail(`${serviceName} source overlay must use its dedicated writable ${volumeName} key volume at ${volumeTarget}`);
+  }
+}
+
+function assertKeyLoaderFixtures() {
+  const auditRoot = path.resolve("deployment", ".local", "audit-trust-authority");
+  assertProtectedKeyFixture(path.join(auditRoot, "ed25519-private.key"), "audit trust private key", true);
+  assertProtectedKeyFixture(path.join(auditRoot, "ed25519-public.key"), "audit trust public key", false);
+  const observationKey = path.resolve("deployment", ".local", "model-promotion-policy",
+    "fleet-observation", "alert.private-key.pkcs8.base64");
+  assertProtectedKeyFixture(observationKey, "model-promotion observation private key", true);
+}
+
+function assertProtectedKeyFixture(file, label, privateKey) {
+  let candidate = path.resolve(file);
+  const ancestors = [];
+  while (true) {
+    ancestors.push(candidate);
+    const parent = path.dirname(candidate);
+    if (parent === candidate) break;
+    candidate = parent;
+  }
+  for (const entryPath of ancestors.reverse()) {
+    try {
+      if (fs.lstatSync(entryPath).isSymbolicLink()) {
+        fail(`${label} path must not traverse a symbolic link`);
+        return;
+      }
+    } catch (error) {
+      fail(error?.code === "ENOENT"
+        ? `${label} is missing`
+        : `${label} cannot be inspected: ${error.message}`);
+      return;
+    }
+  }
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0) {
+      fail(`${label} must be a non-empty regular file`);
+    }
+    if (privateKey && process.platform !== "win32" && (stat.mode & 0o077) !== 0) {
+      fail(`${label} must not grant group or other access`);
+    }
+  } catch (error) {
+    fail(`${label} cannot be inspected: ${error.message}`);
+  }
+}
+
 function mappingBlock(lines, key, indent, start, end) {
   const prefix = `${" ".repeat(indent)}${key}:`;
   const matches = [];
@@ -889,6 +1021,12 @@ if (variant === "model-shadow-performance-source") {
   finish();
 }
 
+if (variant === "key-loader-source") {
+  assertDeclarativeKeyLoaderSources();
+  assertKeyLoaderFixtures();
+  finish();
+}
+
 assertNoContainerNames();
 
 if (variant === "base") {
@@ -918,6 +1056,8 @@ if (variant === "ai") {
 }
 
 if (variant === "security-hardened" || variant === "security-hardened-model-shadow-performance") {
+  assertDeclarativeKeyLoaderSources();
+  assertKeyLoaderFixtures();
   expectEqual("security ml-inference-service INTERNAL_AUTH_MODE", env("ml-inference-service", "INTERNAL_AUTH_MODE"), "MTLS_SERVICE_IDENTITY");
   expectEqual("security fraud-scoring-service ML_MODEL_BASE_URL", env("fraud-scoring-service", "ML_MODEL_BASE_URL"), "https://ml-inference-service:8090");
   expectEqual("security alert-service ML_GOVERNANCE_BASE_URL", env("alert-service", "ML_GOVERNANCE_BASE_URL"), "https://ml-inference-service:8090");
