@@ -1,5 +1,6 @@
 package com.frauddetection.simulator.service;
 
+import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.simulator.config.SyntheticReplayProperties;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +19,8 @@ class SyntheticReplayDataSourceTest {
                         20,
                         10,
                         4,
-                        30L
+                        30L,
+                        false
                 )
         );
 
@@ -56,5 +58,53 @@ class SyntheticReplayDataSourceTest {
                     .reduce(BigDecimal.ZERO, BigDecimal::add))
                     .isGreaterThan(new BigDecimal("20000.00"));
         }
+    }
+
+    @Test
+    void deterministicTestModeReproducesIdsTimestampsAndStablePerDeviceFingerprints() {
+        SyntheticReplayProperties properties = new SyntheticReplayProperties(
+                Instant.parse("2026-01-01T08:00:00Z"),
+                4,
+                3,
+                2,
+                30L,
+                true
+        );
+        var first = new SyntheticReplayDataSource(properties).stream(20).toList();
+        var second = new SyntheticReplayDataSource(properties).stream(20).toList();
+
+        assertThat(first).containsExactlyElementsOf(second);
+        assertThat(first).extracting(TransactionRawEvent::eventId).doesNotHaveDuplicates();
+        assertThat(first).extracting(TransactionRawEvent::correlationId).doesNotHaveDuplicates();
+        assertThat(first).allSatisfy(event -> {
+            assertThat(event.attributes()).containsEntry("generator", "synthetic");
+            assertThat(event.sourceSystem()).isEqualTo("SYNTHETIC_GENERATOR");
+        });
+        assertThat(first.stream().collect(java.util.stream.Collectors.toMap(
+                event -> event.deviceInfo().deviceId(),
+                event -> event.deviceInfo().fingerprint(),
+                (firstFingerprint, repeatedFingerprint) -> {
+                    assertThat(repeatedFingerprint).isEqualTo(firstFingerprint);
+                    return firstFingerprint;
+                }
+        ))).hasSizeGreaterThan(1);
+    }
+
+    @Test
+    void defaultModeUsesFreshRunIdentityAndPerDeviceFingerprint() {
+        SyntheticReplayProperties properties = new SyntheticReplayProperties(
+                Instant.parse("2026-01-01T08:00:00Z"),
+                4,
+                3,
+                2,
+                30L,
+                false
+        );
+        var first = new SyntheticReplayDataSource(properties).stream(20).toList();
+        var second = new SyntheticReplayDataSource(properties).stream(20).toList();
+
+        assertThat(first.getFirst().transactionId()).isNotEqualTo(second.getFirst().transactionId());
+        assertThat(first).allSatisfy(event -> assertThat(event.deviceInfo().fingerprint())
+                .isEqualTo("syn-fp-" + event.deviceInfo().deviceId()));
     }
 }

@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.data.dataset import Dataset
-from app.data.generator import generate_fraud_behavior, generate_normal_behavior
+from app.data.generator import generate_fraud_behavior, generate_normal_behavior, generate_training_examples
 from app.data.splitting import split_dataset
 from app.evaluation.evaluate import cli_summary, evaluate_scores
 from app.features import feature_contract as feature_contract_module
@@ -870,6 +870,19 @@ class FraudModelTest(unittest.TestCase):
         self.assertTrue(all(row["label"] is None for row in first.X))
         self.assertTrue(all("raw_transaction" in row for row in first.X))
         self.assertGreater(len({row["user_id"] for row in first.X}), 1)
+
+    def test_seeded_fraud_and_training_generators_preserve_features_and_labels(self):
+        first_fraud = generate_fraud_behavior(count=80, seed=456, user_count=8, fraud_ratio=0.02)
+        second_fraud = generate_fraud_behavior(count=80, seed=456, user_count=8, fraud_ratio=0.02)
+        self.assertEqual(first_fraud.X, second_fraud.X)
+        self.assertEqual(first_fraud.y, second_fraud.y)
+        self.assertEqual(first_fraud.metadata, second_fraud.metadata)
+
+        first_training = generate_training_examples(count=128, seed=712)
+        second_training = generate_training_examples(count=128, seed=712)
+        self.assertEqual(first_training.X, second_training.X)
+        self.assertEqual(first_training.y, second_training.y)
+        self.assertEqual(first_training.metadata, second_training.metadata)
 
     def test_fraud_behavior_generator_labels_realistic_scenarios(self):
         dataset = generate_fraud_behavior(count=500, seed=456, user_count=30, fraud_ratio=0.02)

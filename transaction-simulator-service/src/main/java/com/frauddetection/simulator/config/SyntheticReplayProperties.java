@@ -1,6 +1,7 @@
 package com.frauddetection.simulator.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
 import jakarta.validation.constraints.NotNull;
@@ -14,6 +15,7 @@ public record SyntheticReplayProperties(
         @Positive int customerCount,
         @Positive int merchantCount,
         @Positive int suspiciousEvery,
-        @Positive long secondsBetweenEvents
+        @Positive long secondsBetweenEvents,
+        @DefaultValue("false") boolean deterministicTestMode
 ) {
 }

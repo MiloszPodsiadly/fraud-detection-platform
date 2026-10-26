@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -45,9 +46,25 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
 
     @Override
     public Stream<TransactionRawEvent> stream(int maxEvents) {
-        String runId = Long.toString(Instant.now().toEpochMilli(), 36);
+        String runId = syntheticReplayProperties.deterministicTestMode()
+                ? deterministicRunId()
+                : UUID.randomUUID().toString();
         return IntStream.range(0, maxEvents)
                 .mapToObj(index -> buildEvent(index, runId));
+    }
+
+    private String deterministicRunId() {
+        String identity = "synthetic-test:" + syntheticReplayProperties.referenceInstant()
+                + ":" + syntheticReplayProperties.customerCount()
+                + ":" + syntheticReplayProperties.merchantCount()
+                + ":" + syntheticReplayProperties.suspiciousEvery()
+                + ":" + syntheticReplayProperties.secondsBetweenEvents();
+        return UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8)).toString();
+    }
+
+    private String deterministicId(String runId, int index, String purpose) {
+        return UUID.nameUUIDFromBytes((runId + ":" + index + ":" + purpose)
+                .getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private TransactionRawEvent buildEvent(int index, String runId) {
@@ -96,13 +113,19 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
                         .plusSeconds(random.nextInt(15));
 
         return new TransactionRawEvent(
-                UUID.randomUUID().toString(),
+                syntheticReplayProperties.deterministicTestMode()
+                        ? deterministicId(runId, index, "event")
+                        : UUID.randomUUID().toString(),
                 "syn-txn-" + runId + "-" + (index + 1),
-                UUID.randomUUID().toString(),
+                syntheticReplayProperties.deterministicTestMode()
+                        ? deterministicId(runId, index, "correlation")
+                        : UUID.randomUUID().toString(),
                 customerId,
                 accountId,
                 paymentInstrumentId,
-                Instant.now(),
+                syntheticReplayProperties.deterministicTestMode()
+                        ? syntheticReplayProperties.referenceInstant().plusSeconds(index)
+                        : Instant.now(),
                 transactionTimestamp,
                 new Money(amount, rapidTransfer ? "PLN" : homeCurrency(homeCountry)),
                 new MerchantInfo(
@@ -121,7 +144,7 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
                 ),
                 new DeviceInfo(
                         deviceId,
-                        "syn-fp-" + customerNumber + "-" + (elevatedRisk ? index + 1 : "stable"),
+                        "syn-fp-" + deviceId,
                         elevatedRisk ? "198.51.100." + ((index % 200) + 1) : "203.0.113." + ((customerNumber % 200) + 1),
                         elevatedRisk ? "Mozilla/5.0 Synthetic Risk Browser" : "Mozilla/5.0 Synthetic Stable Browser",
                         elevatedRisk ? "ANDROID" : "IOS",

@@ -4,6 +4,7 @@ set -euo pipefail
 count=50000
 seed=7341
 output_path="data/generated/synthetic-replay.jsonl"
+deterministic_test_mode=false
 normal_percentage=93
 rapid_transfer_seed_percentage=2
 rapid_transfer_percentage=1
@@ -17,6 +18,7 @@ while [[ $# -gt 0 ]]; do
     --count) count="$2"; shift 2 ;;
     --seed) seed="$2"; shift 2 ;;
     --output) output_path="$2"; shift 2 ;;
+    --deterministic-test-mode) deterministic_test_mode=true; shift ;;
     --normal-percentage) normal_percentage="$2"; shift 2 ;;
     --rapid-transfer-seed-percentage) rapid_transfer_seed_percentage="$2"; shift 2 ;;
     --rapid-transfer-percentage) rapid_transfer_percentage="$2"; shift 2 ;;
@@ -28,14 +30,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-"$(dirname "$0")/generate-canonical-replay.sh" \
-  --count "$count" \
-  --seed "$seed" \
-  --output "$output_path" \
-  --normal-percentage "$normal_percentage" \
-  --rapid-transfer-seed-percentage "$rapid_transfer_seed_percentage" \
-  --rapid-transfer-percentage "$rapid_transfer_percentage" \
-  --new-device-percentage "$new_device_percentage" \
-  --high-proxy-percentage "$high_proxy_percentage" \
-  --country-mismatch-percentage "$country_mismatch_percentage" \
+canonical_args=(
+  --count "$count"
+  --seed "$seed"
+  --output "$output_path"
+  --normal-percentage "$normal_percentage"
+  --rapid-transfer-seed-percentage "$rapid_transfer_seed_percentage"
+  --rapid-transfer-percentage "$rapid_transfer_percentage"
+  --new-device-percentage "$new_device_percentage"
+  --high-proxy-percentage "$high_proxy_percentage"
+  --country-mismatch-percentage "$country_mismatch_percentage"
   --account-takeover-percentage "$account_takeover_percentage"
+)
+if [[ "$deterministic_test_mode" == "true" ]]; then
+  canonical_args+=(--deterministic-test-mode)
+fi
+
+"$(dirname "$0")/generate-canonical-replay.sh" "${canonical_args[@]}"
