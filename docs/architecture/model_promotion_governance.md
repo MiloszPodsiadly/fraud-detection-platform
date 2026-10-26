@@ -376,9 +376,16 @@ omit original rationale text. Reviewers and explicitly designated governance/aud
 audited state read. Mutation and retry responses do not echo rationale content. The repository has no automatic rationale
 retention or deletion policy; access to the underlying Mongo collections must remain restricted operationally.
 
-The API rate limiter is process-local, bounded by tracked actors and request windows, and synchronizes concurrent access.
-At capacity it rejects untracked actors until an expired window is removed. Replicas do not share counters; ingress
-rate limiting is still needed for a fleet-wide bound. The first-party verifier authorizes only signatures under a
+Model-promotion API rate limiting uses the shared Redis deployment by default. A single atomic Lua sliding-window
+operation enforces one per-actor budget across alert-service replicas. Redis keeps only SHA-256-derived actor keys,
+expires request windows and the bounded active-actor index automatically, and uses a fixed `UNAVAILABLE` result
+when Redis is down or the actor index reaches capacity; the controllers return `503` for that result and `429` only
+for an exhausted actor quota. The actor key is derived from the authenticated OIDC issuer and subject, never from a
+request parameter. Set `MODEL_PROMOTION_API_RATE_LIMITER_MODE=in-memory` only for an explicitly single-node local
+development run; it is not an availability fallback. The state, assessment, lifecycle, signed-review, and emergency
+retirement HTTP endpoints all enforce this shared limiter before invoking their workflow. Production ingress may add
+a broader network-level limit as defense in depth, but must preserve authentication and must not expose service
+methods through an alternate route. The first-party verifier authorizes only signatures under a
 deployment-provisioned, current public issuer registry; with no configured registry it remains `UNAVAILABLE`.
 Existing audit-signature keys are not a policy-authority adapter. Provenance strings and unsigned Mongo documents
 cannot turn `UNAVAILABLE` into `VERIFIED`. The loaded issuer generation is visible as the bounded,
@@ -395,6 +402,17 @@ indexes. Spring Data's global Mongo auto-index setting does not duplicate these 
 documents do not declare annotation-based indexes. The ledger is append-only through this application boundary; Mongo
 storage is not described as WORM or externally immutable, and external audit anchoring remains a separate verified
 guarantee.
+
+Audit-outbox recovery exposes separate assurance fields: `localReceiptStatus`, `receiptIntegrityStatus`,
+`referencedEvidenceStatus` and `independentWitnessStatus`. Recovery receipts and their canonical SHA-256 digest are stored
+in the same MongoDB administrative boundary as the outbox; a valid digest detects accidental or partial changes but a
+privileged MongoDB administrator could rewrite both the receipt and digest. The recovery receipt is therefore not WORM,
+tamperproof or independently notarized. Existing external audit-anchor verification applies to the referenced governance
+append and does not bind the recovery-receipt digest. The service reports `NOT_INDEPENDENTLY_ANCHORED` for that receipt;
+an unavailable referenced-evidence verifier reports `NOT_VERIFIED`. Institutional independent assurance requires an
+operator-provisioned immutable external store or witness under a separate administrative boundary, a verifier that binds
+the exact receipt digest, documented retention and key custody, and a readiness/preflight check before policy can claim
+that assurance. No such receipt witness is currently configured.
 
 ## Durable policy-governance workflow
 

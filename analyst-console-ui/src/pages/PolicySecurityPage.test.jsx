@@ -17,6 +17,8 @@ function client(authorities) {
       status: "ACTIVE", createdAt: "2026-10-01T00:00:00Z" }]),
     listPolicyCredentialSecurityEvents: vi.fn().mockResolvedValue([]),
     listMyPolicyCredentialGrants: vi.fn().mockResolvedValue([]),
+    listAuditRecoveryObligations: vi.fn().mockResolvedValue([]),
+    listAuditRecoveryHistory: vi.fn().mockResolvedValue([]),
     getPolicyTrustRegistries: vi.fn().mockResolvedValue([{ registry: "ONLINE_ACTORS", status: "READY",
       generation: 1, digestSha256: "a".repeat(64), entries: [] }]),
     listPolicyTrustChanges: vi.fn().mockResolvedValue([{ id: "change-1", requestedBy: own,
@@ -58,6 +60,27 @@ function client(authorities) {
 beforeEach(() => { vi.clearAllMocks(); window.sessionStorage.clear(); vi.stubGlobal("confirm", vi.fn(() => true)); });
 
 describe("Security workspace", () => {
+  it("labels local recovery receipts without claiming independent witness assurance", async () => {
+    const apiClient = client(["model-policy:audit:recover", "model-policy:audit:read", "model-policy:scope:production"]);
+    apiClient.listAuditRecoveryObligations.mockResolvedValue([{
+      outboxId: "outbox-1", eventKind: "POLICY_PUBLISHED", eventId: "event-1", classification: "NO_APPEND_PROVEN",
+      action: "NONE", attemptCount: 5, recoveryCount: 0, localReceiptStatus: "NOT_PRESENT",
+      receiptIntegrityStatus: "NOT_VERIFIED", referencedEvidenceStatus: "NO_APPEND_PROVEN",
+      independentWitnessStatus: "NOT_INDEPENDENTLY_ANCHORED"
+    }]);
+    apiClient.listAuditRecoveryHistory.mockResolvedValue([{
+      operationId: "operation-1", eventKind: "POLICY_PUBLISHED", eventId: "event-1", result: "RETRY_QUEUED",
+      actorId: own, reason: "store restored", auditRequestId: "gov:abc", receiptSha256: "a".repeat(64),
+      localReceiptStatus: "COMMITTED_IN_LOCAL_MONGO", receiptIntegrityStatus: "VALID",
+      referencedEvidenceStatus: "NO_APPEND_PROVEN", independentWitnessStatus: "NOT_INDEPENDENTLY_ANCHORED"
+    }]);
+    render(<PolicySecurityPage apiClient={apiClient} enabled />);
+
+    expect(await screen.findByText(/Receipt NOT_PRESENT; receipt integrity NOT_VERIFIED; referenced evidence NO_APPEND_PROVEN; independent witness NOT_INDEPENDENTLY_ANCHORED/)).toBeInTheDocument();
+    expect(screen.getByText(/local receipt COMMITTED_IN_LOCAL_MONGO, integrity VALID, referenced evidence NO_APPEND_PROVEN, independent witness NOT_INDEPENDENTLY_ANCHORED/)).toBeInTheDocument();
+    expect(screen.getByText(/not an external witness or WORM guarantee/)).toBeInTheDocument();
+  });
+
   it("revokes the actor's credential only after passkey confirmation", async () => {
     const apiClient = client(["model-policy:credential:enroll"]);
     render(<PolicySecurityPage apiClient={apiClient} enabled />);

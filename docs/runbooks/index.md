@@ -6,6 +6,8 @@ Status: current runbook standard.
 
 | Runbook | Use when |
 | --- | --- |
+| [Local Compose security bootstrap](compose_security_bootstrap.md) | Starting or resetting the local Compose stack and its disposable database/key-loader volumes. |
+| [Audit chain index bootstrap and migration](audit_chain_index_bootstrap.md) | Preflighting required audit indexes before fresh startup or Mongo index migration. |
 | [Engine intelligence operational runbook](engine_intelligence_operational_runbook.md) | Engine-intelligence projection, feedback submit/read, audit dependency, rollout, rollback, retention, index, and storage-growth triage. |
 | [Alert service operations](alert_service_operations.md) | Runtime operations, trust incidents, outbox ambiguity, audit degradation, and startup closure. |
 | [Regulated mutation recovery](regulated_mutation_recovery.md) | Lease renewal failures, checkpoint renewal failures, finalize recovery, and local audit-chain contention. |

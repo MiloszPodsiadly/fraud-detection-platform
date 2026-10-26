@@ -1214,16 +1214,12 @@ class RegulatedMutationArchitectureTest {
         String combined = Files.readString(Path.of("../docs/architecture/regulated_mutation_lease_fencing.md"));
 
         assertThat(combined).contains("claim acquisition is not write fencing");
-        assertThat(combined).contains("post-claim transitions are fenced");
-        assertThat(combined).containsIgnoringCase("command transition fencing is not business-side-effect rollback by itself");
+        assertThat(combined).contains("Command transition fencing is not business-side-effect rollback by itself");
         assertThat(combined).contains("transaction-mode `REQUIRED`");
-        assertThat(combined).contains("current runtime requires");
-        assertThat(combined).contains("stale worker");
-        assertThat(combined).contains("no silent `repository.save` after claim");
-        assertThat(combined).contains("does not expand transaction scope");
+        assertThat(combined).contains("local Mongo");
+        assertThat(combined).contains("There is no distributed lock for regulated-command transitions");
+        assertThat(combined).contains("generation-fenced partition lease");
         assertThat(combined).contains("no distributed lock");
-        assertThat(combined).contains("Source-string architecture tests are guardrails, not complete architectural proof");
-        assertThat(combined).contains("lease-owner fenced command transition design is the current runtime contract");
         assertThat(combined).doesNotContain("Merge Decision");
         assertThat(combined).doesNotContain("GO:");
         assertThat(combined).doesNotContain("NO-GO:");

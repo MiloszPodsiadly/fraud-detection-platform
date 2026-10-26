@@ -184,7 +184,7 @@ export function PolicySecurityPage({ apiClient, enabled }) {
       });
       setAuditRecoveryPending(null);
       forgetAuditRecoveryPending(operation.operationId);
-      setNotice(`Audit recovery ${operation.operationId}: ${receipt.classification}; receipt ${receipt.receiptSha256}.`);
+      setNotice(`Audit recovery ${operation.operationId}: ${receipt.classification}; local receipt ${receipt.localReceiptStatus}, integrity ${receipt.receiptIntegrityStatus}, referenced evidence ${receipt.referencedEvidenceStatus}, independent witness ${receipt.independentWitnessStatus}; SHA-256 ${receipt.receiptSha256}.`);
       setAuditRecoveryReasons((current) => ({ ...current, [operation.outboxId]: "" }));
     });
   }
@@ -578,7 +578,7 @@ export function PolicySecurityPage({ apiClient, enabled }) {
     </section>
     {can(actor, POLICY.AUDIT_RECOVER) && can(actor, POLICY.AUDIT_READ) && can(actor, POLICY.PRODUCTION)
       && <section className="panel"><h3>Exhausted audit obligations</h3>
-        <p>Recovery is available only when the immutable commitment verifies. A retry keeps the original event and request identity.</p>
+        <p>Recovery is available only when the immutable commitment verifies. A retry keeps the original event and request identity. Receipt SHA-256 checks local record integrity; it is not an external witness or WORM guarantee.</p>
         {auditRecoveryPending && !auditRecovery.some((item) => item.outboxId === auditRecoveryPending.outboxId)
           && <p role="status">Operation {auditRecoveryPending.operationId} may have completed. Replay its exact request to retrieve the durable receipt.
             <button type="button" disabled={busy} onClick={() => submitAuditRecovery(auditRecoveryPending)}>Replay pending recovery</button>
@@ -590,6 +590,7 @@ export function PolicySecurityPage({ apiClient, enabled }) {
               const reason = pending?.reason ?? auditRecoveryReasons[item.outboxId] ?? "";
               return <>
             <p>{item.eventKind} / {item.eventId} — {item.classification}; attempts {item.attemptCount}; recoveries {item.recoveryCount}.</p>
+            <p>Receipt {item.localReceiptStatus}; receipt integrity {item.receiptIntegrityStatus}; referenced evidence {item.referencedEvidenceStatus}; independent witness {item.independentWitnessStatus}.</p>
             <p>Diagnostic: {item.diagnostic || "none"}; commitment {item.commitmentSha256 || "unavailable"}</p>
             {(pending || item.action !== "NONE") && <><label>Recovery reason <input
               disabled={!!pending}
@@ -608,7 +609,7 @@ export function PolicySecurityPage({ apiClient, enabled }) {
         <h4>Recovery history</h4>
         {auditRecoveryHistory.length === 0 ? <p>No recovery operations recorded.</p> : <ul>
           {auditRecoveryHistory.map((entry) => <li key={entry.operationId}>
-            Operation {entry.operationId}, {entry.eventKind}/{entry.eventId}: {entry.result} by {entry.actorId}; {entry.reason}; request {entry.auditRequestId}; receipt {entry.receiptSha256 || "INTEGRITY FAILURE"}.
+            Operation {entry.operationId}, {entry.eventKind}/{entry.eventId}: {entry.result} by {entry.actorId}; {entry.reason}; request {entry.auditRequestId}; local receipt {entry.localReceiptStatus}, integrity {entry.receiptIntegrityStatus}, referenced evidence {entry.referencedEvidenceStatus}, independent witness {entry.independentWitnessStatus}; receipt SHA-256 {entry.receiptSha256 || "INTEGRITY FAILURE"}.
           </li>)}
         </ul>}
       </section>}
