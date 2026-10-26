@@ -199,10 +199,12 @@ app:
     jwt:
       enabled: ${APP_SECURITY_JWT_ENABLED:false}
       required: ${APP_SECURITY_JWT_REQUIRED:false}
-      # Required when APP_SECURITY_JWT_ENABLED=true.
-      # Prefer jwk-set-uri for explicit key discovery in local/integration setups.
+      # Protected deployments require issuer-uri and expected-audience together.
       issuer-uri: ${APP_SECURITY_JWT_ISSUER_URI:}
       jwk-set-uri: ${APP_SECURITY_JWT_JWK_SET_URI:}
+      expected-audience: ${APP_SECURITY_JWT_EXPECTED_AUDIENCE:}
+      # Lower-assurance local/test-only escape hatch; requires an explicit opt-in and profile.
+      allow-unbound-jwks-for-local: ${APP_SECURITY_JWT_ALLOW_UNBOUND_JWKS_FOR_LOCAL:false}
       user-id-claim: ${APP_SECURITY_JWT_USER_ID_CLAIM:sub}
       access-claim: ${APP_SECURITY_JWT_ACCESS_CLAIM:groups}
       production-promotion-access-values: ${APP_SECURITY_JWT_PRODUCTION_PROMOTION_ACCESS_VALUES:}

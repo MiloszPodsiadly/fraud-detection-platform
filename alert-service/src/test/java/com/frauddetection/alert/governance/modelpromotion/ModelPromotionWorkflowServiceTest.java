@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.authorization.AnalystRole;
@@ -101,13 +102,65 @@ class ModelPromotionWorkflowServiceTest {
                 )
         );
 
-        assertThat(result.proposal().proposedBy()).isEqualTo("proposer");
+        String proposerId = PolicyGovernanceActor.identityId("https://issuer.example", "proposer");
+        assertThat(result.proposal().proposedBy()).isEqualTo(proposerId);
         org.mockito.ArgumentCaptor<ModelPromotionProposalSubmission> submitted =
                 org.mockito.ArgumentCaptor.forClass(ModelPromotionProposalSubmission.class);
         org.mockito.Mockito.verify(store).submitProposal(submitted.capture(), any());
-        assertThat(submitted.getValue().operationContext().actorId()).isEqualTo("proposer");
+        assertThat(submitted.getValue().operationContext().actorId()).isEqualTo(proposerId);
+        assertThat(submitted.getValue().operationContext().actorIdentity().issuer()).isEqualTo("https://issuer.example");
+        assertThat(submitted.getValue().operationContext().actorIdentity().subject()).isEqualTo("proposer");
         assertThat(submitted.getValue().policySnapshot()).isNull();
         assertThat(submitted.getValue().assessmentSnapshot()).isNull();
+    }
+
+    @Test
+    void authorizationFingerprintUsesStableIssuerSubjectAndRightsInsteadOfDisplayLogin() {
+        String issuer = "https://issuer.example";
+        String subject = "stable-subject";
+        Set<String> authorities = Set.of(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST, AnalystAuthority.MODEL_PROMOTION_RATIONALE_READ);
+        ModelPromotionAuthorization authorization = new ModelPromotionAuthorization(new CurrentAnalystUser());
+        authenticate(new AnalystPrincipal("display one", Set.of(), authorities, issuer + "#" + subject,
+                PolicyGovernanceActor.identityId(issuer, subject)));
+        var first = authorization.authorize(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                scope(ModelGovernanceEnvironment.TEST), "operation-1", NOW);
+
+        authenticate(new AnalystPrincipal("display two", Set.of(), authorities, issuer + "#" + subject,
+                PolicyGovernanceActor.identityId(issuer, subject)));
+        var sameActor = authorization.authorize(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                scope(ModelGovernanceEnvironment.TEST), "operation-1", NOW);
+        assertThat(sameActor.actorId()).isEqualTo(first.actorId());
+        assertThat(sameActor.authorizationFingerprint()).isEqualTo(first.authorizationFingerprint());
+
+        String otherIssuer = "https://other-issuer.example";
+        authenticate(new AnalystPrincipal("display two", Set.of(), authorities,
+                otherIssuer + "#" + subject, PolicyGovernanceActor.identityId(otherIssuer, subject)));
+        assertThatThrownBy(() -> authorization.revalidate(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                scope(ModelGovernanceEnvironment.TEST), first.operationContext()))
+                .isInstanceOf(ModelPromotionWorkflowBlockedException.class);
+
+        Set<String> reducedRights = Set.of(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_TEST);
+        authenticate(new AnalystPrincipal("display two", Set.of(), reducedRights, issuer + "#" + subject,
+                PolicyGovernanceActor.identityId(issuer, subject)));
+        assertThatThrownBy(() -> authorization.revalidate(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                scope(ModelGovernanceEnvironment.TEST), first.operationContext()))
+                .isInstanceOf(ModelPromotionWorkflowBlockedException.class);
+    }
+
+    @Test
+    void localDemoIdentityCannotSatisfyProductionPromotionAuthorization() {
+        ModelPromotionAuthorization authorization = new ModelPromotionAuthorization(new CurrentAnalystUser());
+        String localActorId = "local:" + "a".repeat(64);
+        authenticate(new AnalystPrincipal("demo display", Set.of(),
+                withProductionScope(Set.of(AnalystAuthority.MODEL_PROMOTION_PROPOSE)), null, localActorId));
+
+        assertThatThrownBy(() -> authorization.authorize(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                scope(ModelGovernanceEnvironment.PRODUCTION), "operation-demo", NOW))
+                .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
+                .satisfies(error -> assertThat(((ModelPromotionWorkflowBlockedException) error).reason())
+                        .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.UNSUPPORTED_PRINCIPAL));
     }
 
     @Test
@@ -429,8 +482,10 @@ class ModelPromotionWorkflowServiceTest {
                 targetState,
                 "proposal-operation"
         );
+        ModelPromotionActorIdentity proposerIdentity = ModelPromotionActorIdentity.institutional(
+                "https://issuer.example", proposer);
         ModelPromotionOperationContext context = new ModelPromotionOperationContext(
-                "proposal-operation", proposer, AUTHORIZATION, NOW
+                "proposal-operation", proposerIdentity.actorId(), AUTHORIZATION, NOW, proposerIdentity
         );
         ModelPromotionProposalSubmission submission = new ModelPromotionProposalSubmission(
                 transition,
@@ -441,7 +496,7 @@ class ModelPromotionWorkflowServiceTest {
                 new ModelPromotionProposal(
                         "proposal-1",
                         targetState,
-                        proposer,
+                        proposerIdentity.actorId(),
                         NOW,
                         proposalRationale("proposal-1")
                 )
@@ -451,7 +506,8 @@ class ModelPromotionWorkflowServiceTest {
                 "c".repeat(64),
                 submission,
                 new ModelPromotionDecisionDocument.LocalAuditEvidence(
-                        "audit-1", "SUBMIT_MODEL_PROMOTION_PROPOSAL", "SUCCEEDED", proposer, AUTHORIZATION, NOW
+                        "audit-1", "SUBMIT_MODEL_PROMOTION_PROPOSAL", "SUCCEEDED",
+                        proposerIdentity.actorId(), AUTHORIZATION, NOW
                 ),
                 NOW
         );
@@ -492,17 +548,20 @@ class ModelPromotionWorkflowServiceTest {
                 ModelPromotionLifecycleState.SHADOW_APPROVED,
                 "quality-gated-proposal-operation"
         );
+        ModelPromotionActorIdentity proposerIdentity = ModelPromotionActorIdentity.institutional(
+                "https://issuer.example", proposer);
         ModelPromotionProposalSubmission submission = new ModelPromotionProposalSubmission(
                 transition,
                 new ModelPromotionOperationContext(
-                        "quality-gated-proposal-operation", proposer, AUTHORIZATION, NOW
+                        "quality-gated-proposal-operation", proposerIdentity.actorId(), AUTHORIZATION, NOW,
+                        proposerIdentity
                 ),
                 policy,
                 assessment,
                 new ModelPromotionProposal(
                         "quality-gated-proposal",
                         ModelPromotionLifecycleState.SHADOW_APPROVED,
-                        proposer,
+                        proposerIdentity.actorId(),
                         NOW,
                         proposalRationale("quality-gated-proposal")
                 )
@@ -515,7 +574,7 @@ class ModelPromotionWorkflowServiceTest {
                         "quality-gated-audit",
                         "SUBMIT_MODEL_PROMOTION_PROPOSAL",
                         "SUCCEEDED",
-                        proposer,
+                        proposerIdentity.actorId(),
                         AUTHORIZATION,
                         NOW
                 ),
@@ -524,7 +583,14 @@ class ModelPromotionWorkflowServiceTest {
     }
 
     private void authenticate(String userId, Set<String> authorities, Set<AnalystRole> roles) {
-        AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities);
+        String issuer = "https://issuer.example";
+        String actorId = PolicyGovernanceActor.identityId(issuer, userId);
+        AnalystPrincipal principal = new AnalystPrincipal("display-" + userId, roles, authorities,
+                issuer + "#" + userId, actorId);
+        authenticate(principal);
+    }
+
+    private void authenticate(AnalystPrincipal principal) {
         SecurityContextHolder.getContext().setAuthentication(new AnalystAuthenticationFactory().authenticated(principal));
     }
 

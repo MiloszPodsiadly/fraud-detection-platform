@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.modelpromotion.api;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,9 +9,6 @@ import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Clock;
-import java.util.Arrays;
-import java.util.Locale;
-
 @Configuration(proxyBeanMethods = false)
 class ModelPromotionApiConfiguration {
 
@@ -30,20 +28,21 @@ class ModelPromotionApiConfiguration {
             @Value("${app.model-promotion.api.rate-limiter.mode}") String mode,
             StringRedisTemplate redisTemplate,
             AlertServiceMetrics metrics,
-            Environment environment
+            Environment environment,
+            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed
     ) {
         if ("redis".equalsIgnoreCase(mode)) {
             return new ModelPromotionApiRateLimiter(redisTemplate, Clock.systemUTC(), java.time.Duration.ofMinutes(1),
                     maxRequestsPerMinute, maxTrackedActors, metrics);
         }
         if ("in-memory".equalsIgnoreCase(mode)) {
-            boolean productionLike = Arrays.stream(environment.getActiveProfiles())
-                    .map(profile -> profile.toLowerCase(Locale.ROOT))
-                    .anyMatch(profile -> profile.equals("prod") || profile.equals("production")
-                            || profile.equals("staging") || profile.equals("bank"));
-            if (productionLike) {
+            if (InstitutionalModePolicy.isInstitutionalMode(environment, bankModeFailClosed)) {
                 throw new IllegalStateException("In-memory model-promotion rate limiting is forbidden in "
-                        + "production-like profiles; configure standalone Redis.");
+                        + "institutional mode; configure standalone Redis.");
+            }
+            if (!InstitutionalModePolicy.isExplicitLocalSingleNodeMode(environment)) {
+                throw new IllegalStateException("In-memory model-promotion rate limiting requires an explicit "
+                        + "local/dev/test/docker-local/bank-local profile; configure standalone Redis otherwise.");
             }
             return new ModelPromotionApiRateLimiter(Clock.systemUTC(), maxRequestsPerMinute, maxTrackedActors, metrics);
         }

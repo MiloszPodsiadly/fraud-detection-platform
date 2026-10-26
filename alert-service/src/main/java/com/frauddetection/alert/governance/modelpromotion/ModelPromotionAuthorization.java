@@ -12,12 +12,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.regex.Pattern;
 
 @Component
 class ModelPromotionAuthorization {
-
-    private static final Pattern ACTOR_ID = Pattern.compile("^[A-Za-z0-9._:@-]{1,128}$");
 
     private final CurrentAnalystUser currentAnalystUser;
 
@@ -30,7 +27,15 @@ class ModelPromotionAuthorization {
     }
 
     String requireActor(String requiredAuthority, ModelGovernanceScope governanceScope) {
-        return requirePrincipal(requiredAuthority, governanceScope).userId();
+        AnalystPrincipal principal = requirePrincipal(requiredAuthority, governanceScope);
+        ModelPromotionActorIdentity identity = ModelPromotionActorIdentity.fromPrincipal(principal);
+        if (governanceScope.environment() == ModelGovernanceEnvironment.PRODUCTION
+                && !identity.isInstitutional()) {
+            throw new ModelPromotionWorkflowBlockedException(
+                    ModelPromotionWorkflowBlockedException.Reason.UNSUPPORTED_PRINCIPAL,
+                    "Production model promotion requires a verified institutional actor");
+        }
+        return identity.actorId();
     }
 
     boolean canReadRationale(ModelGovernanceScope governanceScope) {
@@ -49,15 +54,23 @@ class ModelPromotionAuthorization {
             Instant requestedAt
     ) {
         AnalystPrincipal principal = requirePrincipal(requiredAuthority, governanceScope);
-        String authorizationFingerprint = authorizationFingerprint(principal);
+        ModelPromotionActorIdentity actorIdentity = ModelPromotionActorIdentity.fromPrincipal(principal);
+        if (governanceScope.environment() == ModelGovernanceEnvironment.PRODUCTION
+                && !actorIdentity.isInstitutional()) {
+            throw new ModelPromotionWorkflowBlockedException(
+                    ModelPromotionWorkflowBlockedException.Reason.UNSUPPORTED_PRINCIPAL,
+                    "Production model promotion requires a verified institutional actor");
+        }
+        String authorizationFingerprint = authorizationFingerprint(principal, actorIdentity);
         return new AuthorizedActor(
-                principal.userId(),
+                actorIdentity.actorId(),
                 authorizationFingerprint,
                 new ModelPromotionOperationContext(
                         operationId,
-                        principal.userId(),
+                        actorIdentity.actorId(),
                         authorizationFingerprint,
-                        requestedAt
+                        requestedAt,
+                        actorIdentity
                 )
         );
     }
@@ -75,7 +88,9 @@ class ModelPromotionAuthorization {
         );
         if (!current.operationContext().actorId().equals(expectedContext.actorId())
                 || !current.operationContext().authorizationFingerprint()
-                .equals(expectedContext.authorizationFingerprint())) {
+                .equals(expectedContext.authorizationFingerprint())
+                || !java.util.Objects.equals(current.operationContext().actorIdentity(),
+                        expectedContext.actorIdentity())) {
             throw new ModelPromotionWorkflowBlockedException(
                     ModelPromotionWorkflowBlockedException.Reason.UNAUTHORIZED,
                     "Model promotion authorization changed before the decision could commit"
@@ -91,12 +106,6 @@ class ModelPromotionAuthorization {
                 ModelPromotionWorkflowBlockedException.Reason.UNAUTHENTICATED,
                 "An authenticated analyst principal is required"
         ));
-        if (!ACTOR_ID.matcher(principal.userId()).matches()) {
-            throw new ModelPromotionWorkflowBlockedException(
-                    ModelPromotionWorkflowBlockedException.Reason.UNSUPPORTED_PRINCIPAL,
-                    "The authenticated analyst principal cannot be used for model promotion"
-            );
-        }
         if (!principal.hasAuthority(requiredAuthority)
                 || !principal.hasAuthority(scopeAuthority(governanceScope.environment()))) {
             throw new ModelPromotionWorkflowBlockedException(
@@ -107,12 +116,12 @@ class ModelPromotionAuthorization {
         return principal;
     }
 
-    private String authorizationFingerprint(AnalystPrincipal principal) {
+    private String authorizationFingerprint(AnalystPrincipal principal, ModelPromotionActorIdentity actorIdentity) {
         List<String> roles = new ArrayList<>(principal.roles().stream().map(Enum::name).toList());
         List<String> authorities = new ArrayList<>(principal.authorities());
         roles.sort(String::compareTo);
         authorities.sort(String::compareTo);
-        String material = "model-promotion-principal-v1\n" + principal.userId()
+        String material = "model-promotion-principal-v2\n" + actorIdentity.actorId()
                 + "\nroles=" + String.join(",", roles)
                 + "\nauthorities=" + String.join(",", authorities);
         try {

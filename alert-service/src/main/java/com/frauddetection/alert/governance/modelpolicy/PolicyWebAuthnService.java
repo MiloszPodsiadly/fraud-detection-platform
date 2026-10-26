@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.modelpolicy;
 
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import com.frauddetection.alert.governance.modelpromotion.ModelGovernanceEnvironment;
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import com.yubico.webauthn.AssertionRequest;
 import com.yubico.webauthn.AssertionResult;
@@ -50,6 +51,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -863,7 +865,7 @@ public class PolicyWebAuthnService {
         }
     }
 
-    private void validateOrigin(String rpId, String origin, Environment environment) {
+    static void validateOrigin(String rpId, String origin, Environment environment) {
         URI uri;
         try {
             uri = URI.create(origin);
@@ -878,12 +880,21 @@ public class PolicyWebAuthnService {
                     && !("localhost".equals(rpId) && "http".equals(uri.getScheme())))) {
             throw new IllegalStateException("WebAuthn RP ID and exact origin must be secure and compatible");
         }
-        for (String profile : environment.getActiveProfiles()) {
-            if (("prod".equalsIgnoreCase(profile) || "production".equalsIgnoreCase(profile))
-                    && ("localhost".equals(rpId) || !"https".equals(uri.getScheme()))) {
-                throw new IllegalStateException("Production WebAuthn requires an explicit HTTPS RP origin");
-            }
+        if (InstitutionalModePolicy.isInstitutionalMode(environment)
+                && (isLocalWebAuthnHost(rpId) || isLocalWebAuthnHost(uri.getHost())
+                    || !"https".equalsIgnoreCase(uri.getScheme()))) {
+            throw new IllegalStateException("Institutional WebAuthn requires a non-local HTTPS RP origin");
         }
+    }
+
+    private static boolean isLocalWebAuthnHost(String host) {
+        if (host == null) return false;
+        String normalized = host.toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("[") && normalized.endsWith("]")) {
+            normalized = normalized.substring(1, normalized.length() - 1);
+        }
+        return normalized.equals("localhost") || normalized.endsWith(".localhost")
+                || normalized.equals("::1") || normalized.startsWith("127.");
     }
 
     public record CeremonyOptions(String challengeId, String optionsJson, Instant expiresAt) { }

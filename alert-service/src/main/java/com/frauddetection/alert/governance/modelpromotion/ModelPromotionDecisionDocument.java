@@ -30,13 +30,34 @@ public record ModelPromotionDecisionDocument(
         ModelPromotionProposal proposal,
         ModelPromotionApproval approval,
         @Field("local_audit") LocalAuditEvidence localAudit,
-        @Field("committed_at") Instant committedAt
+        @Field("committed_at") Instant committedAt,
+        @Field("actor_identity") ModelPromotionActorIdentity actorIdentity
 ) {
 
     public static final String COLLECTION = "model_promotion_decisions";
     public static final String OPERATION_INDEX = "model_promotion_operation_unique_idx";
     public static final String DECISION_INDEX = "model_promotion_decision_unique_idx";
     public static final String HISTORY_INDEX = "model_promotion_history_v2_idx";
+
+    public ModelPromotionDecisionDocument {
+        if (actorIdentity != null && (!actorId.equals(actorIdentity.actorId())
+                || !actorId.equals(localAudit.actorId()))) {
+            throw new IllegalArgumentException("Decision actor, identity and audit actor must agree");
+        }
+    }
+
+    ModelPromotionDecisionDocument(String operationKey, String aggregateKey, String operationId,
+            String commandSha256, String actorId, String authorizationFingerprint, EventType eventType,
+            ExactModelArtifactIdentity artifactIdentity, ModelGovernanceScope governanceScope,
+            ModelPromotionIntendedUse intendedUse, ModelPromotionLifecycleState sourceState,
+            ModelPromotionLifecycleState resultingState, long resultingRevision, String decisionId,
+            ModelPromotionPolicy policySnapshot, ModelPromotionAssessment assessmentSnapshot,
+            ModelPromotionProposal proposal, ModelPromotionApproval approval, LocalAuditEvidence localAudit,
+            Instant committedAt) {
+        this(operationKey, aggregateKey, operationId, commandSha256, actorId, authorizationFingerprint, eventType,
+                artifactIdentity, governanceScope, intendedUse, sourceState, resultingState, resultingRevision,
+                decisionId, policySnapshot, assessmentSnapshot, proposal, approval, localAudit, committedAt, null);
+    }
 
     ModelPromotionMutationResult toResult() {
         ModelPromotionAggregate aggregate = new ModelPromotionAggregate(

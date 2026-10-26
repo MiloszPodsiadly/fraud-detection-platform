@@ -131,6 +131,9 @@ import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -414,31 +417,34 @@ class RouteCoverageAgainstMvcMappingsTest {
     }
 
     @Test
-    void securitySensitiveGetMappingsHaveExecutableAuditPolicies() {
-        List<String> violations = handlerMapping.getHandlerMethods().entrySet().stream()
+    void securitySensitiveGetMappingsHaveExecutableAuditPolicies() throws IOException {
+        List<RouteAuditEvaluation> evaluations = handlerMapping.getHandlerMethods().entrySet().stream()
                 .filter(entry -> entry.getValue().getBeanType().getName().startsWith("com.frauddetection.alert"))
                 .flatMap(entry -> routeDescriptors(entry)
                         .filter(route -> route.method().equals("GET"))
-                        .filter(route -> route.pattern().startsWith("/api/v1/alerts")
-                                || route.pattern().startsWith("/api/v1/governance/")
-                                || route.pattern().startsWith("/api/v2/governance/")
-                                || route.pattern().startsWith("/api/v1/audit/")
-                                || route.pattern().startsWith("/governance/")
-                                || route.pattern().startsWith("/api/v1/fraud-cases/")
-                                || route.pattern().startsWith("/api/v1/transactions/scored")
-                                || route.pattern().startsWith("/internal/suspicious-transactions")
-                                || route.pattern().equals("/system/trust-level")
-                                || route.pattern().startsWith("/api/v1/trust/incidents")
-                                || route.pattern().startsWith("/api/v1/regulated-mutations")
-                                || route.pattern().startsWith("/api/v1/outbox")
+                        .filter(route -> isSensitiveReadFamily(route.pattern())
                                 || org.springframework.core.annotation.AnnotatedElementUtils
                                         .hasAnnotation(entry.getValue().getMethod(), AuditedSensitiveRead.class))
-                        .map(route -> auditedRouteViolation(entry.getValue(), route.pattern())))
+                        .map(route -> evaluateAuditedRoute(entry.getValue(), route.pattern())))
+                .toList();
+
+        writeSensitiveGetRouteCoverageReport(evaluations);
+
+        List<String> violations = evaluations.stream()
+                .map(RouteAuditEvaluation::violation)
                 .filter(java.util.Objects::nonNull)
                 .sorted()
                 .toList();
-
+        assertThat(evaluations).as("The registered MVC map must include sensitive GET routes").isNotEmpty();
         assertThat(violations).as(String.join(System.lineSeparator(), violations)).isEmpty();
+    }
+
+    @Test
+    void publicHealthDoesNotReceiveASyntheticReadAuditPolicy() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/health");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/actuator/health");
+
+        assertThat(readAccessAuditClassifier.classify(request)).isEmpty();
     }
 
     @Test
@@ -461,10 +467,17 @@ class RouteCoverageAgainstMvcMappingsTest {
     }
 
     private String auditedRouteViolation(HandlerMethod handlerMethod, String pattern) {
+        return evaluateAuditedRoute(handlerMethod, pattern).violation();
+    }
+
+    private RouteAuditEvaluation evaluateAuditedRoute(HandlerMethod handlerMethod, String pattern) {
         AuditedSensitiveRead policy = org.springframework.core.annotation.AnnotatedElementUtils
                 .findMergedAnnotation(handlerMethod.getMethod(), AuditedSensitiveRead.class);
         String route = handlerMethod.getBeanType().getSimpleName() + "#"
                 + handlerMethod.getMethod().getName() + " GET " + pattern;
+        String source = policy == null ? "legacy route classifier" : "@AuditedSensitiveRead";
+        String category = policy == null ? "UNCLASSIFIED" : policy.category().name();
+        String resourceType = policy == null ? "UNKNOWN" : policy.resourceType().name();
         MockHttpServletRequest request = new MockHttpServletRequest("GET", pattern);
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, pattern);
         request.setAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE, handlerMethod);
@@ -475,29 +488,86 @@ class RouteCoverageAgainstMvcMappingsTest {
         }
         request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, variables);
         if (policy == null) {
-            return readAccessAuditClassifier.classify(request).isPresent()
-                    ? null : route + " has no effective read-audit policy.";
+            var target = readAccessAuditClassifier.classify(request).orElse(null);
+            if (target == null) {
+                return new RouteAuditEvaluation(route, source, category, resourceType,
+                        route + " has no effective read-audit policy.");
+            }
+            return new RouteAuditEvaluation(route, source, target.endpointCategory().name(),
+                    target.resourceType().name(), null);
         }
         if (policy.category() == ReadAccessEndpointCategory.UNCLASSIFIED
                 || policy.resourceType() == ReadAccessResourceType.UNKNOWN) {
-            return route + " has incomplete @AuditedSensitiveRead metadata.";
+            return new RouteAuditEvaluation(route, source, category, resourceType,
+                    route + " has incomplete @AuditedSensitiveRead metadata.");
         }
-        if (!policy.resourceIdParameter().isBlank()) {
-            request.setParameter(policy.resourceIdParameter(), "a".repeat(64));
+        try {
+            if (!policy.resourceIdParameter().isBlank()) {
+                request.setParameter(policy.resourceIdParameter(), "a".repeat(64));
+            }
+            var target = readAccessAuditClassifier.classify(request).orElse(null);
+            if (target == null) {
+                return new RouteAuditEvaluation(route, source, category, resourceType,
+                        route + " has metadata that is not applied by the runtime audit classifier.");
+            }
+            if (!policy.resourceIdVariable().isBlank()
+                    && !java.util.Objects.equals(target.resourceId(), variables.get(policy.resourceIdVariable()))) {
+                return new RouteAuditEvaluation(route, source, category, resourceType,
+                        route + " does not audit the declared URI resource ID.");
+            }
+            if (!policy.resourceIdParameter().isBlank()
+                    && !java.util.Objects.equals(target.resourceId(), request.getParameter(policy.resourceIdParameter()))) {
+                return new RouteAuditEvaluation(route, source, category, resourceType,
+                        route + " does not audit the declared query resource ID.");
+            }
+            return new RouteAuditEvaluation(route, source, target.endpointCategory().name(),
+                    target.resourceType().name(), null);
+        } catch (RuntimeException exception) {
+            return new RouteAuditEvaluation(route, source, category, resourceType,
+                    route + " caused runtime classifier failure: " + exception.getClass().getSimpleName() + ".");
         }
-        var target = readAccessAuditClassifier.classify(request).orElse(null);
-        if (target == null) {
-            return route + " has metadata that is not applied by the runtime audit classifier.";
+    }
+
+    private boolean isSensitiveReadFamily(String pattern) {
+        return pattern.startsWith("/api/v1/alerts")
+                || pattern.startsWith("/api/v1/governance/")
+                || pattern.startsWith("/api/v2/governance/")
+                || pattern.startsWith("/api/v1/audit/")
+                || pattern.startsWith("/governance/")
+                || pattern.startsWith("/api/v1/fraud-cases/")
+                || pattern.startsWith("/api/v1/transactions/scored")
+                || pattern.startsWith("/internal/suspicious-transactions")
+                || pattern.equals("/system/trust-level")
+                || pattern.startsWith("/api/v1/trust/incidents")
+                || pattern.startsWith("/api/v1/regulated-mutations")
+                || pattern.startsWith("/api/v1/outbox");
+    }
+
+    private void writeSensitiveGetRouteCoverageReport(List<RouteAuditEvaluation> evaluations) throws IOException {
+        List<RouteAuditEvaluation> ordered = evaluations.stream()
+                .sorted(Comparator.comparing(RouteAuditEvaluation::route))
+                .toList();
+        long failures = ordered.stream().filter(row -> row.violation() != null).count();
+        StringBuilder report = new StringBuilder("# Registered sensitive GET route coverage\n\n")
+                .append("Generated by `RouteCoverageAgainstMvcMappingsTest` from Spring's registered `RequestMappingHandlerMapping#getHandlerMethods()` and evaluated with the production `ReadAccessAuditClassifier`.\n\n")
+                .append("- Registered sensitive GET mappings: ").append(ordered.size()).append("\n")
+                .append("- Coverage failures: ").append(failures).append("\n")
+                .append("- Public health endpoints are outside the sensitive families and are checked separately.\n\n")
+                .append("| Route handler | Effective policy source | Category | Resource | Result |\n")
+                .append("| --- | --- | --- | --- | --- |\n");
+        for (RouteAuditEvaluation row : ordered) {
+            report.append("| `").append(row.route()).append("` | `")
+                    .append(row.policySource()).append("` | `")
+                    .append(row.category()).append("` | `")
+                    .append(row.resourceType()).append("` | ")
+                    .append(row.violation() == null ? "PASS" : "FAIL: " + row.violation())
+                    .append(" |\n");
         }
-        if (!policy.resourceIdVariable().isBlank()
-                && !java.util.Objects.equals(target.resourceId(), variables.get(policy.resourceIdVariable()))) {
-            return route + " does not audit the declared URI resource ID.";
-        }
-        if (!policy.resourceIdParameter().isBlank()
-                && !java.util.Objects.equals(target.resourceId(), request.getParameter(policy.resourceIdParameter()))) {
-            return route + " does not audit the declared query resource ID.";
-        }
-        return null;
+        Path reportPath = Path.of("target", "security-sensitive-get-route-coverage.md");
+        Files.createDirectories(reportPath.getParent());
+        Files.writeString(reportPath, report.toString(), StandardCharsets.UTF_8);
+        System.out.println("Sensitive GET route coverage report: " + reportPath.toAbsolutePath()
+                + " (" + ordered.size() + " mappings; " + failures + " failures)");
     }
 
     @Test
@@ -626,6 +696,15 @@ class RouteCoverageAgainstMvcMappingsTest {
     }
 
     private record RouteDescriptor(String method, String pattern) {
+    }
+
+    private record RouteAuditEvaluation(
+            String route,
+            String policySource,
+            String category,
+            String resourceType,
+            String violation
+    ) {
     }
 
     private static final class MethodlessController {

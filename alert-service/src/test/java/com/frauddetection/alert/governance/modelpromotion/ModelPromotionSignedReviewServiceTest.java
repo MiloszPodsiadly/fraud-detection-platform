@@ -44,6 +44,10 @@ class ModelPromotionSignedReviewServiceTest {
     private final PolicyGovernanceActor reviewer = new PolicyGovernanceActor(
             PolicyGovernanceActor.identityId("https://issuer.example", "reviewer"), Set.of(),
             "https://issuer.example", "reviewer");
+    private final ModelPromotionActorIdentity reviewerIdentity = ModelPromotionActorIdentity.institutional(
+            reviewer.issuer(), reviewer.subject());
+    private final ModelPromotionActorIdentity proposerIdentity = ModelPromotionActorIdentity.institutional(
+            "https://issuer.example", "maker");
     private final String rationale = "Exact artifact and current evidence reviewed";
     private final ModelPromotionSignedReviewService.ReviewIntent intent =
             new ModelPromotionSignedReviewService.ReviewIntent("approval-1",
@@ -54,11 +58,13 @@ class ModelPromotionSignedReviewServiceTest {
     void setUp() {
         when(store.findProposal("proposal-1")).thenReturn(Optional.of(proposal));
         when(authorization.requireActor(AnalystAuthority.MODEL_PROMOTION_APPROVE, scope))
-                .thenReturn("reviewer");
+                .thenReturn(reviewer.id());
         when(proposal.proposalId()).thenReturn("proposal-1");
         when(proposal.transition()).thenReturn(transition);
         when(proposal.proposal()).thenReturn(proposalBody);
-        when(proposalBody.proposedBy()).thenReturn("maker");
+        when(proposalBody.proposedBy()).thenReturn(proposerIdentity.actorId());
+        when(proposal.proposerIdentity()).thenReturn(proposerIdentity);
+        when(proposal.reviewerIdentity()).thenReturn(reviewerIdentity);
         when(proposal.reviewStatus()).thenReturn(ModelPromotionProposalDocument.ReviewStatus.PENDING);
         when(proposal.commandSha256()).thenReturn("b".repeat(64));
         when(proposal.requestIntentSha256()).thenReturn("c".repeat(64));
@@ -107,13 +113,32 @@ class ModelPromotionSignedReviewServiceTest {
     }
 
     @Test
+    void legacyPendingProposalWithoutIssuerBindingMustBeResubmitted() {
+        when(proposal.proposerIdentity()).thenReturn(null);
+
+        assertThatThrownBy(() -> service.start(reviewer, "proposal-1", intent))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("resubmit");
+    }
+
+    @Test
+    void reviewerWithSameSubjectFromAnotherIssuerCannotReview() {
+        var collision = new PolicyGovernanceActor(PolicyGovernanceActor.identityId(
+                "https://other-issuer.example", "reviewer"), Set.of(),
+                "https://other-issuer.example", "reviewer");
+
+        assertThatThrownBy(() -> service.start(collision, "proposal-1", intent))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
     void receiptLookupRequiresExactOperationAndOriginalReviewer() {
         var approval = mock(ModelPromotionApproval.class);
         var approvalRationale = mock(ModelPromotionDecisionRationale.class);
         when(proposal.reviewOperationId()).thenReturn("review-1");
         when(proposal.approval()).thenReturn(approval);
         when(approval.outcome()).thenReturn(ModelPromotionApproval.Outcome.APPROVED);
-        when(approval.approvedBy()).thenReturn(reviewer.subject());
+        when(approval.approvedBy()).thenReturn(reviewer.id());
         when(approval.approvalId()).thenReturn("approval-1");
         when(approval.rationale()).thenReturn(approvalRationale);
         when(approvalRationale.sha256()).thenReturn(intent.rationaleSha256());
@@ -125,6 +150,15 @@ class ModelPromotionSignedReviewServiceTest {
                 .thenReturn(evidence);
         assertThat(service.receipt(reviewer, "proposal-1", "review-1").rationaleSha256())
                 .isEqualTo(intent.rationaleSha256());
+        var mismatchedIssuer = new ModelPromotionWebAuthnReviewEvidence(evidence.challengeId(),
+                evidence.proposalId(), evidence.operationId(), evidence.approvalId(), evidence.outcome(),
+                evidence.rationaleSha256(), evidence.actorId(), "https://other-issuer.example",
+                evidence.subject(), evidence.credentialId(), evidence.contractSha256(), evidence.assertionSha256(),
+                evidence.signatureCount(), evidence.acceptedAt());
+        when(mongo.findById(evidence.challengeId(), ModelPromotionWebAuthnReviewEvidence.class))
+                .thenReturn(mismatchedIssuer);
+        assertThatThrownBy(() -> service.receipt(reviewer, "proposal-1", "review-1"))
+                .isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> service.receipt(reviewer, "proposal-1", "other-operation"))
                 .isInstanceOf(ResponseStatusException.class);
         var stranger = new PolicyGovernanceActor(PolicyGovernanceActor.identityId(

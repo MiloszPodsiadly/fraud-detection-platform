@@ -1,5 +1,6 @@
 package com.frauddetection.alert.security.internal;
 
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
@@ -11,7 +12,6 @@ import java.util.stream.Collectors;
 @Component
 class InternalServiceClientProdGuard implements InitializingBean {
 
-    private static final Set<String> PROD_LIKE_PROFILES = Set.of("prod", "production", "staging");
     private static final Set<String> LOCAL_FIXTURE_PROFILES = Set.of("local", "dev", "docker-local");
     private static final Set<String> TRUTHY_VALUES = Set.of("true", "1", "yes", "on");
     private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.";
@@ -71,7 +71,7 @@ class InternalServiceClientProdGuard implements InitializingBean {
     }
 
     private boolean prodLikeProfileActive() {
-        return activeProfiles().stream().anyMatch(PROD_LIKE_PROFILES::contains);
+        return InstitutionalModePolicy.isInstitutionalMode(environment);
     }
 
     private boolean localFixtureProfileActive() {

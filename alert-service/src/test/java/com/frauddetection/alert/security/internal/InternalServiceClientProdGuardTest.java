@@ -39,6 +39,17 @@ class InternalServiceClientProdGuardTest {
     }
 
     @Test
+    void shouldFailClosedWhenBankModeFlagIsSetForLocalProfile() {
+        MockEnvironment environment = environment("bank-local");
+        environment.setProperty("app.audit.bank-mode.fail-closed", "true");
+        InternalServiceClientProdGuard guard = new InternalServiceClientProdGuard(disabledProperties(), environment);
+
+        assertThatThrownBy(guard::afterPropertiesSet)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Internal service auth client must be enabled in prod-like profiles.");
+    }
+
+    @Test
     void shouldFailClosedWhenProdProfileMissesToken() {
         assertThatThrownBy(() -> new InternalServiceClientProperties(true, "TOKEN_VALIDATOR", "alert-service", " ", false, InternalServiceClientProperties.Jwt.empty(), InternalServiceClientProperties.Mtls.empty()))
                 .isInstanceOf(IllegalArgumentException.class)

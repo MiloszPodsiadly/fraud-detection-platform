@@ -5,8 +5,21 @@ import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
+import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
+import com.frauddetection.alert.audit.read.ReadAccessAuditEventDocument;
+import com.frauddetection.alert.audit.read.ReadAccessAuditFailureInterceptor;
+import com.frauddetection.alert.audit.read.ReadAccessAuditRepository;
+import com.frauddetection.alert.audit.read.ReadAccessAuditResponseAdvice;
+import com.frauddetection.alert.audit.read.ReadAccessAuditService;
+import com.frauddetection.alert.audit.read.ReadAccessAuditWebConfig;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.ReadAccessResultCountExtractor;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditPolicy;
 import com.frauddetection.alert.controller.FraudCaseController;
+import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -22,14 +35,18 @@ import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.security.session.AnalystSessionController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
 import com.frauddetection.alert.fraudcase.FraudCaseQueryService;
+import com.frauddetection.alert.service.AlertManagementUseCase;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -44,6 +61,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -63,7 +81,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest({FraudCaseController.class, AnalystSessionController.class})
+@WebMvcTest({FraudCaseController.class, AnalystSessionController.class, AlertController.class})
 @Import({
         AlertSecurityConfig.class,
         CurrentAnalystUser.class,
@@ -73,7 +91,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         SecurityDeniedAccessTelemetrySliceTestConfig.class,
         FraudCaseResponseMapper.class,
         AlertResponseMapper.class,
-        AlertServiceExceptionHandler.class
+        AlertServiceExceptionHandler.class,
+        ReadAccessAuditClassifier.class,
+        ReadAccessResultCountExtractor.class,
+        ReadAccessAuditService.class,
+        ReadAccessAuditResponseAdvice.class,
+        ReadAccessAuditFailureInterceptor.class,
+        ReadAccessAuditWebConfig.class
 })
 @ActiveProfiles("test")
 @TestPropertySource(properties = {
@@ -97,10 +121,22 @@ class BffSessionSecurityIntegrationTest {
     protected FraudCaseQueryService fraudCaseQueryService;
 
     @MockitoBean
+    protected AlertManagementUseCase alertManagementUseCase;
+
+    @MockitoBean
+    protected AnalystCaseSummaryUseCase analystCaseSummaryUseCase;
+
+    @MockitoBean
     protected AlertServiceMetrics alertServiceMetrics;
 
     @MockitoBean
     protected SensitiveReadAuditService sensitiveReadAuditService;
+
+    @MockitoBean
+    protected ReadAccessAuditRepository readAccessAuditRepository;
+
+    @MockitoBean
+    protected SensitiveReadAuditPolicy sensitiveReadAuditPolicy;
 
     @MockitoBean
     protected OidcAnalystAuthoritiesMapper oidcAnalystAuthoritiesMapper;
@@ -117,6 +153,7 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(jsonPath("$.authenticated").value(false))
                 .andExpect(jsonPath("$.sessionStatus").value("ANONYMOUS"))
                 .andExpect(jsonPath("$.userId").value(""))
+                .andExpect(jsonPath("$.actorId").value(""))
                 .andExpect(jsonPath("$.roles").isEmpty())
                 .andExpect(jsonPath("$.authorities").isEmpty())
                 .andExpect(jsonPath("$.access_token").doesNotExist())
@@ -139,7 +176,8 @@ class BffSessionSecurityIntegrationTest {
     @Test
     void sessionEndpointReturnsOidcIdentityCsrfAndNoTokenFields() throws Exception {
         mockMvc.perform(get("/api/v1/session").with(oidcLogin()
-                        .idToken(token -> token.subject("oidc-user-1"))
+                        .idToken(token -> token.issuer("https://issuer.bank.example/realms/fraud")
+                                .subject("oidc-user-1"))
                         .authorities(
                                 new SimpleGrantedAuthority("ROLE_FRAUD_OPS_ADMIN"),
                                 new SimpleGrantedAuthority(AnalystAuthority.FRAUD_CASE_READ)
@@ -149,6 +187,7 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(jsonPath("$.authenticated").value(true))
                 .andExpect(jsonPath("$.sessionStatus").value("AUTHENTICATED"))
                 .andExpect(jsonPath("$.userId").value("oidc-user-1"))
+                .andExpect(jsonPath("$.actorId").value(matchesPattern("oidc:[0-9a-f]{64}")))
                 .andExpect(jsonPath("$.roles[0]").value("FRAUD_OPS_ADMIN"))
                 .andExpect(jsonPath("$.authorities[0]").value(AnalystAuthority.FRAUD_CASE_READ))
                 .andExpect(jsonPath("$.csrf.headerName").isNotEmpty())
@@ -167,6 +206,34 @@ class BffSessionSecurityIntegrationTest {
                 .andExpect(content().string(not(containsString("sessionId"))));
 
         verify(alertServiceMetrics).recordAnalystSessionRequest("authenticated", true);
+    }
+
+    @Test
+    void sensitiveAlertReadPersistsTheWiredOidcIssuerSubjectIdentityOnce() throws Exception {
+        when(sensitiveReadAuditPolicy.failClosed()).thenReturn(true);
+        when(alertManagementUseCase.listAlerts(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/v1/alerts").with(oidcLogin()
+                        .idToken(token -> token.issuer("https://issuer.bank.example/realms/fraud")
+                                .subject("oidc-reader-1"))
+                        .authorities(
+                                new SimpleGrantedAuthority("ROLE_FRAUD_OPS_ADMIN"),
+                                new SimpleGrantedAuthority(AnalystAuthority.ALERT_READ)
+                        )))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray());
+
+        org.mockito.ArgumentCaptor<ReadAccessAuditEventDocument> event =
+                org.mockito.ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
+        verify(readAccessAuditRepository, org.mockito.Mockito.times(1)).save(event.capture());
+        org.assertj.core.api.Assertions.assertThat(event.getValue().actorId())
+                .isEqualTo(PolicyGovernanceActor.identityId(
+                        "https://issuer.bank.example/realms/fraud", "oidc-reader-1"));
+        org.assertj.core.api.Assertions.assertThat(event.getValue().endpointCategory())
+                .isEqualTo(ReadAccessEndpointCategory.ALERT_LIST);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().resourceType())
+                .isEqualTo(ReadAccessResourceType.ALERT);
+        org.mockito.Mockito.verifyNoInteractions(sensitiveReadAuditService);
     }
 
     @Test

@@ -21,7 +21,7 @@ class JwtAnalystAuthenticationConverterTest {
     private final JwtSecurityProperties properties = new JwtSecurityProperties(
             true,
             false,
-            null,
+            "https://issuer.example.test",
             "https://issuer.example.test/.well-known/jwks.json",
             "sub",
             "groups",
@@ -31,7 +31,9 @@ class JwtAnalystAuthenticationConverterTest {
                     "fraud-reviewer", AnalystRole.REVIEWER,
                     "fraud-ops-admin", AnalystRole.FRAUD_OPS_ADMIN
             ),
-            Set.of()
+            Set.of(),
+            "fraud-detection-platform-api",
+            false
     );
 
     private final JwtAnalystAuthenticationConverter converter = new JwtAnalystAuthenticationConverter(
@@ -125,16 +127,37 @@ class JwtAnalystAuthenticationConverterTest {
     }
 
     @Test
+    void modelPromotionIdentityUsesTrustedIssuerAndSubjectWhenDisplayClaimDiffers() {
+        JwtSecurityProperties displayProperties = new JwtSecurityProperties(
+                true, false, "https://issuer.example.test", "https://issuer.example.test/.well-known/jwks.json",
+                "preferred_username", "groups", Map.of("fraud-reviewer", AnalystRole.REVIEWER), Set.of(),
+                "fraud-detection-platform-api", false);
+        JwtAnalystAuthenticationConverter displayConverter = new JwtAnalystAuthenticationConverter(
+                displayProperties, new AnalystAuthenticationFactory());
+        AnalystPrincipal principal = (AnalystPrincipal) displayConverter.convert(jwt(Map.of(
+                "sub", "immutable-subject", "preferred_username", "reviewer.display",
+                "groups", List.of("fraud-reviewer")))).getPrincipal();
+
+        assertThat(principal.userId()).isEqualTo("reviewer.display");
+        assertThat(principal.institutionalActorId())
+                .isEqualTo("https://issuer.example.test#immutable-subject");
+        assertThat(principal.readAuditActorId()).isEqualTo(com.frauddetection.alert.governance.modelpolicy
+                .PolicyGovernanceActor.identityId("https://issuer.example.test", "immutable-subject"));
+    }
+
+    @Test
     void shouldGrantProductionPromotionScopeOnlyForConfiguredTrustedAccessValue() {
         JwtSecurityProperties productionProperties = new JwtSecurityProperties(
                 true,
                 false,
-                null,
+                "https://issuer.example.test",
                 "https://issuer.example.test/.well-known/jwks.json",
                 "sub",
                 "groups",
                 Map.of("fraud-analyst", AnalystRole.ANALYST),
-                Set.of("bank-production-model-promotion")
+                Set.of("bank-production-model-promotion"),
+                "fraud-detection-platform-api",
+                false
         );
         JwtAnalystAuthenticationConverter productionConverter = new JwtAnalystAuthenticationConverter(
                 productionProperties, new AnalystAuthenticationFactory()
@@ -175,12 +198,16 @@ class JwtAnalystAuthenticationConverterTest {
     }
 
     private Jwt jwt(Map<String, Object> claims) {
+        java.util.Map<String, Object> trustedClaims = new java.util.LinkedHashMap<>();
+        trustedClaims.put("iss", "https://issuer.example.test");
+        trustedClaims.put("aud", List.of("fraud-detection-platform-api"));
+        trustedClaims.putAll(claims);
         return new Jwt(
                 "token-value",
                 Instant.parse("2026-04-23T10:00:00Z"),
                 Instant.parse("2026-04-23T11:00:00Z"),
                 Map.of("alg", "none"),
-                claims
+                trustedClaims
         );
     }
 }

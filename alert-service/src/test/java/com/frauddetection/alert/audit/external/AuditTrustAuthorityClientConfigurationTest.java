@@ -59,6 +59,17 @@ class AuditTrustAuthorityClientConfigurationTest {
     }
 
     @Test
+    void shouldRequireInstitutionalJwtIdentityWhenBankFailClosedIsSetForLocalProfile() {
+        AuditTrustAuthorityProperties properties = jwtProperties();
+        MockEnvironment environment = environment("bank-local");
+        environment.setProperty("app.audit.bank-mode.fail-closed", "true");
+
+        assertThatThrownBy(() -> configuration.auditTrustAuthorityProdGuard(properties, environment).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Institutional alert-service requires audit trust authority JWT private key path.");
+    }
+
+    @Test
     void shouldAllowInlineJwtPrivateKeyOutsideProdLikeProfiles() {
         AuditTrustAuthorityProperties properties = jwtProperties();
         properties.getJwtIdentity().setPrivateKey("inline-private-key");

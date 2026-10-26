@@ -2,6 +2,7 @@ package com.frauddetection.alert.security.session;
 
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
@@ -35,11 +36,13 @@ public class AnalystSessionController {
                         true,
                         "AUTHENTICATED",
                         requireUserId(principal.userId()),
+                        institutionalActorId(principal),
                         principal.roles().stream().map(AnalystRole::name).sorted().toList(),
                         principal.authorities().stream().sorted().toList(),
                         csrf(csrfToken)
                 ))
-                .orElseGet(() -> new AnalystSessionResponse(false, "ANONYMOUS", "", List.of(), List.of(), csrf(csrfToken)));
+                .orElseGet(() -> new AnalystSessionResponse(false, "ANONYMOUS", "", "", List.of(), List.of(),
+                        csrf(csrfToken)));
         metrics.recordAnalystSessionRequest(response.authenticated() ? "authenticated" : "anonymous", csrfPresent);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
@@ -56,6 +59,23 @@ public class AnalystSessionController {
         return userId.trim();
     }
 
+    private String institutionalActorId(com.frauddetection.alert.security.principal.AnalystPrincipal principal) {
+        String identity = principal.institutionalActorId();
+        int separator = identity == null ? -1 : identity.lastIndexOf('#');
+        if (separator <= 0 || separator == identity.length() - 1) {
+            return "";
+        }
+        try {
+            String issuer = identity.substring(0, separator);
+            String subject = identity.substring(separator + 1);
+            String actorId = PolicyGovernanceActor.identityId(issuer, subject);
+            return principal.readAuditActorId() == null || principal.readAuditActorId().equals(actorId)
+                    ? actorId : "";
+        } catch (IllegalArgumentException invalidIdentity) {
+            return "";
+        }
+    }
+
     private CsrfResponse csrf(CsrfToken csrfToken) {
         if (csrfToken == null) {
             return null;
@@ -67,6 +87,7 @@ public class AnalystSessionController {
             boolean authenticated,
             String sessionStatus,
             String userId,
+            String actorId,
             List<String> roles,
             List<String> authorities,
             CsrfResponse csrf

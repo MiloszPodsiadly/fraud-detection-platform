@@ -1,10 +1,10 @@
 package com.frauddetection.alert.fraudcase;
 
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
-import java.util.Arrays;
 import java.util.Set;
 
 @Component
@@ -32,8 +32,6 @@ public class FraudCaseWorkQueueCursorSecretStartupGuard implements InitializingB
     }
 
     private boolean productionLikeProfileActive() {
-        return Arrays.stream(environment.getActiveProfiles())
-                .map(String::toLowerCase)
-                .anyMatch(profile -> profile.contains("prod") || profile.contains("bank"));
+        return InstitutionalModePolicy.isInstitutionalMode(environment);
     }
 }

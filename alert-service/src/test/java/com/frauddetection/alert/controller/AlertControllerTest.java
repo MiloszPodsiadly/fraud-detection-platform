@@ -126,15 +126,23 @@ class AlertControllerTest {
 
         org.mockito.ArgumentCaptor<ReadAccessAuditEventDocument> event =
                 org.mockito.ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
-        org.mockito.Mockito.verify(readAccessAuditRepository).save(event.capture());
+        org.mockito.Mockito.verify(readAccessAuditRepository, org.mockito.Mockito.times(1)).save(event.capture());
         org.assertj.core.api.Assertions.assertThat(event.getValue().endpointCategory())
                 .isEqualTo(ReadAccessEndpointCategory.ALERT_LIST);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().resourceType())
+                .isEqualTo(com.frauddetection.alert.audit.read.ReadAccessResourceType.ALERT);
         org.assertj.core.api.Assertions.assertThat(event.getValue().actorId()).isNotEqualTo("unknown");
         org.assertj.core.api.Assertions.assertThat(event.getValue().resultCount()).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(event.getValue().page()).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(event.getValue().size()).isEqualTo(5);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().queryHash())
+                .matches("[0-9a-f]{32}")
+                .doesNotContain("page=1", "size=5");
         org.assertj.core.api.Assertions.assertThat(event.getValue().correlationId()).isEqualTo("corr-alert-list");
-        org.assertj.core.api.Assertions.assertThat(event.getValue().toString()).doesNotContain("cust-1", "txn-1");
+        org.assertj.core.api.Assertions.assertThat(event.getValue().toString())
+                .doesNotContain("cust-1", "txn-1", "customerIds", "transactionIds", "narrative");
+        org.assertj.core.api.Assertions.assertThat(objectMapper.writeValueAsString(event.getValue()))
+                .doesNotContain("customerIds", "transactionIds", "narrative");
     }
 
     @Test
@@ -150,13 +158,18 @@ class AlertControllerTest {
 
         org.mockito.ArgumentCaptor<ReadAccessAuditEventDocument> event =
                 org.mockito.ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
-        org.mockito.Mockito.verify(readAccessAuditRepository).save(event.capture());
+        org.mockito.Mockito.verify(readAccessAuditRepository, org.mockito.Mockito.times(1)).save(event.capture());
         org.assertj.core.api.Assertions.assertThat(event.getValue().endpointCategory())
                 .isEqualTo(ReadAccessEndpointCategory.ALERT_ASSISTANT_SUMMARY);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().resourceType())
+                .isEqualTo(com.frauddetection.alert.audit.read.ReadAccessResourceType.ALERT);
         org.assertj.core.api.Assertions.assertThat(event.getValue().resourceId()).isEqualTo("alert-1");
         org.assertj.core.api.Assertions.assertThat(event.getValue().resultCount()).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(event.getValue().toString())
-                .doesNotContain("cust-1", "txn-1", "Device differs from known behavior.");
+                .doesNotContain("cust-1", "txn-1", "Device differs from known behavior.",
+                        "supportingEvidence", "narrative", "customerIds", "transactionIds");
+        org.assertj.core.api.Assertions.assertThat(objectMapper.writeValueAsString(event.getValue()))
+                .doesNotContain("supportingEvidence", "narrative", "customerIds", "transactionIds");
     }
 
     @Test

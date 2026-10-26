@@ -28,7 +28,9 @@ public record ModelPromotionProposalDocument(
         @Field("submission_audit") ModelPromotionDecisionDocument.LocalAuditEvidence submissionAudit,
         @Field("review_audit") ModelPromotionDecisionDocument.LocalAuditEvidence reviewAudit,
         @Field("submitted_at") Instant submittedAt,
-        @Field("reviewed_at") Instant reviewedAt
+        @Field("reviewed_at") Instant reviewedAt,
+        @Field("proposer_identity") ModelPromotionActorIdentity proposerIdentity,
+        @Field("reviewer_identity") ModelPromotionActorIdentity reviewerIdentity
 ) {
 
     public static final String COLLECTION = "model_promotion_proposals";
@@ -57,6 +59,9 @@ public record ModelPromotionProposalDocument(
         if (!actorId.equals(proposal.proposedBy())) {
             throw new IllegalArgumentException("proposal actor does not match the submitting actor");
         }
+        if (proposerIdentity != null && !actorId.equals(proposerIdentity.actorId())) {
+            throw new IllegalArgumentException("proposer identity does not match the submitting actor");
+        }
         boolean reviewed = reviewStatus == ReviewStatus.APPROVED || reviewStatus == ReviewStatus.REJECTED;
         if (reviewed != (approval != null)) {
             throw new IllegalArgumentException("review status and approval must be consistent");
@@ -65,8 +70,15 @@ public record ModelPromotionProposalDocument(
                 || reviewerAuthorizationFingerprint == null || reviewAudit == null || reviewedAt == null)) {
             throw new IllegalArgumentException("completed review details are required");
         }
+        if (reviewed && reviewerIdentity != null && !approval.approvedBy().equals(reviewerIdentity.actorId())) {
+            throw new IllegalArgumentException("reviewer identity does not match the approving actor");
+        }
+        if (reviewed && reviewerIdentity != null && !approval.approvedBy().equals(reviewAudit.actorId())) {
+            throw new IllegalArgumentException("review audit actor does not match the approving actor");
+        }
         if (!reviewed && (approval != null || reviewOperationId != null || reviewCommandSha256 != null
-                || reviewerAuthorizationFingerprint != null || reviewAudit != null || reviewedAt != null)) {
+                || reviewerAuthorizationFingerprint != null || reviewAudit != null || reviewedAt != null
+                || reviewerIdentity != null)) {
             throw new IllegalArgumentException("pending review must not contain completed review details");
         }
     }
@@ -99,6 +111,8 @@ public record ModelPromotionProposalDocument(
                 submissionAudit,
                 null,
                 submittedAt,
+                null,
+                submission.operationContext().actorIdentity(),
                 null
         );
     }

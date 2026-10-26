@@ -50,6 +50,11 @@ public record PolicyGovernanceActor(String id, Set<String> authorities, String i
         if (issuer == null || issuer.isBlank() || subject == null || subject.isBlank()) {
             throw new AccessDeniedException("Stable issuer and subject are required for policy governance");
         }
+        if (authentication.getPrincipal() instanceof AnalystPrincipal analyst
+                && analyst.readAuditActorId() != null
+                && !identityId(issuer, subject).equals(analyst.readAuditActorId())) {
+            throw new AccessDeniedException("JWT issuer and subject do not match the trusted actor identity");
+        }
         return new PolicyGovernanceActor(identityId(issuer, subject),
                 authentication.getAuthorities().stream().map(authority -> authority.getAuthority())
                         .collect(Collectors.toUnmodifiableSet()), issuer, subject, evidence);

@@ -1,6 +1,8 @@
 package com.frauddetection.alert.security.config;
 
 import com.frauddetection.alert.security.auth.DemoAuthFilter;
+import com.frauddetection.alert.security.auth.JwtSecurityProperties;
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -8,9 +10,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.env.Environment;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.stereotype.Component;
-
-import java.util.Arrays;
-import java.util.Locale;
+import org.springframework.util.StringUtils;
 
 @Component
 public class AuthenticationStartupGuard implements ApplicationRunner {
@@ -19,7 +19,7 @@ public class AuthenticationStartupGuard implements ApplicationRunner {
     private final JwtDecoder jwtDecoder;
     private final DemoAuthFilter demoAuthFilter;
     private final boolean bankModeFailClosed;
-    private final boolean jwtRequired;
+    private final JwtSecurityProperties jwtProperties;
     private final boolean demoAuthEnabled;
 
     public AuthenticationStartupGuard(
@@ -27,14 +27,14 @@ public class AuthenticationStartupGuard implements ApplicationRunner {
             ObjectProvider<JwtDecoder> jwtDecoder,
             ObjectProvider<DemoAuthFilter> demoAuthFilter,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
-            @Value("${app.security.jwt.required:false}") boolean jwtRequired,
+            JwtSecurityProperties jwtProperties,
             @Value("${app.security.demo-auth.enabled:false}") boolean demoAuthEnabled
     ) {
         this.environment = environment;
         this.jwtDecoder = jwtDecoder.getIfAvailable();
         this.demoAuthFilter = demoAuthFilter.getIfAvailable();
         this.bankModeFailClosed = bankModeFailClosed;
-        this.jwtRequired = jwtRequired;
+        this.jwtProperties = jwtProperties;
         this.demoAuthEnabled = demoAuthEnabled;
     }
 
@@ -43,19 +43,18 @@ public class AuthenticationStartupGuard implements ApplicationRunner {
         if (!prodLike()) {
             return;
         }
-        require("app.security.jwt.required", "true", jwtRequired, "prod/staging/bank profiles require JWT resource-server authentication.");
-        require("JwtDecoder", "present", jwtDecoder != null, "prod/staging/bank profiles must have a configured JWT decoder.");
+        require("app.security.jwt.required", "true", jwtProperties.required(), "institutional mode requires JWT resource-server authentication.");
+        require("JwtDecoder", "present", jwtDecoder != null, "institutional mode must have a configured JWT decoder.");
+        require("app.security.jwt.issuer-uri", "configured", StringUtils.hasText(jwtProperties.issuerUri()),
+                "institutional mode requires an explicit trusted JWT issuer.");
+        require("app.security.jwt.expected-audience", "configured", StringUtils.hasText(jwtProperties.expectedAudience()),
+                "institutional mode requires an explicit JWT resource audience.");
         require("app.security.demo-auth.enabled", "false", !demoAuthEnabled, "demo/header authentication is local/dev only.");
-        require("DemoAuthFilter", "absent", demoAuthFilter == null, "demo/header authentication filter must not be registered in prod/staging/bank.");
+        require("DemoAuthFilter", "absent", demoAuthFilter == null, "demo/header authentication filter must not be registered in institutional mode.");
     }
 
     private boolean prodLike() {
-        return bankModeFailClosed || Arrays.stream(environment.getActiveProfiles())
-                .map(profile -> profile.toLowerCase(Locale.ROOT))
-                .anyMatch(profile -> profile.equals("prod")
-                        || profile.equals("production")
-                        || profile.equals("staging")
-                        || profile.equals("bank"));
+        return InstitutionalModePolicy.isInstitutionalMode(environment, bankModeFailClosed);
     }
 
     private void require(String setting, String required, boolean valid, String reason) {

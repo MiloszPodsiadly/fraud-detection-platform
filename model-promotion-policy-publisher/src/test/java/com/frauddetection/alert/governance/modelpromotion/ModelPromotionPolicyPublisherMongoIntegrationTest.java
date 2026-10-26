@@ -1,13 +1,26 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.governance.ExactModelArtifactIdentity;
+import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import com.frauddetection.alert.governance.modelcard.ModelCardProvider;
 import com.frauddetection.alert.governance.exactmodelshadowperformance.ExactModelShadowPerformanceProvider;
+import com.frauddetection.alert.governance.modelpolicy.GovernanceBoundWebAuthnProof;
+import com.frauddetection.alert.governance.modelpolicy.GovernanceWebAuthnBoundChallenge;
+import com.frauddetection.alert.governance.modelpolicy.MongoPolicyGovernanceStore;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnCredential;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnCredentialRepository;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
+import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.yubico.webauthn.AssertionRequest;
+import com.upokecenter.cbor.CBORObject;
+import com.mongodb.MongoException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -17,7 +30,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -30,18 +45,25 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.Signature;
+import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECGenParameterSpec;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -197,6 +219,261 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
         assertThat(unchangedProposal.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
         assertThat(unchangedProposal.reviewAudit()).isNull();
 
+    }
+
+    @Test
+    void verifiedProductionSignedReviewCommitsProofAndRecoversLostAcknowledgement() throws Exception {
+        Instant decisionTime = Instant.parse("2026-08-02T00:00:00Z");
+        ModelPromotionPolicyPublisher.Draft draft = productionReviewProposal("policy-prod-review", 1,
+                "2026-07-01T00:00:00Z", "2027-10-01T00:00:00Z");
+        InternalPolicyApprovalArtifact approvalProof = firstPartyProof(draft);
+        InternalPolicyPublicationAuthorization approval = new InternalPolicyPublicationAuthorization(
+                mapper, firstPartyTrust(), approvalProof, publisherKey.getPrivate(), CLOCK);
+        ModelPromotionPolicyPublisher.PreparedPublication prepared = publisher(approval, store)
+                .prepare(draft, issuerKey.getPrivate(), ISSUER, KEY_ID);
+        assertThat(verifier.verify(prepared.policy()).status())
+                .isEqualTo(ModelPromotionPolicyAuthorityVerification.Status.VERIFIED);
+        publisher(approval, store).publishPrepared(prepared);
+
+        ModelGovernanceScope governanceScope = scope();
+        ModelPromotionIntendedUse intendedUse = ModelPromotionIntendedUse.FRAUD_RISK_SCORING;
+        ModelPromotionPolicyFullTrustVerifier trust = fullTrust();
+        ModelPromotionPolicyResolver policyResolver = new ModelPromotionPolicyResolver(
+                new MongoModelPromotionPolicyStore(mongo), new ModelPromotionPolicyValidator(mapper), trust);
+        ModelPromotionPolicyResolution policyResolution = policyResolver.resolve(
+                governanceScope, intendedUse, decisionTime);
+        assertThat(policyResolution.status()).isEqualTo(ModelPromotionPolicyResolution.Status.AVAILABLE);
+        assertThat(policyResolution.policy()).isEqualTo(prepared.policy());
+        assertThat(trust.verify(prepared.policy()).status())
+                .isEqualTo(ModelPromotionPolicyTrustVerification.Status.FULLY_AUTHORIZED);
+
+        new ModelPromotionPersistenceIndexInitializer(mongo).ensureIndexes();
+        MongoTransactionManager transactionManager = new MongoTransactionManager(factory);
+        ModelPromotionDecisionValidator decisionValidator = new ModelPromotionDecisionValidator(
+                mapper, new ModelPromotionPolicyValidator(mapper), trust);
+        MongoModelPromotionStore promotionStore = modelPromotionStore(
+                mongo, transactionManager, decisionValidator, null);
+        ExactModelArtifactIdentity identity = new ExactModelArtifactIdentity(
+                "production-review-model", "2026.08.01", "feature-contract-v2", "a".repeat(64));
+        ModelPromotionEvaluationWindow window = new ModelPromotionEvaluationWindow(
+                "2026-07-01T00:00:00Z", "2026-07-31T23:59:59Z");
+        ModelPromotionEvidenceBundle evidence = productionReviewEvidence(identity, governanceScope, window);
+        ModelPromotionEvidenceResolver evidenceResolver = mock(ModelPromotionEvidenceResolver.class);
+        when(evidenceResolver.resolve(identity, governanceScope, intendedUse, window))
+                .thenReturn(ModelPromotionEvidenceResolution.available(evidence));
+        ModelPromotionAssessmentService assessmentService = new ModelPromotionAssessmentService(policyResolver, mapper);
+        ModelPromotionAuthorization authorization = new ModelPromotionAuthorization(new CurrentAnalystUser());
+        ModelPromotionWorkflowService workflow = new ModelPromotionWorkflowService(promotionStore, evidenceResolver,
+                assessmentService, policyResolver, authorization, Clock.fixed(decisionTime, ZoneOffset.UTC));
+
+        String proposerIssuer = "https://institution.example";
+        String proposerSubject = "promotion-proposer";
+        String reviewerIssuer = "https://institution.example";
+        String reviewerSubject = "independent-reviewer";
+        String reviewerId = PolicyGovernanceActor.identityId(reviewerIssuer, reviewerSubject);
+        PolicyGovernanceActor reviewer = new PolicyGovernanceActor(reviewerId,
+                Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE, AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION),
+                reviewerIssuer, reviewerSubject);
+        KeyPairGenerator ec = KeyPairGenerator.getInstance("EC");
+        ec.initialize(new ECGenParameterSpec("secp256r1"));
+        KeyPair assertionKey = ec.generateKeyPair();
+        ECPublicKey assertionPublicKey = (ECPublicKey) assertionKey.getPublic();
+        String credentialId = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("production-review-passkey".getBytes(StandardCharsets.UTF_8));
+        String userHandle = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(HexFormat.of().parseHex(reviewerId.substring("oidc:".length())));
+        CBORObject cose = CBORObject.NewMap().Add(1, 2).Add(3, -7).Add(-1, 1)
+                .Add(-2, coseCoordinate(assertionPublicKey.getW().getAffineX()))
+                .Add(-3, coseCoordinate(assertionPublicKey.getW().getAffineY()));
+        mongo.insert(new PolicyWebAuthnCredential(credentialId, reviewerId, reviewerIssuer, reviewerSubject,
+                userHandle, Base64.getUrlEncoder().withoutPadding().encodeToString(cose.EncodeToBytes()),
+                0, false, CLOCK.instant(), CLOCK.instant(), "ACTIVE", "PRODUCTION", null, null, null, null));
+        PolicyWebAuthnService webAuthn = policyWebAuthn(mongo, transactionManager, new MongoPolicyGovernanceStore(
+                mongo, transactionManager));
+        ModelPromotionSignedReviewService signedReview = new ModelPromotionSignedReviewService(
+                promotionStore, authorization, workflow, webAuthn, mongo, mapper);
+
+        authenticate(proposerIssuer, proposerSubject, Set.of(AnalystAuthority.MODEL_PROMOTION_REGISTER,
+                AnalystAuthority.MODEL_PROMOTION_PROPOSE, AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION));
+        workflow.registerCandidate(new ModelPromotionWorkflowService.CandidateRegistrationRequest(
+                identity, governanceScope, intendedUse, "register-prod-review"));
+        ModelPromotionProposalResult challengerProposal = workflow.proposeTransition(
+                new ModelPromotionWorkflowService.TransitionProposalRequest(identity, governanceScope, intendedUse,
+                        ModelPromotionLifecycleState.CANDIDATE, 0, ModelPromotionLifecycleState.CHALLENGER,
+                        window, "submit-prod-challenger", "proposal-prod-challenger",
+                        "Move exact production artifact to challenger", ModelPromotionDecisionRationale.sha256(
+                                "Move exact production artifact to challenger")));
+        assertThat(challengerProposal.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
+
+        authenticate(reviewerIssuer, reviewerSubject, Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION));
+        var challengerIntent = reviewIntent("approval-prod-challenger", "review-prod-challenger",
+                "Approve challenger state after independent production review");
+        var challengerChallenge = signedReview.start(reviewer, "proposal-prod-challenger", challengerIntent);
+        String challengerAssertion = signedAssertion(mongo, challengerChallenge.challengeId(), credentialId,
+                userHandle, assertionKey, 1);
+        assertThat(signedReview.finish(reviewer, "proposal-prod-challenger",
+                new ModelPromotionSignedReviewService.SignedReview(challengerIntent,
+                        challengerChallenge.challengeId(), challengerAssertion)).reviewStatus())
+                .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.APPROVED);
+        assertThat(promotionStore.currentState(identity, governanceScope, intendedUse).orElseThrow().lifecycleState())
+                .isEqualTo(ModelPromotionLifecycleState.CHALLENGER);
+
+        authenticate(proposerIssuer, proposerSubject, Set.of(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION));
+        ModelPromotionProposalResult shadowProposal = workflow.proposeTransition(
+                new ModelPromotionWorkflowService.TransitionProposalRequest(identity, governanceScope, intendedUse,
+                        ModelPromotionLifecycleState.CHALLENGER, 1, ModelPromotionLifecycleState.SHADOW_APPROVED,
+                        window, "submit-prod-shadow", "proposal-prod-shadow",
+                        "Request exact-evidence shadow approval", ModelPromotionDecisionRationale.sha256(
+                                "Request exact-evidence shadow approval")));
+        assertThat(shadowProposal.policySha256()).isEqualTo(prepared.policy().canonicalSha256());
+        assertThat(shadowProposal.assessmentSha256()).isNotBlank();
+        ModelPromotionProposalDocument pendingShadow = promotionStore.findProposal("proposal-prod-shadow")
+                .orElseThrow();
+        assertThat(pendingShadow.transition().artifactIdentity()).isEqualTo(identity);
+        assertThat(pendingShadow.transition().governanceScope()).isEqualTo(governanceScope);
+        assertThat(pendingShadow.transition().requestedTargetState())
+                .isEqualTo(ModelPromotionLifecycleState.SHADOW_APPROVED);
+        assertThat(pendingShadow.transition().expectedRevision()).isEqualTo(1);
+        assertThat(pendingShadow.assessmentSnapshot().content().evidence().evidenceBundleSha256())
+                .isEqualTo(evidence.canonicalSha256());
+
+        authenticate(reviewerIssuer, reviewerSubject, Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE,
+                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION));
+        var shadowIntent = reviewIntent("approval-prod-shadow", "review-prod-shadow",
+                "Approve shadow state against verified production policy and exact evidence");
+        var shadowChallenge = signedReview.start(reviewer, "proposal-prod-shadow", shadowIntent);
+        String shadowAssertion = signedAssertion(mongo, shadowChallenge.challengeId(), credentialId,
+                userHandle, assertionKey, 2);
+        AtomicBoolean unknownCommitSignalled = new AtomicBoolean();
+        MongoModelPromotionStore uncertainStore = modelPromotionStore(
+                mongo, transactionManager, decisionValidator, unknownCommitSignalled);
+        ModelPromotionWorkflowService uncertainWorkflow = new ModelPromotionWorkflowService(uncertainStore,
+                evidenceResolver, assessmentService, policyResolver, authorization,
+                Clock.fixed(decisionTime, ZoneOffset.UTC));
+        ModelPromotionSignedReviewService uncertainSignedReview = new ModelPromotionSignedReviewService(
+                uncertainStore, authorization, uncertainWorkflow, webAuthn, mongo, mapper);
+        ModelPromotionProposalResult committed = uncertainSignedReview.finish(reviewer, "proposal-prod-shadow",
+                new ModelPromotionSignedReviewService.SignedReview(shadowIntent,
+                        shadowChallenge.challengeId(), shadowAssertion));
+        assertThat(unknownCommitSignalled.get()).isTrue();
+        assertThat(committed.idempotentReplay()).isTrue();
+
+        ModelPromotionProposalDocument approved = promotionStore.findProposal("proposal-prod-shadow").orElseThrow();
+        assertThat(approved.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.APPROVED);
+        assertThat(approved.proposerIdentity()).isEqualTo(
+                ModelPromotionActorIdentity.institutional(proposerIssuer, proposerSubject));
+        assertThat(approved.reviewerIdentity()).isEqualTo(
+                ModelPromotionActorIdentity.institutional(reviewerIssuer, reviewerSubject));
+        assertThat(approved.approval().approvedBy()).isEqualTo(reviewerId);
+        assertThat(approved.reviewAudit().actorId()).isEqualTo(reviewerId);
+        ModelPromotionAggregate promoted = promotionStore.currentState(identity, governanceScope, intendedUse)
+                .orElseThrow();
+        assertThat(promoted.lifecycleState()).isEqualTo(ModelPromotionLifecycleState.SHADOW_APPROVED);
+        assertThat(promoted.revision()).isEqualTo(2);
+        assertThat(promotionStore.history(identity, governanceScope, intendedUse, 10)).hasSize(3);
+
+        GovernanceWebAuthnBoundChallenge consumed = mongo.findById(shadowChallenge.challengeId(),
+                GovernanceWebAuthnBoundChallenge.class);
+        GovernanceWebAuthnBoundChallenge firstConsumed = mongo.findById(challengerChallenge.challengeId(),
+                GovernanceWebAuthnBoundChallenge.class);
+        PolicyWebAuthnCredential updatedCredential = mongo.findById(credentialId, PolicyWebAuthnCredential.class);
+        GovernanceBoundWebAuthnProof proof = mongo.findById(shadowChallenge.challengeId(),
+                GovernanceBoundWebAuthnProof.class);
+        ModelPromotionWebAuthnReviewEvidence reviewEvidence = mongo.findById(shadowChallenge.challengeId(),
+                ModelPromotionWebAuthnReviewEvidence.class);
+        assertThat(consumed.used()).isTrue();
+        assertThat(firstConsumed.used()).isTrue();
+        assertThat(updatedCredential.signatureCount()).isEqualTo(2);
+        assertThat(proof).isNotNull();
+        assertThat(proof.previousSignatureCount()).isEqualTo(1);
+        assertThat(proof.signatureCount()).isEqualTo(2);
+        assertThat(proof.actorId()).isEqualTo(reviewerId);
+        assertThat(proof.issuer()).isEqualTo(reviewerIssuer);
+        assertThat(proof.subject()).isEqualTo(reviewerSubject);
+        assertThat(proof.rpId()).isEqualTo("localhost");
+        assertThat(proof.origin()).isEqualTo("http://localhost:4173");
+        assertThat(proof.userPresenceRequired()).isTrue();
+        assertThat(proof.userVerificationRequired()).isTrue();
+        assertThat(reviewEvidence.assertionSha256()).isEqualTo(proof.assertionSha256());
+        assertThat(reviewEvidence.contractSha256()).isEqualTo(proof.contractSha256());
+        assertThat(mongo.count(Query.query(Criteria.where("namespace").is("model-promotion-review")),
+                GovernanceBoundWebAuthnProof.class)).isEqualTo(2);
+        assertThat(mongo.count(new Query(), ModelPromotionWebAuthnReviewEvidence.class)).isEqualTo(2);
+
+        ObjectNode contract = (ObjectNode) new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(proof.contractJson());
+        assertThat(contract.path("environment").asText()).isEqualTo("PRODUCTION");
+        assertThat(contract.path("requestedTargetState").asText()).isEqualTo("SHADOW_APPROVED");
+        assertThat(contract.path("expectedRevision").asLong()).isEqualTo(1);
+        assertThat(contract.path("currentRevision").asLong()).isEqualTo(1);
+        assertThat(contract.path("currentState").asText()).isEqualTo("CHALLENGER");
+        assertThat(contract.path("modelArtifactSha256").asText()).isEqualTo(identity.modelArtifactSha256());
+        assertThat(contract.path("policySha256").asText()).isEqualTo(prepared.policy().canonicalSha256());
+        assertThat(contract.path("assessmentSha256").asText())
+                .isEqualTo(approved.assessmentSnapshot().canonicalSha256());
+        ModelPromotionDecisionDocument shadowDecision = promotionStore.history(
+                identity, governanceScope, intendedUse, 10).stream()
+                .filter(decision -> "review-prod-shadow".equals(decision.operationId()))
+                .findFirst().orElseThrow();
+        assertThat(shadowDecision.policySnapshot()).isEqualTo(prepared.policy());
+        assertThat(shadowDecision.assessmentSnapshot()).isEqualTo(approved.assessmentSnapshot());
+        assertThat(shadowDecision.localAudit().outcome()).isEqualTo("SUCCEEDED");
+        assertThat(shadowDecision.localAudit().actorId()).isEqualTo(reviewerId);
+        assertThat(shadowDecision.localAudit().action()).isEqualTo("ACCEPT_MODEL_PROMOTION_TRANSITION");
+        assertThat(approved.reviewAudit().actorId()).isEqualTo(shadowDecision.localAudit().actorId());
+        assertThat(mongo.count(new Query(), ModelPromotionDecisionDocument.class)).isEqualTo(3);
+        var receipt = uncertainSignedReview.receipt(reviewer, "proposal-prod-shadow", "review-prod-shadow");
+        assertThat(receipt.approvalId()).isEqualTo(shadowIntent.approvalId());
+        assertThat(receipt.outcome()).isEqualTo(ModelPromotionApproval.Outcome.APPROVED);
+        assertThat(receipt.rationaleSha256()).isEqualTo(shadowIntent.rationaleSha256());
+
+        SimpleMongoClientDatabaseFactory reopenedFactory = new SimpleMongoClientDatabaseFactory(
+                MONGO.getReplicaSetUrl(mongo.getDb().getName()));
+        try {
+            MongoTemplate reopenedMongo = new MongoTemplate(reopenedFactory);
+            ModelPromotionPolicyFullTrustVerifier reopenedTrust = fullTrust(reopenedMongo);
+            ModelPromotionPolicyResolver reopenedPolicyResolver = new ModelPromotionPolicyResolver(
+                    new MongoModelPromotionPolicyStore(reopenedMongo),
+                    new ModelPromotionPolicyValidator(mapper), reopenedTrust);
+            MongoTransactionManager reopenedManager = new MongoTransactionManager(reopenedFactory);
+            ModelPromotionDecisionValidator reopenedDecisionValidator = new ModelPromotionDecisionValidator(
+                    mapper, new ModelPromotionPolicyValidator(mapper), reopenedTrust);
+            MongoModelPromotionStore reopenedStore = modelPromotionStore(
+                    reopenedMongo, reopenedManager, reopenedDecisionValidator, null);
+            ModelPromotionWorkflowService reopenedWorkflow = new ModelPromotionWorkflowService(reopenedStore,
+                    evidenceResolver, new ModelPromotionAssessmentService(reopenedPolicyResolver, mapper),
+                    reopenedPolicyResolver, authorization, Clock.fixed(decisionTime, ZoneOffset.UTC));
+            ModelPromotionSignedReviewService reopenedSignedReview = new ModelPromotionSignedReviewService(
+                    reopenedStore, authorization, reopenedWorkflow,
+                    policyWebAuthn(reopenedMongo, reopenedManager,
+                            new MongoPolicyGovernanceStore(reopenedMongo, reopenedManager)),
+                    reopenedMongo, mapper);
+            PolicyGovernanceActor auditor = new PolicyGovernanceActor(
+                    PolicyGovernanceActor.identityId("https://institution.example", "production-auditor"),
+                    Set.of(ModelPolicyAuthority.AUDIT_READ, ModelPolicyAuthority.PRODUCTION),
+                    "https://institution.example", "production-auditor");
+            reopenedSignedReview.verifyHistoricalReview(auditor, "proposal-prod-shadow");
+            reopenedSignedReview.verifyHistoricalReview(auditor, "proposal-prod-challenger");
+            assertThat(reopenedSignedReview.receipt(reviewer, "proposal-prod-shadow", "review-prod-shadow"))
+                    .isEqualTo(receipt);
+            PolicyGovernanceActor otherReviewer = new PolicyGovernanceActor(
+                    PolicyGovernanceActor.identityId(reviewerIssuer, "different-reviewer"),
+                    reviewer.authorities(), reviewerIssuer, "different-reviewer");
+            assertThatThrownBy(() -> reopenedSignedReview.receipt(
+                    otherReviewer, "proposal-prod-shadow", "review-prod-shadow"))
+                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            assertThat(reopenedStore.currentState(identity, governanceScope, intendedUse).orElseThrow())
+                    .isEqualTo(promoted);
+            assertThat(reopenedMongo.count(new Query(), ModelPromotionDecisionDocument.class)).isEqualTo(3);
+            assertThat(reopenedMongo.findById(shadowChallenge.challengeId(), GovernanceBoundWebAuthnProof.class))
+                    .isEqualTo(proof);
+            assertThat(reopenedMongo.findById(credentialId, PolicyWebAuthnCredential.class).signatureCount())
+                    .isEqualTo(2);
+        } finally {
+            reopenedFactory.destroy();
+        }
     }
 
     @Test
@@ -502,6 +779,158 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
                 new TransactionTemplate(new MongoTransactionManager(source)));
     }
 
+    private MongoModelPromotionStore modelPromotionStore(MongoTemplate template,
+            MongoTransactionManager manager, ModelPromotionDecisionValidator decisionValidator,
+            AtomicBoolean unknownCommitSignalled) {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformTransactionManager> managerProvider = mock(ObjectProvider.class);
+        when(managerProvider.getIfAvailable()).thenReturn(manager);
+        RegulatedMutationTransactionRunner transactionRunner = unknownCommitSignalled == null
+                ? new RegulatedMutationTransactionRunner("REQUIRED", managerProvider)
+                : new RegulatedMutationTransactionRunner("REQUIRED", managerProvider) {
+                    @Override
+                    public <T> T runLocalCommit(Supplier<T> callback) {
+                        if (!unknownCommitSignalled.compareAndSet(false, true)) {
+                            throw new AssertionError("Unknown commit must not replay the protected mutation");
+                        }
+                        super.runLocalCommit(callback);
+                        MongoException unknown = new MongoException(91, "injected unknown commit result");
+                        unknown.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL);
+                        throw unknown;
+                    }
+                };
+        return new MongoModelPromotionStore(template, transactionRunner, decisionValidator,
+                new ModelPromotionLocalAuditFactory(),
+                Clock.fixed(Instant.parse("2026-08-02T00:00:00Z"), ZoneOffset.UTC));
+    }
+
+    private PolicyWebAuthnService policyWebAuthn(MongoTemplate template, MongoTransactionManager manager,
+            MongoPolicyGovernanceStore governanceStore) {
+        return new PolicyWebAuthnService(template, manager, new PolicyWebAuthnCredentialRepository(template), null,
+                governanceStore, null, mapper, new MockEnvironment(), "localhost", "http://localhost:4173");
+    }
+
+    private ModelPromotionSignedReviewService.ReviewIntent reviewIntent(String approvalId, String operationId,
+            String rationale) {
+        return new ModelPromotionSignedReviewService.ReviewIntent(approvalId,
+                ModelPromotionApproval.Outcome.APPROVED, operationId, rationale,
+                ModelPromotionDecisionRationale.sha256(rationale));
+    }
+
+    private String signedAssertion(MongoTemplate template, String challengeId, String credentialId,
+            String userHandle, KeyPair assertionKey, int counter) throws Exception {
+        GovernanceWebAuthnBoundChallenge challengeDocument = template.findById(
+                challengeId, GovernanceWebAuthnBoundChallenge.class);
+        String challenge = AssertionRequest.fromJson(challengeDocument.requestJson())
+                .getPublicKeyCredentialRequestOptions().getChallenge().getBase64Url();
+        byte[] clientData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(Map.of(
+                "type", "webauthn.get", "challenge", challenge,
+                "origin", "http://localhost:4173", "crossOrigin", false));
+        byte[] authenticatorData = ByteBuffer.allocate(37)
+                .put(MessageDigest.getInstance("SHA-256").digest("localhost".getBytes(StandardCharsets.UTF_8)))
+                .put((byte) 0x05).putInt(counter).array();
+        Signature signature = Signature.getInstance("SHA256withECDSA");
+        signature.initSign(assertionKey.getPrivate());
+        signature.update(authenticatorData);
+        signature.update(MessageDigest.getInstance("SHA-256").digest(clientData));
+        var encoder = Base64.getUrlEncoder().withoutPadding();
+        return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of(
+                "id", credentialId, "rawId", credentialId, "type", "public-key",
+                "response", Map.of("clientDataJSON", encoder.encodeToString(clientData),
+                        "authenticatorData", encoder.encodeToString(authenticatorData),
+                        "signature", encoder.encodeToString(signature.sign()), "userHandle", userHandle),
+                "clientExtensionResults", Map.of()));
+    }
+
+    private byte[] coseCoordinate(java.math.BigInteger value) {
+        byte[] encoded = value.toByteArray();
+        byte[] coordinate = new byte[32];
+        System.arraycopy(encoded, Math.max(0, encoded.length - 32), coordinate,
+                Math.max(0, 32 - encoded.length), Math.min(32, encoded.length));
+        return coordinate;
+    }
+
+    private ModelPromotionPolicyPublisher.Draft productionReviewProposal(String policyId, long revision,
+            String effectiveFrom, String effectiveTo) {
+        List<ModelPromotionPolicy.CriterionRule> rules = List.of(
+                criterionRule(ModelPromotionCriterion.STATISTICALLY_MEANINGFUL_SAMPLE, Map.of(
+                        "minimumEvaluatedRecords", new BigDecimal("100"),
+                        "minimumPositiveLabels", new BigDecimal("10"),
+                        "minimumNegativeLabels", new BigDecimal("10"))),
+                criterionRule(ModelPromotionCriterion.PRECISION_AT_ALERT_REVIEW_BUDGET, Map.of(
+                        "alertReviewBudget", new BigDecimal("100"),
+                        "minimumMlPrecision", new BigDecimal("0.70"),
+                        "minimumDeltaVsRules", BigDecimal.ZERO)),
+                criterionRule(ModelPromotionCriterion.FALSE_POSITIVE_RATE,
+                        Map.of("maximumRate", new BigDecimal("0.10"))),
+                criterionRule(ModelPromotionCriterion.RULES_VS_ML_DISAGREEMENT,
+                        Map.of("maximumRate", new BigDecimal("0.10"))),
+                criterionRule(ModelPromotionCriterion.CRITICAL_SEGMENT_REGRESSIONS, Map.of(
+                        "maximumCriticalRegressions", BigDecimal.ZERO,
+                        "minimumSegmentsEvaluated", new BigDecimal("5"))),
+                criterionRule(ModelPromotionCriterion.EXACT_MODEL_LATENCY_STABILITY, Map.of(
+                        "maximumMilliseconds", new BigDecimal("500"),
+                        "minimumSampleSize", new BigDecimal("100"))),
+                criterionRule(ModelPromotionCriterion.EXACT_MODEL_FALLBACK_RATE, Map.of(
+                        "maximumRate", new BigDecimal("0.05"),
+                        "minimumDenominator", new BigDecimal("100"))),
+                criterionRule(ModelPromotionCriterion.COMPLETE_EVALUATION_PROVENANCE, Map.of()),
+                criterionRule(ModelPromotionCriterion.EXACT_SHA_MODEL_CARD, Map.of()),
+                criterionRule(ModelPromotionCriterion.IDENTITY_AND_LINEAGE_INTEGRITY,
+                        Map.of("maximumCriticalLineageGaps", BigDecimal.ZERO)));
+        ModelPromotionPolicyDraft content = new ModelPromotionPolicyDraft(ModelPromotionPolicyDraft.VERSION,
+                policyId, revision, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
+                "policy-author", "risk-committee", "approval-" + policyId, "policy-publisher", "publisher-key-1",
+                ISSUER, KEY_ID, effectiveFrom, effectiveTo, rules);
+        return new ModelPromotionPolicyPublisher.Draft(content, content.canonicalSha256(mapper));
+    }
+
+    private ModelPromotionPolicy.CriterionRule criterionRule(ModelPromotionCriterion criterion,
+            Map<String, BigDecimal> thresholds) {
+        return new ModelPromotionPolicy.CriterionRule(criterion,
+                ModelPromotionPolicy.CriterionApplicability.MANDATORY, thresholds, 604800,
+                "VERIFIED_REPORTS_AND_MANIFESTS", criterion.evidenceSource(), criterion.metricSemantics(),
+                criterion.populationDefinition(), criterion.denominatorDefinition(), null);
+    }
+
+    private ModelPromotionEvidenceBundle productionReviewEvidence(ExactModelArtifactIdentity identity,
+            ModelGovernanceScope governanceScope, ModelPromotionEvaluationWindow window) {
+        ModelPromotionEvidenceBundle.PopulationEvidence population = new ModelPromotionEvidenceBundle.PopulationEvidence(
+                1000, 1000, 100, 900, false, "COMPLETE", "BOUNDED_SOURCE_NOT_TRUNCATED");
+        ModelPromotionEvidenceBundle.EvaluationEvidence evaluation = new ModelPromotionEvidenceBundle.EvaluationEvidence(
+                population,
+                Map.of(100, new ModelPromotionEvidenceBundle.RankedMetricEvidence(true, 100, 100,
+                        new BigDecimal("0.80"), null)),
+                new ModelPromotionEvidenceBundle.FairPrecisionComparisonEvidence(true, 100, 100,
+                        new BigDecimal("0.80"), new BigDecimal("0.70"), "matched-cohort-sha256", null),
+                new ModelPromotionEvidenceBundle.RateMetricEvidence(true, new BigDecimal("0.01"),
+                        9, 900, "ANALYST_FEEDBACK_LABEL", null),
+                new ModelPromotionEvidenceBundle.RateMetricEvidence(true, new BigDecimal("0.05"),
+                        50, 1000, "FEEDBACK_CREATED_AT", null),
+                new ModelPromotionEvidenceBundle.SegmentRegressionEvidence(true, 5, 0,
+                        "segment-contract-v1", null),
+                new ModelPromotionEvidenceBundle.LatencyEvidence(false, null, null, null,
+                        "EXACT_ARTIFACT_LATENCY_EVIDENCE_NOT_REQUIRED_FOR_SHADOW_APPROVAL"),
+                new ModelPromotionEvidenceBundle.RateMetricEvidence(false, null, null, null, null,
+                        "EXACT_ARTIFACT_FALLBACK_EVIDENCE_NOT_REQUIRED_FOR_SHADOW_APPROVAL"),
+                new ModelPromotionEvidenceBundle.LineageEvidence("EXCLUDE", 0, 0, 0, 0, 0));
+        ModelPromotionEvidenceBundle.Content content = new ModelPromotionEvidenceBundle.Content(
+                ModelPromotionEvidenceBundle.CURRENT_VERSION, identity, governanceScope,
+                ModelPromotionIntendedUse.FRAUD_RISK_SCORING, window,
+                new ModelPromotionEvidenceBundle.ModelCardEvidence("b".repeat(64),
+                        identity.modelArtifactSha256(), "2026-08-01T00:00:01Z", "1".repeat(64),
+                        "VERIFIED_AGAINST_SOURCE_BYTES"),
+                new ModelPromotionEvidenceBundle.ShadowPerformanceEvidence("c".repeat(64),
+                        "2026-08-01T00:00:01Z", "1".repeat(64), population.returnedCohortStatus(),
+                        population.sourcePopulationStatus(), population.recordsConsidered(),
+                        population.recordsEvaluated(), false),
+                evaluation,
+                new ModelPromotionEvidenceBundle.EvidenceTrust("VERIFIED_REPORTS_AND_MANIFESTS",
+                        "VERIFIED_AGAINST_SOURCE_BYTES", "NOT_PROVIDED", "NOT_CLAIMED"),
+                List.of("SYNTHETIC_INTEGRATION_FIXTURE_FOR_SIGNED_REVIEW_FLOW"));
+        return new ModelPromotionEvidenceBundle(content, GovernanceCanonicalJson.sha256(mapper, content));
+    }
+
     private ModelPromotionPolicyPublisher publisher(InternalPolicyPublicationAuthorization approval,
             MongoModelPromotionPolicyPublicationStore storage) {
         return new ModelPromotionPolicyPublisher(mapper, new ModelPromotionPolicyValidator(mapper), approval,
@@ -535,8 +964,12 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
     }
 
     private ModelPromotionPolicyFullTrustVerifier fullTrust() throws Exception {
+        return fullTrust(mongo);
+    }
+
+    private ModelPromotionPolicyFullTrustVerifier fullTrust(MongoTemplate template) throws Exception {
         return new ModelPromotionPolicyFullTrustVerifier(verifier,
-                new MongoModelPromotionPolicyApprovalEvidenceVerifier(mongo, mapper, CLOCK,
+                new MongoModelPromotionPolicyApprovalEvidenceVerifier(template, mapper, CLOCK,
                         firstPartyTrust(), null));
     }
 
@@ -628,7 +1061,13 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
     }
 
     private void authenticate(String actorId, Set<String> authorities) {
-        AnalystPrincipal principal = new AnalystPrincipal(actorId, Set.of(), authorities);
+        authenticate("https://model-promotion.example", actorId, authorities);
+    }
+
+    private void authenticate(String issuer, String subject, Set<String> authorities) {
+        String actorId = PolicyGovernanceActor.identityId(issuer, subject);
+        AnalystPrincipal principal = new AnalystPrincipal(subject, Set.of(), authorities,
+                issuer + "#" + subject, actorId);
         SecurityContextHolder.getContext().setAuthentication(
                 new AnalystAuthenticationFactory().authenticated(principal));
     }

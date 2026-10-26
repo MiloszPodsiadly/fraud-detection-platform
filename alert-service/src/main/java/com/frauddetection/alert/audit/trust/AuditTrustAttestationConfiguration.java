@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.trust;
 
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationRunner;
@@ -11,24 +12,20 @@ import org.springframework.core.env.Environment;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Locale;
-import java.util.Set;
 
 @Configuration
 @EnableConfigurationProperties(AuditTrustAttestationProperties.class)
 public class AuditTrustAttestationConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(AuditTrustAttestationConfiguration.class);
-    private static final Set<String> PROD_LIKE_PROFILES = Set.of("prod", "production", "staging");
-
     @Bean
     AuditTrustAttestationSigner auditTrustAttestationSigner(
             AuditTrustAttestationProperties properties,
             Environment environment
     ) {
         String mode = normalize(properties.getSigning().getMode());
-        validateModeForProfiles(mode, environment);
+        validateModeForInstitutionalMode(mode, environment);
         AuditTrustAttestationSigner signer = switch (mode) {
             case "disabled" -> new DisabledAuditTrustAttestationSigner();
             case "local-dev" -> localDevSigner(properties, environment);
@@ -67,7 +64,7 @@ public class AuditTrustAttestationConfiguration {
             Environment environment
     ) {
         if (prodLikeProfile(environment)) {
-            throw new IllegalStateException("Local-dev audit trust attestation signing is not allowed in prod-like profiles.");
+            throw new IllegalStateException("Local-dev audit trust attestation signing is not allowed in institutional mode.");
         }
         if (!StringUtils.hasText(properties.getSigning().getLocalDevKeyId())
                 || !StringUtils.hasText(properties.getSigning().getLocalDevSecret())) {
@@ -89,9 +86,9 @@ public class AuditTrustAttestationConfiguration {
         throw new IllegalStateException("KMS-ready audit trust attestation signing requires a real KMS/HSM adapter.");
     }
 
-    private void validateModeForProfiles(String mode, Environment environment) {
+    private void validateModeForInstitutionalMode(String mode, Environment environment) {
         if (prodLikeProfile(environment) && !"disabled".equals(mode) && !"kms-ready".equals(mode)) {
-            throw new IllegalStateException("Audit trust attestation signer mode is not allowed in prod-like profiles.");
+            throw new IllegalStateException("Audit trust attestation signer mode is not allowed in institutional mode.");
         }
     }
 
@@ -100,9 +97,7 @@ public class AuditTrustAttestationConfiguration {
     }
 
     private boolean prodLikeProfile(Environment environment) {
-        return Arrays.stream(environment.getActiveProfiles())
-                .map(this::normalize)
-                .anyMatch(PROD_LIKE_PROFILES::contains);
+        return InstitutionalModePolicy.isInstitutionalMode(environment);
     }
 
     private String normalize(String value) {

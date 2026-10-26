@@ -167,7 +167,7 @@ public class ModelPromotionEmergencyRetirementService {
             }
             var proposal = pendingRetirement(grant.proposalId());
             requireExactProposalAndState(grant, proposal);
-            if (actor.subject().equals(proposal.proposal().proposedBy())) {
+            if (actor.id().equals(proposal.proposal().proposedBy())) {
                 throw new AccessDeniedException("Model proposer cannot authorize emergency retirement");
             }
             var updated = mongo.findAndModify(Query.query(Criteria.where("_id").is(grant.id())
@@ -372,7 +372,11 @@ public class ModelPromotionEmergencyRetirementService {
                         && grant.reviewOperationId().equals(proposal.reviewOperationId())
                         && proposal.transition().equals(grant.transition())
                         && grant.approvalId().equals(proposal.approval().approvalId())
-                        && grant.requesterSubject().equals(proposal.approval().approvedBy())
+                        && (proposal.reviewerIdentity() == null
+                                ? grant.requesterSubject().equals(proposal.approval().approvedBy())
+                                : grant.requesterActorId().equals(proposal.approval().approvedBy())
+                                        && grant.requesterIssuer().equals(proposal.reviewerIdentity().issuer())
+                                        && grant.requesterSubject().equals(proposal.reviewerIdentity().subject()))
                         && "EMERGENCY_RETIRE_MODEL_PROMOTION_PROPOSAL".equals(proposal.reviewAudit().action())
                         && proposal.transition().requestedTargetState() == ModelPromotionLifecycleState.RETIRED)
                 .isPresent() && matchingRetirementDecision(grant);
@@ -410,7 +414,11 @@ public class ModelPromotionEmergencyRetirementService {
                 && decision.resultingState() == ModelPromotionLifecycleState.RETIRED
                 && decision.sourceState() == grant.currentState()
                 && decision.resultingRevision() == grant.currentRevision() + 1
-                && grant.requesterSubject().equals(decision.actorId())
+                && (decision.actorIdentity() == null
+                        ? grant.requesterSubject().equals(decision.actorId())
+                        : grant.requesterActorId().equals(decision.actorId())
+                                && grant.requesterIssuer().equals(decision.actorIdentity().issuer())
+                                && grant.requesterSubject().equals(decision.actorIdentity().subject()))
                 && grant.approvalId().equals(decision.approval().approvalId())
                 && grant.proposalId().equals(decision.proposal().proposalId())
                 && transition.artifactIdentity().equals(decision.artifactIdentity())
@@ -478,7 +486,8 @@ public class ModelPromotionEmergencyRetirementService {
                 new ModelPromotionPersistenceConflictException("Model retirement proposal unavailable"));
         if (proposal.reviewStatus() != ModelPromotionProposalDocument.ReviewStatus.PENDING
                 || proposal.transition().requestedTargetState() != ModelPromotionLifecycleState.RETIRED
-                || proposal.transition().governanceScope().environment() != ModelGovernanceEnvironment.PRODUCTION) {
+                || proposal.transition().governanceScope().environment() != ModelGovernanceEnvironment.PRODUCTION
+                || proposal.proposerIdentity() == null || !proposal.proposerIdentity().isInstitutional()) {
             throw new ModelPromotionPersistenceConflictException("Pending production retirement required");
         }
         return proposal;
@@ -518,11 +527,15 @@ public class ModelPromotionEmergencyRetirementService {
 
     private void requireReviewerFor(PolicyGovernanceActor actor, ModelPromotionProposalDocument proposal) {
         var scope = proposal.transition().governanceScope();
-        if (!actor.subject().equals(authorization.requireActor(AnalystAuthority.MODEL_PROMOTION_APPROVE, scope))) {
+        if (!actor.id().equals(authorization.requireActor(AnalystAuthority.MODEL_PROMOTION_APPROVE, scope))) {
             throw new AccessDeniedException("OIDC requester and model reviewer differ");
         }
         authorization.requireAuthority(AnalystAuthority.MODEL_PROMOTION_RETIRE, scope);
-        if (actor.subject().equals(proposal.proposal().proposedBy())) {
+        if (proposal.proposerIdentity() == null) {
+            throw new ModelPromotionPersistenceConflictException(
+                    "Legacy pending proposal has no issuer binding; resubmit with new proposal and operation IDs");
+        }
+        if (actor.id().equals(proposal.proposal().proposedBy())) {
             throw new AccessDeniedException("Model proposer cannot emergency-review own proposal");
         }
     }

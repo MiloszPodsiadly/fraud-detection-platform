@@ -306,6 +306,10 @@ public class MongoModelPromotionStore {
         if (proposal.reviewStatus() != ModelPromotionProposalDocument.ReviewStatus.PENDING) {
             throw new ModelPromotionPersistenceConflictException("Model promotion proposal was already reviewed");
         }
+        if (proposal.proposerIdentity() == null) {
+            throw new ModelPromotionPersistenceConflictException(
+                    "Legacy pending proposal has no issuer binding; resubmit with new proposal and operation IDs");
+        }
         if (proposal.proposal().proposedBy().equals(review.operationContext().actorId())) {
             throw new ModelPromotionPersistenceConflictException(
                     "A model promotion proposer cannot review their own proposal"
@@ -371,7 +375,7 @@ public class MongoModelPromotionStore {
         return new ModelPromotionProposalReview(review.proposalId(), new ModelPromotionApproval(
                 old.approvalId(), old.proposalId(), old.outcome(), old.approvedBy(), acceptedAt,
                 old.rationale()), new ModelPromotionOperationContext(context.operationId(), context.actorId(),
-                context.authorizationFingerprint(), acceptedAt));
+                context.authorizationFingerprint(), acceptedAt, context.actorIdentity()));
     }
 
     private void recordProposalRejection(
@@ -414,7 +418,8 @@ public class MongoModelPromotionStore {
                         review.operationContext(),
                         reviewedAt
                 ),
-                reviewedAt
+                reviewedAt,
+                review.operationContext().actorIdentity()
         );
         mongoTemplate.insert(decision);
     }
@@ -477,6 +482,7 @@ public class MongoModelPromotionStore {
                         .set("review_operation_id", review.operationContext().operationId())
                         .set("review_command_sha256", reviewCommandSha256)
                         .set("reviewer_authorization_fingerprint", review.operationContext().authorizationFingerprint())
+                        .set("reviewer_identity", review.operationContext().actorIdentity())
                         .set("review_audit", reviewAudit)
                         .set("reviewed_at", reviewedAt),
                 ModelPromotionProposalDocument.class
@@ -504,7 +510,9 @@ public class MongoModelPromotionStore {
                 proposal.submissionAudit(),
                 reviewAudit,
                 proposal.submittedAt(),
-                reviewedAt
+                reviewedAt,
+                proposal.proposerIdentity(),
+                review.operationContext().actorIdentity()
         ).toResult(false);
     }
 
@@ -551,7 +559,8 @@ public class MongoModelPromotionStore {
                 null,
                 null,
                 audit,
-                committedAt
+                committedAt,
+                command.operationContext().actorIdentity()
         );
         mongoTemplate.insert(decision);
         return decision.toResult();
@@ -628,7 +637,8 @@ public class MongoModelPromotionStore {
                 request.proposal(),
                 request.approval(),
                 audit,
-                committedAt
+                committedAt,
+                request.operationContext().actorIdentity()
         );
         mongoTemplate.insert(decision);
         return decision.toResult();
@@ -806,7 +816,8 @@ public class MongoModelPromotionStore {
             return Optional.empty();
         }
         if (!existing.actorId().equals(context.actorId())
-                || !existing.authorizationFingerprint().equals(context.authorizationFingerprint())) {
+                || !existing.authorizationFingerprint().equals(context.authorizationFingerprint())
+                || !sameActorIdentity(existing.proposerIdentity(), context.actorIdentity())) {
             throw new ModelPromotionPersistenceConflictException("Idempotency operation is unavailable to this caller");
         }
         boolean sameIntent = requestIntentSha256 == null
@@ -843,7 +854,8 @@ public class MongoModelPromotionStore {
             return Optional.empty();
         }
         if (existing.approval() == null || !existing.approval().approvedBy().equals(context.actorId())
-                || !existing.reviewerAuthorizationFingerprint().equals(context.authorizationFingerprint())) {
+                || !existing.reviewerAuthorizationFingerprint().equals(context.authorizationFingerprint())
+                || !sameActorIdentity(existing.reviewerIdentity(), context.actorIdentity())) {
             throw new ModelPromotionPersistenceConflictException("Idempotency operation is unavailable to this caller");
         }
         if (!existing.reviewCommandSha256().equals(reviewCommandSha256)) {
@@ -902,7 +914,8 @@ public class MongoModelPromotionStore {
             return Optional.empty();
         }
         if (!existing.actorId().equals(context.actorId())
-                || !existing.authorizationFingerprint().equals(context.authorizationFingerprint())) {
+                || !existing.authorizationFingerprint().equals(context.authorizationFingerprint())
+                || !sameActorIdentity(existing.actorIdentity(), context.actorIdentity())) {
             throw new ModelPromotionPersistenceConflictException("Idempotency operation is unavailable to this caller");
         }
         if (!existing.commandSha256().equals(commandSha256)) {
@@ -911,6 +924,11 @@ public class MongoModelPromotionStore {
             );
         }
         return Optional.of(existing.toResult().asReplay());
+    }
+
+    private boolean sameActorIdentity(ModelPromotionActorIdentity persisted,
+            ModelPromotionActorIdentity current) {
+        return persisted == null ? current == null : persisted.equals(current);
     }
 
     private void claimOperation(

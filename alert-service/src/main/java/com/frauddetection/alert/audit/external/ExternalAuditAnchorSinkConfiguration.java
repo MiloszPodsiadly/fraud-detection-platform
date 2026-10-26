@@ -3,6 +3,7 @@ package com.frauddetection.alert.audit.external;
 import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.audit.ExternalAuditHeadForensicService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,7 +25,6 @@ class ExternalAuditAnchorSinkConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(ExternalAuditAnchorSinkConfiguration.class);
     private static final Set<String> LOCAL_PROFILES = Set.of("local", "dev", "test", "docker-local");
-    private static final Set<String> PROD_LIKE_PROFILES = Set.of("prod", "production", "staging");
 
     @Bean
     ExternalAuditAnchorSink externalAuditAnchorSink(
@@ -337,8 +337,8 @@ class ExternalAuditAnchorSinkConfiguration {
 
     private void validateLocalFileSink(Environment environment, boolean allowLocalFileInProd) {
         Set<String> profiles = Set.copyOf(Arrays.asList(environment.getActiveProfiles()));
-        if (profiles.stream().anyMatch(PROD_LIKE_PROFILES::contains)) {
-            throw new IllegalStateException("Local-file external audit anchor sink is not allowed in prod-like profiles.");
+        if (InstitutionalModePolicy.isInstitutionalMode(environment)) {
+            throw new IllegalStateException("Local-file external audit anchor sink is not allowed in institutional mode.");
         }
         if (allowLocalFileInProd) {
             log.warn("Ignoring local-file external audit anchor prod override; local-file is never allowed in prod-like profiles.");
@@ -450,7 +450,7 @@ class ExternalAuditAnchorSinkConfiguration {
         if (isProdLike(environment)
                 && lowerThan(capabilities.independenceLevel(), ExternalWitnessIndependenceLevel.CROSS_ORG.name(), ExternalWitnessIndependenceLevel.class)
                 && !allowSeparateAccountInProd) {
-            throw new IllegalStateException("Prod-like external anchoring requires CROSS_ORG witness independence or an explicit SEPARATE_ACCOUNT limitation override.");
+            throw new IllegalStateException("Institutional external anchoring requires CROSS_ORG witness independence or an explicit SEPARATE_ACCOUNT limitation override.");
         }
     }
 
@@ -503,7 +503,7 @@ class ExternalAuditAnchorSinkConfiguration {
     }
 
     private boolean isProdLike(Environment environment) {
-        return Arrays.stream(environment.getActiveProfiles()).anyMatch(PROD_LIKE_PROFILES::contains);
+        return InstitutionalModePolicy.isInstitutionalMode(environment);
     }
 
     private <E extends Enum<E>> boolean lowerThan(String actual, String minimum, Class<E> enumType) {

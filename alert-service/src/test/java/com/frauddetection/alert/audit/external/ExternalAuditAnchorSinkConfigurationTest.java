@@ -105,6 +105,37 @@ class ExternalAuditAnchorSinkConfigurationTest {
     }
 
     @Test
+    void shouldRejectLocalFileSinkWhenBankFailClosedFlagIsSetForLocalProfile() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("app.audit.bank-mode.fail-closed", "true");
+        environment.setActiveProfiles("bank-local");
+
+        assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
+                new ObjectMapper(),
+                emptyObjectStoreClient(),
+                metrics(),
+                environment,
+                false,
+                "local-file",
+                "./target/test-audit-external-anchors.jsonl",
+                false,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                true,
+                false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                "test-instance"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Local-file external audit anchor sink is not allowed in institutional mode");
+    }
+
+    @Test
     void shouldRejectLocalFileSinkInProdLikeProfileEvenWithOverride() {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("production");

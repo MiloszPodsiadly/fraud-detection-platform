@@ -88,15 +88,21 @@ public class ModelPromotionSignedReviewService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Review operation unavailable");
         String mandate = proposal.approval().outcome() == ModelPromotionApproval.Outcome.APPROVED
                 ? AnalystAuthority.MODEL_PROMOTION_APPROVE : AnalystAuthority.MODEL_PROMOTION_REJECT;
-        if (!actor.subject().equals(authorization.requireActor(mandate,
+        boolean legacyReview = proposal.reviewerIdentity() == null;
+        if (!actor.id().equals(authorization.requireActor(mandate,
                 proposal.transition().governanceScope()))
-                || !actor.subject().equals(proposal.approval().approvedBy()))
+                || (legacyReview ? !actor.subject().equals(proposal.approval().approvedBy())
+                        : !actor.id().equals(proposal.approval().approvedBy())
+                                || !actor.issuer().equals(proposal.reviewerIdentity().issuer())
+                                || !actor.subject().equals(proposal.reviewerIdentity().subject())))
             throw new AccessDeniedException("Review receipt belongs to a different actor or scope");
         var evidence = mongo.findById(NAMESPACE + ":" + operationId,
                 ModelPromotionWebAuthnReviewEvidence.class);
         if (evidence == null || !proposalId.equals(evidence.proposalId())
                 || !operationId.equals(evidence.operationId())
                 || !actor.id().equals(evidence.actorId())
+                || !actor.issuer().equals(evidence.issuer())
+                || !actor.subject().equals(evidence.subject())
                 || !proposal.approval().approvalId().equals(evidence.approvalId())
                 || proposal.approval().outcome() != evidence.outcome()
                 || !proposal.approval().rationale().sha256().equals(evidence.rationaleSha256()))
@@ -184,7 +190,16 @@ public class ModelPromotionSignedReviewService {
                 || !approval.approvalId().equals(receipt.approvalId())
                 || approval.outcome() != receipt.outcome()
                 || !approval.rationale().sha256().equals(receipt.rationaleSha256())
-                || !approval.approvedBy().equals(receipt.subject())
+                || (proposal.reviewerIdentity() == null
+                        ? !approval.approvedBy().equals(receipt.subject())
+                        : !proposal.reviewerIdentity().actorId().equals(approval.approvedBy())
+                                || !proposal.reviewerIdentity().actorId().equals(receipt.actorId())
+                                || !proposal.reviewerIdentity().issuer().equals(receipt.issuer())
+                                || !proposal.reviewerIdentity().subject().equals(receipt.subject()))
+                || (proposal.reviewerIdentity() == null ? decision.actorIdentity() != null
+                        : !proposal.reviewerIdentity().equals(decision.actorIdentity()))
+                || (decision.actorIdentity() != null
+                        && !decision.actorIdentity().actorId().equals(decision.actorId()))
                 || !proof.id().equals(receipt.challengeId())
                 || !proof.actorId().equals(receipt.actorId())
                 || !proof.issuer().equals(receipt.issuer())
@@ -219,11 +234,18 @@ public class ModelPromotionSignedReviewService {
                 new ModelPromotionPersistenceConflictException("Model promotion proposal unavailable"));
         String mandate = intent.outcome() == ModelPromotionApproval.Outcome.APPROVED
                 ? AnalystAuthority.MODEL_PROMOTION_APPROVE : AnalystAuthority.MODEL_PROMOTION_REJECT;
-        if (!actor.subject().equals(authorization.requireActor(mandate,
+        if (!actor.id().equals(authorization.requireActor(mandate,
                 proposal.transition().governanceScope()))) {
             throw new AccessDeniedException("OIDC identity and promotion reviewer differ");
         }
-        if (proposal.proposal().proposedBy().equals(actor.subject())) {
+        if (proposal.proposerIdentity() == null) {
+            throw new ModelPromotionPersistenceConflictException(
+                    "Legacy pending proposal has no issuer binding; resubmit with new proposal and operation IDs");
+        }
+        if (!proposal.proposal().proposedBy().equals(proposal.proposerIdentity().actorId())) {
+            throw new SecurityException("Proposal actor identity is inconsistent");
+        }
+        if (proposal.proposerIdentity().actorId().equals(actor.id())) {
             throw new AccessDeniedException("Independent reviewer required");
         }
         new ModelPromotionDecisionRationale(ModelPromotionDecisionRationale.approvalReference(

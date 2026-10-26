@@ -48,6 +48,16 @@ class PolicyGovernanceSecurityTest {
     }
 
     @Test
+    void canonicalActorIsStableAcrossSessionsAndDistinctAcrossIssuers() {
+        String firstSession = PolicyGovernanceActor.identityId("https://issuer.example/realm", "same-subject");
+        String secondSession = PolicyGovernanceActor.identityId("https://issuer.example/realm", "same-subject");
+        String otherIssuer = PolicyGovernanceActor.identityId("https://other-issuer.example/realm", "same-subject");
+
+        assertThat(firstSession).isEqualTo(secondSession);
+        assertThat(otherIssuer).isNotEqualTo(firstSession);
+    }
+
+    @Test
     void forgedAuthorAndPublisherFieldsAreNotAcceptedByDraftRequestContract() {
         String json = """
                 {"policyId":"policy-1","revision":1,"governanceScope":{

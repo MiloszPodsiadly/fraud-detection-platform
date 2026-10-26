@@ -2,6 +2,8 @@ package com.frauddetection.alert.security.principal;
 
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionActorIdentity;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -57,9 +59,9 @@ class CurrentAnalystUserTest {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 oidcUser, "credentials", List.of(new SimpleGrantedAuthority("ROLE_ANALYST"))));
 
-        assertThat(currentAnalystUser.get())
-                .get()
-                .extracting(AnalystPrincipal::institutionalActorId)
-                .isEqualTo("https://issuer.example#same-subject");
+        AnalystPrincipal principal = currentAnalystUser.get().orElseThrow();
+        assertThat(principal.institutionalActorId()).isEqualTo("https://issuer.example#same-subject");
+        assertThat(ModelPromotionActorIdentity.fromPrincipal(principal).actorId())
+                .isEqualTo(PolicyGovernanceActor.identityId("https://issuer.example", "same-subject"));
     }
 }

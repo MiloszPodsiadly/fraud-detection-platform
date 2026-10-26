@@ -181,6 +181,19 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         signed.finish(reviewer, "proposal-signed-review",
                 new ModelPromotionSignedReviewService.SignedReview(intent, options.challengeId(), assertion));
         assertThat(mongoTemplate.findById(options.challengeId(), GovernanceBoundWebAuthnProof.class)).isNotNull();
+        ModelPromotionProposalDocument signedProposal = store.findProposal("proposal-signed-review").orElseThrow();
+        String makerId = PolicyGovernanceActor.identityId(issuer, "maker");
+        assertThat(signedProposal.proposerIdentity().actorId()).isEqualTo(makerId);
+        assertThat(signedProposal.proposal().proposedBy()).isEqualTo(makerId);
+        assertThat(signedProposal.reviewerIdentity().actorId()).isEqualTo(actorId);
+        assertThat(signedProposal.approval().approvedBy()).isEqualTo(actorId);
+        assertThat(signedProposal.submissionAudit().actorId()).isEqualTo(makerId);
+        assertThat(signedProposal.reviewAudit().actorId()).isEqualTo(actorId);
+        ModelPromotionDecisionDocument signedDecision = store.history(identity, scope, use(), 10).stream()
+                .filter(decision -> "review-signed-review".equals(decision.operationId()))
+                .findFirst().orElseThrow();
+        assertThat(signedDecision.actorId()).isEqualTo(actorId);
+        assertThat(signedDecision.actorIdentity()).isEqualTo(signedProposal.reviewerIdentity());
 
         var staleIntent = new ModelPromotionSignedReviewService.ReviewIntent("approval-stale-review",
                 ModelPromotionApproval.Outcome.REJECTED, "review-stale-review", RATIONALE,
@@ -225,6 +238,9 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                     Clock.fixed(NOW, ZoneOffset.UTC));
             ModelPromotionSignedReviewService restarted = new ModelPromotionSignedReviewService(reopenedStore,
                     authorization, workflow, webAuthn, reopenedMongo, new ObjectMapper());
+            assertThat(restarted.finish(reviewer, "proposal-signed-review",
+                    new ModelPromotionSignedReviewService.SignedReview(intent, options.challengeId(), assertion))
+                    .idempotentReplay()).isTrue();
             PolicyGovernanceActor auditor = new PolicyGovernanceActor(
                     PolicyGovernanceActor.identityId(issuer, "auditor"),
                     Set.of(ModelPolicyAuthority.AUDIT_READ), issuer, "auditor");
@@ -240,6 +256,34 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         } finally {
             reopenedFactory.destroy();
         }
+    }
+
+    @Test
+    void legacyPendingProposalWithoutIssuerBindingMustBeResubmitted() {
+        var submission = proposal(identity("9"), scope("TEST"), "legacy-proposal-operation",
+                "legacy-proposal", "legacy-maker");
+        var current = ModelPromotionProposalDocument.pending(
+                ModelPromotionPersistenceKey.aggregate(identity("9"), scope("TEST"), use()),
+                "a".repeat(64), submission,
+                new ModelPromotionDecisionDocument.LocalAuditEvidence("legacy-audit",
+                        "SUBMIT_MODEL_PROMOTION_PROPOSAL", "SUCCEEDED", submission.operationContext().actorId(),
+                        AUTHORIZATION, NOW),
+                NOW);
+        ModelPromotionProposalDocument legacy = new ModelPromotionProposalDocument(
+                current.proposalId(), current.aggregateKey(), current.operationId(), current.commandSha256(),
+                current.requestIntentSha256(), current.actorId(), current.authorizationFingerprint(),
+                current.transition(), current.policySnapshot(), current.assessmentSnapshot(), current.proposal(),
+                current.reviewStatus(), current.approval(), current.reviewOperationId(), current.reviewCommandSha256(),
+                current.reviewerAuthorizationFingerprint(), current.submissionAudit(), current.reviewAudit(),
+                current.submittedAt(), current.reviewedAt(), null, null);
+        mongoTemplate.insert(legacy);
+
+        assertThatThrownBy(() -> store.reviewProposal(review("legacy-proposal", "legacy-review-operation",
+                "legacy-reviewer"), () -> { }))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("resubmit");
+        assertThat(store.findProposal("legacy-proposal").orElseThrow().reviewStatus())
+                .isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
     }
 
     private static byte[] coseCoordinate(java.math.BigInteger value) {
@@ -443,7 +487,8 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                         approval.operationContext().operationId(),
                         approval.operationContext().actorId(),
                         approval.operationContext().authorizationFingerprint(),
-                        NOW.plusSeconds(30)
+                        NOW.plusSeconds(30),
+                        approval.operationContext().actorIdentity()
                 )
         );
         ModelPromotionProposalResult replay = restarted.reviewProposal(retriedAfterLostResponse, () -> {
@@ -933,7 +978,8 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
         assertThat(decision.policySnapshot()).isNull();
         assertThat(decision.assessmentSnapshot()).isNull();
         assertThat(decision.proposal().rationale().content()).isEqualTo(RATIONALE);
-        assertThat(decision.approval().approvedBy()).isEqualTo("retirement-reviewer");
+        assertThat(decision.approval().approvedBy())
+                .isEqualTo(PolicyGovernanceActor.identityId(issuer, "retirement-reviewer"));
         assertThat(store.findProposal(pending.proposalId()).orElseThrow().reviewAudit().action())
                 .isEqualTo("EMERGENCY_RETIRE_MODEL_PROMOTION_PROPOSAL");
         assertThatThrownBy(() -> emergency.retire(requester, pending.proposalId(),
@@ -1820,7 +1866,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                 new ModelPromotionProposal(
                         proposalId,
                         requestedTargetState,
-                        proposer,
+                        context.actorId(),
                         NOW.minusSeconds(30),
                         proposalRationale(proposalId)
                 )
@@ -1868,7 +1914,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                 new ModelPromotionProposal(
                         proposalId,
                         ModelPromotionLifecycleState.RETIRED,
-                        proposer,
+                        context(operationId, proposer).actorId(),
                         NOW.minusSeconds(30),
                         proposalRationale(proposalId)
                 )
@@ -1899,7 +1945,7 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                         approvalId,
                         proposalId,
                         outcome,
-                        reviewer,
+                        context.actorId(),
                         NOW.minusSeconds(10),
                         approvalRationale(proposalId, approvalId, rationale)
                 ),
@@ -1972,12 +2018,15 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
                         review.operationContext().authorizationFingerprint(),
                         NOW
                 ),
-                NOW
+                NOW,
+                review.operationContext().actorIdentity()
         );
     }
 
     private ModelPromotionOperationContext context(String operationId, String actorId) {
-        return new ModelPromotionOperationContext(operationId, actorId, AUTHORIZATION, NOW);
+        ModelPromotionActorIdentity identity = ModelPromotionActorIdentity.institutional(
+                "https://issuer.example", actorId);
+        return new ModelPromotionOperationContext(operationId, identity.actorId(), AUTHORIZATION, NOW, identity);
     }
 
     private ModelPromotionWorkflowService workflow(
@@ -1993,7 +2042,10 @@ class MongoModelPromotionStoreIntegrationTest extends AbstractIntegrationTest {
     }
 
     private void authenticate(String actorId, Set<String> authorities) {
-        AnalystPrincipal principal = new AnalystPrincipal(actorId, Set.of(), authorities);
+        String issuer = "https://issuer.example";
+        String canonicalActorId = PolicyGovernanceActor.identityId(issuer, actorId);
+        AnalystPrincipal principal = new AnalystPrincipal("display-" + actorId, Set.of(), authorities,
+                issuer + "#" + actorId, canonicalActorId);
         SecurityContextHolder.getContext().setAuthentication(
                 new AnalystAuthenticationFactory().authenticated(principal)
         );
