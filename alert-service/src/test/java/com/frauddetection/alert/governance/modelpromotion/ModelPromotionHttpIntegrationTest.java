@@ -184,7 +184,12 @@ class ModelPromotionHttpIntegrationTest extends AbstractIntegrationTest {
         assertThat(persistedState).isNotNull();
         assertThat(persistedState.toAggregate().lifecycleState()).isEqualTo(ModelPromotionLifecycleState.SHADOW_APPROVED);
         assertThat(persistedProposal).isNotNull();
-        assertThat(persistedProposal.approval().approvedBy()).isEqualTo("actor-b");
+        assertThat(persistedProposal.reviewerIdentity()).isNotNull();
+        assertThat(persistedProposal.reviewerIdentity().kind())
+                .isEqualTo(ModelPromotionActorIdentity.Kind.LOCAL_DEMO);
+        assertThat(persistedProposal.reviewerIdentity().actorId()).matches("^local:[0-9a-f]{64}$");
+        assertThat(persistedProposal.approval().approvedBy())
+                .isEqualTo(persistedProposal.reviewerIdentity().actorId());
         assertThat(persistedProposal.proposal().rationale().content())
                 .isEqualTo("Verified exact evidence supports shadow use");
         assertThat(persistedProposal.assessmentSnapshot().content().formalRecommendationEligible()).isFalse();
