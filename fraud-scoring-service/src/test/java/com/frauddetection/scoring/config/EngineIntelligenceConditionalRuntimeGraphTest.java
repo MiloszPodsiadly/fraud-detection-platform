@@ -5,6 +5,7 @@ import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalEngine;
 import com.frauddetection.scoring.engine.rules.RuleBasedSignalEngine;
 import com.frauddetection.scoring.engine.velocity.VelocitySignalEngine;
+import com.frauddetection.scoring.device.DeviceRiskSignalEngine;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
@@ -47,6 +48,7 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
             assertThat(context).doesNotHaveBean(FraudSignalEngineRegistry.class);
             assertThat(context).doesNotHaveBean(RuleBasedSignalEngine.class);
             assertThat(context).doesNotHaveBean(PythonMlSignalEngine.class);
+            assertThat(context).doesNotHaveBean(DeviceRiskSignalEngine.class);
             assertThat(context).doesNotHaveBean(BoundedFraudEngineExecutor.class);
             assertThat(context).doesNotHaveBean(FraudEngineAggregationService.class);
             assertThat(context).doesNotHaveBean(PublicEngineIntelligenceMapper.class);
@@ -63,6 +65,7 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
             assertThat(context).hasSingleBean(RuleBasedSignalEngine.class);
             assertThat(context).hasSingleBean(PythonMlSignalEngine.class);
             assertThat(context).doesNotHaveBean(VelocitySignalEngine.class);
+            assertThat(context).doesNotHaveBean(DeviceRiskSignalEngine.class);
             assertThat(context).hasSingleBean(BoundedFraudEngineExecutor.class);
             assertThat(context).hasSingleBean(FraudEngineAggregationService.class);
             assertThat(context).hasSingleBean(PublicEngineIntelligenceMapper.class);
@@ -108,6 +111,7 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
         var properties = yaml.getObject();
 
         assertThat(properties).containsKey("fraud.scoring.engines.velocity.enabled");
+        assertThat(properties).containsKey(DeviceRiskEngineProperties.PROPERTY_NAME);
         assertThat(properties).doesNotContainKey("fraud.engines.velocity.enabled");
     }
 
@@ -143,6 +147,38 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
     @Test
     void absentVelocityPropertyKeepsVelocityBeanAbsent() {
         enabledContextRunner().run(context -> assertThat(context).doesNotHaveBean(VelocitySignalEngine.class));
+    }
+
+    @Test
+    void deviceFlagFailsClosedInBothEmissionModesUntilAdmissionAndPublicContractAreReady() {
+        for (boolean emissionEnabled : new boolean[]{false, true}) {
+            (emissionEnabled ? enabledContextRunner() : contextRunner())
+                    .withPropertyValues(
+                            EngineIntelligenceEmissionProperties.PROPERTY_NAME + "=" + emissionEnabled,
+                            DeviceRiskEngineProperties.PROPERTY_NAME + "=true")
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasRootCauseInstanceOf(IllegalStateException.class)
+                                .hasRootCauseMessage(DeviceRiskEngineProperties.PROPERTY_NAME
+                                        + " requires an authenticated occurrence-bound reader and a migrated public contract");
+                    });
+        }
+    }
+
+    @Test
+    void disabledDeviceFlagNeverCreatesAReaderEngineOrFourthRegistryEntry() {
+        enabledContextRunner()
+                .withPropertyValues(DeviceRiskEngineProperties.PROPERTY_NAME + "=false",
+                        VelocityEngineProperties.PROPERTY_NAME + "=true")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(DeviceRiskSignalEngine.class);
+                    assertThat(context).doesNotHaveBean(com.frauddetection.scoring.device.AdmittedDeviceRiskEvidenceReader.class);
+                    assertThat(context.getBean(FraudSignalEngineRegistry.class).orderedEngines())
+                            .extracting(engine -> engine.descriptor().engineId())
+                            .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
+                });
     }
 
     @Test
