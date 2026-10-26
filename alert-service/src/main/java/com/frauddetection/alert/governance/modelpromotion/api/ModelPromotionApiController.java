@@ -1,8 +1,11 @@
 package com.frauddetection.alert.governance.modelpromotion.api;
 
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.governance.modelpromotion.ModelGovernanceEnvironment;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionIntendedUse;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -20,7 +23,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.AssessmentResponse;
 import static com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiContracts.AssessmentSelection;
@@ -51,7 +53,9 @@ public class ModelPromotionApiController {
     }
 
     @GetMapping("/state")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_PROMOTION_STATE,
+            resourceType = ReadAccessResourceType.MODEL_PROMOTION,
+            resourceIdParameter = "modelArtifactSha256")
     public StateResponse state(
             Authentication authentication,
             @RequestParam @NotBlank @Pattern(regexp = IDENTIFIER) String modelName,
@@ -69,7 +73,9 @@ public class ModelPromotionApiController {
     }
 
     @GetMapping("/assessment")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_PROMOTION_ASSESSMENT,
+            resourceType = ReadAccessResourceType.MODEL_PROMOTION,
+            resourceIdParameter = "modelArtifactSha256")
     public AssessmentResponse assessment(
             Authentication authentication,
             @RequestParam @NotBlank @Pattern(regexp = IDENTIFIER) String modelName,
@@ -145,9 +151,6 @@ public class ModelPromotionApiController {
     }
 
     private void enforceRateLimit(Authentication authentication) {
-        String actorId = authentication != null && authentication.isAuthenticated() ? authentication.getName() : null;
-        if (!rateLimiter.allow(actorId)) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Model promotion API rate limit exceeded.");
-        }
+        rateLimiter.enforce(PolicyGovernanceActor.from(authentication).id());
     }
 }

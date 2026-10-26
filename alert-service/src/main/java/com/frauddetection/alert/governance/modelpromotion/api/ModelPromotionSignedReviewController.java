@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelpromotion.api;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionSignedReviewService;
@@ -49,6 +52,9 @@ public class ModelPromotionSignedReviewController {
     }
 
     @GetMapping("/operations/{operationId}")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_PROMOTION_SIGNED_REVIEW_OPERATION,
+            resourceType = ReadAccessResourceType.MODEL_PROMOTION_REVIEW_OPERATION,
+            resourceIdVariable = "operationId")
     public ModelPromotionSignedReviewService.ReviewReceipt receipt(Authentication authentication,
             @PathVariable @NotBlank @Pattern(regexp = PROPOSAL_ID) String proposalId,
             @PathVariable @NotBlank @Pattern(regexp = "^[A-Za-z0-9._:-]{1,128}$") String operationId) {
@@ -58,9 +64,6 @@ public class ModelPromotionSignedReviewController {
     }
 
     private void requireRateLimit(Authentication authentication) {
-        if (authentication == null || !rateLimiter.allow(authentication.getName())) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, "Model promotion API rate limit exceeded.");
-        }
+        rateLimiter.enforce(PolicyGovernanceActor.fromOidcSession(authentication).id());
     }
 }

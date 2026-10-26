@@ -90,6 +90,8 @@ app:
     api:
       max-requests-per-minute: ${MODEL_PROMOTION_API_MAX_REQUESTS_PER_MINUTE:30}
       max-tracked-actors: ${MODEL_PROMOTION_API_MAX_TRACKED_ACTORS:10000}
+      rate-limiter:
+        mode: ${MODEL_PROMOTION_API_RATE_LIMITER_MODE:redis}
   fraud-cases:
     work-queue:
       sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}

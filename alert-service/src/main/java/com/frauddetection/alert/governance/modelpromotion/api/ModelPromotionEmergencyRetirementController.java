@@ -1,6 +1,8 @@
 package com.frauddetection.alert.governance.modelpromotion.api;
 
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionEmergencyRetirementService;
 import jakarta.validation.Valid;
@@ -60,7 +62,8 @@ public class ModelPromotionEmergencyRetirementController {
     }
 
     @GetMapping("/emergency-authorizations/active")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_PROMOTION_EMERGENCY_ACTIVE,
+            resourceType = ReadAccessResourceType.MODEL_PROMOTION_EMERGENCY_AUTHORIZATION)
     public ModelPromotionEmergencyRetirementService.AffectedGrants affected(
             Authentication authentication, @RequestParam(required = false) String actorId,
             @RequestParam(required = false) String incidentId) {
@@ -78,7 +81,9 @@ public class ModelPromotionEmergencyRetirementController {
     }
 
     @GetMapping("/emergency-authorizations/{authorizationId}")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_PROMOTION_EMERGENCY_DETAIL,
+            resourceType = ReadAccessResourceType.MODEL_PROMOTION_EMERGENCY_AUTHORIZATION,
+            resourceIdVariable = "authorizationId")
     public ModelPromotionEmergencyRetirementService.AuthorizationReviewView inspect(
             Authentication authentication, @PathVariable @NotBlank @Pattern(regexp = ID) String authorizationId) {
         requireRateLimit(authentication);
@@ -102,7 +107,9 @@ public class ModelPromotionEmergencyRetirementController {
     }
 
     @GetMapping("/emergency-authorizations/{authorizationId}/audit")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_PROMOTION_EMERGENCY_AUDIT,
+            resourceType = ReadAccessResourceType.MODEL_PROMOTION_EMERGENCY_AUTHORIZATION,
+            resourceIdVariable = "authorizationId")
     public ModelPromotionEmergencyRetirementService.AuditView audit(
             Authentication authentication, @PathVariable @NotBlank @Pattern(regexp = ID) String authorizationId) {
         requireRateLimit(authentication);
@@ -110,9 +117,6 @@ public class ModelPromotionEmergencyRetirementController {
     }
 
     private void requireRateLimit(Authentication authentication) {
-        if (authentication == null || !rateLimiter.allow(authentication.getName())) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "Model promotion API rate limit exceeded.");
-        }
+        rateLimiter.enforce(PolicyGovernanceActor.fromOidcSession(authentication).id());
     }
 }

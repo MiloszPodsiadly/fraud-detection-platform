@@ -1,12 +1,21 @@
 package com.frauddetection.alert.governance.modelpromotion.api;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 
 class ModelPromotionApiRateLimiterTest {
 
@@ -34,6 +43,24 @@ class ModelPromotionApiRateLimiterTest {
         clock.advance(java.time.Duration.ofMinutes(1).plusSeconds(1));
 
         assertThat(rateLimiter.allow("analyst-2")).isTrue();
+    }
+
+    @Test
+    void redisFailureIsDistinctFromQuotaAndIsObservableWithoutActorLabels() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        doThrow(new RedisConnectionFailureException("redis unavailable"))
+                .when(redis).execute(any(RedisScript.class), anyList(), any(Object[].class));
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
+        ModelPromotionApiRateLimiter rateLimiter = new ModelPromotionApiRateLimiter(redis, Clock.systemUTC(),
+                java.time.Duration.ofMinutes(1), 30, 100, metrics);
+
+        assertThat(rateLimiter.check("issuer-a#sensitive-subject")).isEqualTo(ModelPromotionApiRateLimiter.Decision.UNAVAILABLE);
+        assertThat(registry.get("model_promotion_api_rate_limit_total")
+                .tag("outcome", "UNAVAILABLE").counter().count()).isEqualTo(1.0d);
+        assertThat(registry.get("model_promotion_api_rate_limit_total").tag("outcome", "UNAVAILABLE")
+                .counter().getId().getTags()).extracting(io.micrometer.core.instrument.Tag::getKey)
+                .containsExactly("outcome");
     }
 
     private static final class MutableClock extends Clock {
