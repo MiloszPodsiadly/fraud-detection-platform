@@ -145,6 +145,53 @@ class ReadAccessAuditEndpointTest {
     }
 
     @Test
+    void alertListAndAssistantSummaryPersistOneMinimizedAuditEach() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts").queryParam("page", "2").queryParam("size", "5")
+                        .header("X-Correlation-Id", "corr-alert-list"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/alerts/alert-secret/assistant-summary")
+                        .header("X-Correlation-Id", "corr-alert-summary"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ReadAccessAuditEventDocument> captor =
+                ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
+        verify(repository, org.mockito.Mockito.times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).extracting(ReadAccessAuditEventDocument::endpointCategory)
+                .containsExactly(ReadAccessEndpointCategory.ALERT_LIST,
+                        ReadAccessEndpointCategory.ALERT_ASSISTANT_SUMMARY);
+        assertThat(captor.getAllValues()).extracting(ReadAccessAuditEventDocument::resourceType)
+                .containsOnly(ReadAccessResourceType.ALERT);
+        assertThat(captor.getAllValues()).extracting(ReadAccessAuditEventDocument::resourceId)
+                .containsExactly(null, "alert-secret");
+        assertThat(captor.getAllValues()).extracting(ReadAccessAuditEventDocument::resultCount)
+                .containsExactly(2, 1);
+        assertThat(captor.getAllValues()).extracting(ReadAccessAuditEventDocument::correlationId)
+                .containsExactly("corr-alert-list", "corr-alert-summary");
+        assertThat(captor.getAllValues().toString())
+                .doesNotContain("customer-secret", "account-secret", "supporting-evidence-secret");
+    }
+
+    @Test
+    void strictAuditFailureSuppressesAlertListAndAssistantSummaryBodies() throws Exception {
+        when(sensitiveReadAuditPolicy.failClosed()).thenReturn(true);
+        doThrow(new DataAccessResourceFailureException("private mongo endpoint detail"))
+                .when(repository).save(any());
+
+        var list = mockMvc.perform(get("/api/v1/alerts"))
+                .andExpect(status().isServiceUnavailable()).andReturn();
+        var summary = mockMvc.perform(get("/api/v1/alerts/alert-secret/assistant-summary"))
+                .andExpect(status().isServiceUnavailable()).andReturn();
+
+        assertThat(list.getResponse().getContentAsString())
+                .contains("Sensitive read audit unavailable.")
+                .doesNotContain("customer-secret", "txn-secret", "private mongo endpoint detail");
+        assertThat(summary.getResponse().getContentAsString())
+                .contains("Sensitive read audit unavailable.")
+                .doesNotContain("alert-secret", "supporting-evidence-secret", "private mongo endpoint detail");
+        verify(repository, org.mockito.Mockito.times(2)).save(any());
+    }
+
+    @Test
     void executableHandlerPolicyPersistsExactlyOneGovernanceReadEvent() throws Exception {
         mockMvc.perform(get("/api/v1/governance/policy-trust/requests/request-17/candidate")
                         .header("X-Correlation-Id", "corr-policy-candidate"))
@@ -327,6 +374,24 @@ class ReadAccessAuditEndpointTest {
 
     @RestController
     public static class SensitiveReadController {
+
+        @GetMapping("/api/v1/alerts")
+        @AuditedSensitiveRead(category = ReadAccessEndpointCategory.ALERT_LIST,
+                resourceType = ReadAccessResourceType.ALERT)
+        PagedResponse<Map<String, Object>> alertList() {
+            return new PagedResponse<>(List.of(
+                    Map.of("customerId", "customer-secret", "transactionId", "txn-secret"),
+                    Map.of("customerId", "customer-secret-2", "transactionId", "txn-secret-2")),
+                    30, 15, 2, 2);
+        }
+
+        @GetMapping("/api/v1/alerts/{alertId}/assistant-summary")
+        @AuditedSensitiveRead(category = ReadAccessEndpointCategory.ALERT_ASSISTANT_SUMMARY,
+                resourceType = ReadAccessResourceType.ALERT, resourceIdVariable = "alertId")
+        Map<String, Object> assistantSummary(@PathVariable String alertId) {
+            return Map.of("alertId", alertId, "customerId", "customer-secret",
+                    "evidence", "supporting-evidence-secret");
+        }
 
         @GetMapping("/api/v1/alerts/{alertId}")
         Map<String, Object> alert(@PathVariable String alertId) {

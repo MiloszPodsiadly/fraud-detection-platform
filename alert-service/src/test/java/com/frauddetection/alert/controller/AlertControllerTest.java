@@ -11,9 +11,23 @@ import com.frauddetection.alert.assistant.FraudReasonSummary;
 import com.frauddetection.alert.assistant.RecommendedNextAction;
 import com.frauddetection.alert.assistant.TransactionSummary;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
+import com.frauddetection.alert.audit.read.ReadAccessAuditEventDocument;
+import com.frauddetection.alert.audit.read.ReadAccessAuditFailureInterceptor;
+import com.frauddetection.alert.audit.read.ReadAccessAuditRepository;
+import com.frauddetection.alert.audit.read.ReadAccessAuditResponseAdvice;
+import com.frauddetection.alert.audit.read.ReadAccessAuditService;
+import com.frauddetection.alert.audit.read.ReadAccessAuditWebConfig;
+import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResultCountExtractor;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditPolicy;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.security.principal.AnalystPrincipal;
+import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.AlertManagementUseCase;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
@@ -24,6 +38,7 @@ import com.frauddetection.common.events.model.LocationInfo;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -44,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -59,7 +75,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         }
 )
 @AutoConfigureMockMvc(addFilters = false)
-@Import({AlertResponseMapper.class, AlertServiceExceptionHandler.class})
+@Import({AlertResponseMapper.class, AlertServiceExceptionHandler.class, ReadAccessAuditClassifier.class,
+        ReadAccessResultCountExtractor.class, ReadAccessAuditService.class, ReadAccessAuditResponseAdvice.class,
+        ReadAccessAuditFailureInterceptor.class, ReadAccessAuditWebConfig.class})
 @Tag("production-readiness")
 @Tag("integration")
 class AlertControllerTest {
@@ -76,14 +94,47 @@ class AlertControllerTest {
     @MockitoBean
     private AnalystCaseSummaryUseCase analystCaseSummaryUseCase;
 
+    @MockitoBean
+    private ReadAccessAuditRepository readAccessAuditRepository;
+
+    @MockitoBean
+    private CurrentAnalystUser currentAnalystUser;
+
+    @MockitoBean
+    private AlertServiceMetrics alertServiceMetrics;
+
+    @MockitoBean
+    private SensitiveReadAuditPolicy sensitiveReadAuditPolicy;
+
+    @BeforeEach
+    void configureReadAudit() {
+        when(sensitiveReadAuditPolicy.failClosed()).thenReturn(false);
+        when(currentAnalystUser.get()).thenReturn(java.util.Optional.of(new AnalystPrincipal(
+                "analyst-1", java.util.Set.of(AnalystRole.ANALYST), AnalystRole.ANALYST.authorities(),
+                "https://issuer.example#analyst-1")));
+    }
+
     @Test
     void shouldListAlerts() throws Exception {
         when(alertManagementUseCase.listAlerts(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(sampleAlert())));
 
-        mockMvc.perform(get("/api/v1/alerts"))
+        mockMvc.perform(get("/api/v1/alerts").queryParam("page", "1").queryParam("size", "5")
+                        .header("X-Correlation-Id", "corr-alert-list"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].alertId").value("alert-1"))
                 .andExpect(jsonPath("$.totalElements").value(1));
+
+        org.mockito.ArgumentCaptor<ReadAccessAuditEventDocument> event =
+                org.mockito.ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
+        org.mockito.Mockito.verify(readAccessAuditRepository).save(event.capture());
+        org.assertj.core.api.Assertions.assertThat(event.getValue().endpointCategory())
+                .isEqualTo(ReadAccessEndpointCategory.ALERT_LIST);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().actorId()).isNotEqualTo("unknown");
+        org.assertj.core.api.Assertions.assertThat(event.getValue().resultCount()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().page()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().size()).isEqualTo(5);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().correlationId()).isEqualTo("corr-alert-list");
+        org.assertj.core.api.Assertions.assertThat(event.getValue().toString()).doesNotContain("cust-1", "txn-1");
     }
 
     @Test
@@ -96,6 +147,43 @@ class AlertControllerTest {
                 .andExpect(jsonPath("$.alertId").value("alert-1"))
                 .andExpect(jsonPath("$.mainFraudReasons[0].reasonCode").value("DEVICE_NOVELTY"))
                 .andExpect(jsonPath("$.recommendedNextAction.actionCode").value("STEP_UP_REVIEW"));
+
+        org.mockito.ArgumentCaptor<ReadAccessAuditEventDocument> event =
+                org.mockito.ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
+        org.mockito.Mockito.verify(readAccessAuditRepository).save(event.capture());
+        org.assertj.core.api.Assertions.assertThat(event.getValue().endpointCategory())
+                .isEqualTo(ReadAccessEndpointCategory.ALERT_ASSISTANT_SUMMARY);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().resourceId()).isEqualTo("alert-1");
+        org.assertj.core.api.Assertions.assertThat(event.getValue().resultCount()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(event.getValue().toString())
+                .doesNotContain("cust-1", "txn-1", "Device differs from known behavior.");
+    }
+
+    @Test
+    void strictAuditFailureSuppressesRealAlertEndpointBodies() throws Exception {
+        when(alertManagementUseCase.listAlerts(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(sampleAlert())));
+        when(analystCaseSummaryUseCase.generateSummary(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(sampleAssistantSummary());
+        when(sensitiveReadAuditPolicy.failClosed()).thenReturn(true);
+        doThrow(new org.springframework.dao.DataAccessResourceFailureException("private mongo endpoint detail"))
+                .when(readAccessAuditRepository).save(any());
+
+        var list = mockMvc.perform(get("/api/v1/alerts")).andReturn();
+        org.assertj.core.api.Assertions.assertThat(list.getResponse().getStatus())
+                .as(list.getResponse().getContentAsString()).isEqualTo(503);
+        var summary = mockMvc.perform(get("/api/v1/alerts/alert-1/assistant-summary")).andReturn();
+        org.assertj.core.api.Assertions.assertThat(summary.getResponse().getStatus())
+                .as(summary.getResponse().getContentAsString()).isEqualTo(503);
+
+        org.assertj.core.api.Assertions.assertThat(list.getResponse().getContentAsString())
+                .contains("Sensitive read audit unavailable.")
+                .doesNotContain("cust-1", "txn-1", "private mongo endpoint detail");
+        org.assertj.core.api.Assertions.assertThat(summary.getResponse().getContentAsString())
+                .contains("Sensitive read audit unavailable.")
+                .doesNotContain("cust-1", "txn-1", "Device differs from known behavior.",
+                        "private mongo endpoint detail");
+        org.mockito.Mockito.verify(readAccessAuditRepository, org.mockito.Mockito.times(2)).save(any());
     }
 
     @Test

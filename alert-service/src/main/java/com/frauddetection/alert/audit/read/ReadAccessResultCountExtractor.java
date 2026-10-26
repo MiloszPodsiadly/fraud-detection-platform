@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.read;
 
 import com.frauddetection.alert.api.PagedResponse;
+import com.frauddetection.alert.assistant.AnalystCaseSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceTimelineResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
@@ -31,6 +32,9 @@ public class ReadAccessResultCountExtractor {
         }
         if (body instanceof PagedResponse<?> pagedResponse) {
             return size(pagedResponse.content());
+        }
+        if (body instanceof AnalystCaseSummaryResponse) {
+            return 1;
         }
         if (body instanceof FraudCaseWorkQueueSliceResponse sliceResponse) {
             return size(sliceResponse.content());
@@ -70,6 +74,7 @@ public class ReadAccessResultCountExtractor {
         }
         return switch (category) {
             case ALERT_DETAIL,
+                    ALERT_ASSISTANT_SUMMARY,
                     FRAUD_CASE_DETAIL,
                     FRAUD_CASE_EVIDENCE_SUMMARY,
                     SCORED_TRANSACTION_DETAIL,
@@ -92,7 +97,8 @@ public class ReadAccessResultCountExtractor {
                     POLICY_CREDENTIAL_GRANT_STATUS,
                     POLICY_CREDENTIAL_GRANT_EVIDENCE,
                     MODEL_POLICY_PUBLICATION_STATUS -> 1;
-            case SCORED_TRANSACTION_SEARCH,
+            case ALERT_LIST,
+                    SCORED_TRANSACTION_SEARCH,
                     ENGINE_INTELLIGENCE_READ,
                     ENGINE_INTELLIGENCE_FEEDBACK_READ,
                     SUSPICIOUS_TRANSACTION_SEARCH,

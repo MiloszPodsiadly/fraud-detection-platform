@@ -8,6 +8,9 @@ import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryRequest;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryResponse;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.service.AlertManagementUseCase;
 import jakarta.validation.Valid;
@@ -49,6 +52,8 @@ public class AlertController {
     }
 
     @GetMapping
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.ALERT_LIST,
+            resourceType = ReadAccessResourceType.ALERT)
     public PagedResponse<AlertSummaryResponse> listAlerts(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
@@ -70,6 +75,8 @@ public class AlertController {
     }
 
     @GetMapping("/{alertId}/assistant-summary")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.ALERT_ASSISTANT_SUMMARY,
+            resourceType = ReadAccessResourceType.ALERT, resourceIdVariable = "alertId")
     public AnalystCaseSummaryResponse getAssistantSummary(@PathVariable String alertId) {
         return analystCaseSummaryUseCase.generateSummary(new AnalystCaseSummaryRequest(alertId, null, List.of(), java.util.Map.of()));
     }

@@ -419,7 +419,9 @@ class RouteCoverageAgainstMvcMappingsTest {
                 .filter(entry -> entry.getValue().getBeanType().getName().startsWith("com.frauddetection.alert"))
                 .flatMap(entry -> routeDescriptors(entry)
                         .filter(route -> route.method().equals("GET"))
-                        .filter(route -> route.pattern().startsWith("/api/v1/governance/")
+                        .filter(route -> route.pattern().startsWith("/api/v1/alerts")
+                                || route.pattern().startsWith("/api/v1/governance/")
+                                || route.pattern().startsWith("/api/v2/governance/")
                                 || route.pattern().startsWith("/api/v1/audit/")
                                 || route.pattern().startsWith("/governance/")
                                 || route.pattern().startsWith("/api/v1/fraud-cases/")
@@ -437,6 +439,25 @@ class RouteCoverageAgainstMvcMappingsTest {
                 .toList();
 
         assertThat(violations).as(String.join(System.lineSeparator(), violations)).isEmpty();
+    }
+
+    @Test
+    void anUnauditedSensitiveAlertGetWouldFailTheCoverageGuard() throws NoSuchMethodException {
+        Method method = UnannotatedSensitiveAlertController.class.getDeclaredMethod("customerSummary", String.class);
+        HandlerMethod handlerMethod = new HandlerMethod(new UnannotatedSensitiveAlertController(), method);
+
+        assertThat(auditedRouteViolation(handlerMethod, "/api/v1/alerts/{alertId}/customer-summary"))
+                .isEqualTo("UnannotatedSensitiveAlertController#customerSummary GET "
+                        + "/api/v1/alerts/{alertId}/customer-summary has no effective read-audit policy.");
+    }
+
+    @Test
+    void aVersionedGovernanceReadFixtureClassifiesThroughTheRuntimePolicy() throws NoSuchMethodException {
+        Method method = VersionedGovernanceController.class.getDeclaredMethod("currentSummary");
+        HandlerMethod handlerMethod = new HandlerMethod(new VersionedGovernanceController(), method);
+
+        assertThat(auditedRouteViolation(handlerMethod, "/api/v2/governance/shadow-performance/summary/current"))
+                .isNull();
     }
 
     private String auditedRouteViolation(HandlerMethod handlerMethod, String pattern) {
@@ -486,6 +507,7 @@ class RouteCoverageAgainstMvcMappingsTest {
                         "GET /api/v1/alerts",
                         "GET /api/v1/alerts/{alertId}",
                         "GET /api/v1/alerts/{alertId}/assistant-summary",
+                        "GET /api/v2/governance/shadow-performance/summary/current",
                         "POST /api/v1/alerts/{alertId}/decision",
                         "GET /api/v1/transactions/scored",
                         "GET /api/v1/transactions/scored/{transactionId}",
@@ -610,6 +632,20 @@ class RouteCoverageAgainstMvcMappingsTest {
 
         @SuppressWarnings("unused")
         void methodless() {
+        }
+    }
+
+    private static final class UnannotatedSensitiveAlertController {
+        @SuppressWarnings("unused")
+        void customerSummary(String alertId) {
+        }
+    }
+
+    private static final class VersionedGovernanceController {
+        @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SHADOW_PERFORMANCE_SUMMARY,
+                resourceType = ReadAccessResourceType.SHADOW_PERFORMANCE_SUMMARY)
+        @SuppressWarnings("unused")
+        void currentSummary() {
         }
     }
 }

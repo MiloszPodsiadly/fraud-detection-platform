@@ -269,11 +269,15 @@ Platform Local Trust Authority API:
 
 Sensitive read-access audit:
 
-- Implemented for `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /api/v1/transactions/scored/{transactionId}/feedback`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback`, `GET /governance/advisories`, `GET /governance/advisories/{event_id}`, `GET /governance/advisories/{event_id}/audit`, and `GET /governance/advisories/analytics`.
+- Implemented for `GET /api/v1/alerts`, `GET /api/v1/alerts/{alertId}`, `GET /api/v1/alerts/{alertId}/assistant-summary`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /api/v1/transactions/scored/{transactionId}/feedback`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback`, `GET /governance/advisories`, `GET /governance/advisories/{event_id}`, `GET /governance/advisories/{event_id}/audit`, and `GET /governance/advisories/analytics`.
 - Records authenticated backend principal identity, roles, `action=READ`, resource type/id where applicable, endpoint category, canonical hashed query shape, page/size, bounded result count, outcome, correlation id, source service, schema version, and indexed timestamps.
 - If actor principal is missing, records `actor_id=unknown`, emits a low-cardinality anomaly metric, and logs a bounded warning without URL/query/payload/token content.
 - Does not store raw query parameters, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, secrets, or stack traces.
 - Audit persistence failure follows the configured sensitive-read audit policy. In fail-open modes the read response is not blocked; in fail-closed modes the read endpoint returns bounded 503 without raw audit error details.
+- These records are durable local MongoDB read-audit events. They do not use the cryptographic hash chain or independent witness used for selected governance mutation commitments, and read-access events are not independently anchored.
+- Retention, backup, restore, and MongoDB administrative access are deployment controls; this API does not prove immutable retention or prevent a privileged MongoDB operator from changing or deleting read-audit documents.
+
+See the [sensitive-read audit assurance and operations note](../operations/sensitive_read_audit_assurance.md) for the threat boundary and operational assumptions.
 
 Platform audit read response:
 

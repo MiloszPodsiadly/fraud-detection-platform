@@ -135,6 +135,24 @@ class SensitiveReadAuditWireContractTest {
     }
 
     @Test
+    void successful204And304PreserveProtocolStatusAfterAuditPersistence() {
+        org.mockito.Mockito.when(repository.save(any(ReadAccessAuditEventDocument.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        var noContent = get("/wire/no-content");
+        var notModified = get("/wire/not-modified");
+
+        assertThat(noContent.statusCode()).isEqualTo(HttpStatus.NO_CONTENT.value());
+        assertThat(noContent.body()).isEmpty();
+        assertThat(notModified.statusCode()).isEqualTo(HttpStatus.NOT_MODIFIED.value());
+        assertThat(notModified.body()).isEmpty();
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.times(2))
+                .save(org.mockito.ArgumentMatchers.argThat(event ->
+                        event.endpointCategory() == ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY
+                                && event.outcome() == ReadAccessAuditOutcome.SUCCESS));
+    }
+
+    @Test
     void streamingReadIsRejectedBeforeHandlerStarts() {
         var response = get("/wire/stream");
 

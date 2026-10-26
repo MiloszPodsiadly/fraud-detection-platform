@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.read;
 
 import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
+import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceTimelineResponse;
 import com.frauddetection.alert.api.FraudCaseTimelineEventResponse;
 import com.frauddetection.alert.api.FraudCaseTimelineEventType;
@@ -18,6 +19,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ReadAccessResultCountExtractorTest {
 
     private final ReadAccessResultCountExtractor extractor = new ReadAccessResultCountExtractor();
+
+    @Test
+    void shouldCountOnlyReturnedAlertPageItems() {
+        assertThat(extractor.resultCount(
+                new PagedResponse<>(java.util.List.of("alert-1", "alert-2"), 40, 20, 0, 2),
+                ReadAccessEndpointCategory.ALERT_LIST
+        )).isEqualTo(2);
+        assertThat(extractor.resultCount(
+                new PagedResponse<>(java.util.List.of(), 40, 20, 1, 2),
+                ReadAccessEndpointCategory.ALERT_LIST
+        )).isZero();
+    }
+
+    @Test
+    void shouldCountAssistantSummaryAsOneReadWithoutInspectingItsContent() {
+        assertThat(extractor.resultCount(new Object(), ReadAccessEndpointCategory.ALERT_ASSISTANT_SUMMARY))
+                .isEqualTo(1);
+    }
 
     @Test
     void shouldCountSummaryAsOneAggregateReadResponse() {
