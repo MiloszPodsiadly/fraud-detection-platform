@@ -4,12 +4,22 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Clock;
 
 @Configuration(proxyBeanMethods = false)
 class ModelPromotionApiConfiguration {
+
+    @Bean
+    ModelPromotionRateLimitActorKeyResolver modelPromotionRateLimitActorKeyResolver(
+            @Value("${app.security.demo-auth.enabled:false}") boolean demoAuthEnabled,
+            @Value("${app.security.jwt.enabled:false}") boolean jwtAuthEnabled,
+            Environment environment
+    ) {
+        return new ModelPromotionRateLimitActorKeyResolver(demoAuthEnabled, jwtAuthEnabled, environment);
+    }
 
     @Bean
     ModelPromotionApiRateLimiter modelPromotionApiRateLimiter(

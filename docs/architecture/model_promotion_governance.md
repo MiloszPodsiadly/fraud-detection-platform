@@ -380,13 +380,21 @@ Model-promotion API rate limiting uses the shared Redis deployment by default. A
 operation enforces one per-actor budget across alert-service replicas. Redis keeps only SHA-256-derived actor keys,
 expires request windows and the bounded active-actor index automatically, and uses a fixed `UNAVAILABLE` result
 when Redis is down or the actor index reaches capacity; the controllers return `503` for that result and `429` only
-for an exhausted actor quota. The actor key is derived from the authenticated OIDC issuer and subject, never from a
-request parameter. Set `MODEL_PROMOTION_API_RATE_LIMITER_MODE=in-memory` only for an explicitly single-node local
+for an exhausted actor quota. In JWT/OIDC mode, the key is derived from the trusted issuer and subject, never from a
+request parameter. Explicit local/demo authentication uses a separate namespaced hash and grants no institutional
+identity. Set `MODEL_PROMOTION_API_RATE_LIMITER_MODE=in-memory` only for an explicitly single-node local
 development run; it is not an availability fallback. The state, assessment, lifecycle, signed-review, and emergency
 retirement HTTP endpoints all enforce this shared limiter before invoking their workflow. Production ingress may add
 a broader network-level limit as defense in depth, but must preserve authentication and must not expose service
-methods through an alternate route. The first-party verifier authorizes only signatures under a
-deployment-provisioned, current public issuer registry; with no configured registry it remains `UNAVAILABLE`.
+methods through an alternate route.
+
+The declared Compose topology is one standalone Redis instance. Redis Cluster is **UNVERIFIED and unsupported** for
+this limiter: its Lua operation accesses an actor-specific sorted-set key and a shared actor-index key without a
+common hash tag, so Cluster may reject the script with `CROSSSLOT`. Configure production with standalone or
+cluster-mode-disabled Redis until a slot-safe implementation has a real Redis Cluster integration proof. The
+limiter fails closed if the configured Redis rejects the script.
+The first-party verifier authorizes only signatures under a deployment-provisioned, current public issuer registry;
+with no configured registry it remains `UNAVAILABLE`.
 Existing audit-signature keys are not a policy-authority adapter. Provenance strings and unsigned Mongo documents
 cannot turn `UNAVAILABLE` into `VERIFIED`. The loaded issuer generation is visible as the bounded,
 label-free `model_promotion_policy_trust_registry_generation` gauge; operators must also compare the mounted file

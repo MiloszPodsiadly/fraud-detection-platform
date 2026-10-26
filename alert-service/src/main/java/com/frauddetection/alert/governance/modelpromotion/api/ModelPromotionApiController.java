@@ -5,7 +5,6 @@ import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.governance.modelpromotion.ModelGovernanceEnvironment;
 import com.frauddetection.alert.governance.modelpromotion.ModelPromotionIntendedUse;
-import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -46,10 +45,13 @@ public class ModelPromotionApiController {
 
     private final ModelPromotionApiService service;
     private final ModelPromotionApiRateLimiter rateLimiter;
+    private final ModelPromotionRateLimitActorKeyResolver actorKeyResolver;
 
-    public ModelPromotionApiController(ModelPromotionApiService service, ModelPromotionApiRateLimiter rateLimiter) {
+    public ModelPromotionApiController(ModelPromotionApiService service, ModelPromotionApiRateLimiter rateLimiter,
+            ModelPromotionRateLimitActorKeyResolver actorKeyResolver) {
         this.service = service;
         this.rateLimiter = rateLimiter;
+        this.actorKeyResolver = actorKeyResolver;
     }
 
     @GetMapping("/state")
@@ -151,6 +153,6 @@ public class ModelPromotionApiController {
     }
 
     private void enforceRateLimit(Authentication authentication) {
-        rateLimiter.enforce(PolicyGovernanceActor.from(authentication).id());
+        rateLimiter.enforce(actorKeyResolver.resolve(authentication));
     }
 }

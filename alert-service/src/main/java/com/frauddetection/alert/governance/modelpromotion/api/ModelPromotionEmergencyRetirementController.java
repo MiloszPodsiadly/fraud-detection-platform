@@ -28,12 +28,15 @@ public class ModelPromotionEmergencyRetirementController {
     private final ModelPromotionEmergencyRetirementService emergency;
     private final ModelPromotionApiService api;
     private final ModelPromotionApiRateLimiter rateLimiter;
+    private final ModelPromotionRateLimitActorKeyResolver actorKeyResolver;
 
     public ModelPromotionEmergencyRetirementController(ModelPromotionEmergencyRetirementService emergency,
-            ModelPromotionApiService api, ModelPromotionApiRateLimiter rateLimiter) {
+            ModelPromotionApiService api, ModelPromotionApiRateLimiter rateLimiter,
+            ModelPromotionRateLimitActorKeyResolver actorKeyResolver) {
         this.emergency = emergency;
         this.api = api;
         this.rateLimiter = rateLimiter;
+        this.actorKeyResolver = actorKeyResolver;
     }
 
     @PostMapping("/proposals/{proposalId}/reviews/emergency-authorizations")
@@ -117,6 +120,6 @@ public class ModelPromotionEmergencyRetirementController {
     }
 
     private void requireRateLimit(Authentication authentication) {
-        rateLimiter.enforce(PolicyGovernanceActor.fromOidcSession(authentication).id());
+        rateLimiter.enforce(actorKeyResolver.resolve(authentication));
     }
 }

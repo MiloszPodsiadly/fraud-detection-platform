@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.oidc.OidcIdToken;
 import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -70,11 +71,15 @@ class ModelPromotionApiControllerTest {
     private ModelPromotionApiRateLimiter rateLimiter;
 
     @MockitoBean
+    private ModelPromotionRateLimitActorKeyResolver actorKeyResolver;
+
+    @MockitoBean
     private ReadAccessAuditService readAccessAuditService;
 
     @BeforeEach
     void allowRequests() {
         doNothing().when(rateLimiter).enforce(any());
+        when(actorKeyResolver.resolve(any(Authentication.class))).thenReturn("oidc:" + "b".repeat(64));
     }
 
     @Test

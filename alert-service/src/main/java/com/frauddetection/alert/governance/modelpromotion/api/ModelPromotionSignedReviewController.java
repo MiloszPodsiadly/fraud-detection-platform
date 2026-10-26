@@ -26,12 +26,15 @@ public class ModelPromotionSignedReviewController {
     private final ModelPromotionSignedReviewService signedReviews;
     private final ModelPromotionApiService api;
     private final ModelPromotionApiRateLimiter rateLimiter;
+    private final ModelPromotionRateLimitActorKeyResolver actorKeyResolver;
 
     public ModelPromotionSignedReviewController(ModelPromotionSignedReviewService signedReviews,
-            ModelPromotionApiService api, ModelPromotionApiRateLimiter rateLimiter) {
+            ModelPromotionApiService api, ModelPromotionApiRateLimiter rateLimiter,
+            ModelPromotionRateLimitActorKeyResolver actorKeyResolver) {
         this.signedReviews = signedReviews;
         this.api = api;
         this.rateLimiter = rateLimiter;
+        this.actorKeyResolver = actorKeyResolver;
     }
 
     @PostMapping("/challenges")
@@ -64,6 +67,6 @@ public class ModelPromotionSignedReviewController {
     }
 
     private void requireRateLimit(Authentication authentication) {
-        rateLimiter.enforce(PolicyGovernanceActor.fromOidcSession(authentication).id());
+        rateLimiter.enforce(actorKeyResolver.resolve(authentication));
     }
 }
