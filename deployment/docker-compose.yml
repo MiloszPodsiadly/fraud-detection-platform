@@ -57,6 +57,8 @@ services:
     networks:
       - backend
 
+  # Local single-member replica set so transaction-dependent workflows can be evaluated locally.
+  # This topology is not a production availability or recovery design.
   mongodb:
     <<: *service-defaults
     image: mongo:7.0
@@ -70,6 +72,7 @@ services:
       retries: 10
       start_period: 20s
 
+  # Standalone local Redis. Redis Cluster is unsupported by the model-promotion quota Lua script.
   redis:
     <<: *service-defaults
     image: redis:8.10-alpine
@@ -308,6 +311,7 @@ services:
       SPRING_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      # Plain "docker" profile requires Redis; in-memory needs an allowlisted single-node profile and bank fail-closed=false.
       MODEL_PROMOTION_API_RATE_LIMITER_MODE: ${MODEL_PROMOTION_API_RATE_LIMITER_MODE:-redis}
       OUTBOX_PUBLISHER_ENABLED: ${OUTBOX_PUBLISHER_ENABLED:-true}
       OUTBOX_RECOVERY_ENABLED: ${OUTBOX_RECOVERY_ENABLED:-true}

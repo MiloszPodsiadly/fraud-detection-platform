@@ -358,6 +358,18 @@ continues to bind the policy and assessment snapshots accepted on the first comm
 after restart or a lost client response. Modified or unauthorized replays fail closed. History reads are bounded for resource control, but the
 bound is not a retention policy and does not delete historical decisions.
 
+New promotion records identify an institutional actor as `oidc:` plus the SHA-256 of the verified issuer and subject;
+the login/display `userId` is not an authorization or replay key. Proposal and decision documents retain the exact
+issuer/subject binding with the canonical actor ID, and review records retain the reviewer's binding alongside the
+approval, audit event and WebAuthn receipt. The authorization fingerprint uses that stable actor ID and the sorted
+current roles and authorities, so a display-name change does not alter identity while an issuer, subject or rights
+change invalidates the operation. Local demo actors use a separate `local:` namespace and cannot authorize production.
+Existing completed signed reviews without these identity fields remain verifiable from their unchanged historical
+WebAuthn contract and exact stored issuer/subject proof; the application does not rewrite old decisions or proofs.
+An old pending proposal with no issuer-bound proposer identity cannot be safely checked for cross-issuer maker/checker
+separation, so review fails closed. Resubmit it under the current schema with new proposal and operation IDs; the old
+record remains unchanged in history.
+
 Concurrent reviews of one proposal use the proposal-status CAS within that transaction. A losing review with a
 Mongo `TransientTransactionError` retries the complete transaction with bounded backoff, re-reading the durable
 proposal on each attempt. Once another review commits, the loser receives a stable domain conflict; an identical

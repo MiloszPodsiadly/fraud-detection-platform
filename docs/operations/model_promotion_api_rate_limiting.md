@@ -7,13 +7,12 @@ after a Redis failure.
 
 ## Configuration acceptance
 
-| Active profile | `MODEL_PROMOTION_API_RATE_LIMITER_MODE` | Startup/result |
+| Active profiles and bank flag | `MODEL_PROMOTION_API_RATE_LIMITER_MODE` | Startup/result |
 | --- | --- | --- |
-| no production profile, single-node local | `in-memory` | Allowed; quota state is process-local and resets on restart. |
-| `test` | `in-memory` or `redis` | Allowed for tests. |
-| `bank-local` | `in-memory` or `redis` | Allowed for single-node smoke use only. |
-| `prod`, `production`, `staging`, or `bank` | `redis` | Required; quotas are shared between replicas. |
-| any combination containing a production profile, including `test,prod` | `in-memory` | Rejected at startup. |
+| Exactly named single-node profiles from `local`, `dev`, `test`, `docker-local`, `bank-local` | `in-memory` or `redis` | In-memory allowed only when every active profile is in this list; quota state is process-local and resets on restart. |
+| No active profile, `default`, plain `docker`, or an unlisted profile | `redis` | `in-memory` is rejected; select an explicit single-node profile for local use. |
+| `prod`, `production`, `staging`, `bank`, or any set containing one of them, including `test,prod` | `redis` | Required; quotas are shared between replicas. `in-memory` is rejected at startup. |
+| Any profile with `app.audit.bank-mode.fail-closed=true` | `redis` | Required regardless of profile spelling, including `default` and `bank-local`; `in-memory` is rejected at startup. |
 | any profile | blank or unknown value | Rejected at startup. |
 
 For multi-instance deployments, point every `alert-service` instance at the same managed **standalone Redis** service
@@ -24,4 +23,6 @@ return `CROSSSLOT`. Do not route production governance traffic through that topo
 exhaustion; it fails closed as `503`.
 
 The committed [`deployment/.env.example`](../../deployment/.env.example) selects Redis for the local Compose stack.
-The application configuration defaults to Redis and does not provide an in-memory fallback.
+Its `alert-service` uses the plain `docker` profile, which does not authorize in-memory quotas. Change to an explicit
+allowlisted single-node profile before selecting in-memory, and keep `app.audit.bank-mode.fail-closed=false`. The
+application configuration defaults to Redis and does not provide an in-memory fallback.

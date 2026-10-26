@@ -68,14 +68,19 @@ Protect the publisher's `MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION` independ
 Neither floor may be reset by a routine rollout. The local Compose override deliberately fixes generation 1 and
 development/test-only keys; do not use it as a production trust deployment.
 
-The alert service loads its verifier registries **only at startup**. Restart each instance after a reviewed change,
+The alert service loads its verifier registries **only at startup**. Institutional profiles, and any profile with
+`app.audit.bank-mode.fail-closed=true`, require the public issuer, approval-key, and online-actor registries to be
+readable and valid before startup completes; disabling `MODEL_PROMOTION_PERSISTENCE_ENABLED` is also rejected in
+that mode. Local mode may start with an unset registry path, but verification then reports `UNAVAILABLE` and cannot
+authorize a promotion. Restart each instance after a reviewed change,
 then check its mounted file fingerprint and the label-free
 `model_promotion_policy_trust_registry_generation` gauge on that instance. Confirm every instance reports the
 approved generation before resuming governance decisions. A matching generation alone does not prove identical file
 bytes: compare the CLI's `issuerRegistryFileSha256` to the mounted file through a protected deployment channel.
-If the registry is absent or malformed, startup fails; keep that instance out of service and restore a reviewed
-registry at or above the protected floor. Do not lower the floor to start an older file. The application cannot
-prevent rollback if an attacker controls **both** the registry and its protected floor.
+An absent path is `UNAVAILABLE` in local mode and prevents institutional startup; an explicitly configured malformed
+registry fails validation. Keep a failed instance out of service and restore a reviewed registry at or above the
+protected floor. Do not lower the floor to start an older file. The application cannot prevent rollback if an
+attacker controls **both** the registry and its protected floor.
 
 ## Rollout membership and observation
 

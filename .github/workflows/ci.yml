@@ -38,7 +38,7 @@ jobs:
         run: bash scripts/bootstrap-local-fixtures.sh
 
       - name: Build and test backend modules
-        run: mvn -B -U verify -Dproject.root=${{ github.workspace }} -Dtest=!ArtifactBackedShadowPerformanceSummaryProviderTest#deploymentDemoArtifactSetIsReadableByRealProvider -Dsurefire.failIfNoSpecifiedTests=false
+        run: mvn -B -U verify -Dproject.root=${{ github.workspace }} -Dsurefire.failIfNoSpecifiedTests=false
 
   institutional-reliability:
     name: Institutional Reliability Proof

@@ -37,6 +37,7 @@ services:
       APP_SECURITY_JWT_ENABLED: "true"
       APP_SECURITY_JWT_ISSUER_URI: http://localhost:8086/realms/fraud-detection
       APP_SECURITY_JWT_JWK_SET_URI: http://keycloak:8080/realms/fraud-detection/protocol/openid-connect/certs
+      APP_SECURITY_JWT_EXPECTED_AUDIENCE: fraud-detection-platform-api
       APP_SECURITY_JWT_USER_ID_CLAIM: sub
       APP_SECURITY_JWT_ACCESS_CLAIM: groups
       APP_SECURITY_JWT_PRODUCTION_PROMOTION_ACCESS_VALUES: model-promotion-production

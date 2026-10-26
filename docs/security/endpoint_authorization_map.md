@@ -62,9 +62,12 @@ Do not choose an owner based on URL prefix alone. Choose owner by resource seman
 Sensitive GET auditing is a separate runtime control from authorization. `@AuditedSensitiveRead` supplies route
 category and resource metadata; `ReadAccessAuditClassifier` resolves the request target, `SensitiveReadAuditPolicy`
 selects fail-closed behavior, and MVC response advice gates successful sensitive bodies on one bounded durable audit;
-the interceptor handles rejected, failed and unsupported reads. `RouteCoverageAgainstMvcMappingsTest` checks live MVC mappings for governance, audit, fraud-case,
-scored-transaction, suspicious-transaction, trust, regulated-recovery and outbox read routes. Operational counters
-remain in metrics and do not replace the durable read-audit event.
+the interceptor handles rejected, failed and unsupported reads. `RouteCoverageAgainstMvcMappingsTest` checks live MVC
+mappings for alerts and assistant summaries, governance, audit, fraud-case, scored-transaction,
+suspicious-transaction, trust, regulated-recovery and outbox read routes. It writes the executable coverage report
+to `alert-service/target/security-sensitive-get-route-coverage.md` during the test run. Operational counters remain
+in metrics and do not replace the durable read-audit event. This Mongo audit is application-level evidence, not an
+independently anchored or tamper-proof archive; see [its assurance boundary](../operations/sensitive_read_audit_assurance.md).
 
 ## Auth observability boundaries
 

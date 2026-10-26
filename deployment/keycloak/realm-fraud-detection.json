@@ -60,6 +60,17 @@
             "userinfo.token.claim": "true",
             "claim.name": "groups"
           }
+        },
+        {
+          "name": "Fraud Detection Platform API audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "fraud-detection-platform-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ],
       "defaultClientScopes": [
@@ -112,6 +123,17 @@
             "id.token.claim": "true",
             "userinfo.token.claim": "true",
             "claim.name": "groups"
+          }
+        },
+        {
+          "name": "Fraud Detection Platform API audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "fraud-detection-platform-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
           }
         }
       ],

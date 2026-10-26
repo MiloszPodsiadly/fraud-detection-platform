@@ -35,5 +35,11 @@ Operators should monitor `fraud_platform_read_access_audit_persistence_failures_
 backup and administrative-access controls in the target deployment. The metrics report application observations, not
 proof of immutable retention. The local development stack and its MongoDB volume are not a regulator-certified archive.
 
+Executable coverage includes [`RouteCoverageAgainstMvcMappingsTest`](../../alert-service/src/test/java/com/frauddetection/alert/security/config/RouteCoverageAgainstMvcMappingsTest.java),
+which emits the sensitive-GET coverage report under `alert-service/target`, and[`ReadAccessAuditServiceTest`](../../alert-service/src/test/java/com/frauddetection/alert/audit/read/ReadAccessAuditServiceTest.java),
+which covers bounded metadata, fail-open/closed persistence behavior, and the independence of durable audit success
+from metric failures. These tests establish the application contract; they do not establish independent retention or
+tamper detection.
+
 Independent tamper-resistant read auditing would require a separately scoped threat model, retention and access design,
 independent trust operator, and migration/verification plan. It is not part of this closure change.
