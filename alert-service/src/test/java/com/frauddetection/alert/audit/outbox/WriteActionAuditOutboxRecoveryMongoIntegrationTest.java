@@ -1,5 +1,7 @@
 package com.frauddetection.alert.audit.outbox;
 
+import com.frauddetection.alert.audit.AuditChainLockDocument;
+import com.frauddetection.alert.audit.AuditChainLockRepository;
 import com.frauddetection.alert.governance.audit.GovernanceEventCommitment;
 import com.frauddetection.alert.governance.audit.GovernanceEventVerificationService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
@@ -100,6 +102,10 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
 
         assertThat(first).isEqualTo(replay);
         assertThat(first.receiptSha256()).matches("[0-9a-f]{64}");
+        assertThat(first.localReceiptStatus()).isEqualTo("COMMITTED_IN_LOCAL_MONGO");
+        assertThat(first.receiptIntegrityStatus()).isEqualTo("VALID");
+        assertThat(first.referencedEvidenceStatus()).isEqualTo("NO_APPEND_PROVEN");
+        assertThat(first.independentWitnessStatus()).isEqualTo("NOT_INDEPENDENTLY_ANCHORED");
         assertThat(obligation.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.PENDING);
         assertThat(obligation.getAttemptCount()).isEqualTo(5);
         assertThat(obligation.getMaxAttempts()).isEqualTo(5);
@@ -119,6 +125,37 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
                 new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
                         "recover-1", "different intent", "RETRY")))
                 .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void unknownAbsenceIsRecheckedUnderFencedTakeoverBeforeRetryIsQueued() {
+        var unknown = new GovernanceEventVerificationService.Verification(KIND.name(), EVENT_ID,
+                "OUTCOME_UNKNOWN", COMMITMENT, null, null, null, "NOT_VERIFIED", "ORPHANED_LEASE");
+        when(verifier.verify(OPERATOR, KIND, EVENT_ID)).thenReturn(unknown);
+        when(verifier.verifyUnderRecoveryBarrier(org.mockito.ArgumentMatchers.eq(OPERATOR),
+                org.mockito.ArgumentMatchers.eq(KIND), org.mockito.ArgumentMatchers.eq(EVENT_ID),
+                org.mockito.ArgumentMatchers.any(AuditChainLockDocument.class))).thenReturn(noAppend());
+        mongo.save(new AuditChainLockDocument("source_service:alert-service", "crashed-writer",
+                NOW.minusSeconds(31), 7L));
+        AuditChainLockRepository locks = new AuditChainLockRepository(mongo);
+        var fencedRecovery = new WriteActionAuditOutboxRecoveryService(mongo,
+                new TransactionTemplate(new MongoTransactionManager(factory)), verifier,
+                Clock.fixed(NOW, ZoneOffset.UTC), new ObjectMapper(), locks);
+
+        var result = fencedRecovery.recover(OPERATOR, KIND.name(), EVENT_ID,
+                new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
+                        "orphan-retry", "Recover abandoned audit append", "RETRY"));
+        AuditChainLockDocument persisted = mongo.findById("source_service:alert-service",
+                AuditChainLockDocument.class);
+
+        assertThat(result.classification()).isEqualTo("RETRY_QUEUED");
+        assertThat(persisted).isNotNull();
+        assertThat(persisted.generation()).isEqualTo(8L);
+        assertThat(persisted.ownerToken()).isNull();
+        assertThat(persisted.lockedUntil()).isEqualTo(Instant.EPOCH);
+        verify(verifier).verifyUnderRecoveryBarrier(org.mockito.ArgumentMatchers.eq(OPERATOR),
+                org.mockito.ArgumentMatchers.eq(KIND), org.mockito.ArgumentMatchers.eq(EVENT_ID),
+                org.mockito.ArgumentMatchers.argThat(lease -> lease != null && lease.generation() == 8L));
     }
 
     @Test
@@ -390,7 +427,7 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
     void historyReportsMalformedReceiptFieldsAsIntegrityFailure() {
         mongo.insert(new WriteActionAuditRecoveryEvent("malformed-1", "outbox-1", KIND.name(), EVENT_ID,
                 COMMITMENT, "gov:" + COMMITMENT, "operator-a", null, "RETRY", "RETRY_QUEUED",
-                5, 1, NOW, "not-a-valid-receipt-hash"));
+                5, 1, NOW, "NOT_VERIFIED", "not-a-valid-receipt-hash"));
 
         var history = recovery.history(OPERATOR);
 
@@ -398,6 +435,10 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
                 .extracting(WriteActionAuditOutboxRecoveryService.RecoveryView::classification)
                 .isEqualTo("RECOVERY_RECEIPT_INTEGRITY_FAILURE");
         assertThat(history.getFirst().receiptSha256()).isNull();
+        assertThat(history.getFirst().localReceiptStatus()).isEqualTo("COMMITTED_IN_LOCAL_MONGO");
+        assertThat(history.getFirst().receiptIntegrityStatus()).isEqualTo("INVALID");
+        assertThat(history.getFirst().referencedEvidenceStatus()).isEqualTo("NOT_VERIFIED");
+        assertThat(history.getFirst().independentWitnessStatus()).isEqualTo("NOT_INDEPENDENTLY_ANCHORED");
         assertThatThrownBy(() -> recovery.recover(OPERATOR, KIND.name(), EVENT_ID,
                 new WriteActionAuditOutboxRecoveryService.RecoveryCommand(
                         "malformed-1", "retry", "RETRY")))

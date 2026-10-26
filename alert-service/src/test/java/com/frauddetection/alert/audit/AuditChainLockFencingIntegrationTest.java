@@ -196,6 +196,19 @@ class AuditChainLockFencingIntegrationTest extends AbstractIntegrationTest {
     void uniquePositionAndRequestIndexesAreInstalledAndRejectDuplicates() {
         AuditChainIndexInitializer initializer = new AuditChainIndexInitializer(mongoTemplate);
         assertThat(initializer.hasRequiredUniqueIndexes()).isTrue();
+        assertThat(initializer.preflight().indexes())
+                .allMatch(check -> check.state() == AuditChainIndexInitializer.IndexState.PRESENT);
+        initializer.ensureIndexes();
+
+        List<Document> requestIndexes = mongoTemplate.getCollection("audit_events")
+                .listIndexes(Document.class).into(new ArrayList<>()).stream()
+                .filter(index -> index.get("key", Document.class).equals(new Document("request_id", 1)))
+                .toList();
+        assertThat(requestIndexes).singleElement().satisfies(index -> {
+            assertThat(index.getBoolean("unique")).isTrue();
+            assertThat(index.get("partialFilterExpression"))
+                    .isEqualTo(new Document("request_id", new Document("$type", "string")));
+        });
 
         mongoTemplate.getCollection("audit_events").insertOne(new Document("_id", "event-1")
                 .append("partition_key", AuditEventDocument.PARTITION_KEY)
@@ -223,7 +236,7 @@ class AuditChainLockFencingIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void refusesUniquePositionIndexWithRestrictivePartialFilter() {
-        mongoTemplate.getCollection("audit_events").dropIndex("audit_partition_chain_position_uidx_v2");
+        mongoTemplate.getCollection("audit_events").dropIndex("audit_partition_chain_position_uidx");
         mongoTemplate.getCollection("audit_events").createIndex(
                 new Document("partition_key", 1).append("chain_position", 1),
                 new com.mongodb.client.model.IndexOptions().unique(true)
@@ -234,12 +247,29 @@ class AuditChainLockFencingIntegrationTest extends AbstractIntegrationTest {
         assertThat(initializer.hasRequiredUniqueIndexes()).isFalse();
         assertThatThrownBy(initializer::ensureIndexes)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("incompatible uniqueness options");
+                .hasMessageContaining("INCOMPATIBLE");
+    }
+
+    @Test
+    void refusesUniquePositionIndexWithReversedKeyOrder() {
+        mongoTemplate.getCollection("audit_events").dropIndex("audit_partition_chain_position_uidx");
+        mongoTemplate.getCollection("audit_events").createIndex(
+                new Document("chain_position", 1).append("partition_key", 1),
+                new com.mongodb.client.model.IndexOptions().unique(true)
+                        .name("audit_position_reversed_test")
+                        .partialFilterExpression(new Document("partition_key", new Document("$exists", true))
+                                .append("chain_position", new Document("$exists", true))));
+
+        var position = new AuditChainIndexInitializer(mongoTemplate).preflight().indexes().stream()
+                .filter(check -> check.collection().equals("audit_events")
+                        && check.purpose().equals("chain-position"))
+                .findFirst().orElseThrow();
+        assertThat(position.state()).isEqualTo(AuditChainIndexInitializer.IndexState.INCOMPATIBLE);
     }
 
     @Test
     void refusesUniqueRequestIdIndexWithRestrictivePartialFilter() {
-        mongoTemplate.getCollection("audit_events").dropIndex("audit_request_id_uidx_v2");
+        mongoTemplate.getCollection("audit_events").dropIndex("audit_request_id_uidx");
         mongoTemplate.getCollection("audit_events").createIndex(
                 new Document("request_id", 1),
                 new com.mongodb.client.model.IndexOptions().unique(true)
@@ -250,12 +280,110 @@ class AuditChainLockFencingIntegrationTest extends AbstractIntegrationTest {
         assertThat(initializer.hasRequiredUniqueIndexes()).isFalse();
         assertThatThrownBy(initializer::ensureIndexes)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("incompatible uniqueness options");
+                .hasMessageContaining("INCOMPATIBLE");
+    }
+
+    @Test
+    void refusesRequestIdIndexWithNonDefaultCollation() {
+        mongoTemplate.getCollection("audit_events").dropIndex("audit_request_id_uidx");
+        mongoTemplate.getCollection("audit_events").createIndex(
+                new Document("request_id", 1),
+                new com.mongodb.client.model.IndexOptions().unique(true)
+                        .name("audit_request_collation_test")
+                        .partialFilterExpression(new Document("request_id", new Document("$type", "string")))
+                        .collation(com.mongodb.client.model.Collation.builder()
+                                .locale("en")
+                                .collationStrength(com.mongodb.client.model.CollationStrength.PRIMARY)
+                                .build()));
+
+        AuditChainIndexInitializer initializer = new AuditChainIndexInitializer(mongoTemplate);
+        assertThat(initializer.hasRequiredUniqueIndexes()).isFalse();
+        assertThatThrownBy(initializer::ensureIndexes)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("INCOMPATIBLE");
+    }
+
+    @Test
+    void legacySparseRequestIdIndexIsReportedWithoutAutomaticMigration() {
+        mongoTemplate.getCollection("audit_events").dropIndex("audit_request_id_uidx");
+        mongoTemplate.getCollection("audit_events").createIndex(
+                new Document("request_id", 1),
+                new com.mongodb.client.model.IndexOptions().unique(true).sparse(true)
+                        .name("audit_request_id_idx"));
+        long eventCountBefore = mongoTemplate.getCollection("audit_events").countDocuments();
+
+        AuditChainIndexInitializer initializer = new AuditChainIndexInitializer(mongoTemplate);
+        var requestId = initializer.preflight().indexes().stream()
+                .filter(check -> check.purpose().equals("request-id")).findFirst().orElseThrow();
+        assertThat(requestId.state()).isEqualTo(AuditChainIndexInitializer.IndexState.LEGACY_SPARSE);
+        assertThat(requestId.diagnostic()).contains("operator-approved maintenance migration");
+        assertThatThrownBy(initializer::ensureIndexes)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("LEGACY_SPARSE");
+
+        assertThat(mongoTemplate.getCollection("audit_events").countDocuments()).isEqualTo(eventCountBefore);
+        assertThat(mongoTemplate.getCollection("audit_events").listIndexes(Document.class)
+                .into(new ArrayList<>()).stream().map(index -> index.getString("name")))
+                .contains("audit_request_id_idx")
+                .doesNotContain("audit_request_id_uidx");
+    }
+
+    @Test
+    void duplicateRequestIdsAreReportedWithoutCreatingAnIndexOrChangingDocuments() {
+        mongoTemplate.getCollection("audit_events").dropIndex("audit_request_id_uidx");
+        mongoTemplate.getCollection("audit_events").insertOne(new Document("_id", "duplicate-1")
+                .append("request_id", "duplicate-request"));
+        mongoTemplate.getCollection("audit_events").insertOne(new Document("_id", "duplicate-2")
+                .append("request_id", "duplicate-request"));
+        long eventCountBefore = mongoTemplate.getCollection("audit_events").countDocuments();
+
+        AuditChainIndexInitializer initializer = new AuditChainIndexInitializer(mongoTemplate);
+        var requestId = initializer.preflight().indexes().stream()
+                .filter(check -> check.purpose().equals("request-id")).findFirst().orElseThrow();
+        assertThat(requestId.state()).isEqualTo(AuditChainIndexInitializer.IndexState.DUPLICATE_DATA);
+        assertThat(requestId.duplicatesDetected()).isTrue();
+        assertThatThrownBy(initializer::ensureIndexes)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("DUPLICATE_DATA");
+
+        assertThat(mongoTemplate.getCollection("audit_events").countDocuments()).isEqualTo(eventCountBefore);
+        assertThat(mongoTemplate.getCollection("audit_events").listIndexes(Document.class)
+                .into(new ArrayList<>()).stream().map(index -> index.getString("name")))
+                .doesNotContain("audit_request_id_uidx");
+    }
+
+    @Test
+    void concurrentInitializersConvergeOnOneCanonicalIndexSet() throws Exception {
+        // This disposable Testcontainers database starts without application indexes.
+        mongoTemplate.getCollection("audit_events").dropIndexes();
+        mongoTemplate.getCollection("audit_chain_anchors").dropIndexes();
+        AuditChainIndexInitializer initializer = new AuditChainIndexInitializer(mongoTemplate);
+        assertThat(initializer.preflight().indexes())
+                .allMatch(check -> check.state() == AuditChainIndexInitializer.IndexState.MISSING);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<?> first = executor.submit(() -> {
+                await(start);
+                initializer.ensureIndexes();
+            });
+            Future<?> second = executor.submit(() -> {
+                await(start);
+                initializer.ensureIndexes();
+            });
+            start.countDown();
+            first.get(20, TimeUnit.SECONDS);
+            second.get(20, TimeUnit.SECONDS);
+        }
+        assertThat(initializer.hasRequiredUniqueIndexes()).isTrue();
+        assertThat(mongoTemplate.getCollection("audit_events").listIndexes(Document.class)
+                .into(new ArrayList<>()).stream()
+                .filter(index -> index.get("key", Document.class).equals(new Document("request_id", 1))))
+                .hasSize(1);
     }
 
     @Test
     void refusesToInstallPositionIndexOverConflictingDurableRows() {
-        mongoTemplate.getCollection("audit_events").dropIndex("audit_partition_chain_position_uidx_v2");
+        mongoTemplate.getCollection("audit_events").dropIndex("audit_partition_chain_position_uidx");
         mongoTemplate.getCollection("audit_events").insertOne(new Document("_id", "conflict-1")
                 .append("partition_key", AuditEventDocument.PARTITION_KEY)
                 .append("chain_position", 7L)
@@ -267,7 +395,7 @@ class AuditChainLockFencingIntegrationTest extends AbstractIntegrationTest {
 
         assertThatThrownBy(() -> new AuditChainIndexInitializer(mongoTemplate).ensureIndexes())
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Duplicate audit chain positions");
+                .hasMessageContaining("DUPLICATE_DATA");
         assertThat(new AuditChainIndexInitializer(mongoTemplate).hasRequiredUniqueIndexes()).isFalse();
     }
 

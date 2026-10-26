@@ -24,4 +24,5 @@ public record WriteActionAuditRecoveryEvent(
         int recoveryOrdinal,
         @Indexed(name = "write_action_audit_recovery_occurred_at_idx", direction = IndexDirection.DESCENDING)
         Instant occurredAt,
+        String referencedEvidenceStatus,
         String receiptSha256) { }

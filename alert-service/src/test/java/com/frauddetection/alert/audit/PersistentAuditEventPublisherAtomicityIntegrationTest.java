@@ -15,9 +15,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
-import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.domain.Sort;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -58,11 +56,6 @@ class PersistentAuditEventPublisherAtomicityIntegrationTest extends AbstractInte
         databaseFactory = new SimpleMongoClientDatabaseFactory(FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName));
         mongoTemplate = new MongoTemplate(databaseFactory);
         new AuditChainIndexInitializer(mongoTemplate).ensureIndexes();
-        mongoTemplate.indexOps(AuditEventDocument.class).ensureIndex(new Index()
-                .on("request_id", Sort.Direction.ASC)
-                .unique()
-                .sparse()
-                .named("audit_request_id_uidx_atomic_test"));
         eventRepository = new AuditEventRepository(mongoTemplate);
         anchorRepository = new AuditAnchorRepository(mongoTemplate);
         lockRepository = new AuditChainLockRepository(mongoTemplate);

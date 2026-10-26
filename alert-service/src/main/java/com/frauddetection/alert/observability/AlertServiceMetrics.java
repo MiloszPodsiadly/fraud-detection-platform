@@ -582,8 +582,17 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 .record(duration == null || duration.isNegative() ? Duration.ZERO : duration);
     }
 
+    /** Counts failed physical release attempts; lease callbacks guard for at most one attempt per lease. */
     public void recordRegulatedMutationLocalAuditChainLockReleaseFailure() {
         counter("regulated_mutation_local_audit_chain_lock_release_failure_total").increment();
+    }
+
+    public void recordModelPromotionApiRateLimit(String outcome) {
+        String normalized = switch (outcome == null ? "" : outcome) {
+            case "ALLOWED", "RATE_LIMITED", "UNAVAILABLE" -> outcome;
+            default -> "UNAVAILABLE";
+        };
+        counter("model_promotion_api_rate_limit_total", "outcome", normalized).increment();
     }
 
     public void recordExternalCoverageRequestCost(String status, int cost) {

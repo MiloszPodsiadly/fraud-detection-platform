@@ -11,6 +11,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditActor;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.audit.AuditChainLockRepository;
+import com.frauddetection.alert.audit.AuditChainIndexInitializer;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditEvent;
 import com.frauddetection.alert.audit.AuditEventDocument;
@@ -167,26 +168,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     }
 
     private void ensureAuditIndexes() {
-        mongoTemplate.indexOps(AuditEventDocument.class)
-                .ensureIndex(new Index()
-                        .on("partition_key", Sort.Direction.ASC)
-                        .on("chain_position", Sort.Direction.ASC)
-                        .unique()
-                        .sparse()
-                        .named("audit_partition_chain_position_uidx_test"));
-        mongoTemplate.indexOps(AuditEventDocument.class)
-                .ensureIndex(new Index()
-                        .on("request_id", Sort.Direction.ASC)
-                        .unique()
-                        .sparse()
-                        .named("audit_request_id_uidx_test"));
-        mongoTemplate.indexOps(com.frauddetection.alert.audit.AuditAnchorDocument.class)
-                .ensureIndex(new Index()
-                        .on("partition_key", Sort.Direction.ASC)
-                        .on("chain_position", Sort.Direction.ASC)
-                        .unique()
-                        .sparse()
-                        .named("audit_anchor_partition_chain_position_uidx_test"));
+        new AuditChainIndexInitializer(mongoTemplate).initialize();
     }
 
     private void ensureSingleDecisionIndex() {

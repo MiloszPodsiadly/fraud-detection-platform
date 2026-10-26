@@ -118,19 +118,19 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             return callback.get();
         } finally {
             activeChainLease.remove();
-            AtomicBoolean released = new AtomicBoolean();
+            AtomicBoolean releaseAttempted = new AtomicBoolean();
             Runnable release = () -> {
-                if (released.get()) return;
+                if (!releaseAttempted.compareAndSet(false, true)) return;
                 try {
-                    boolean success = transactionRunner.requiresNew(() -> releaseChainLock(lease));
-                    if (success) released.set(true);
+                    transactionRunner.requiresNew(() -> {
+                        lockRepository.release(lease);
+                        return null;
+                    });
                 } catch (RuntimeException failure) {
-                    recordAppendAttempt("LOCK_RELEASE_FAILED");
-                    recordLockReleaseFailure();
+                    recordReleaseFailureSafely();
                 }
             };
-            transactionRunner.afterCommit(release);
-            transactionRunner.afterCompletion(release);
+            transactionRunner.afterCommitOrRollback(release, release);
         }
     }
 
@@ -176,21 +176,23 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             AuditEventDocument reconciled = auditEventRepository.findByRequestId(phaseKey).orElse(null);
             if (reconciled != null && matchesRequest(command, event, reconciled)) {
                 requireMatchingAnchor(reconciled);
-                transactionRunner.afterCommit(() -> recordAppend("SUCCESS", startedAt));
+                transactionRunner.afterCommit(() -> recordAppendSafely("SUCCESS", startedAt));
                 return reconciled.auditId();
             }
             throw exception;
         }
     }
 
-    private boolean releaseChainLock(AuditChainLockDocument lease) {
+    private void recordReleaseFailureSafely() {
         try {
-            lockRepository.release(lease);
-            return true;
-        } catch (DataAccessException ignored) {
             recordAppendAttempt("LOCK_RELEASE_FAILED");
+        } catch (RuntimeException ignored) {
+            // Metrics must not turn a committed append into an application failure.
+        }
+        try {
             recordLockReleaseFailure();
-            return false;
+        } catch (RuntimeException ignored) {
+            // The lease remains generation-fenced and expires if this counter backend fails.
         }
     }
 
@@ -232,7 +234,7 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             ));
             auditEventInserted = true;
             auditAnchorRepository.insert(AuditAnchorDocument.from(anchorId, document));
-            transactionRunner.afterCommit(() -> recordAppend("SUCCESS", startedAt));
+            transactionRunner.afterCommit(() -> recordAppendSafely("SUCCESS", startedAt));
             return document.auditId();
         } catch (DuplicateKeyException duplicate) {
             return auditEventRepository.findByRequestId(phaseKey)
@@ -336,6 +338,14 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         if (metrics != null) {
             metrics.recordRegulatedMutationLocalAuditChainAppend(outcome);
             metrics.recordRegulatedMutationLocalAuditChainAppendDuration(Duration.ofNanos(System.nanoTime() - startedAt));
+        }
+    }
+
+    private void recordAppendSafely(String outcome, long startedAt) {
+        try {
+            recordAppend(outcome, startedAt);
+        } catch (RuntimeException ignored) {
+            // A metrics backend failure cannot change the result of an already committed append.
         }
     }
 

@@ -28,6 +28,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.util.Objects;
 import java.util.Set;
 import java.util.List;
@@ -79,6 +80,21 @@ public class GovernanceEventVerificationService {
 
     public Verification verify(PolicyGovernanceActor actor, GovernanceEventCommitment.Kind kind,
             String eventId) {
+        return verify(actor, kind, eventId, null);
+    }
+
+    /** Rechecks absence while a recovery transaction owns and has fenced the chain lease. */
+    public Verification verifyUnderRecoveryBarrier(PolicyGovernanceActor actor,
+            GovernanceEventCommitment.Kind kind, String eventId, AuditChainLockDocument recoveryBarrier) {
+        if (recoveryBarrier == null) throw new IllegalArgumentException("A fenced recovery barrier is required");
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Recovery barrier verification must run inside its Mongo transaction");
+        }
+        return verify(actor, kind, eventId, recoveryBarrier);
+    }
+
+    private Verification verify(PolicyGovernanceActor actor, GovernanceEventCommitment.Kind kind,
+            String eventId, AuditChainLockDocument recoveryBarrier) {
         if (actor == null || !actor.authorities().contains(ModelPolicyAuthority.AUDIT_READ)
                 || !actor.authorities().contains(ModelPolicyAuthority.PRODUCTION)) {
             throw new AccessDeniedException("Production governance audit mandate required");
@@ -119,7 +135,7 @@ public class GovernanceEventVerificationService {
             if (!validHeadSnapshot(snapshot)) {
                 return failure(kind, eventId, "AUDIT_HEAD_BROKEN_OR_INCOMPLETE");
             }
-            if (!safeToProveAbsence(snapshot)) {
+            if (!safeToProveAbsence(snapshot, recoveryBarrier)) {
                 return new Verification(kind.name(), eventId, "OUTCOME_UNKNOWN", hash,
                         null, null, null, "NOT_VERIFIED", "APPEND_OR_CLAIM_MAY_STILL_BE_IN_FLIGHT");
             }
@@ -279,7 +295,7 @@ public class GovernanceEventVerificationService {
                 head, headPredecessor, headAnchors, latestAnchor, lock);
     }
 
-    private boolean safeToProveAbsence(VerificationSnapshot snapshot) {
+    private boolean safeToProveAbsence(VerificationSnapshot snapshot, AuditChainLockDocument recoveryBarrier) {
         WriteActionAuditOutboxRecord obligation = snapshot.obligation();
         if (obligation == null
                 || !(obligation.getStatus() == WriteActionAuditOutboxStatus.FAILED_PERMANENT
@@ -291,6 +307,12 @@ public class GovernanceEventVerificationService {
             return false;
         }
         AuditChainLockDocument lock = snapshot.lock();
+        if (recoveryBarrier != null) {
+            return lock != null
+                    && Objects.equals(lock.partitionKey(), recoveryBarrier.partitionKey())
+                    && Objects.equals(lock.ownerToken(), recoveryBarrier.ownerToken())
+                    && lock.generation() == recoveryBarrier.generation();
+        }
         return lock == null || (lock.ownerToken() == null || lock.ownerToken().isBlank())
                 && (lock.lockedUntil() == null || !lock.lockedUntil().isAfter(java.time.Instant.EPOCH));
     }

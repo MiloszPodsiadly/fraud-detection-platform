@@ -84,6 +84,25 @@ public class AuditMongoTransactionRunner {
         });
     }
 
+    /** Runs exactly one completion branch: after commit, or after rollback/unknown completion. */
+    public void afterCommitOrRollback(Runnable afterCommit, Runnable afterRollback) {
+        if (required == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            afterCommit.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                afterCommit.run();
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status != STATUS_COMMITTED) afterRollback.run();
+            }
+        });
+    }
+
     public boolean transactionActive() {
         return TransactionSynchronizationManager.isActualTransactionActive();
     }

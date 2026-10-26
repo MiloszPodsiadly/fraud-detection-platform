@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditActor;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.audit.AuditChainLockRepository;
+import com.frauddetection.alert.audit.AuditChainIndexInitializer;
 import com.frauddetection.alert.audit.AuditEvent;
 import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventHasher;
@@ -68,7 +69,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         );
         mongoTemplate = new MongoTemplate(mongoClientDatabaseFactory);
         mongoTemplate.indexOps(RegulatedMutationCommandDocument.class)
-                .ensureIndex(new Index().on("idempotency_key", Sort.Direction.ASC).unique());
+                .createIndex(new Index().on("idempotency_key", Sort.Direction.ASC).unique());
         AlertServiceMetrics metrics = new AlertServiceMetrics(new SimpleMeterRegistry());
         claimService = new RegulatedMutationClaimService(mongoTemplate, Duration.ofMillis(150), metrics);
         fencedWriter = new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics);
@@ -547,18 +548,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
     void completeDurableLocalFinalizationProofLoadsFromRealMongoCollections() {
         RegulatedMutationCommandDocument command = committedCommand("idem-durable-proof");
         command.setCorrelationId("corr-durable-proof");
-        mongoTemplate.indexOps(AuditEventDocument.class).ensureIndex(new Index()
-                .on("partition_key", Sort.Direction.ASC)
-                .on("chain_position", Sort.Direction.ASC)
-                .unique()
-                .sparse()
-                .named("audit_partition_chain_position_uidx_test"));
-        mongoTemplate.indexOps(AuditAnchorDocument.class).ensureIndex(new Index()
-                .on("partition_key", Sort.Direction.ASC)
-                .on("chain_position", Sort.Direction.ASC)
-                .unique()
-                .sparse()
-                .named("audit_anchor_partition_chain_position_uidx_test"));
+        new AuditChainIndexInitializer(mongoTemplate).initialize();
         AuditEventRepository auditRepository = new AuditEventRepository(mongoTemplate);
         PersistentAuditEventPublisher auditPublisher = new PersistentAuditEventPublisher(
                 auditRepository,

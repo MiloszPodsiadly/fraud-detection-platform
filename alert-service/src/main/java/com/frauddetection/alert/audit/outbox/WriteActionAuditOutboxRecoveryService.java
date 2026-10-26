@@ -1,5 +1,7 @@
 package com.frauddetection.alert.audit.outbox;
 
+import com.frauddetection.alert.audit.AuditChainLockDocument;
+import com.frauddetection.alert.audit.AuditChainLockRepository;
 import com.frauddetection.alert.governance.artifact.GovernanceCanonicalJson;
 import com.frauddetection.alert.governance.audit.GovernanceEventCommitment;
 import com.frauddetection.alert.governance.audit.GovernanceEventVerificationService;
@@ -25,6 +27,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class WriteActionAuditOutboxRecoveryService {
@@ -36,20 +39,33 @@ public class WriteActionAuditOutboxRecoveryService {
     private final GovernanceEventVerificationService verification;
     private final Clock clock;
     private final ObjectMapper mapper;
+    private final AuditChainLockRepository chainLocks;
+
+    public WriteActionAuditOutboxRecoveryService(MongoTemplate mongo, MongoTransactionManager manager,
+            GovernanceEventVerificationService verification, ObjectMapper mapper) {
+        this(mongo, new TransactionTemplate(manager), verification, Clock.systemUTC(), mapper, null);
+    }
 
     @Autowired
     public WriteActionAuditOutboxRecoveryService(MongoTemplate mongo, MongoTransactionManager manager,
-            GovernanceEventVerificationService verification, ObjectMapper mapper) {
-        this(mongo, new TransactionTemplate(manager), verification, Clock.systemUTC(), mapper);
+            GovernanceEventVerificationService verification, ObjectMapper mapper, AuditChainLockRepository chainLocks) {
+        this(mongo, new TransactionTemplate(manager), verification, Clock.systemUTC(), mapper, chainLocks);
     }
 
     WriteActionAuditOutboxRecoveryService(MongoTemplate mongo, TransactionTemplate transactions,
             GovernanceEventVerificationService verification, Clock clock, ObjectMapper mapper) {
+        this(mongo, transactions, verification, clock, mapper, null);
+    }
+
+    WriteActionAuditOutboxRecoveryService(MongoTemplate mongo, TransactionTemplate transactions,
+            GovernanceEventVerificationService verification, Clock clock, ObjectMapper mapper,
+            AuditChainLockRepository chainLocks) {
         this.mongo = mongo;
         this.transactions = transactions;
         this.verification = verification;
         this.clock = clock;
         this.mapper = mapper;
+        this.chainLocks = chainLocks;
     }
 
     public List<RecoveryView> list(PolicyGovernanceActor actor) {
@@ -69,7 +85,10 @@ public class WriteActionAuditOutboxRecoveryService {
                             event.governanceEventId(), event.commitmentSha256(), event.auditRequestId(), event.action(),
                             valid ? event.result() : "RECOVERY_RECEIPT_INTEGRITY_FAILURE",
                             event.attemptCount(), event.recoveryOrdinal(), event.actorId(), event.reason(),
-                            event.occurredAt(), valid ? event.receiptSha256() : null);
+                            event.occurredAt(), valid ? event.receiptSha256() : null,
+                            "COMMITTED_IN_LOCAL_MONGO", valid ? "VALID" : "INVALID",
+                            event.referencedEvidenceStatus() == null ? "NOT_VERIFIED" : event.referencedEvidenceStatus(),
+                            "NOT_INDEPENDENTLY_ANCHORED");
                 }).toList();
     }
 
@@ -114,12 +133,14 @@ public class WriteActionAuditOutboxRecoveryService {
         Classification classification = classify(evidence, kind, eventId, initial.getGovernanceEvidenceHash());
         String expectedAction = classification == Classification.EXACT_AUDIT_APPEND_COMMITTED ? "RECONCILE"
                 : classification == Classification.NO_APPEND_PROVEN ? "RETRY" : null;
-        if (expectedAction == null) {
+        boolean needsFencedRecheck = "RETRY".equals(command.action())
+                && classification == Classification.OUTCOME_UNKNOWN && chainLocks != null;
+        if (expectedAction == null && !needsFencedRecheck) {
             throw new ResponseStatusException(classification == Classification.INFRASTRUCTURE_UNAVAILABLE
                     ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.CONFLICT,
                     "Audit obligation is not safely recoverable: " + classification);
         }
-        if (!expectedAction.equals(command.action())) {
+        if (expectedAction != null && !expectedAction.equals(command.action())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Requested action does not match verified audit evidence: " + classification);
         }
@@ -131,9 +152,17 @@ public class WriteActionAuditOutboxRecoveryService {
                     ensureSameIntent(replay, actor, outboxId, kind, eventId, command);
                     return replay;
                 }
+                AuditChainLockDocument recoveryBarrier = null;
+                if ("RETRY".equals(command.action()) && chainLocks != null) {
+                    recoveryBarrier = chainLocks.acquire("source_service:alert-service",
+                            "audit-recovery-" + UUID.randomUUID());
+                    chainLocks.fence(recoveryBarrier);
+                }
                 final GovernanceEventVerificationService.Verification currentEvidence;
                 try {
-                    currentEvidence = verification.verify(actor, kind, eventId);
+                    currentEvidence = recoveryBarrier == null
+                            ? verification.verify(actor, kind, eventId)
+                            : verification.verifyUnderRecoveryBarrier(actor, kind, eventId, recoveryBarrier);
                 } catch (AccessDeniedException | IllegalArgumentException invalidRequest) {
                     throw invalidRequest;
                 } catch (RuntimeException unavailable) {
@@ -216,19 +245,23 @@ public class WriteActionAuditOutboxRecoveryService {
                         Map.entry("actorId", actor.id()), Map.entry("reason", command.reason()),
                         Map.entry("action", command.action()), Map.entry("result", resultStatus),
                         Map.entry("attemptCount", changed.getAttemptCount()), Map.entry("recoveryOrdinal", ordinal),
-                        Map.entry("occurredAt", now));
+                        Map.entry("occurredAt", now),
+                        Map.entry("referencedEvidenceStatus", currentClassification.name()));
                 WriteActionAuditRecoveryEvent event = new WriteActionAuditRecoveryEvent(command.operationId(), outboxId,
                         kind.name(), eventId, initial.getGovernanceEvidenceHash(),
                         "gov:" + initial.getGovernanceEvidenceHash(), actor.id(), command.reason(),
                         command.action(), resultStatus, changed.getAttemptCount(), ordinal, now,
-                        GovernanceCanonicalJson.sha256(mapper, receipt));
+                        currentClassification.name(), GovernanceCanonicalJson.sha256(mapper, receipt));
                 mongo.insert(event);
+                if (recoveryBarrier != null) chainLocks.release(recoveryBarrier);
                 return event;
             });
             if (result == null) throw new IllegalStateException("Audit recovery transaction returned no receipt");
             return new RecoveryView(result.operationId(), result.outboxId(), result.governanceEventKind(), result.governanceEventId(),
                     result.commitmentSha256(), result.auditRequestId(), result.action(), result.result(), result.attemptCount(),
-                    result.recoveryOrdinal(), result.actorId(), result.reason(), result.occurredAt(), result.receiptSha256());
+                    result.recoveryOrdinal(), result.actorId(), result.reason(), result.occurredAt(), result.receiptSha256(),
+                    "COMMITTED_IN_LOCAL_MONGO", "VALID", result.referencedEvidenceStatus(),
+                    "NOT_INDEPENDENTLY_ANCHORED");
         } catch (ResponseStatusException conflict) {
             throw conflict;
         } catch (AccessDeniedException | IllegalArgumentException invalidRequest) {
@@ -252,7 +285,8 @@ public class WriteActionAuditOutboxRecoveryService {
         String eventId = record.getGovernanceEventId();
         if (kind == null || eventId == null) return new RecoveryView(null, record.getOutboxId(), kind, eventId,
                 record.getGovernanceEvidenceHash(), null, "UNKNOWN", Classification.IMMUTABLE_CONFLICT.name(),
-                record.getAttemptCount(), record.getRecoveryCount(), null, record.getLastErrorCode(), null, null);
+                record.getAttemptCount(), record.getRecoveryCount(), null, record.getLastErrorCode(), null, null,
+                "NOT_PRESENT", "NOT_VERIFIED", "NOT_VERIFIED", "NOT_INDEPENDENTLY_ANCHORED");
         try {
             var evidence = verification.verify(actor, GovernanceEventCommitment.Kind.valueOf(kind), eventId);
             Classification status = classify(evidence, GovernanceEventCommitment.Kind.valueOf(kind), eventId,
@@ -264,11 +298,13 @@ public class WriteActionAuditOutboxRecoveryService {
                     status == Classification.EXACT_AUDIT_APPEND_COMMITTED ? "RECONCILE"
                             : status == Classification.NO_APPEND_PROVEN ? "RETRY" : "NONE",
                     status.name(), record.getAttemptCount(), record.getRecoveryCount(), null,
-                    record.getLastErrorCode(), null, null);
+                    record.getLastErrorCode(), null, null, "NOT_PRESENT", "NOT_VERIFIED", status.name(),
+                    "NOT_INDEPENDENTLY_ANCHORED");
         } catch (RuntimeException unavailable) {
             return new RecoveryView(null, record.getOutboxId(), kind, eventId, record.getGovernanceEvidenceHash(),
                     "gov:" + record.getGovernanceEvidenceHash(), "NONE", Classification.INFRASTRUCTURE_UNAVAILABLE.name(), record.getAttemptCount(),
-                    record.getRecoveryCount(), null, record.getLastErrorCode(), null, null);
+                    record.getRecoveryCount(), null, record.getLastErrorCode(), null, null,
+                    "NOT_PRESENT", "NOT_VERIFIED", "NOT_VERIFIED", "NOT_INDEPENDENTLY_ANCHORED");
         }
     }
 
@@ -295,7 +331,8 @@ public class WriteActionAuditOutboxRecoveryService {
         ensureSameIntent(event, actor, outboxId, kind, eventId, command);
         return new RecoveryView(event.operationId(), event.outboxId(), event.governanceEventKind(), event.governanceEventId(),
                 event.commitmentSha256(), event.auditRequestId(), event.action(), event.result(), event.attemptCount(), event.recoveryOrdinal(),
-                event.actorId(), event.reason(), event.occurredAt(), event.receiptSha256());
+                event.actorId(), event.reason(), event.occurredAt(), event.receiptSha256(),
+                "COMMITTED_IN_LOCAL_MONGO", "VALID", event.referencedEvidenceStatus(), "NOT_INDEPENDENTLY_ANCHORED");
     }
 
     private void ensureSameIntent(WriteActionAuditRecoveryEvent event, PolicyGovernanceActor actor, String outboxId,
@@ -333,13 +370,15 @@ public class WriteActionAuditOutboxRecoveryService {
         receipt.put("attemptCount", event.attemptCount());
         receipt.put("recoveryOrdinal", event.recoveryOrdinal());
         receipt.put("occurredAt", event.occurredAt());
+        receipt.put("referencedEvidenceStatus", event.referencedEvidenceStatus());
         return GovernanceCanonicalJson.sha256(mapper, receipt).equals(event.receiptSha256());
     }
 
     public record RecoveryView(String operationId, String outboxId, String eventKind, String eventId, String commitmentSha256,
             String auditRequestId,
             String action, String classification, int attemptCount, int recoveryCount, String actorId,
-            String diagnostic, Instant occurredAt, String receiptSha256) { }
+            String diagnostic, Instant occurredAt, String receiptSha256, String localReceiptStatus,
+            String receiptIntegrityStatus, String referencedEvidenceStatus, String independentWitnessStatus) { }
     enum Classification { EXACT_AUDIT_APPEND_COMMITTED, NO_APPEND_PROVEN, OPERATIONAL_RETRY_EXHAUSTED,
         IMMUTABLE_CONFLICT, CRYPTOGRAPHIC_INTEGRITY_FAILURE, OUTCOME_UNKNOWN, INFRASTRUCTURE_UNAVAILABLE }
 }

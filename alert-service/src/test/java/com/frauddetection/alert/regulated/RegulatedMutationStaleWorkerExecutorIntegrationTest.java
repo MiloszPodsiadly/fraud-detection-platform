@@ -76,7 +76,7 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
         alertRepository = repositoryFactory.getRepository(AlertRepository.class);
         outboxRepository = repositoryFactory.getRepository(TransactionalOutboxRecordRepository.class);
         mongoTemplate.indexOps(RegulatedMutationCommandDocument.class)
-                .ensureIndex(new Index().on("idempotency_key", Sort.Direction.ASC).unique());
+                .createIndex(new Index().on("idempotency_key", Sort.Direction.ASC).unique());
         meterRegistry = new SimpleMeterRegistry();
         metrics = new AlertServiceMetrics(meterRegistry);
         claimService = new RegulatedMutationClaimService(mongoTemplate, Duration.ofMillis(500), metrics);

@@ -197,7 +197,7 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             try {
                 AppendResult appended = appendUnderLock(event, auditId, anchorId);
                 if (appended.newlyInserted()) {
-                    transactionRunner.afterCommit(() -> metrics.recordPlatformAuditEventPersisted(event.action(), event.outcome()));
+                    transactionRunner.afterCommit(() -> recordPersistedSafely(event));
                 }
                 return appended;
             } catch (AuditChainConflictException exception) {
@@ -212,7 +212,7 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
                     AppendResult reconciled = reconcileCommittedAppend(event, auditId);
                     if (reconciled != null) {
                         if (reconciled.newlyInserted()) {
-                            transactionRunner.afterCommit(() -> metrics.recordPlatformAuditEventPersisted(event.action(), event.outcome()));
+                            transactionRunner.afterCommit(() -> recordPersistedSafely(event));
                         }
                         return reconciled;
                     }
@@ -254,23 +254,33 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
         } finally {
             if (lease != null) {
                 AuditChainLockDocument acquiredLease = lease;
-                AtomicBoolean released = new AtomicBoolean();
+                AtomicBoolean releaseAttempted = new AtomicBoolean();
                 Runnable release = () -> {
-                    if (released.get()) return;
+                    if (!releaseAttempted.compareAndSet(false, true)) return;
                     try {
                         transactionRunner.requiresNew(() -> {
                             lockRepository.release(acquiredLease);
                             return null;
                         });
-                        released.set(true);
                     } catch (RuntimeException exception) {
-                        metrics.recordPlatformAuditChainConflict();
+                        try {
+                            metrics.recordPlatformAuditChainConflict();
+                        } catch (RuntimeException ignored) {
+                            // Release accounting must not alter the committed audit result.
+                        }
                     }
                 };
                 // Unlock after commit before later after-commit callbacks may need a second append.
-                transactionRunner.afterCommit(release);
-                transactionRunner.afterCompletion(release);
+                transactionRunner.afterCommitOrRollback(release, release);
             }
+        }
+    }
+
+    private void recordPersistedSafely(AuditEvent event) {
+        try {
+            metrics.recordPlatformAuditEventPersisted(event.action(), event.outcome());
+        } catch (RuntimeException ignored) {
+            // Audit persistence is authoritative; metrics are best-effort after commit.
         }
     }
 

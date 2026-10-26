@@ -158,6 +158,32 @@ class GovernanceEventVerificationServiceTest {
         assertThat(verification.verify(auditor(), KIND, source.id()).status()).isEqualTo("OUTCOME_UNKNOWN");
     }
 
+    @Test void onlyMatchingFencedRecoveryLeaseCanProveAbsenceBehindAnOwnedLock() {
+        var source = event("a".repeat(64));
+        var obligation = obligation(source);
+        obligation.setStatus(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
+        when(mongo.findById(obligation.getOutboxId(), WriteActionAuditOutboxRecord.class)).thenReturn(obligation);
+        when(mongo.findById(source.id(), PolicyTrustChangeAuditDocument.class)).thenReturn(source);
+        when(auditEvents.findByRequestId("gov:" + obligation.getGovernanceEvidenceHash()))
+                .thenReturn(Optional.empty());
+        var lease = new AuditChainLockDocument("source_service:alert-service", "recovery-owner",
+                NOW.plusSeconds(30), 9L);
+        when(mongo.findById("source_service:alert-service", AuditChainLockDocument.class)).thenReturn(lease);
+
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            var result = verification.verifyUnderRecoveryBarrier(auditor(), KIND, source.id(), lease);
+            assertThat(result.status()).isEqualTo("BLOCKED");
+
+            var staleGeneration = new AuditChainLockDocument(lease.partitionKey(), lease.ownerToken(),
+                    lease.lockedUntil(), lease.generation() - 1L);
+            assertThat(verification.verifyUnderRecoveryBarrier(auditor(), KIND, source.id(), staleGeneration)
+                    .status()).isEqualTo("OUTCOME_UNKNOWN");
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
     @Test void missingExactLocalAnchorIsIntegrityFailureEvenWhenEventHashIsValid() {
         var source = event("a".repeat(64));
         var obligation = obligation(source);
