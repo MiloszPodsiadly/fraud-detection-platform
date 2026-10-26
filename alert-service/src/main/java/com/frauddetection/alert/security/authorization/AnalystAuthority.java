@@ -20,6 +20,19 @@ public final class AnalystAuthority {
     public static final String PROMOTION_READINESS_READ = "promotion-readiness:read";
     public static final String MODEL_CARD_READ = "model-card:read";
     public static final String MODEL_SHADOW_PERFORMANCE_READ = "model-shadow-performance:read";
+    public static final String MODEL_PROMOTION_READ = "model-promotion:read";
+    public static final String MODEL_PROMOTION_RATIONALE_READ = "model-promotion:rationale:read";
+    public static final String MODEL_PROMOTION_REGISTER = "model-promotion:register";
+    public static final String MODEL_PROMOTION_PROPOSE = "model-promotion:propose";
+    public static final String MODEL_PROMOTION_APPROVE = "model-promotion:approve";
+    public static final String MODEL_PROMOTION_REJECT = "model-promotion:reject";
+    public static final String MODEL_PROMOTION_RETIRE = "model-promotion:retire";
+    /** Issued only by explicit institutional IAM group mapping, never by analyst roles or demo auth. */
+    public static final String MODEL_PROMOTION_EMERGENCY_REQUEST = "model-promotion:emergency:request";
+    public static final String MODEL_PROMOTION_EMERGENCY_AUTHORIZE = "model-promotion:emergency:authorize";
+    public static final String MODEL_PROMOTION_SCOPE_DEVELOPMENT = "model-promotion:scope:development";
+    public static final String MODEL_PROMOTION_SCOPE_TEST = "model-promotion:scope:test";
+    public static final String MODEL_PROMOTION_SCOPE_PRODUCTION = "model-promotion:scope:production";
     public static final String AUDIT_READ = "audit:read";
     public static final String AUDIT_VERIFY = "audit:verify";
     public static final String AUDIT_EXPORT = "audit:export";
@@ -51,6 +64,15 @@ public final class AnalystAuthority {
             PROMOTION_READINESS_READ,
             MODEL_CARD_READ,
             MODEL_SHADOW_PERFORMANCE_READ,
+            MODEL_PROMOTION_READ,
+            MODEL_PROMOTION_RATIONALE_READ,
+            MODEL_PROMOTION_REGISTER,
+            MODEL_PROMOTION_PROPOSE,
+            MODEL_PROMOTION_APPROVE,
+            MODEL_PROMOTION_REJECT,
+            MODEL_PROMOTION_RETIRE,
+            MODEL_PROMOTION_SCOPE_DEVELOPMENT,
+            MODEL_PROMOTION_SCOPE_TEST,
             AUDIT_READ,
             AUDIT_VERIFY,
             AUDIT_EXPORT,

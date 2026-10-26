@@ -1,6 +1,12 @@
 package com.frauddetection.alert.security.config;
 
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
+import com.frauddetection.alert.audit.read.ReadAccessAuditEventDocument;
+import com.frauddetection.alert.audit.read.ReadAccessAuditRepository;
+import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -34,6 +40,8 @@ import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -51,6 +59,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
         SecurityDeniedAccessTelemetrySliceTestConfig.class,
+        JwtAlertReadAuditSliceTestConfiguration.class,
         AlertResponseMapper.class,
         AlertServiceExceptionHandler.class
 })
@@ -59,8 +68,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.security.demo-auth.enabled=true",
         "app.security.jwt.enabled=true",
         "app.security.jwt.jwk-set-uri=https://issuer.example.test/.well-known/jwks.json",
+        "app.security.jwt.issuer-uri=https://issuer.example.test",
+        "app.security.jwt.expected-audience=fraud-detection-platform-api",
         "app.security.jwt.user-id-claim=sub",
-        "app.security.jwt.access-claim=groups"
+        "app.security.jwt.access-claim=groups",
+        "app.sensitive-reads.audit.fail-closed=true"
 })
 class AlertSecurityConfigJwtPreferredOverDemoTest {
 
@@ -78,6 +90,9 @@ class AlertSecurityConfigJwtPreferredOverDemoTest {
 
     @MockitoBean
     private AlertServiceMetrics alertServiceMetrics;
+
+    @MockitoBean
+    private ReadAccessAuditRepository readAccessAuditRepository;
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
@@ -105,6 +120,18 @@ class AlertSecurityConfigJwtPreferredOverDemoTest {
                         .header(DemoAuthHeaders.USER_ID, "different-demo-user")
                         .header(DemoAuthHeaders.ROLES, "FRAUD_OPS_ADMIN"))
                 .andExpect(status().isOk());
+
+        org.mockito.ArgumentCaptor<ReadAccessAuditEventDocument> auditEvent =
+                org.mockito.ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
+        verify(readAccessAuditRepository, times(1)).save(auditEvent.capture());
+        org.assertj.core.api.Assertions.assertThat(auditEvent.getValue().actorId())
+                .isEqualTo(PolicyGovernanceActor.identityId("https://issuer.example.test", "analyst-1"));
+        org.assertj.core.api.Assertions.assertThat(auditEvent.getValue().endpointCategory())
+                .isEqualTo(ReadAccessEndpointCategory.ALERT_LIST);
+        org.assertj.core.api.Assertions.assertThat(auditEvent.getValue().resourceType())
+                .isEqualTo(ReadAccessResourceType.ALERT);
+        org.assertj.core.api.Assertions.assertThat(auditEvent.getValue().outcome())
+                .isEqualTo(ReadAccessAuditOutcome.SUCCESS);
     }
 
     private Jwt jwt(String userId, List<String> groups) {
@@ -113,7 +140,8 @@ class AlertSecurityConfigJwtPreferredOverDemoTest {
                 Instant.parse("2026-04-23T10:00:00Z"),
                 Instant.parse("2026-04-23T11:00:00Z"),
                 Map.of("alg", "none"),
-                Map.of("sub", userId, "groups", groups)
+                Map.of("iss", "https://issuer.example.test", "sub", userId,
+                        "aud", List.of("fraud-detection-platform-api"), "groups", groups)
         );
     }
 }

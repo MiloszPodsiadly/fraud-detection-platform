@@ -13,10 +13,35 @@ import org.springframework.web.servlet.HandlerMapping;
 import java.util.List;
 import java.util.stream.Stream;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ReadAccessAuditResponseAdviceTest {
+
+    @Test
+    void missingAuditServiceFailsClosedBeforeReturningSensitiveBody() throws Exception {
+        ObjectProvider<ReadAccessAuditService> missingAuditor = mock(ObjectProvider.class);
+        when(missingAuditor.getIfAvailable()).thenReturn(null);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/transactions/scored");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/transactions/scored");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        response.setStatus(200);
+        SensitiveReadAuditPolicy failClosedPolicy = mock(SensitiveReadAuditPolicy.class);
+        when(failClosedPolicy.failClosed()).thenReturn(true);
+        ReadAccessAuditResponseAdvice advice = new ReadAccessAuditResponseAdvice(
+                provider(new ReadAccessAuditClassifier()), provider(new ReadAccessResultCountExtractor()),
+                missingAuditor, provider(failClosedPolicy));
+
+        Object result = advice.beforeBodyWrite("sensitive-customer-body", null, MediaType.TEXT_PLAIN, null,
+                new ServletServerHttpRequest(request), new ServletServerHttpResponse(response));
+
+        assertThat(result).isNull();
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getContentAsString()).contains("Sensitive read audit unavailable.")
+                .doesNotContain("sensitive-customer-body");
+    }
 
     @Test
     void shouldAuditSuccessfulSensitiveReadFromResponseBody() {
@@ -24,7 +49,8 @@ class ReadAccessAuditResponseAdviceTest {
         ReadAccessAuditResponseAdvice advice = new ReadAccessAuditResponseAdvice(
                 provider(new ReadAccessAuditClassifier()),
                 provider(new ReadAccessResultCountExtractor()),
-                provider(auditService)
+                provider(auditService),
+                provider(failOpenPolicy())
         );
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/transactions/scored");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/transactions/scored");
@@ -90,5 +116,11 @@ class ReadAccessAuditResponseAdviceTest {
                 return stream();
             }
         };
+    }
+
+    private static SensitiveReadAuditPolicy failOpenPolicy() {
+        SensitiveReadAuditPolicy policy = mock(SensitiveReadAuditPolicy.class);
+        when(policy.failClosed()).thenReturn(false);
+        return policy;
     }
 }

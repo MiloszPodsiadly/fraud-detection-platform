@@ -3,6 +3,7 @@ package com.frauddetection.alert.audit.read;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -49,12 +50,11 @@ public class ReadAccessAuditService {
             String correlationId,
             boolean failClosed
     ) {
+        ReadAccessAuditEvent event = event(target, outcome, resultCount, correlationId, failClosed);
         try {
-            ReadAccessAuditEvent event = event(target, outcome, resultCount, correlationId);
             repository.save(ReadAccessAuditEventDocument.from(event));
-            metrics.recordReadAccessAuditPersisted(target.endpointCategory(), outcome);
         } catch (RuntimeException exception) {
-            metrics.recordReadAccessAuditPersistenceFailure(target.endpointCategory());
+            bestEffort(() -> metrics.recordReadAccessAuditPersistenceFailure(target.endpointCategory()));
             log.atWarn()
                     .addKeyValue("endpointCategory", target.endpointCategory())
                     .addKeyValue("resourceType", target.resourceType())
@@ -65,28 +65,35 @@ public class ReadAccessAuditService {
             if (failClosed) {
                 throw exception;
             }
+            return;
         }
+        bestEffort(() -> metrics.recordReadAccessAuditPersisted(target.endpointCategory(), outcome));
     }
 
     private ReadAccessAuditEvent event(
             ReadAccessAuditTarget target,
             ReadAccessAuditOutcome outcome,
             int resultCount,
-            String correlationId
+            String correlationId,
+            boolean requireActor
     ) {
         Optional<AnalystPrincipal> principalOptional = currentAnalystUser.get();
         AnalystPrincipal principal = principalOptional == null ? null : principalOptional.orElse(null);
-        if (principal == null) {
-            metrics.recordReadAccessAuditActorMissing(target.endpointCategory());
+        String actorId = resolveActorId(principal, requireActor);
+        if (actorId == null) {
+            bestEffort(() -> metrics.recordReadAccessAuditActorMissing(target.endpointCategory()));
             log.atWarn()
                     .addKeyValue("endpointCategory", target.endpointCategory())
                     .addKeyValue("resourceType", target.resourceType())
-                    .log("Read-access audit actor principal was missing; persisted audit with unknown actor.");
+                    .log("Read-access audit actor principal is missing or invalid.");
+            if (requireActor) {
+                throw new MissingReadAccessActorException();
+            }
         }
         return new ReadAccessAuditEvent(
                 UUID.randomUUID().toString(),
                 Instant.now(),
-                principal == null ? "unknown" : principal.userId(),
+                actorId == null ? "unknown" : actorId,
                 principal == null ? Set.of() : roles(principal),
                 ReadAccessAuditAction.READ,
                 target.resourceType(),
@@ -104,6 +111,42 @@ public class ReadAccessAuditService {
         );
     }
 
+    private void bestEffort(Runnable telemetry) {
+        try {
+            telemetry.run();
+        } catch (RuntimeException ignored) {
+            // Metrics are advisory; persistence and fail-closed actor checks remain authoritative.
+        }
+    }
+
+    private String resolveActorId(AnalystPrincipal principal, boolean requireTrustedActor) {
+        if (principal != null && principal.readAuditActorId() != null
+                && !principal.readAuditActorId().isBlank()) {
+            return principal.readAuditActorId();
+        }
+        if (principal != null && principal.institutionalActorId() != null) {
+            int separator = principal.institutionalActorId().lastIndexOf('#');
+            if (separator > 0 && separator < principal.institutionalActorId().length() - 1) {
+                try {
+                    return PolicyGovernanceActor.identityId(
+                            principal.institutionalActorId().substring(0, separator),
+                            principal.institutionalActorId().substring(separator + 1));
+                } catch (IllegalArgumentException ignored) {
+                    return null;
+                }
+            }
+        }
+        if (principal == null || principal.userId() == null || principal.userId().isBlank()) {
+            return null;
+        }
+        if (requireTrustedActor) {
+            return null;
+        }
+        return "unverified:" + PolicyGovernanceActor.identityId("unverified-user-id",
+                java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(principal.userId().trim().getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .substring("oidc:".length());
+    }
+
     private Set<String> roles(AnalystPrincipal principal) {
         TreeSet<String> roles = new TreeSet<>();
         principal.roles().forEach(role -> roles.add(role.name()));
@@ -112,5 +155,12 @@ public class ReadAccessAuditService {
 
     private String normalize(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static final class MissingReadAccessActorException extends IllegalStateException {
+
+        private MissingReadAccessActorException() {
+            super("Sensitive read actor identity is unavailable.");
+        }
     }
 }

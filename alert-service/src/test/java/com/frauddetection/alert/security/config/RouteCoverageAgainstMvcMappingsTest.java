@@ -18,6 +18,10 @@ import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalAuditCoverageRateLimiter;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityController;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.ReadAccessAuditService;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.AlertController;
@@ -40,12 +44,42 @@ import com.frauddetection.alert.governance.audit.GovernanceAdvisoryController;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryProjectionService;
 import com.frauddetection.alert.governance.audit.GovernanceAuditController;
 import com.frauddetection.alert.governance.audit.GovernanceAuditService;
+import com.frauddetection.alert.governance.audit.GovernanceEventVerificationController;
+import com.frauddetection.alert.governance.audit.GovernanceEventAuditRecoveryController;
+import com.frauddetection.alert.governance.audit.GovernanceEventVerificationService;
+import com.frauddetection.alert.governance.audit.AuditChainRangeVerificationService;
 import com.frauddetection.alert.governance.exactmodelshadowperformance.ExactModelShadowPerformanceController;
 import com.frauddetection.alert.governance.exactmodelshadowperformance.ExactModelShadowPerformanceReadService;
 import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionReviewReadinessReportController;
 import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionReviewReadinessReportReadService;
 import com.frauddetection.alert.governance.modelcard.ModelCardController;
 import com.frauddetection.alert.governance.modelcard.ModelCardReadService;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiController;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionSignedReviewController;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionEmergencyRetirementController;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionSignedReviewService;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionEmergencyRetirementService;
+import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectory;
+import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDirectoryController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyPublicationRecoveryService;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiRateLimiter;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiService;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionRateLimitActorKeyResolver;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceController;
+import com.frauddetection.alert.governance.modelpolicy.PolicySecurityActorController;
+import com.frauddetection.alert.governance.modelpromotion.PolicySecurityOperationsController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustAdministrationController;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustChangeService;
+import com.frauddetection.alert.governance.modelpromotion.PolicyTrustRegistrySnapshotService;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialEnrollmentGrantService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyCredentialGrantReviewService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationRecoveryController;
+import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationStatusService;
+import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryController;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryReadService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -87,14 +121,19 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
+import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -128,10 +167,23 @@ import static org.assertj.core.api.Assertions.assertThat;
         SystemTrustLevelController.class,
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class,
+        GovernanceEventVerificationController.class,
+        GovernanceEventAuditRecoveryController.class,
         ShadowPerformanceSummaryController.class,
         PromotionReviewReadinessReportController.class,
         ModelCardController.class,
         ExactModelShadowPerformanceController.class,
+        ModelPromotionApiController.class,
+        ModelPromotionSignedReviewController.class,
+        ModelPromotionEmergencyRetirementController.class,
+        PolicyGovernanceController.class,
+        PolicySecurityActorController.class,
+        PolicySecurityOperationsController.class,
+        PolicyTrustAdministrationController.class,
+        OnlinePolicyApproverDirectoryController.class,
+        PolicyCredentialEnrollmentGrantController.class,
+        PolicyPublicationStatusController.class,
+        PolicyPublicationRecoveryController.class,
         SuspiciousTransactionReadController.class,
         AnalystSessionController.class
 })
@@ -142,13 +194,17 @@ import static org.assertj.core.api.Assertions.assertThat;
         EngineIntelligenceResponseMapper.class,
         ScoredTransactionSearchPolicy.class,
         EngineIntelligenceFeedbackReadQueryPolicy.class,
-        AlertServiceExceptionHandler.class
+        AlertServiceExceptionHandler.class,
+        ReadAccessAuditClassifier.class
 })
 @ActiveProfiles("test")
 class RouteCoverageAgainstMvcMappingsTest {
 
     @Autowired
     private RequestMappingHandlerMapping handlerMapping;
+
+    @Autowired
+    private ReadAccessAuditClassifier readAccessAuditClassifier;
 
     @MockitoBean
     private AlertManagementUseCase alertManagementUseCase;
@@ -262,10 +318,64 @@ class RouteCoverageAgainstMvcMappingsTest {
     private ExactModelShadowPerformanceReadService exactModelShadowPerformanceReadService;
 
     @MockitoBean
+    private ModelPromotionApiService modelPromotionApiService;
+
+    @MockitoBean
+    private ModelPromotionSignedReviewService modelPromotionSignedReviewService;
+
+    @MockitoBean
+    private ModelPromotionEmergencyRetirementService modelPromotionEmergencyRetirementService;
+
+    @MockitoBean
+    private ModelPromotionApiRateLimiter modelPromotionApiRateLimiter;
+
+    @MockitoBean
+    private ModelPromotionRateLimitActorKeyResolver modelPromotionRateLimitActorKeyResolver;
+
+    @MockitoBean
+    private PolicyGovernanceService policyGovernanceService;
+
+    @MockitoBean
+    private PolicyWebAuthnService policyWebAuthnService;
+
+    @MockitoBean
+    private PolicyCredentialEnrollmentGrantService policyCredentialEnrollmentGrantService;
+
+    @MockitoBean
+    private PolicyCredentialGrantReviewService policyCredentialGrantReviewService;
+
+    @MockitoBean
+    private PolicyPublicationStatusService policyPublicationStatusService;
+
+    @MockitoBean
+    private PolicyPublicationRecoveryService policyPublicationRecoveryService;
+
+    @MockitoBean
+    private OnlinePolicyApproverDirectory onlinePolicyApproverDirectory;
+
+    @MockitoBean
+    private PolicyTrustChangeService policyTrustChangeService;
+
+    @MockitoBean
+    private PolicyTrustRegistrySnapshotService policyTrustRegistrySnapshotService;
+
+    @MockitoBean
+    private MongoTemplate policySecurityMongoTemplate;
+
+    @MockitoBean
     private AlertRepository alertRepository;
 
     @MockitoBean
     private GovernanceAuditService governanceAuditService;
+
+    @MockitoBean
+    private GovernanceEventVerificationService governanceEventVerificationService;
+
+    @MockitoBean
+    private AuditChainRangeVerificationService auditChainRangeVerificationService;
+
+    @MockitoBean
+    private com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRecoveryService auditOutboxRecoveryService;
 
     @MockitoBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
@@ -307,12 +417,167 @@ class RouteCoverageAgainstMvcMappingsTest {
     }
 
     @Test
+    void securitySensitiveGetMappingsHaveExecutableAuditPolicies() throws IOException {
+        List<RouteAuditEvaluation> evaluations = handlerMapping.getHandlerMethods().entrySet().stream()
+                .filter(entry -> entry.getValue().getBeanType().getName().startsWith("com.frauddetection.alert"))
+                .flatMap(entry -> routeDescriptors(entry)
+                        .filter(route -> route.method().equals("GET"))
+                        .filter(route -> isSensitiveReadFamily(route.pattern())
+                                || org.springframework.core.annotation.AnnotatedElementUtils
+                                        .hasAnnotation(entry.getValue().getMethod(), AuditedSensitiveRead.class))
+                        .map(route -> evaluateAuditedRoute(entry.getValue(), route.pattern())))
+                .toList();
+
+        writeSensitiveGetRouteCoverageReport(evaluations);
+
+        List<String> violations = evaluations.stream()
+                .map(RouteAuditEvaluation::violation)
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .toList();
+        assertThat(evaluations).as("The registered MVC map must include sensitive GET routes").isNotEmpty();
+        assertThat(violations).as(String.join(System.lineSeparator(), violations)).isEmpty();
+    }
+
+    @Test
+    void publicHealthDoesNotReceiveASyntheticReadAuditPolicy() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/health");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/actuator/health");
+
+        assertThat(readAccessAuditClassifier.classify(request)).isEmpty();
+    }
+
+    @Test
+    void anUnauditedSensitiveAlertGetWouldFailTheCoverageGuard() throws NoSuchMethodException {
+        Method method = UnannotatedSensitiveAlertController.class.getDeclaredMethod("customerSummary", String.class);
+        HandlerMethod handlerMethod = new HandlerMethod(new UnannotatedSensitiveAlertController(), method);
+
+        assertThat(auditedRouteViolation(handlerMethod, "/api/v1/alerts/{alertId}/customer-summary"))
+                .isEqualTo("UnannotatedSensitiveAlertController#customerSummary GET "
+                        + "/api/v1/alerts/{alertId}/customer-summary has no effective read-audit policy.");
+    }
+
+    @Test
+    void aVersionedGovernanceReadFixtureClassifiesThroughTheRuntimePolicy() throws NoSuchMethodException {
+        Method method = VersionedGovernanceController.class.getDeclaredMethod("currentSummary");
+        HandlerMethod handlerMethod = new HandlerMethod(new VersionedGovernanceController(), method);
+
+        assertThat(auditedRouteViolation(handlerMethod, "/api/v2/governance/shadow-performance/summary/current"))
+                .isNull();
+    }
+
+    private String auditedRouteViolation(HandlerMethod handlerMethod, String pattern) {
+        return evaluateAuditedRoute(handlerMethod, pattern).violation();
+    }
+
+    private RouteAuditEvaluation evaluateAuditedRoute(HandlerMethod handlerMethod, String pattern) {
+        AuditedSensitiveRead policy = org.springframework.core.annotation.AnnotatedElementUtils
+                .findMergedAnnotation(handlerMethod.getMethod(), AuditedSensitiveRead.class);
+        String route = handlerMethod.getBeanType().getSimpleName() + "#"
+                + handlerMethod.getMethod().getName() + " GET " + pattern;
+        String source = policy == null ? "legacy route classifier" : "@AuditedSensitiveRead";
+        String category = policy == null ? "UNCLASSIFIED" : policy.category().name();
+        String resourceType = policy == null ? "UNKNOWN" : policy.resourceType().name();
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", pattern);
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, pattern);
+        request.setAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE, handlerMethod);
+        java.util.Map<String, String> variables = new java.util.HashMap<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\{([^/}]+)}").matcher(pattern);
+        while (matcher.find()) {
+            variables.put(matcher.group(1), "sample-" + matcher.group(1));
+        }
+        request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, variables);
+        if (policy == null) {
+            var target = readAccessAuditClassifier.classify(request).orElse(null);
+            if (target == null) {
+                return new RouteAuditEvaluation(route, source, category, resourceType,
+                        route + " has no effective read-audit policy.");
+            }
+            return new RouteAuditEvaluation(route, source, target.endpointCategory().name(),
+                    target.resourceType().name(), null);
+        }
+        if (policy.category() == ReadAccessEndpointCategory.UNCLASSIFIED
+                || policy.resourceType() == ReadAccessResourceType.UNKNOWN) {
+            return new RouteAuditEvaluation(route, source, category, resourceType,
+                    route + " has incomplete @AuditedSensitiveRead metadata.");
+        }
+        try {
+            if (!policy.resourceIdParameter().isBlank()) {
+                request.setParameter(policy.resourceIdParameter(), "a".repeat(64));
+            }
+            var target = readAccessAuditClassifier.classify(request).orElse(null);
+            if (target == null) {
+                return new RouteAuditEvaluation(route, source, category, resourceType,
+                        route + " has metadata that is not applied by the runtime audit classifier.");
+            }
+            if (!policy.resourceIdVariable().isBlank()
+                    && !java.util.Objects.equals(target.resourceId(), variables.get(policy.resourceIdVariable()))) {
+                return new RouteAuditEvaluation(route, source, category, resourceType,
+                        route + " does not audit the declared URI resource ID.");
+            }
+            if (!policy.resourceIdParameter().isBlank()
+                    && !java.util.Objects.equals(target.resourceId(), request.getParameter(policy.resourceIdParameter()))) {
+                return new RouteAuditEvaluation(route, source, category, resourceType,
+                        route + " does not audit the declared query resource ID.");
+            }
+            return new RouteAuditEvaluation(route, source, target.endpointCategory().name(),
+                    target.resourceType().name(), null);
+        } catch (RuntimeException exception) {
+            return new RouteAuditEvaluation(route, source, category, resourceType,
+                    route + " caused runtime classifier failure: " + exception.getClass().getSimpleName() + ".");
+        }
+    }
+
+    private boolean isSensitiveReadFamily(String pattern) {
+        return pattern.startsWith("/api/v1/alerts")
+                || pattern.startsWith("/api/v1/governance/")
+                || pattern.startsWith("/api/v2/governance/")
+                || pattern.startsWith("/api/v1/audit/")
+                || pattern.startsWith("/governance/")
+                || pattern.startsWith("/api/v1/fraud-cases/")
+                || pattern.startsWith("/api/v1/transactions/scored")
+                || pattern.startsWith("/internal/suspicious-transactions")
+                || pattern.equals("/system/trust-level")
+                || pattern.startsWith("/api/v1/trust/incidents")
+                || pattern.startsWith("/api/v1/regulated-mutations")
+                || pattern.startsWith("/api/v1/outbox");
+    }
+
+    private void writeSensitiveGetRouteCoverageReport(List<RouteAuditEvaluation> evaluations) throws IOException {
+        List<RouteAuditEvaluation> ordered = evaluations.stream()
+                .sorted(Comparator.comparing(RouteAuditEvaluation::route))
+                .toList();
+        long failures = ordered.stream().filter(row -> row.violation() != null).count();
+        StringBuilder report = new StringBuilder("# Registered sensitive GET route coverage\n\n")
+                .append("Generated by `RouteCoverageAgainstMvcMappingsTest` from Spring's registered `RequestMappingHandlerMapping#getHandlerMethods()` and evaluated with the production `ReadAccessAuditClassifier`.\n\n")
+                .append("- Registered sensitive GET mappings: ").append(ordered.size()).append("\n")
+                .append("- Coverage failures: ").append(failures).append("\n")
+                .append("- Public health endpoints are outside the sensitive families and are checked separately.\n\n")
+                .append("| Route handler | Effective policy source | Category | Resource | Result |\n")
+                .append("| --- | --- | --- | --- | --- |\n");
+        for (RouteAuditEvaluation row : ordered) {
+            report.append("| `").append(row.route()).append("` | `")
+                    .append(row.policySource()).append("` | `")
+                    .append(row.category()).append("` | `")
+                    .append(row.resourceType()).append("` | ")
+                    .append(row.violation() == null ? "PASS" : "FAIL: " + row.violation())
+                    .append(" |\n");
+        }
+        Path reportPath = Path.of("target", "security-sensitive-get-route-coverage.md");
+        Files.createDirectories(reportPath.getParent());
+        Files.writeString(reportPath, report.toString(), StandardCharsets.UTF_8);
+        System.out.println("Sensitive GET route coverage report: " + reportPath.toAbsolutePath()
+                + " (" + ordered.size() + " mappings; " + failures + " failures)");
+    }
+
+    @Test
     void currentFrontendBackedRoutesRemainMapped() {
         assertThat(applicationRouteDescriptions())
                 .contains(
                         "GET /api/v1/alerts",
                         "GET /api/v1/alerts/{alertId}",
                         "GET /api/v1/alerts/{alertId}/assistant-summary",
+                        "GET /api/v2/governance/shadow-performance/summary/current",
                         "POST /api/v1/alerts/{alertId}/decision",
                         "GET /api/v1/transactions/scored",
                         "GET /api/v1/transactions/scored/{transactionId}",
@@ -329,7 +594,12 @@ class RouteCoverageAgainstMvcMappingsTest {
                         "GET /api/v1/fraud-cases/{caseId}",
                         "PATCH /api/v1/fraud-cases/{caseId}",
                         "GET /api/v1/fraud-cases/{caseId}/evidence-summary",
-                        "GET /api/v1/fraud-cases/{caseId}/evidence-timeline"
+                        "GET /api/v1/fraud-cases/{caseId}/evidence-timeline",
+                        "GET /api/v1/governance/model-policies",
+                        "GET /api/v1/governance/model-policies/me",
+                        "GET /api/v1/governance/model-policies/{id}",
+                        "GET /api/v1/governance/model-policies/{id}/history",
+                        "GET /api/v1/governance/model-policies/{id}/publication"
                 );
     }
 
@@ -428,10 +698,33 @@ class RouteCoverageAgainstMvcMappingsTest {
     private record RouteDescriptor(String method, String pattern) {
     }
 
+    private record RouteAuditEvaluation(
+            String route,
+            String policySource,
+            String category,
+            String resourceType,
+            String violation
+    ) {
+    }
+
     private static final class MethodlessController {
 
         @SuppressWarnings("unused")
         void methodless() {
+        }
+    }
+
+    private static final class UnannotatedSensitiveAlertController {
+        @SuppressWarnings("unused")
+        void customerSummary(String alertId) {
+        }
+    }
+
+    private static final class VersionedGovernanceController {
+        @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SHADOW_PERFORMANCE_SUMMARY,
+                resourceType = ReadAccessResourceType.SHADOW_PERFORMANCE_SUMMARY)
+        @SuppressWarnings("unused")
+        void currentSummary() {
         }
     }
 }

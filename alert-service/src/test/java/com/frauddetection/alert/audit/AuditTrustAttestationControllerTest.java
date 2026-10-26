@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit;
 
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditSliceTestConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -30,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         }
 )
 @AutoConfigureMockMvc(addFilters = false)
-@Import(AlertServiceExceptionHandler.class)
+@Import({AlertServiceExceptionHandler.class, SensitiveReadAuditSliceTestConfiguration.class})
 class AuditTrustAttestationControllerTest {
 
     @Autowired

@@ -53,7 +53,8 @@ public class RegulatedMutationRecoveryController {
     }
 
     @GetMapping("/recovery/backlog")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.REGULATED_MUTATION_RECOVERY_BACKLOG,
+            resourceType = ReadAccessResourceType.REGULATED_MUTATION_RECOVERY)
     public RegulatedMutationRecoveryBacklogResponse backlog(HttpServletRequest request) {
         RegulatedMutationRecoveryBacklogResponse response = recoveryService.backlog();
         sensitiveReadAuditService.audit(
@@ -67,7 +68,9 @@ public class RegulatedMutationRecoveryController {
     }
 
     @GetMapping("/by-command/{commandId}")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.REGULATED_MUTATION_INSPECTION,
+            resourceType = ReadAccessResourceType.REGULATED_MUTATION_COMMAND,
+            resourceIdVariable = "commandId")
     public RegulatedMutationCommandInspectionResponse inspectByCommandId(
             @PathVariable String commandId,
             Authentication authentication,
@@ -80,7 +83,9 @@ public class RegulatedMutationRecoveryController {
     }
 
     @GetMapping("/by-idempotency-hash/{hash}")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.REGULATED_MUTATION_INSPECTION,
+            resourceType = ReadAccessResourceType.REGULATED_MUTATION_COMMAND,
+            resourceIdVariable = "hash")
     public RegulatedMutationCommandInspectionResponse inspectByIdempotencyHash(
             @PathVariable String hash,
             Authentication authentication,

@@ -66,4 +66,13 @@ class AnalystRoleTest {
         assertThat(AnalystRole.FRAUD_OPS_ADMIN.authorities())
                 .containsExactlyInAnyOrderElementsOf(AnalystAuthority.ALL);
     }
+
+    @Test
+    void defaultRolesMustNotGrantProductionModelPromotionScope() {
+        assertThat(AnalystRole.values())
+                .extracting(AnalystRole::authorities)
+                .allSatisfy(authorities -> assertThat(authorities)
+                        .doesNotContain(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION));
+        assertThat(AnalystAuthority.ALL).doesNotContain(AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION);
+    }
 }

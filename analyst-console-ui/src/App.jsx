@@ -31,7 +31,7 @@ export default function App() {
     workspaceHref,
     invalidWorkspaceRoute
   } = useWorkspaceRoute();
-  const [session, setSession] = useState(() => authProvider.getInitialSession());
+  const [session, setSession] = useState(() => normalizeSession(authProvider.getInitialSession()));
   const [sessionState, setSessionState] = useState(() => getSessionStateForProvider(authProvider.getInitialSession(), authProvider));
   const [callbackError, setCallbackError] = useState(null);
   const handlingOidcCallback = authProvider.kind === "oidc" && isOidcCallbackPath();
@@ -230,7 +230,8 @@ export default function App() {
       </header>
 
       <main>
-        <WorkspaceRuntimeProvider session={session} authProvider={authProvider} enabled={Boolean(session?.userId)}>
+        <WorkspaceRuntimeProvider session={session} authProvider={authProvider} sessionState={sessionState}
+          sessionBootstrapPending={sessionBootstrapPending} enabled={Boolean(session?.userId)}>
           <WorkspaceDashboardShell
             workspacePage={workspacePage}
             selectedAlertId={runtimeSelectedAlertId}
@@ -268,6 +269,9 @@ function sessionBoundaryKeyFor(session, authProvider) {
   return [
     authProvider?.kind || "none",
     session?.userId || "",
+    session?.actorId || "",
+    session?.issuer || "",
+    session?.subject || "",
     roles,
     authorities
   ].join(":");

@@ -13,6 +13,7 @@ describe("oidcSessionSource", () => {
     const snapshot = normalizeOidcSessionSnapshot({
       accessToken: " oidc-token-1 ",
       profile: {
+        iss: "https://issuer.bank.example/realms/fraud",
         sub: "oidc-user-1",
         roles: ["ANALYST"],
         authorities: ["alert:read"]
@@ -25,6 +26,8 @@ describe("oidcSessionSource", () => {
 
     expect(snapshot.session).toMatchObject({
       userId: "oidc-user-1",
+      issuer: "https://issuer.bank.example/realms/fraud",
+      subject: "oidc-user-1",
       roles: ["ANALYST"]
     });
     expect(snapshot.accessToken).toBe("oidc-token-1");

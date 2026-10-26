@@ -1,5 +1,6 @@
 package com.frauddetection.alert.audit.external;
 
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -58,7 +59,7 @@ class AuditTrustAuthorityClientConfiguration {
                         && !localFixtureProfile(environment)) {
                     throw new IllegalStateException(DEMO_SECRET_ERROR);
                 }
-                if (properties.isEnabled() && prodLikeProfile(environment)) {
+                if (properties.isEnabled() && InstitutionalModePolicy.isInstitutionalMode(environment)) {
                     if (!properties.isSigningRequired()) {
                         throw new IllegalStateException("Prod-like alert-service requires audit trust authority signing-required=true when trust authority is enabled.");
                     }
@@ -83,23 +84,15 @@ class AuditTrustAuthorityClientConfiguration {
 
     private void validateJwtPrivateKey(AuditTrustAuthorityProperties.JwtIdentity jwt) {
         if (StringUtils.hasText(jwt.getPrivateKey())) {
-            throw new IllegalStateException("Prod-like alert-service forbids inline audit trust authority JWT private key material.");
+            throw new IllegalStateException("Institutional alert-service forbids inline audit trust authority JWT private key material.");
         }
         if (!StringUtils.hasText(jwt.getPrivateKeyPath())) {
-            throw new IllegalStateException("Prod-like alert-service requires audit trust authority JWT private key path.");
+            throw new IllegalStateException("Institutional alert-service requires audit trust authority JWT private key path.");
         }
         Path keyPath = Path.of(jwt.getPrivateKeyPath());
         if (!Files.exists(keyPath) || !Files.isReadable(keyPath)) {
-            throw new IllegalStateException("Prod-like alert-service audit trust authority JWT private key must exist and be readable.");
+            throw new IllegalStateException("Institutional alert-service audit trust authority JWT private key must exist and be readable.");
         }
-    }
-
-    private boolean prodLikeProfile(Environment environment) {
-        return Arrays.stream(environment.getActiveProfiles())
-                .map(String::toLowerCase)
-                .anyMatch(profile -> profile.equals("prod")
-                        || profile.equals("production")
-                        || profile.equals("staging"));
     }
 
     private boolean localFixtureProfile(Environment environment) {

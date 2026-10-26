@@ -2,11 +2,15 @@ package com.frauddetection.alert.security.principal;
 
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.authorization.AnalystRole;
+import com.frauddetection.alert.governance.modelpromotion.ModelPromotionActorIdentity;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 
 import java.util.List;
 import java.util.Set;
@@ -43,5 +47,21 @@ class CurrentAnalystUserTest {
 
         assertThat(currentAnalystUser.get())
                 .contains(principal);
+    }
+
+    @Test
+    void shouldPreserveValidatedIssuerAndSubjectForReadAuditIdentity() {
+        java.time.Instant issuedAt = java.time.Instant.parse("2026-01-01T00:00:00Z");
+        OidcIdToken token = new OidcIdToken("token", issuedAt, issuedAt.plusSeconds(300),
+                java.util.Map.of("iss", "https://issuer.example", "sub", "same-subject"));
+        DefaultOidcUser oidcUser = new DefaultOidcUser(
+                List.of(new SimpleGrantedAuthority("ROLE_ANALYST")), token);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                oidcUser, "credentials", List.of(new SimpleGrantedAuthority("ROLE_ANALYST"))));
+
+        AnalystPrincipal principal = currentAnalystUser.get().orElseThrow();
+        assertThat(principal.institutionalActorId()).isEqualTo("https://issuer.example#same-subject");
+        assertThat(ModelPromotionActorIdentity.fromPrincipal(principal).actorId())
+                .isEqualTo(PolicyGovernanceActor.identityId("https://issuer.example", "same-subject"));
     }
 }

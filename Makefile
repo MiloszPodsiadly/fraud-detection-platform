@@ -6,7 +6,8 @@ SECURITY_HARDENED_BASE_COMPOSE = docker compose --project-name $(COMPOSE_PROJECT
 	-f deployment/docker-compose.oidc.yml \
 	-f deployment/docker-compose.service-identity-mtls.yml \
 	-f deployment/docker-compose.trust-authority-jwt.yml \
-	-f deployment/docker-compose.hardened.yml
+	-f deployment/docker-compose.hardened.yml \
+	-f deployment/docker-compose.model-promotion-policy-trust.yml
 
 SHADOW_PERFORMANCE_DEMO_COMPOSE = $(SECURITY_HARDENED_BASE_COMPOSE) \
 	-f deployment/docker-compose.shadow-performance-demo.yml
@@ -24,22 +25,32 @@ EXACT_MODEL_SHADOW_COMPOSE = $(SECURITY_HARDENED_COMPOSE) \
 	app-up app-up-exact-model-shadow app-down app-clean app-ps check-python local-runtime-fixtures \
 	regenerate-local-runtime-fixtures \
 	exact-model-shadow-preflight shadow-performance-summary promotion-readiness-report \
-	app-up-shadow-performance-generated shadow-performance-local-loop check-local-startup
+	app-up-shadow-performance-generated shadow-performance-local-loop check-local-startup \
+	model-promotion-trust-check
 
 deployment/.env:
 	cp deployment/.env.example deployment/.env
 
 local-runtime-fixtures:
 	bash scripts/bootstrap-local-fixtures.sh --ensure
+	node scripts/bootstrap-local-model-promotion-keys.mjs --ensure
+	node scripts/bootstrap-local-audit-trust-key.mjs --ensure
+
+model-promotion-trust-check: local-runtime-fixtures
+	mvn -pl model-promotion-policy-publisher -am -DskipTests package
+	java -jar model-promotion-policy-publisher/target/model-promotion-policy-publisher-0.0.1-SNAPSHOT-exec.jar trust-check \
+		--approval-trust deployment/.local/model-promotion-policy/approval/trusted-approvals.json \
+		--trusted-issuers deployment/.local/model-promotion-policy/trusted-issuers.json
 
 regenerate-local-runtime-fixtures:
 	bash scripts/bootstrap-local-fixtures.sh --force
 
-app-up: deployment/.env shadow-performance-summary
+app-up: deployment/.env local-runtime-fixtures shadow-performance-summary
 	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
 		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
 	@test -f deployment/local-generated/shadow-performance/manifest.json || \
 		(echo "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary" && exit 1)
+	$(SECURITY_HARDENED_COMPOSE) config --format json | node scripts/check-compose-security-config.mjs security-hardened
 	$(SECURITY_HARDENED_COMPOSE) up --build -d
 
 app-down: deployment/.env
@@ -82,6 +93,7 @@ check-compose-exact-model-shadow: exact-model-shadow-preflight
 
 check-local-startup:
 	node --test scripts/local-startup-contract.test.mjs
+	node --test scripts/model-promotion-trust-admin.test.mjs
 
 app-up-exact-model-shadow: deployment/.env shadow-performance-summary exact-model-shadow-preflight
 	$(EXACT_MODEL_SHADOW_COMPOSE) up --build -d
@@ -109,6 +121,7 @@ app-up-shadow-performance-generated: deployment/.env shadow-performance-summary
 		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
 	@test -f deployment/local-generated/shadow-performance/manifest.json || \
 		(echo "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary" && exit 1)
+	$(SHADOW_PERFORMANCE_GENERATED_COMPOSE) config --format json | node scripts/check-compose-security-config.mjs security-hardened
 	$(SHADOW_PERFORMANCE_GENERATED_COMPOSE) up --build -d
 
 shadow-performance-local-loop: app-up-shadow-performance-generated

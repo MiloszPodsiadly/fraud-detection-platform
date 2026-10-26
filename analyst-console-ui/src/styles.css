@@ -3109,3 +3109,9 @@ button:focus-visible,
 .modelCardPanel .dataTable tbody tr:last-child td {
   border-bottom: 0;
 }
+.policyGovernanceJson {
+  max-height: 28rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -19,7 +19,9 @@ This document is the current security overview. Endpoint-level ownership lives i
 `alert-service` supports three analyst identity sources:
 
 - BFF session/OIDC: browser session mode using provider-backed login, callback, session bootstrap, logout, and CSRF metadata.
-- JWT resource server: stateless bearer API mode with configurable claim-to-authority mapping.
+- JWT resource server: stateless bearer API mode with configurable claim-to-authority mapping. Protected deployments
+  require an exact trusted issuer and an expected resource audience; signatures, issuer, audience, `exp`, and `nbf`
+  are validated before authority mapping. Explicit JWKS without issuer binding is an opt-in local/test fixture mode.
 - Local demo auth: `local`, `dev` and `docker-local` only; automated `test` execution requires an explicit fixture marker. It is disabled by default and must not be treated as a production identity provider.
 
 Demo auth is ignored when JWT auth is active. Controllers and services depend on `AnalystPrincipal` and `CurrentAnalystUser`, not on demo headers or provider-specific claim names.
@@ -84,11 +86,41 @@ Local mTLS and JWT/JWKS material is generated on demand by `scripts/bootstrap-lo
 without treating fixture keys as production PKI, production secret management, production provenance, or an
 independent external trust anchor.
 
+## Model-promotion policy trust
+
+The `model-promotion-policy-publisher` authenticates separately provisioned author, independent approver,
+publisher and issuer credentials against deployment-controlled public trust registries. `alert-service`
+loads the public actor, approval-key and issuer registries; it never holds an issuer private key or infers authority
+from a Mongo policy document. Current policy `VERIFIED` requires an active issuer mandate and exact signature. Historical
+`INTACT_*` inspection is not current authorization. Ordinary model-promotion reads omit original rationale content;
+the approval-proof collection is not exposed by those APIs and requires restricted direct Mongo audit access.
+The verifier reports only bounded status/reason metrics and a label-free loaded-registry generation gauge.
+Protect each registry file and its independent minimum-generation setting against rollback. See
+[trust operations](../operations/model_promotion_trust_operations.md); local fixture keys are not production keys.
+The rollout view compares a declared Compose instance inventory with bounded runtime observations and the API's
+configured file. These Mongo observations are operational telemetry, not independent deployment attestation;
+`OBSERVED_CONSISTENT` does not establish `ACTIVATION_CONFIRMED`.
+
 ## Limitations
 
 The repository provides a security implementation foundation, not a complete bank operating model. Production IAM governance, provider tenancy, secret rotation, certificate automation, ingress hardening, network policy, SIEM integration, WORM retention, and regulatory certification remain deployment and operating-environment responsibilities unless implemented explicitly in this repository.
 
 Audit and regulated mutation controls are local service contracts. They are not distributed ACID. They do not provide exactly-once processing across Kafka, MongoDB, external audit storage, and downstream consumers.
+
+## Threat model and executable boundaries
+
+| Threat | Control and executable test | Residual limitation |
+| --- | --- | --- |
+| Cross-service JWT replay | JWT signature, exact issuer, audience, and time validation; the ML receiver also validates service identity. See [`JwtResourceServerRealDecoderTest`](../../alert-service/src/test/java/com/frauddetection/alert/security/config/JwtResourceServerRealDecoderTest.java) (`explicitJwksDecoderValidatesSignatureIssuerAudienceAndTimeClaims`) and [`test_server_metrics.py`](../../ml-inference-service/tests/test_server_metrics.py) (`test_token_validator_rejects_unknown_service`). | A stolen token remains usable by its intended audience until expiry; this service does not establish per-token revocation. Token issuance, storage, and rotation remain deployment controls. |
+| Same subject from different issuers | Governance actor identity binds issuer and subject; reviewer identity must match the provisioned actor. See [`ModelPromotionSignedReviewServiceTest`](../../alert-service/src/test/java/com/frauddetection/alert/governance/modelpromotion/ModelPromotionSignedReviewServiceTest.java) (`reviewerWithSameSubjectFromAnotherIssuerCannotReview`). | Trust depends on exact configured issuer identifiers and their lifecycle at the identity provider. |
+| Stale or revoked reviewer | Current actor mandate and credential status are checked when accepting a WebAuthn decision. See [`PolicyWebAuthnMongoIntegrationTest`](../../alert-service/src/test/java/com/frauddetection/alert/governance/modelpolicy/PolicyWebAuthnMongoIntegrationTest.java) (`revokedCredentialAndRevokedMandateBlockDecision`) and [`ModelPromotionPolicyPublisherMongoIntegrationTest`](../../model-promotion-policy-publisher/src/test/java/com/frauddetection/alert/governance/modelpromotion/ModelPromotionPolicyPublisherMongoIntegrationTest.java) (`currentTrustRevocationAndUnavailableApprovalRegistryBlockNewUseWithoutChangingHistory`). | Revocation blocks future use; it does not erase or retroactively invalidate an already committed historical decision. |
+| Missing JWT `iss` or `aud` | Protected startup requires explicit issuer and expected audience; the real decoder rejects invalid claim sets. See [`AuthenticationStartupGuardTest`](../../alert-service/src/test/java/com/frauddetection/alert/security/config/AuthenticationStartupGuardTest.java) (`shouldRequireIssuerAndAudienceWhenBankFailClosedIsEnabledOnAnUnexpectedProfile`) and [`JwtResourceServerRealDecoderTest`](../../alert-service/src/test/java/com/frauddetection/alert/security/config/JwtResourceServerRealDecoderTest.java). | Correct audience and issuer claims still depend on identity-provider configuration; no external certification is implied. |
+| Stolen or reused WebAuthn assertion | Challenge is single-use and bound to actor, operation, and exact contract; Mongo transaction commits evidence with the decision. See [`PolicyWebAuthnMongoIntegrationTest`](../../alert-service/src/test/java/com/frauddetection/alert/governance/modelpolicy/PolicyWebAuthnMongoIntegrationTest.java) (`sharedBoundAssertionRejectsChangedModelContractAndCrossDomainReplay`, `concurrentUseOfOneChallengeHasOneDurableDecision`). | A compromised browser/session or authenticator can race the legitimate user; one accepted use cannot distinguish who controlled the device. |
+| Publisher loses its lease | Lease takeover and publication are fenced through durable Mongo state. See [`PolicyPublicationWorkerMongoIntegrationTest`](../../model-promotion-policy-publisher/src/test/java/com/frauddetection/alert/governance/modelpromotion/PolicyPublicationWorkerMongoIntegrationTest.java) (`slowSignerLosesLeaseToAnotherWorkerWithoutDuplicatePublication`). | The fence governs cooperating application workers; privileged direct database writes remain outside that boundary. |
+| MongoDB commit acknowledgement is unknown | The store reconciles the exact durable decision and does not repeat the mutation. See [`MongoModelPromotionStoreIntegrationTest`](../../alert-service/src/test/java/com/frauddetection/alert/governance/modelpromotion/MongoModelPromotionStoreIntegrationTest.java) (`unknownCommitResultReadsDurableDecisionWithoutSecondMutation`). | While MongoDB remains unavailable, the caller may not learn whether the original commit completed. |
+| Redis outage or Cluster `CROSSSLOT` | Shared standalone Redis is required in protected mode; limiter errors fail closed with `503`. See [`ModelPromotionApiRateLimiterTest`](../../alert-service/src/test/java/com/frauddetection/alert/governance/modelpromotion/api/ModelPromotionApiRateLimiterTest.java) (`redisAndClusterCrossSlotFailuresFailClosedWithoutActorLabels`). | Governance API availability depends on Redis; Redis Cluster is unsupported by the current Lua key layout. |
+| Privileged MongoDB tampering with read-audit records | Fail-closed mode gates supported sensitive responses on a durable Mongo write. [`ReadAccessAuditServiceTest`](../../alert-service/src/test/java/com/frauddetection/alert/audit/read/ReadAccessAuditServiceTest.java) checks bounded records and persistence behavior. | There is no independent read-audit anchor or tamper detector; a privileged database operator can change or delete records. |
+| Browser switches accounts | OIDC callback identity changes clear a selected detail before another account loads it. See [`App.test.jsx`](../../analyst-console-ui/src/App.test.jsx) (`clears a selected detail when the OIDC callback changes the active account`) and [`authProvider.test.js`](../../analyst-console-ui/src/auth/authProvider.test.js) (`prepares oidc provider around a token/session source boundary`). | These are application tests, not a live identity-provider/browser test; backend authorization remains authoritative. |
 
 ## Review Checklist
 
@@ -98,3 +130,13 @@ Audit and regulated mutation controls are local service contracts. They are not 
 - UI auth-sensitive calls go through `createAlertsApiClient({ session, authProvider })`.
 - New metrics use bounded low-cardinality labels.
 - New service-to-service calls use `InternalServiceAuthHeaders` and the shared internal HTTP client boundary.
+
+### Sensitive read audit response boundary
+
+Sensitive MVC responses use buffered response bodies (`DTO`, maps, lists and `ResponseEntity` bodies). The audit is
+persisted before Spring serializes those bodies. Successful `200`, bodyless `204`, and conditional `304` responses
+are covered; controller failures and authorization denials are audited while preserving their selected status.
+In bank, staging, production, or explicitly fail-closed mode, an unavailable audit store produces a bounded `503`
+before sensitive content is written. Missing actor identity also fails closed; ordinary `401`/`403` responses remain
+intact. Streaming, asynchronous, `Resource`, and raw `InputStream` response types are unsupported for sensitive reads
+and are rejected in fail-closed mode. Local fail-open mode remains best effort and emits bounded audit-failure metrics.

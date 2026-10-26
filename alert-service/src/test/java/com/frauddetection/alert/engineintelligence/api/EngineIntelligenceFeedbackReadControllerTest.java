@@ -2,6 +2,7 @@ package com.frauddetection.alert.engineintelligence.api;
 
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditSliceTestConfiguration;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -54,7 +55,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         }
 )
 @AutoConfigureMockMvc(addFilters = false)
-@Import({AlertServiceExceptionHandler.class, EngineIntelligenceFeedbackReadQueryPolicy.class})
+@Import({AlertServiceExceptionHandler.class, EngineIntelligenceFeedbackReadQueryPolicy.class,
+        SensitiveReadAuditSliceTestConfiguration.class})
 class EngineIntelligenceFeedbackReadControllerTest {
 
     @Autowired

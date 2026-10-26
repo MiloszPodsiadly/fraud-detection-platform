@@ -9,6 +9,9 @@ import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.assistant.AnalystCaseSummaryUseCase;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.audit.read.ReadAccessAuditEventDocument;
+import com.frauddetection.alert.audit.read.ReadAccessAuditRepository;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
@@ -52,6 +55,10 @@ import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -74,6 +81,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
         SecurityDeniedAccessTelemetrySliceTestConfig.class,
+        JwtAlertReadAuditSliceTestConfiguration.class,
         AlertResponseMapper.class,
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,
@@ -84,8 +92,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = {
         "app.security.jwt.enabled=true",
         "app.security.jwt.jwk-set-uri=https://issuer.example.test/.well-known/jwks.json",
+        "app.security.jwt.issuer-uri=https://issuer.example.test",
+        "app.security.jwt.expected-audience=fraud-detection-platform-api",
         "app.security.jwt.user-id-claim=sub",
-        "app.security.jwt.access-claim=groups"
+        "app.security.jwt.access-claim=groups",
+        "app.sensitive-reads.audit.fail-closed=true"
 })
 class AlertSecurityConfigJwtEnabledTest {
 
@@ -119,12 +130,17 @@ class AlertSecurityConfigJwtEnabledTest {
     @MockitoBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
+    @MockitoBean
+    private ReadAccessAuditRepository readAccessAuditRepository;
+
     @BeforeEach
     void setUp() {
         when(alertManagementUseCase.listAlerts(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
         when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
         when(jwtDecoder.decode(startsWith("token-"))).thenAnswer(invocation -> switch (invocation.getArgument(0, String.class)) {
             case "token-analyst" -> jwt("analyst-1", List.of("fraud-analyst"));
+            case "token-invalid" -> throw new org.springframework.security.oauth2.jwt.BadJwtException("invalid token");
+            case "token-no-alert-read" -> jwt("analyst-no-alert-read", List.of("unmapped-group"));
             case "token-readonly" -> jwt("readonly-1", List.of("fraud-readonly-analyst"));
             case "token-reviewer" -> jwt("reviewer-1", List.of("fraud-reviewer"));
             case "token-admin" -> jwt("admin-1", List.of("fraud-ops-admin"));
@@ -148,6 +164,53 @@ class AlertSecurityConfigJwtEnabledTest {
         mockMvc.perform(get("/api/v1/alerts").header("Authorization", "Bearer token-analyst"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
+
+        org.mockito.ArgumentCaptor<ReadAccessAuditEventDocument> auditEvent =
+                org.mockito.ArgumentCaptor.forClass(ReadAccessAuditEventDocument.class);
+        verify(readAccessAuditRepository, times(1)).save(auditEvent.capture());
+        org.assertj.core.api.Assertions.assertThat(auditEvent.getValue().actorId())
+                .isEqualTo(PolicyGovernanceActor.identityId("https://issuer.example.test", "analyst-1"));
+        org.assertj.core.api.Assertions.assertThat(auditEvent.getValue().endpointCategory())
+                .isEqualTo(com.frauddetection.alert.audit.read.ReadAccessEndpointCategory.ALERT_LIST);
+        org.assertj.core.api.Assertions.assertThat(auditEvent.getValue().resourceType())
+                .isEqualTo(com.frauddetection.alert.audit.read.ReadAccessResourceType.ALERT);
+        org.assertj.core.api.Assertions.assertThat(auditEvent.getValue().outcome())
+                .isEqualTo(com.frauddetection.alert.audit.read.ReadAccessAuditOutcome.SUCCESS);
+        verifyNoInteractions(sensitiveReadAuditService);
+    }
+
+    @Test
+    void shouldDenyAlertListBeforeCallingProtectedUseCaseOrPersistingAudit() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts").header("Authorization", "Bearer token-no-alert-read"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+
+        verifyNoInteractions(alertManagementUseCase, readAccessAuditRepository, sensitiveReadAuditService);
+    }
+
+    @Test
+    void shouldReturn401WhenJwtIsInvalid() throws Exception {
+        mockMvc.perform(get("/api/v1/alerts").header("Authorization", "Bearer token-invalid"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(readAccessAuditRepository);
+    }
+
+    @Test
+    void shouldReturn503WithoutAlertContentWhenMandatoryReadAuditPersistenceFails() throws Exception {
+        doThrow(new org.springframework.dao.DataAccessResourceFailureException("private mongo detail"))
+                .when(readAccessAuditRepository).save(any());
+
+        var response = mockMvc.perform(get("/api/v1/alerts")
+                        .header("Authorization", "Bearer token-analyst"))
+                .andExpect(status().isServiceUnavailable())
+                .andReturn().getResponse();
+
+        org.assertj.core.api.Assertions.assertThat(response.getContentAsString())
+                .contains("Sensitive read audit unavailable.")
+                .doesNotContain("private mongo detail", "customer", "transaction");
+        verify(readAccessAuditRepository, times(1)).save(any());
+        verifyNoInteractions(sensitiveReadAuditService);
     }
 
     @Test
@@ -199,7 +262,8 @@ class AlertSecurityConfigJwtEnabledTest {
                 Instant.parse("2026-04-23T10:00:00Z"),
                 Instant.parse("2026-04-23T11:00:00Z"),
                 Map.of("alg", "none"),
-                Map.of("sub", userId, "groups", groups)
+                Map.of("iss", "https://issuer.example.test", "sub", userId,
+                        "aud", List.of("fraud-detection-platform-api"), "groups", groups)
         );
     }
 

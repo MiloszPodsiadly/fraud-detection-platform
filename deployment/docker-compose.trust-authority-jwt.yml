@@ -1,6 +1,11 @@
 services:
   audit-trust-authority:
+    depends_on:
+      audit-trust-key-loader:
+        condition: service_completed_successfully
     environment:
+      TRUST_AUTHORITY_ACTIVE_PRIVATE_KEY_PATH: /run/audit-trust-keys/ed25519-private.key
+      TRUST_AUTHORITY_ACTIVE_PUBLIC_KEY_PATH: /run/audit-trust-keys/ed25519-public.key
       TRUST_AUTHORITY_IDENTITY_MODE: jwt-service-identity
       TRUST_AUTHORITY_AUDIT_SINK: durable-hash-chain
       TRUST_AUTHORITY_JWT_ISSUER: fraud-platform-local
@@ -13,6 +18,13 @@ services:
       APP_TRUST_AUTHORITY_CALLERS_0_SIGN_RATE_LIMIT_PER_MINUTE: "1000"
     volumes:
       - ./.local/service-identity/jwks.json:/run/service-identity/jwks.json:ro
+      - type: volume
+        source: audit-trust-keys
+        target: /run/audit-trust-keys
+        read_only: true
+
+  audit-trust-key-loader:
+    profiles: !reset []
 
   alert-service:
     environment:

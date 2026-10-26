@@ -4,6 +4,8 @@ import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.suspicious.api.SuspiciousTransactionSearchQuery;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.nio.charset.StandardCharsets;
@@ -17,6 +19,12 @@ import java.util.TreeMap;
 @Component
 public class ReadAccessAuditClassifier {
 
+    public static boolean isSensitiveReadHandler(HandlerMethod handlerMethod) {
+        AuditedSensitiveRead policy = AnnotatedElementUtils.findMergedAnnotation(
+                handlerMethod.getMethod(), AuditedSensitiveRead.class);
+        return policy != null && policy.category() != ReadAccessEndpointCategory.UNCLASSIFIED;
+    }
+
     @SuppressWarnings("unchecked")
     public Optional<ReadAccessAuditTarget> classify(HttpServletRequest request) {
         if (!"GET".equalsIgnoreCase(request.getMethod())) {
@@ -25,6 +33,23 @@ public class ReadAccessAuditClassifier {
         String pattern = (String) request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
         Map<String, String> variables = (Map<String, String>) request.getAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
         variables = variables == null ? Map.of() : variables;
+
+        Object mappedHandler = request.getAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE);
+        if (mappedHandler instanceof HandlerMethod handlerMethod) {
+            AuditedSensitiveRead policy = AnnotatedElementUtils.findMergedAnnotation(
+                    handlerMethod.getMethod(), AuditedSensitiveRead.class);
+            if (policy != null && policy.category() != ReadAccessEndpointCategory.UNCLASSIFIED) {
+                if (policy.resourceType() == ReadAccessResourceType.UNKNOWN) {
+                    throw new IllegalStateException("Sensitive read policy requires a resource type for "
+                            + handlerMethod.getShortLogMessage());
+                }
+                String resourceId = !policy.resourceIdVariable().isBlank()
+                        ? variables.get(policy.resourceIdVariable())
+                        : policy.resourceIdParameter().isBlank()
+                                ? null : request.getParameter(policy.resourceIdParameter());
+                return Optional.of(target(policy.category(), policy.resourceType(), resourceId, request));
+            }
+        }
 
         if ("/api/v1/alerts/{alertId}".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.ALERT_DETAIL, ReadAccessResourceType.ALERT, variables.get("alertId"), request));
@@ -93,6 +118,22 @@ public class ReadAccessAuditClassifier {
             return Optional.of(target(
                     ReadAccessEndpointCategory.EXACT_MODEL_SHADOW_PERFORMANCE,
                     ReadAccessResourceType.EXACT_MODEL_SHADOW_PERFORMANCE,
+                    request.getParameter("modelArtifactSha256"),
+                    request
+            ));
+        }
+        if ("/api/v1/governance/model-promotion/state".equals(pattern)) {
+            return Optional.of(target(
+                    ReadAccessEndpointCategory.MODEL_PROMOTION_STATE,
+                    ReadAccessResourceType.MODEL_PROMOTION,
+                    request.getParameter("modelArtifactSha256"),
+                    request
+            ));
+        }
+        if ("/api/v1/governance/model-promotion/assessment".equals(pattern)) {
+            return Optional.of(target(
+                    ReadAccessEndpointCategory.MODEL_PROMOTION_ASSESSMENT,
+                    ReadAccessResourceType.MODEL_PROMOTION,
                     request.getParameter("modelArtifactSha256"),
                     request
             ));
@@ -188,8 +229,9 @@ public class ReadAccessAuditClassifier {
     }
 
     private String canonicalQuery(HttpServletRequest request) {
-        String pattern = (String) request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
-        if ("/api/v1/transactions/scored".equals(pattern)) {
+        if (endpointCategory(request).orElse(null) == ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH
+                || "/api/v1/transactions/scored".equals(
+                        request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE))) {
             return ScoredTransactionSearchPolicy.canonicalAuditQuery(request.getParameterMap());
         }
         Map<String, String[]> parameterMap = request.getParameterMap();
@@ -218,6 +260,22 @@ public class ReadAccessAuditClassifier {
                 canonical.append(name).append('=').append(value).append('\n')
         ));
         return canonical.toString();
+    }
+
+    private Optional<ReadAccessEndpointCategory> endpointCategory(HttpServletRequest request) {
+        Object handler = request.getAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE);
+        if (handler instanceof HandlerMethod handlerMethod) {
+            AuditedSensitiveRead policy = AnnotatedElementUtils.findMergedAnnotation(
+                    handlerMethod.getMethod(), AuditedSensitiveRead.class);
+            if (policy != null && policy.category() != ReadAccessEndpointCategory.UNCLASSIFIED) {
+                return Optional.of(policy.category());
+            }
+        }
+        String pattern = (String) request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        if ("/api/v1/transactions/scored".equals(pattern)) {
+            return Optional.of(ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH);
+        }
+        return Optional.empty();
     }
 
     private String normalize(String value) {

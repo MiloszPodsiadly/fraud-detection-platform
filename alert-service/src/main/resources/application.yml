@@ -60,6 +60,11 @@ model-card:
     path: ${MODEL_CARD_CURRENT_PATH:}
     max-card-size-bytes: ${MODEL_CARD_CURRENT_MAX_CARD_SIZE_BYTES:524288}
     max-markdown-size-bytes: ${MODEL_CARD_CURRENT_MAX_MARKDOWN_SIZE_BYTES:262144}
+  artifacts:
+    enabled: ${MODEL_CARD_ARTIFACTS_ENABLED:false}
+    base-dir: ${MODEL_CARD_ARTIFACTS_BASE_DIR:/run/model-card-artifacts}
+    max-card-size-bytes: ${MODEL_CARD_ARTIFACTS_MAX_CARD_SIZE_BYTES:524288}
+    max-markdown-size-bytes: ${MODEL_CARD_ARTIFACTS_MAX_MARKDOWN_SIZE_BYTES:262144}
 
 model-shadow-performance:
   artifacts:
@@ -68,6 +73,25 @@ model-shadow-performance:
     max-summary-size-bytes: ${MODEL_SHADOW_PERFORMANCE_MAX_SUMMARY_SIZE_BYTES:524288}
 
 app:
+  model-promotion:
+    credential-bootstrap:
+      path: ${MODEL_PROMOTION_CREDENTIAL_BOOTSTRAP_PATH:}
+    trusted-issuers:
+      path: ${MODEL_PROMOTION_TRUSTED_ISSUERS_PATH:}
+      minimum-generation: ${MODEL_PROMOTION_TRUST_MIN_GENERATION:1}
+    approval-trust:
+      path: ${MODEL_PROMOTION_APPROVAL_TRUST_PATH:}
+      minimum-generation: ${MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION:1}
+    online-actor-trust:
+      path: ${MODEL_PROMOTION_ONLINE_ACTOR_TRUST_PATH:}
+      minimum-generation: ${MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION:1}
+    persistence:
+      enabled: ${MODEL_PROMOTION_PERSISTENCE_ENABLED:true}
+    api:
+      max-requests-per-minute: ${MODEL_PROMOTION_API_MAX_REQUESTS_PER_MINUTE:30}
+      max-tracked-actors: ${MODEL_PROMOTION_API_MAX_TRACKED_ACTORS:10000}
+      rate-limiter:
+        mode: ${MODEL_PROMOTION_API_RATE_LIMITER_MODE:redis}
   fraud-cases:
     work-queue:
       sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}
@@ -99,6 +123,8 @@ app:
     preview:
       max-per-minute: ${TRUST_INCIDENTS_PREVIEW_MAX_PER_MINUTE:30}
   audit:
+    integrity:
+      max-range-length: ${AUDIT_CHAIN_RANGE_MAX_LENGTH:1000}
     bank-mode:
       fail-closed: ${AUDIT_BANK_MODE_FAIL_CLOSED:false}
     local-phase-writer:
@@ -156,6 +182,11 @@ app:
     audit:
       fail-closed: ${SENSITIVE_READS_AUDIT_FAIL_CLOSED:false}
   security:
+    model-promotion-emergency:
+      # Configure only after the IdP enforces and signs this exact fresh step-up ACR.
+      trusted-issuer: ${MODEL_PROMOTION_EMERGENCY_TRUSTED_ISSUER:}
+      trusted-acr: ${MODEL_PROMOTION_EMERGENCY_TRUSTED_ACR:}
+      max-age-seconds: ${MODEL_PROMOTION_EMERGENCY_MAX_AGE_SECONDS:300}
     demo-auth:
       enabled: ${APP_SECURITY_DEMO_AUTH_ENABLED:false}
     bff:
@@ -168,17 +199,42 @@ app:
     jwt:
       enabled: ${APP_SECURITY_JWT_ENABLED:false}
       required: ${APP_SECURITY_JWT_REQUIRED:false}
-      # Required when APP_SECURITY_JWT_ENABLED=true.
-      # Prefer jwk-set-uri for explicit key discovery in local/integration setups.
+      # Protected deployments require issuer-uri and expected-audience together.
       issuer-uri: ${APP_SECURITY_JWT_ISSUER_URI:}
       jwk-set-uri: ${APP_SECURITY_JWT_JWK_SET_URI:}
+      expected-audience: ${APP_SECURITY_JWT_EXPECTED_AUDIENCE:}
+      # Lower-assurance local/test-only escape hatch; requires an explicit opt-in and profile.
+      allow-unbound-jwks-for-local: ${APP_SECURITY_JWT_ALLOW_UNBOUND_JWKS_FOR_LOCAL:false}
       user-id-claim: ${APP_SECURITY_JWT_USER_ID_CLAIM:sub}
       access-claim: ${APP_SECURITY_JWT_ACCESS_CLAIM:groups}
+      production-promotion-access-values: ${APP_SECURITY_JWT_PRODUCTION_PROMOTION_ACCESS_VALUES:}
       role-mapping:
         fraud-readonly-analyst: READ_ONLY_ANALYST
         fraud-analyst: ANALYST
         fraud-reviewer: REVIEWER
         fraud-ops-admin: FRAUD_OPS_ADMIN
+    model-policy:
+      # Policy mandates are independent of REVIEWER and FRAUD_OPS_ADMIN.
+      # Bind these group names only to trusted IdP groups in the deployment.
+      group-mapping:
+        model-policy-reader: ["model-policy:read", "model-policy:audit:read"]
+        model-policy-author: ["model-policy:read", "model-policy:directory:read", "model-policy:create", "model-policy:submit", "model-policy:credential:enroll"]
+        model-policy-approver: ["model-policy:read", "model-policy:approve", "model-policy:reject", "model-policy:credential:enroll"]
+        model-policy-publisher: ["model-policy:read", "model-policy:publish:request"]
+        model-policy-recovery: ["model-policy:read", "model-policy:publication:recover", "model-policy:audit:read"]
+        model-policy-audit-recovery: ["model-policy:audit:recover"]
+        model-policy-credential-admin: ["model-policy:credential:admin"]
+        model-policy-credential-incident-revoker: ["model-policy:credential:incident-revoke"]
+        model-policy-credential-holder: ["model-policy:credential:enroll"]
+        model-policy-production: ["model-policy:scope:production"]
+        model-policy-trust-requester: ["model-policy:trust:read", "model-policy:trust:request"]
+        model-policy-trust-approver: ["model-policy:trust:read", "model-policy:trust:approve"]
+        model-promotion-emergency-requester: ["model-promotion:emergency:request"]
+        model-promotion-emergency-authorizer: ["model-promotion:emergency:authorize"]
+        model-promotion-retirement-operator: ["model-promotion:retire"]
+  model-policy-webauthn:
+    rp-id: ${APP_MODEL_POLICY_WEBAUTHN_RP_ID:localhost}
+    origin: ${APP_MODEL_POLICY_WEBAUTHN_ORIGIN:http://localhost:4173}
   internal-auth:
     client:
       enabled: ${INTERNAL_AUTH_CLIENT_ENABLED:false}

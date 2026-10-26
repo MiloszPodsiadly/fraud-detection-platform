@@ -19,8 +19,7 @@ import java.util.List;
         @CompoundIndex(name = "audit_event_type_created_at_idx", def = "{'event_type': 1, 'created_at': -1}"),
         @CompoundIndex(name = "audit_resource_created_at_idx", def = "{'resource_type': 1, 'resource_id': 1, 'created_at': -1}"),
         @CompoundIndex(name = "audit_source_service_created_at_idx", def = "{'source_service': 1, 'created_at': -1}"),
-        @CompoundIndex(name = "audit_partition_created_at_idx", def = "{'partition_key': 1, 'created_at': -1}"),
-        @CompoundIndex(name = "audit_request_id_idx", def = "{'request_id': 1}", unique = true, sparse = true)
+        @CompoundIndex(name = "audit_partition_created_at_idx", def = "{'partition_key': 1, 'created_at': -1}")
 })
 public record AuditEventDocument(
         @Id
@@ -120,7 +119,7 @@ public record AuditEventDocument(
                 null,
                 null
         );
-        return new AuditEventDocument(
+        AuditEventDocument unhashed = new AuditEventDocument(
                 auditId,
                 event.action(),
                 event.actor().userId(),
@@ -145,13 +144,8 @@ public record AuditEventDocument(
                 null,
                 HASH_ALGORITHM,
                 SCHEMA_VERSION
-        ).withEventHash(AuditEventHasher.hash(thisWithoutHashPlaceholder(
-                auditId,
-                event,
-                previousEventHash,
-                chainPosition,
-                metadataSummary
-        )));
+        );
+        return unhashed.withEventHash(AuditEventHasher.hash(unhashed));
     }
 
     static AuditEventDocument from(String auditId, AuditEvent event, String previousEventHash) {
@@ -188,43 +182,6 @@ public record AuditEventDocument(
                 eventHash,
                 hashAlgorithm,
                 schemaVersion
-        );
-    }
-
-    private static AuditEventDocument thisWithoutHashPlaceholder(
-            String auditId,
-            AuditEvent event,
-            String previousEventHash,
-            long chainPosition,
-            AuditEventMetadataSummary metadataSummary
-    ) {
-        return new AuditEventDocument(
-                auditId,
-                event.action(),
-                event.actor().userId(),
-                event.actor().userId(),
-                sorted(event.actor().roles()),
-                "HUMAN",
-                sorted(event.actor().authorities()),
-                event.action(),
-                event.resourceType(),
-                event.resourceId(),
-                event.timestamp(),
-                event.correlationId(),
-                bounded(event.requestId(), MAX_REQUEST_ID_LENGTH),
-                SOURCE_SERVICE,
-                PARTITION_KEY,
-                chainPosition,
-                event.outcome(),
-                event.failureCategory() == null
-                        ? AuditEvent.failureCategory(event.outcome(), event.failureReason())
-                        : event.failureCategory(),
-                event.failureReason(),
-                metadataSummary,
-                previousEventHash,
-                null,
-                HASH_ALGORITHM,
-                SCHEMA_VERSION
         );
     }
 

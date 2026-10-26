@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -13,11 +14,14 @@ import org.springframework.data.mongodb.core.mapping.Field;
 import java.time.Instant;
 
 @Document(collection = "write_action_audit_outbox")
-@CompoundIndex(name = "write_action_audit_publishable_v2_idx", def = "{'status': 1, 'next_attempt_at': 1, 'claim_expires_at': 1, 'created_at': 1}")
+@CompoundIndexes({
+        @CompoundIndex(name = "write_action_audit_publishable_v2_idx",
+                def = "{'status': 1, 'next_attempt_at': 1, 'claim_expires_at': 1, 'created_at': 1}"),
+        @CompoundIndex(name = "write_action_audit_recovery_queue_idx", def = "{'status': 1, 'created_at': 1}")
+})
 public class WriteActionAuditOutboxRecord {
 
     @Id
-    @Field("outbox_id")
     private String outboxId;
 
     @Indexed(unique = true)
@@ -41,6 +45,33 @@ public class WriteActionAuditOutboxRecord {
     private String actor;
     private AuditOutcome outcome;
 
+    @Field("governance_event_kind")
+    private String governanceEventKind;
+
+    @Field("governance_evidence_hash")
+    private String governanceEvidenceHash;
+
+    @Field("governance_event_id")
+    private String governanceEventId;
+
+    @Field("governance_scope")
+    private String governanceScope;
+
+    @Field("governance_object_id")
+    private String governanceObjectId;
+
+    @Field("governance_operation_id")
+    private String governanceOperationId;
+
+    @Field("governance_proof_digest")
+    private String governanceProofDigest;
+
+    @Field("governance_result_id")
+    private String governanceResultId;
+
+    @Field("governance_occurred_at")
+    private Instant governanceOccurredAt;
+
     @Field("metadata_summary")
     private AuditEventMetadataSummary metadataSummary;
 
@@ -51,6 +82,9 @@ public class WriteActionAuditOutboxRecord {
 
     @Field("max_attempts")
     private int maxAttempts;
+
+    @Field("recovery_count")
+    private int recoveryCount;
 
     @Field("next_attempt_at")
     private Instant nextAttemptAt;
@@ -66,6 +100,12 @@ public class WriteActionAuditOutboxRecord {
 
     @Field("claim_owner")
     private String claimOwner;
+
+    @Field("claim_token")
+    private String claimToken;
+
+    @Field("claim_generation")
+    private long claimGeneration;
 
     @Field("claim_expires_at")
     private Instant claimExpiresAt;
@@ -97,6 +137,24 @@ public class WriteActionAuditOutboxRecord {
     public void setActor(String actor) { this.actor = actor; }
     public AuditOutcome getOutcome() { return outcome; }
     public void setOutcome(AuditOutcome outcome) { this.outcome = outcome; }
+    public String getGovernanceEventKind() { return governanceEventKind; }
+    public void setGovernanceEventKind(String governanceEventKind) { this.governanceEventKind = governanceEventKind; }
+    public String getGovernanceEvidenceHash() { return governanceEvidenceHash; }
+    public void setGovernanceEvidenceHash(String governanceEvidenceHash) { this.governanceEvidenceHash = governanceEvidenceHash; }
+    public String getGovernanceEventId() { return governanceEventId; }
+    public void setGovernanceEventId(String governanceEventId) { this.governanceEventId = governanceEventId; }
+    public String getGovernanceScope() { return governanceScope; }
+    public void setGovernanceScope(String governanceScope) { this.governanceScope = governanceScope; }
+    public String getGovernanceObjectId() { return governanceObjectId; }
+    public void setGovernanceObjectId(String governanceObjectId) { this.governanceObjectId = governanceObjectId; }
+    public String getGovernanceOperationId() { return governanceOperationId; }
+    public void setGovernanceOperationId(String governanceOperationId) { this.governanceOperationId = governanceOperationId; }
+    public String getGovernanceProofDigest() { return governanceProofDigest; }
+    public void setGovernanceProofDigest(String governanceProofDigest) { this.governanceProofDigest = governanceProofDigest; }
+    public String getGovernanceResultId() { return governanceResultId; }
+    public void setGovernanceResultId(String governanceResultId) { this.governanceResultId = governanceResultId; }
+    public Instant getGovernanceOccurredAt() { return governanceOccurredAt; }
+    public void setGovernanceOccurredAt(Instant governanceOccurredAt) { this.governanceOccurredAt = governanceOccurredAt; }
     public AuditEventMetadataSummary getMetadataSummary() { return metadataSummary; }
     public void setMetadataSummary(AuditEventMetadataSummary metadataSummary) { this.metadataSummary = metadataSummary; }
     public WriteActionAuditOutboxStatus getStatus() { return status; }
@@ -105,6 +163,8 @@ public class WriteActionAuditOutboxRecord {
     public void setAttemptCount(int attemptCount) { this.attemptCount = attemptCount; }
     public int getMaxAttempts() { return maxAttempts; }
     public void setMaxAttempts(int maxAttempts) { this.maxAttempts = maxAttempts; }
+    public int getRecoveryCount() { return recoveryCount; }
+    public void setRecoveryCount(int recoveryCount) { this.recoveryCount = recoveryCount; }
     public Instant getNextAttemptAt() { return nextAttemptAt; }
     public void setNextAttemptAt(Instant nextAttemptAt) { this.nextAttemptAt = nextAttemptAt; }
     public Instant getCreatedAt() { return createdAt; }
@@ -115,6 +175,10 @@ public class WriteActionAuditOutboxRecord {
     public void setClaimedAt(Instant claimedAt) { this.claimedAt = claimedAt; }
     public String getClaimOwner() { return claimOwner; }
     public void setClaimOwner(String claimOwner) { this.claimOwner = claimOwner; }
+    public String getClaimToken() { return claimToken; }
+    public void setClaimToken(String claimToken) { this.claimToken = claimToken; }
+    public long getClaimGeneration() { return claimGeneration; }
+    public void setClaimGeneration(long claimGeneration) { this.claimGeneration = claimGeneration; }
     public Instant getClaimExpiresAt() { return claimExpiresAt; }
     public void setClaimExpiresAt(Instant claimExpiresAt) { this.claimExpiresAt = claimExpiresAt; }
     public Instant getPublishedAt() { return publishedAt; }

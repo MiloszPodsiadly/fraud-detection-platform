@@ -1,6 +1,8 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,7 +18,8 @@ public class ShadowPerformanceSummaryController {
     }
 
     @GetMapping("/current")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SHADOW_PERFORMANCE_SUMMARY,
+            resourceType = ReadAccessResourceType.SHADOW_PERFORMANCE_SUMMARY)
     public ShadowPerformanceSummaryResponse currentSummary() {
         return readService.currentSummary();
     }

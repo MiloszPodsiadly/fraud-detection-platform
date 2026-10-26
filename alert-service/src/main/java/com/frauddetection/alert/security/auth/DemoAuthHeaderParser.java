@@ -34,7 +34,11 @@ public class DemoAuthHeaderParser implements AnalystPrincipalResolver {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         authorities.addAll(parseAuthorities(request.getHeader(DemoAuthHeaders.AUTHORITIES)));
 
-        return Optional.of(new AnalystPrincipal(userId.trim(), roles, authorities));
+        return Optional.of(new AnalystPrincipal(userId.trim(), roles, authorities, null,
+                "local:" + com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor.identityId(
+                        "demo-auth", java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                                userId.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                        .substring("oidc:".length())));
     }
 
     private Set<AnalystRole> parseRoles(String headerValue) {

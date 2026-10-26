@@ -101,6 +101,7 @@ describe("authProvider", () => {
         authenticated: true,
         sessionStatus: "AUTHENTICATED",
         userId: "server-user-1",
+        actorId: `oidc:${"a".repeat(64)}`,
         roles: ["FRAUD_OPS_ADMIN"],
         authorities: ["alert:read"],
         csrf: {
@@ -117,6 +118,7 @@ describe("authProvider", () => {
 
     await expect(provider.refreshSession()).resolves.toMatchObject({
       userId: "server-user-1",
+      actorId: `oidc:${"a".repeat(64)}`,
       roles: ["FRAUD_OPS_ADMIN"]
     });
     expect(authHeadersForSession(provider)).toEqual({

@@ -57,7 +57,9 @@ public class EngineIntelligenceFeedbackReadController {
     }
 
     @GetMapping("/{transactionId}/engine-intelligence/feedback")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ,
+            resourceType = ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK,
+            resourceIdVariable = "transactionId")
     public EngineIntelligenceFeedbackReadModel read(
             @PathVariable String transactionId,
             @RequestParam MultiValueMap<String, String> rawParams,

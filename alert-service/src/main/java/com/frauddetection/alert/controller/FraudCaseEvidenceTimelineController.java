@@ -35,7 +35,8 @@ public class FraudCaseEvidenceTimelineController {
         this.metrics = metrics;
     }
 
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_TIMELINE,
+            resourceType = ReadAccessResourceType.FRAUD_CASE, resourceIdVariable = "caseId")
     @GetMapping("/{caseId}/evidence-timeline")
     public FraudCaseEvidenceTimelineResponse timeline(@PathVariable String caseId, HttpServletRequest request) {
         try {

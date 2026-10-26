@@ -1,11 +1,9 @@
 package com.frauddetection.alert.audit.read;
 
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
-
-import java.util.Arrays;
-import java.util.Locale;
 
 @Component
 public class SensitiveReadAuditPolicy {
@@ -25,15 +23,10 @@ public class SensitiveReadAuditPolicy {
     }
 
     public boolean failClosed() {
-        return sensitiveReadsFailClosed || bankModeFailClosed || prodLikeProfile();
+        return sensitiveReadsFailClosed || InstitutionalModePolicy.isInstitutionalMode(environment, bankModeFailClosed);
     }
 
     public boolean prodLikeProfile() {
-        return Arrays.stream(environment.getActiveProfiles())
-                .map(profile -> profile.toLowerCase(Locale.ROOT))
-                .anyMatch(profile -> profile.equals("prod")
-                        || profile.equals("production")
-                        || profile.equals("staging")
-                        || profile.equals("bank"));
+        return InstitutionalModePolicy.hasInstitutionalProfile(environment);
     }
 }

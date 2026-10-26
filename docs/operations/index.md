@@ -4,8 +4,16 @@ Status: current operations documentation index.
 
 ## Scope
 
-This folder contains operations-oriented branch evidence that is not a live runbook. Use [runbooks](../runbooks/index.md)
-for current operator procedures and [observability](../observability/index.md) for dashboard and metric contracts.
+This folder contains operations-oriented branch evidence and the offline policy-publication procedure. Use
+[runbooks](../runbooks/index.md) for runtime operator procedures and [observability](../observability/index.md)
+for dashboard and metric contracts.
+
+## Offline Procedure
+
+| Document | Scope |
+| --- | --- |
+| [Local model-promotion policy publication](model_promotion_policy_publication.md) | Separate author, approver and publisher actions, with durable approval evidence. |
+| [Model-promotion trust operations](model_promotion_trust_operations.md) | Public-key provisioning, fingerprint checks, rotation, revocation, registry floors and recovery. |
 
 ## Branch Evidence
 

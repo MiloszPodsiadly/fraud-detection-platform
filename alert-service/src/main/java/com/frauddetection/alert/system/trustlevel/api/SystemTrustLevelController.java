@@ -48,7 +48,8 @@ public class SystemTrustLevelController {
     }
 
     @GetMapping("/system/trust-level")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SYSTEM_TRUST_LEVEL,
+            resourceType = ReadAccessResourceType.SYSTEM_TRUST_LEVEL)
     public SystemTrustLevelResponse trustLevel(HttpServletRequest request) {
         SystemTrustLevelResponse response = responseMapper.map(trustLevelService.trustLevel());
         if (sensitiveReadAuditService != null) {

@@ -25,13 +25,6 @@ public class AuditEventRepository {
         return mongoTemplate.insert(document);
     }
 
-    public Optional<AuditEventDocument> findLatestBySourceService(String sourceService) throws DataAccessException {
-        Query query = new Query(Criteria.where("source_service").is(sourceService))
-                .with(Sort.by(Sort.Direction.DESC, "created_at"))
-                .limit(1);
-        return Optional.ofNullable(mongoTemplate.findOne(query, AuditEventDocument.class));
-    }
-
     public Optional<AuditEventDocument> findLatestByPartitionKey(String partitionKey) throws DataAccessException {
         Query query = new Query(Criteria.where("partition_key").is(partitionKey))
                 .with(Sort.by(Sort.Order.desc("chain_position"), Sort.Order.desc("created_at")))
@@ -74,6 +67,17 @@ public class AuditEventRepository {
 
     public List<AuditEventDocument> findFullChain(String partitionKey, int limit) throws DataAccessException {
         Query query = new Query(Criteria.where("partition_key").is(partitionKey))
+                .with(Sort.by(Sort.Direction.ASC, "chain_position"))
+                .limit(limit);
+        return mongoTemplate.find(query, AuditEventDocument.class);
+    }
+
+    /** Indexed, inclusive position lookup. Callers pass maxRange + 1 to detect truncation/duplicates. */
+    public List<AuditEventDocument> findByPartitionKeyAndChainPositionBetween(
+            String partitionKey, long fromPosition, long toPosition, int limit) throws DataAccessException {
+        Query query = new Query(new Criteria().andOperator(
+                Criteria.where("partition_key").is(partitionKey),
+                Criteria.where("chain_position").gte(fromPosition).lte(toPosition)))
                 .with(Sort.by(Sort.Direction.ASC, "chain_position"))
                 .limit(limit);
         return mongoTemplate.find(query, AuditEventDocument.class);

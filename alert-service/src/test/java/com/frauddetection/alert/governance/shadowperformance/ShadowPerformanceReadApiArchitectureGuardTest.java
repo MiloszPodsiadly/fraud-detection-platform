@@ -475,7 +475,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
 
         assertThat(makefile).contains(
                 "SECURITY_HARDENED_COMPOSE = $(SHADOW_PERFORMANCE_GENERATED_COMPOSE)",
-                "app-up: deployment/.env shadow-performance-summary",
+                "app-up: deployment/.env local-runtime-fixtures shadow-performance-summary",
                 "app-up-shadow-performance-generated: deployment/.env shadow-performance-summary",
                 "deployment/local-generated/shadow-performance/current-summary.json",
                 "deployment/local-generated/shadow-performance/manifest.json",

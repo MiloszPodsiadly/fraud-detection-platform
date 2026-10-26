@@ -12,6 +12,7 @@ COPY feature-enricher-service/pom.xml feature-enricher-service/pom.xml
 COPY fraud-scoring-service/pom.xml fraud-scoring-service/pom.xml
 COPY alert-service/pom.xml alert-service/pom.xml
 COPY audit-trust-authority/pom.xml audit-trust-authority/pom.xml
+COPY model-promotion-policy-publisher/pom.xml model-promotion-policy-publisher/pom.xml
 
 COPY common-events/src common-events/src
 COPY common-test-support/src common-test-support/src

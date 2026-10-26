@@ -16,6 +16,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -134,7 +135,8 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
                 auditAnchorRepository,
                 lockRepository,
                 metrics,
-                properties
+                properties,
+                new AuditMongoTransactionRunner(new MongoTransactionManager(databaseFactory))
         );
 
         assertThatThrownBy(() -> failingWriter.recordSuccessPhase(
@@ -149,13 +151,39 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
     }
 
     @Test
+    void corruptedPreviousHash_failsClosedWithoutAppendingEventOrAnchor() {
+        RegulatedMutationCommandDocument first = command("command-canonical-head", "idem-canonical-head", "alert-canonical-head");
+        String firstAuditId = writer.recordSuccessPhase(
+                first,
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
+        );
+        mongoTemplate.updateFirst(
+                Query.query(Criteria.where("_id").is(firstAuditId)),
+                new Update().set("previous_event_hash", "corrupted-previous-hash"),
+                AuditEventDocument.class
+        );
+
+        assertThatThrownBy(() -> writer.recordSuccessPhase(
+                command("command-after-corrupted-head", "idem-after-corrupted-head", "alert-after-corrupted-head"),
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
+        )).isInstanceOf(AuditPersistenceUnavailableException.class)
+                .hasMessageContaining("canonical hash contract");
+
+        assertThat(mongoTemplate.count(new Query(), AuditEventDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), AuditAnchorDocument.class)).isEqualTo(1L);
+    }
+
+    @Test
     void anchorInsertFailure_rollsBackWhenInsideTransaction() {
         RegulatedMutationLocalAuditPhaseWriter failingWriter = new RegulatedMutationLocalAuditPhaseWriter(
                 auditEventRepository,
                 new FailingAuditAnchorRepository(mongoTemplate),
                 lockRepository,
                 metrics,
-                properties
+                properties,
+                new AuditMongoTransactionRunner(new MongoTransactionManager(databaseFactory))
         );
         TransactionTemplate transactionTemplate = new TransactionTemplate(new MongoTransactionManager(databaseFactory));
 
@@ -182,12 +210,44 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
     }
 
     @Test
+    void anchorInsertFailureOutsideOuterTransaction_rollsBackEventAndDoesNotConsumePosition() {
+        RegulatedMutationLocalAuditPhaseWriter failingWriter = new RegulatedMutationLocalAuditPhaseWriter(
+                auditEventRepository,
+                new FailingAuditAnchorRepository(mongoTemplate),
+                lockRepository,
+                metrics,
+                properties,
+                new AuditMongoTransactionRunner(new MongoTransactionManager(databaseFactory))
+        );
+
+        assertThatThrownBy(() -> failingWriter.recordSuccessPhase(
+                command("command-anchor-fail-atomic", "idem-anchor-fail-atomic", "alert-anchor-fail-atomic"),
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
+        )).isInstanceOf(AuditPersistenceUnavailableException.class);
+
+        assertThat(mongoTemplate.count(new Query(), AuditEventDocument.class)).isZero();
+        assertThat(mongoTemplate.count(new Query(), AuditAnchorDocument.class)).isZero();
+
+        String recoveredAuditId = writer.recordSuccessPhase(
+                command("command-anchor-retry-atomic", "idem-anchor-retry-atomic", "alert-anchor-retry-atomic"),
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
+        );
+        AuditEventDocument recovered = auditEventRepository.findByAuditId(recoveredAuditId).orElseThrow();
+        assertThat(recovered.chainPosition()).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), AuditAnchorDocument.class)).isEqualTo(1L);
+    }
+
+    @Test
     void lockReleaseFailure_doesNotTurnFailureIntoDuplicateSuccess() {
         RegulatedMutationCommandDocument command = command("command-release-fail", "idem-release-fail", "alert-release-fail");
+        ReleaseFailingAuditChainLockRepository failingLockRepository =
+                new ReleaseFailingAuditChainLockRepository(mongoTemplate);
         RegulatedMutationLocalAuditPhaseWriter releaseFailingWriter = new RegulatedMutationLocalAuditPhaseWriter(
                 auditEventRepository,
                 auditAnchorRepository,
-                new ReleaseFailingAuditChainLockRepository(mongoTemplate),
+                failingLockRepository,
                 metrics,
                 properties
         );
@@ -201,6 +261,49 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
         assertThat(countAnchors(event.eventHash())).isEqualTo(1);
         assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "LOCK_RELEASE_FAILED", 1.0d);
         assertCounter("regulated_mutation_local_audit_chain_lock_release_failure_total", 1.0d);
+        assertThat(failingLockRepository.releaseAttempts()).isEqualTo(1);
+    }
+
+    @Test
+    void metricsFailureAfterCommitDoesNotFailOrDuplicateSuccessfulAppend() {
+        AlertServiceMetrics throwingMetrics = new AlertServiceMetrics(meterRegistry) {
+            @Override
+            public void recordRegulatedMutationLocalAuditChainAppend(String outcome) {
+                throw new IllegalStateException("metrics backend unavailable");
+            }
+        };
+        RegulatedMutationLocalAuditPhaseWriter metricsFailingWriter = new RegulatedMutationLocalAuditPhaseWriter(
+                auditEventRepository, auditAnchorRepository, lockRepository, throwingMetrics, properties,
+                new AuditMongoTransactionRunner(new MongoTransactionManager(databaseFactory)));
+        RegulatedMutationCommandDocument command = command("command-metrics-fail", "idem-metrics-fail", "alert-metrics-fail");
+
+        String auditId = metricsFailingWriter.recordSuccessPhase(command,
+                AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT);
+
+        assertThat(auditId).isNotBlank();
+        assertThat(countEvents(command.getId() + ":SUCCESS")).isEqualTo(1L);
+        AuditEventDocument event = auditEventRepository.findByRequestId(command.getId() + ":SUCCESS").orElseThrow();
+        assertThat(countAnchors(event.eventHash())).isEqualTo(1L);
+    }
+
+    @Test
+    void outerTransactionKeepsChainLeaseUntilCommitCompletes() {
+        TransactionTemplate outer = new TransactionTemplate(new MongoTransactionManager(databaseFactory));
+        RegulatedMutationCommandDocument command = command("command-outer-lock", "idem-outer-lock", "alert-outer-lock");
+
+        outer.executeWithoutResult(status -> {
+            writer.recordSuccessPhase(command, AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT);
+            AuditChainLockDocument held = mongoTemplate.findById(
+                    AuditEventDocument.PARTITION_KEY, AuditChainLockDocument.class);
+            assertThat(held).isNotNull();
+            assertThat(held.ownerToken()).isNotBlank();
+        });
+
+        AuditChainLockDocument released = mongoTemplate.findById(
+                AuditEventDocument.PARTITION_KEY, AuditChainLockDocument.class);
+        assertThat(released).isNotNull();
+        assertThat(released.ownerToken()).isNull();
+        assertThat(countEvents(command.getId() + ":SUCCESS")).isEqualTo(1L);
     }
 
     @Test
@@ -313,7 +416,8 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
                 anchorRepository,
                 auditChainLockRepository,
                 metrics,
-                writerProperties
+                writerProperties,
+                new AuditMongoTransactionRunner(new MongoTransactionManager(databaseFactory))
         );
     }
 
@@ -392,13 +496,20 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
     }
 
     private static final class ReleaseFailingAuditChainLockRepository extends AuditChainLockRepository {
+        private final AtomicInteger releaseAttempts = new AtomicInteger();
+
         private ReleaseFailingAuditChainLockRepository(MongoTemplate mongoTemplate) {
             super(mongoTemplate);
         }
 
         @Override
-        public void release(String partitionKey, String ownerToken) throws DataAccessException {
+        public void release(AuditChainLockDocument lease) throws DataAccessException {
+            releaseAttempts.incrementAndGet();
             throw new DataAccessResourceFailureException("lock release failed");
+        }
+
+        private int releaseAttempts() {
+            return releaseAttempts.get();
         }
     }
 

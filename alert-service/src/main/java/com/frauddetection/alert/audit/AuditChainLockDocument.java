@@ -16,6 +16,9 @@ public record AuditChainLockDocument(
         String ownerToken,
 
         @Field("locked_until")
-        Instant lockedUntil
+        Instant lockedUntil,
+
+        @Field("generation")
+        long generation
 ) {
 }

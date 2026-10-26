@@ -61,7 +61,22 @@ class AuditTrustAttestationConfigurationTest {
 
         assertThatThrownBy(() -> configuration.auditTrustAttestationSigner(properties, environment))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("not allowed in prod-like");
+                .hasMessageContaining("not allowed in institutional mode");
+    }
+
+    @Test
+    void shouldRejectLocalDevSignerWhenBankFailClosedFlagIsSetForLocalProfile() {
+        AuditTrustAttestationProperties properties = new AuditTrustAttestationProperties();
+        properties.getSigning().setMode("local-dev");
+        properties.getSigning().setLocalDevKeyId("local-key");
+        properties.getSigning().setLocalDevSecret("secret");
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("app.audit.bank-mode.fail-closed", "true");
+        environment.setActiveProfiles("bank-local");
+
+        assertThatThrownBy(() -> configuration.auditTrustAttestationSigner(properties, environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not allowed in institutional mode");
     }
 
     @Test

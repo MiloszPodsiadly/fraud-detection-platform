@@ -11,6 +11,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditActor;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
 import com.frauddetection.alert.audit.AuditChainLockRepository;
+import com.frauddetection.alert.audit.AuditChainIndexInitializer;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditEvent;
 import com.frauddetection.alert.audit.AuditEventDocument;
@@ -147,7 +148,10 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         localAuditPhaseWriter = new RegulatedMutationLocalAuditPhaseWriter(
                 auditEventRepository,
                 new AuditAnchorRepository(mongoTemplate),
-                new AuditChainLockRepository(mongoTemplate)
+                new AuditChainLockRepository(mongoTemplate),
+                null,
+                new com.frauddetection.alert.audit.LocalAuditPhaseWriterProperties(),
+                new com.frauddetection.alert.audit.AuditMongoTransactionRunner(new MongoTransactionManager(databaseFactory))
         );
 
         RegulatedMutationTransactionRunner transactionRunner = new RegulatedMutationTransactionRunner(
@@ -164,26 +168,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     }
 
     private void ensureAuditIndexes() {
-        mongoTemplate.indexOps(AuditEventDocument.class)
-                .ensureIndex(new Index()
-                        .on("partition_key", Sort.Direction.ASC)
-                        .on("chain_position", Sort.Direction.ASC)
-                        .unique()
-                        .sparse()
-                        .named("audit_partition_chain_position_uidx_test"));
-        mongoTemplate.indexOps(AuditEventDocument.class)
-                .ensureIndex(new Index()
-                        .on("request_id", Sort.Direction.ASC)
-                        .unique()
-                        .sparse()
-                        .named("audit_request_id_uidx_test"));
-        mongoTemplate.indexOps(com.frauddetection.alert.audit.AuditAnchorDocument.class)
-                .ensureIndex(new Index()
-                        .on("partition_key", Sort.Direction.ASC)
-                        .on("chain_position", Sort.Direction.ASC)
-                        .unique()
-                        .sparse()
-                        .named("audit_anchor_partition_chain_position_uidx_test"));
+        new AuditChainIndexInitializer(mongoTemplate).initialize();
     }
 
     private void ensureSingleDecisionIndex() {
@@ -268,7 +253,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 metrics,
                 EvidenceGatedFinalizeCoordinatorIntegrationTest.<ExternalAuditAnchorPublisher>provider(null),
                 false,
-                false
+                false,
+                new com.frauddetection.alert.audit.AuditMongoTransactionRunner(new MongoTransactionManager(databaseFactory))
         );
         RegulatedMutationAuditPhaseService auditPhaseService = new RegulatedMutationAuditPhaseService(
                 auditEventRepository,
@@ -1466,6 +1452,11 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         for (int index = 0; index < documents.size(); index++) {
             AuditEventDocument current = documents.get(index);
             assertThat(current.chainPosition()).isEqualTo(index + 1L);
+            assertThat(com.frauddetection.alert.audit.AuditEventHasher.matches(current)).isTrue();
+            assertThat(mongoTemplate.count(
+                    Query.query(Criteria.where("last_event_hash").is(current.eventHash())),
+                    com.frauddetection.alert.audit.AuditAnchorDocument.class
+            )).isEqualTo(1L);
             if (previous == null) {
                 assertThat(current.previousEventHash()).isNull();
             } else {
@@ -1503,12 +1494,22 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     }
 
     private final class LocalMongoAuditPublisher implements AuditEventPublisher {
-        private final MongoTemplate mongoTemplate;
+        private final PersistentAuditEventPublisher delegate;
         private int successPublishCalls;
         private boolean failAttemptedPublish;
 
         private LocalMongoAuditPublisher(MongoTemplate mongoTemplate) {
-            this.mongoTemplate = mongoTemplate;
+            AlertServiceMetrics metrics = new AlertServiceMetrics(new SimpleMeterRegistry());
+            this.delegate = new PersistentAuditEventPublisher(
+                    new AuditEventRepository(mongoTemplate),
+                    new AuditAnchorRepository(mongoTemplate),
+                    new AuditChainLockRepository(mongoTemplate),
+                    metrics,
+                    null,
+                    false,
+                    false,
+                    new com.frauddetection.alert.audit.AuditMongoTransactionRunner(new MongoTransactionManager(databaseFactory))
+            );
         }
 
         @Override
@@ -1516,37 +1517,10 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
             if (failAttemptedPublish && event.outcome() == AuditOutcome.ATTEMPTED) {
                 throw new DataAccessResourceFailureException("attempted audit unavailable");
             }
+            delegate.publish(event);
             if (event.outcome() == AuditOutcome.SUCCESS) {
                 successPublishCalls++;
             }
-            long chainPosition = mongoTemplate.count(new Query(), AuditEventDocument.class) + 1L;
-            AuditEventDocument document = new AuditEventDocument(
-                    UUID.randomUUID().toString(),
-                    event.action(),
-                    event.actor() == null ? "principal-7" : event.actor().userId(),
-                    event.actor() == null ? "principal-7" : event.actor().userId(),
-                    List.of(),
-                    "HUMAN",
-                    List.of(),
-                    event.action(),
-                    event.resourceType(),
-                    event.resourceId(),
-                    event.timestamp(),
-                    event.correlationId(),
-                    event.requestId(),
-                    "alert-service",
-                    "source_service:alert-service",
-                    chainPosition,
-                    event.outcome(),
-                    event.failureCategory() == null ? AuditFailureCategory.NONE : event.failureCategory(),
-                    event.failureReason(),
-                    event.metadataSummary(),
-                    null,
-                    "hash-" + chainPosition,
-                    "SHA-256",
-                    "1.0"
-            );
-            mongoTemplate.insert(document);
         }
     }
 

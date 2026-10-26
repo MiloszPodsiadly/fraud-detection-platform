@@ -82,6 +82,18 @@ class FraudCaseWorkQueueCursorSecretProfileTest {
                 .run(context -> assertThat(context).hasNotFailed());
     }
 
+    @Test
+    void bankFailClosedFlagRejectsLocalCursorSecretUnderBankLocalProfile() {
+        contextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=bank-local",
+                        "app.audit.bank-mode.fail-closed=true",
+                        "app.fraud-cases.work-queue.sla=PT8H",
+                        "app.fraud-cases.work-queue.cursor-signing-secret=local-dev-work-queue-cursor-secret-change-me"
+                )
+                .run(context -> assertThat(context).hasFailed());
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(FraudCaseWorkQueueProperties.class)
     @Import(FraudCaseWorkQueueCursorSecretStartupGuard.class)

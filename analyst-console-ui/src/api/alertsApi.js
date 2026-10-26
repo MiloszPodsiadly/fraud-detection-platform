@@ -43,6 +43,141 @@ export function createAlertsApiClient({
     getExactModelShadowPerformance: (selector, requestOptions) => exactModelShadowPerformanceRequest(
       request, selector, requestOptions
     ),
+    getModelPromotionState: (selector, requestOptions) => modelPromotionStateRequest(request, selector, requestOptions),
+    getModelPromotionAssessment: (selector, requestOptions) => modelPromotionAssessmentRequest(request, selector, requestOptions),
+    registerModelPromotionCandidate: (command, requestOptions) => modelPromotionCommandRequest(request, "/candidates", command, requestOptions),
+    proposeModelPromotionTransition: (command, requestOptions) => modelPromotionCommandRequest(request, "/proposals", command, requestOptions),
+    proposeModelRetirement: (command, requestOptions) => modelPromotionCommandRequest(request, "/retirement-proposals", command, requestOptions),
+    reviewModelPromotionProposal: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/proposals/${encodeURIComponent(proposalId)}/reviews`, command, requestOptions
+    ),
+    startSignedModelPromotionReview: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/proposals/${encodeURIComponent(proposalId)}/reviews/challenges`, command, requestOptions
+    ),
+    finishSignedModelPromotionReview: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/proposals/${encodeURIComponent(proposalId)}/reviews/signed`, command, requestOptions
+    ),
+    getSignedModelPromotionReviewOperation: (proposalId, operationId, requestOptions) => request(
+      `/api/v1/governance/model-promotion/proposals/${encodeURIComponent(proposalId)}/reviews/operations/${encodeURIComponent(operationId)}`,
+      requestOptions
+    ),
+    requestEmergencyModelRetirement: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/proposals/${encodeURIComponent(proposalId)}/reviews/emergency-authorizations`, command, requestOptions
+    ),
+    inspectEmergencyModelRetirement: (authorizationId, requestOptions) => request(
+      `/api/v1/governance/model-promotion/emergency-authorizations/${encodeURIComponent(authorizationId)}`, requestOptions
+    ),
+    authorizeEmergencyModelRetirement: (authorizationId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/emergency-authorizations/${encodeURIComponent(authorizationId)}/approve`, command, requestOptions
+    ),
+    claimEmergencyModelRetirement: (authorizationId, requestOptions) => modelPromotionCommandRequest(
+      request, `/emergency-authorizations/${encodeURIComponent(authorizationId)}/claim`, {}, requestOptions
+    ),
+    revokeEmergencyModelRetirement: (authorizationId, requestOptions) => modelPromotionCommandRequest(
+      request, `/emergency-authorizations/${encodeURIComponent(authorizationId)}/revoke`, {}, requestOptions
+    ),
+    findAffectedEmergencyModelRetirements: (actorId, incidentId, requestOptions) => request(
+      `/api/v1/governance/model-promotion/emergency-authorizations/active?`
+      + new URLSearchParams({ ...(actorId ? { actorId } : {}), ...(incidentId ? { incidentId } : {}) }), requestOptions
+    ),
+    revokeAffectedEmergencyModelRetirements: (selector, requestOptions) => modelPromotionCommandRequest(
+      request, "/emergency-authorizations/active/revoke", selector, requestOptions
+    ),
+    consumeEmergencyModelRetirement: (proposalId, command, requestOptions) => modelPromotionCommandRequest(
+      request, `/proposals/${encodeURIComponent(proposalId)}/reviews/emergency`, command, requestOptions
+    ),
+    auditEmergencyModelRetirement: (authorizationId, requestOptions) => request(
+      `/api/v1/governance/model-promotion/emergency-authorizations/${encodeURIComponent(authorizationId)}/audit`, requestOptions
+    ),
+    getPolicyGovernanceActor: (options) => request("/api/v1/governance/model-policies/me", options),
+    getPolicyPage: (params = {}, options) => request(
+      `/api/v1/governance/model-policies/page?${new URLSearchParams(Object.entries(params)
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")).toString()}`, options),
+    getPolicySchema: (options) => request("/api/v1/governance/model-policies/schema", options),
+    listPolicyApprovers: (environment, intendedUse, options) => request(
+      `/api/v1/governance/model-policies/approvers?${new URLSearchParams({ environment, intendedUse })}`, options),
+    getPolicyOperation: (operationId, options) => request(
+      `/api/v1/governance/model-policies/operations/${encodeURIComponent(operationId)}`, options),
+    getPolicyProposal: (id, options) => request(policyProposalPath(id), options),
+    getPolicyHistoryPage: (id, params = {}, options) => request(
+      `${policyProposalPath(id)}/history/page?${new URLSearchParams(Object.entries(params)
+        .filter(([, value]) => value !== null && value !== undefined)).toString()}`, options),
+    getPolicyPublication: (id, options) => request(`${policyProposalPath(id)}/publication`, options),
+    getPolicyPublicationRecovery: (id, options) => request(`${policyProposalPath(id)}/publication/recovery`, options),
+    requestPolicyPublicationRecovery: (id, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/publication/recovery`, "POST", command, options),
+    reconcileCommittedPolicyPublication: (id, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/publication/recovery/reconcile`, "POST", command, options),
+    createPolicyDraft: (command, options) => policyCommand(request, "/drafts", "POST", command, options),
+    updatePolicyDraft: (id, command, options) => policyCommand(request, `/drafts/${encodeURIComponent(id)}`, "PUT", command, options),
+    startPolicyAction: (id, action, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/${action}/challenges`, "POST", command, options),
+    finishPolicyAction: (id, action, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/${action}`, "POST", command, options),
+    requestPolicyPublication: (id, command, options) => policyCommand(request,
+      `/${encodeURIComponent(id)}/publication-requests`, "POST", command, options),
+    listPolicyCredentials: (options) => request("/api/v1/governance/model-policies/webauthn/credentials", options),
+    listPolicyCredentialSecurityEvents: (options) => request(
+      "/api/v1/governance/model-policies/webauthn/security-events", options),
+    renamePolicyCredential: (credentialId, label, options) => policyCommand(request,
+      `/webauthn/credentials/${encodeURIComponent(credentialId)}/label`, "PUT", { label }, options),
+    startPolicyCredentialRevocation: (credentialId, operationId, options) => policyCommand(request,
+      `/webauthn/credentials/${encodeURIComponent(credentialId)}/revocation-challenges`,
+      "POST", { operationId }, options),
+    finishPolicyCredentialRevocation: (credentialId, command, options) => policyCommand(request,
+      `/webauthn/credentials/${encodeURIComponent(credentialId)}/revoke`, "POST", command, options),
+    protectedPolicyCredentialRevocation: (credentialId, command, options) => policyCommand(request,
+      `/webauthn/credentials/${encodeURIComponent(credentialId)}/protected-revoke`, "POST", command, options),
+    requestPolicyCredentialGrant: (command, options) => policyCommand(request,
+      "/webauthn/enrollment-grants", "POST", command, options),
+    listMyPolicyCredentialGrants: (options) => request(
+      "/api/v1/governance/model-policies/webauthn/enrollment-grants/mine", options),
+    claimPolicyCredentialGrant: (grantId, options) => policyCommand(request,
+      `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/claim`, "POST", {}, options),
+    getPolicyCredentialGrantReview: (grantId, options) => request(
+      `/api/v1/governance/model-policies/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/review`, options),
+    getPolicyCredentialGrantStatus: (grantId, options) => request(
+      `/api/v1/governance/model-policies/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/status`, options),
+    revokePolicyCredentialGrant: (grantId, command, options) => policyCommand(request,
+      `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/revoke`, "POST", command, options),
+    findPolicyCredentialIncidentGrants: (actorId, afterId, options) => request(
+      `/api/v1/governance/model-policies/webauthn/enrollment-grants/incidents?actorId=${encodeURIComponent(actorId)}`
+        + (afterId ? `&afterId=${encodeURIComponent(afterId)}` : ""), options),
+    startPolicyCredentialGrantReview: (grantId, intent, options) => policyCommand(request,
+      `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/review/challenges`, "POST", intent, options),
+    finishPolicyCredentialGrantReview: (grantId, command, options) => policyCommand(request,
+      `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/review`, "POST", command, options),
+    bootstrapPolicyCredentialGrant: (grantId, options) => policyCommand(request,
+      `/webauthn/enrollment-grants/${encodeURIComponent(grantId)}/bootstrap-approval`, "POST", {}, options),
+    startPolicyCredentialRegistration: (grantToken, options) => policyCommand(request,
+      "/webauthn/registrations", "POST", { grantToken }, options),
+    finishPolicyCredentialRegistration: (command, options) => policyCommand(request,
+      "/webauthn/registrations/complete", "POST", command, options),
+    getPolicySecurityActor: (options) => request("/api/v1/governance/policy-security/me", options),
+    getPolicySecurityOperations: (options) => request("/api/v1/governance/policy-security/operations", options),
+    listAuditRecoveryObligations: (options) => request("/api/v1/governance/audit/recovery", options),
+    listAuditRecoveryHistory: (options) => request("/api/v1/governance/audit/recovery/history", options),
+    recoverAuditObligation: (kind, eventId, command, options = {}) => request(
+      `/api/v1/governance/audit/commitments/${encodeURIComponent(kind)}/${encodeURIComponent(eventId)}/recovery`,
+      { ...options, method: "POST", body: JSON.stringify(command) }),
+    getPolicyTrustRegistries: (options) => request("/api/v1/governance/policy-trust/registries", options),
+    listPolicyTrustChanges: (options) => request("/api/v1/governance/policy-trust/requests", options),
+    getPolicyTrustChangeAudit: (id, options) => request(
+      `/api/v1/governance/policy-trust/requests/${encodeURIComponent(id)}/audit`, options),
+    getPolicyTrustDeployment: (id, options) => request(
+      `/api/v1/governance/policy-trust/requests/${encodeURIComponent(id)}/deployment`, options),
+    getPolicyTrustCandidate: (id, options) => request(
+      `/api/v1/governance/policy-trust/requests/${encodeURIComponent(id)}/candidate`, options),
+    previewPolicyTrustChange: (intent, options) => trustCommand(request,
+      "/requests/preview", intent, options),
+    startPolicyTrustChange: (command, options) => trustCommand(request,
+      "/requests/challenges", command, options),
+    finishPolicyTrustChange: (command, options) => trustCommand(request,
+      "/requests", command, options),
+    startPolicyTrustReview: (id, command, options) => trustCommand(request,
+      `/requests/${encodeURIComponent(id)}/reviews/challenges`, command, options),
+    finishPolicyTrustReview: (id, command, options) => trustCommand(request,
+      `/requests/${encodeURIComponent(id)}/reviews`, command, options),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -77,6 +212,24 @@ export function createAlertsApiClient({
       headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {},
       body: JSON.stringify(decision)
     })
+  });
+}
+
+function policyProposalPath(id) {
+  return `/api/v1/governance/model-policies/${encodeURIComponent(id)}`;
+}
+
+function policyCommand(request, suffix, method, command, options = {}) {
+  return request(`/api/v1/governance/model-policies${suffix}`, {
+    ...options,
+    method,
+    body: JSON.stringify(command)
+  });
+}
+
+function trustCommand(request, suffix, command, options = {}) {
+  return request(`/api/v1/governance/policy-trust${suffix}`, {
+    ...options, method: "POST", body: JSON.stringify(command)
   });
 }
 
@@ -322,6 +475,42 @@ async function exactModelShadowPerformanceRequest(request, selector, { signal } 
     return Object.freeze({ state: "invalid-response" });
   }
   return response;
+}
+
+function modelPromotionStateRequest(request, selector, { signal, historyLimit = 20 } = {}) {
+  const params = modelPromotionParams(selector);
+  params.set("historyLimit", String(Math.min(Math.max(Number(historyLimit) || 20, 1), 100)));
+  return request(`/api/v1/governance/model-promotion/state?${params.toString()}`, { signal });
+}
+
+function modelPromotionAssessmentRequest(request, selector, { signal } = {}) {
+  const params = modelPromotionParams(selector, true);
+  return request(`/api/v1/governance/model-promotion/assessment?${params.toString()}`, { signal });
+}
+
+function modelPromotionCommandRequest(request, suffix, command, { signal } = {}) {
+  return request(`/api/v1/governance/model-promotion${suffix}`, {
+    method: "POST",
+    signal,
+    body: JSON.stringify(command)
+  });
+}
+
+function modelPromotionParams(selector, requiresWindow = false) {
+  const params = new URLSearchParams();
+  for (const field of ["modelName", "modelVersion", "featureContractVersion", "modelArtifactSha256", "environment", "intendedUse"]) {
+    const value = String(selector?.[field] || "").trim();
+    if (!value) throw new TypeError(`${field} is required`);
+    params.set(field, value);
+  }
+  if (requiresWindow) {
+    for (const field of ["fromInclusive", "toInclusive"]) {
+      const value = String(selector?.[field] || "").trim();
+      if (!value) throw new TypeError(`${field} is required`);
+      params.set(field, value);
+    }
+  }
+  return params;
 }
 
 const ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;

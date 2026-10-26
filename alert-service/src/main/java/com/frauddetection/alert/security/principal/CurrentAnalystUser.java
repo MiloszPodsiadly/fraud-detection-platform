@@ -26,15 +26,24 @@ public class CurrentAnalystUser {
             return Optional.of(analystPrincipal);
         }
         if (principal instanceof OidcUser oidcUser) {
-            return Optional.of(fromAuthentication(authentication, oidcUser.getSubject()));
+            String issuer = oidcUser.getIdToken() == null || oidcUser.getIdToken().getIssuer() == null
+                    ? null : oidcUser.getIdToken().getIssuer().toString();
+            String subject = oidcUser.getIdToken() == null ? null : oidcUser.getIdToken().getSubject();
+            String institutionalActorId = issuer == null || subject == null ? null : issuer + "#" + subject;
+            return Optional.of(fromAuthentication(authentication, oidcUser.getSubject(), institutionalActorId, null));
         }
         if (principal instanceof OAuth2User oAuth2User) {
-            return Optional.of(fromAuthentication(authentication, oAuth2User.getName()));
+            return Optional.of(fromAuthentication(authentication, oAuth2User.getName(), null, null));
         }
         return Optional.empty();
     }
 
-    private AnalystPrincipal fromAuthentication(Authentication authentication, String userId) {
+    private AnalystPrincipal fromAuthentication(
+            Authentication authentication,
+            String userId,
+            String institutionalActorId,
+            String readAuditActorId
+    ) {
         Set<AnalystRole> roles = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .filter(authority -> authority.startsWith("ROLE_"))
@@ -51,6 +60,7 @@ public class CurrentAnalystUser {
                 .map(GrantedAuthority::getAuthority)
                 .filter(authority -> !authority.startsWith("ROLE_"))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        return new AnalystPrincipal(userId == null ? "" : userId, roles, authorities);
+        return new AnalystPrincipal(userId == null ? "" : userId, roles, authorities,
+                institutionalActorId, readAuditActorId);
     }
 }

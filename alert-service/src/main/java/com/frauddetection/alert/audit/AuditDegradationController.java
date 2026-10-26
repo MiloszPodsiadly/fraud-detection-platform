@@ -41,7 +41,8 @@ public class AuditDegradationController {
     }
 
     @GetMapping
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.AUDIT_DEGRADATION_LIST,
+            resourceType = ReadAccessResourceType.AUDIT_DEGRADATION)
     public AuditDegradationListResponse listUnresolved(HttpServletRequest request) {
         AuditDegradationListResponse response = new AuditDegradationListResponse(
                 service.unresolvedEvents().stream().map(AuditDegradationResponse::from).toList()

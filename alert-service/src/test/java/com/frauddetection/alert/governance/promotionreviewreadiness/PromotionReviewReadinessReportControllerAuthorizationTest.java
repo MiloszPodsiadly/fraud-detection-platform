@@ -106,7 +106,7 @@ class PromotionReviewReadinessReportControllerAuthorizationTest {
                 .andExpect(jsonPath("$.inputs.recordsEvaluated").value(3))
                 .andExpect(jsonPath("$.banner").value(PromotionReviewReadinessReportContract.REQUIRED_BANNER));
 
-        verify(readAccessAuditService).audit(
+        verify(readAccessAuditService).auditOrThrow(
                 argThat(target -> target.endpointCategory() == ReadAccessEndpointCategory.PROMOTION_REVIEW_READINESS
                         && target.resourceType() == ReadAccessResourceType.PROMOTION_REVIEW_READINESS
                         && target.resourceId() == null),

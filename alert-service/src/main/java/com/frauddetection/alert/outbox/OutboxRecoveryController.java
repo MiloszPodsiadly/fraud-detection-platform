@@ -47,7 +47,8 @@ public class OutboxRecoveryController {
     }
 
     @GetMapping("/recovery/backlog")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.OUTBOX_RECOVERY_BACKLOG,
+            resourceType = ReadAccessResourceType.OUTBOX_RECOVERY)
     public OutboxBacklogResponse backlog(HttpServletRequest request) {
         OutboxBacklogResponse response = service.backlog();
         sensitiveReadAuditService.audit(
@@ -83,7 +84,8 @@ public class OutboxRecoveryController {
     }
 
     @GetMapping("/fraud-alerts/recovery/backlog")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.OUTBOX_RECOVERY_BACKLOG,
+            resourceType = ReadAccessResourceType.OUTBOX_RECOVERY)
     public FraudAlertOutboxBacklogResponse fraudAlertBacklog(HttpServletRequest request) {
         FraudAlertOutboxBacklogResponse response = fraudAlertOutboxRecoveryService.backlog();
         sensitiveReadAuditService.audit(

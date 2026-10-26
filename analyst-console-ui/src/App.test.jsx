@@ -143,6 +143,7 @@ vi.mock("./auth/oidcClient.js", () => ({
 }));
 
 import App from "./App.jsx";
+import { normalizeSession } from "./auth/session.js";
 
 describe("App", () => {
   beforeEach(() => {
@@ -221,6 +222,42 @@ describe("App", () => {
       riskLevel: "ALL",
       status: "ALL"
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it("clears a selected detail when the OIDC callback changes the active account", async () => {
+    window.history.replaceState({}, "", "/?alertId=previous-account-alert");
+    const previousAccount = {
+      ...authenticatedSession(),
+      userId: "analyst-account-a",
+      issuer: "https://identity.example.test/realm-a",
+      subject: "account-a"
+    };
+    callbackPath.value = true;
+    completeLoginCallback.mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => {
+        callbackPath.value = false;
+        resolve({
+          ...authenticatedSession(),
+          userId: "analyst-account-b",
+          issuer: "https://identity.example.test/realm-b",
+          subject: "account-b"
+        });
+      }, 0);
+    }));
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => previousAccount,
+      getSessionState: (session) => ({ status: session?.userId ? "authenticated" : "unauthenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer account-b-token" })
+    };
+    listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 });
+
+    render(<App />);
+
+    await waitFor(() => expect(completeLoginCallback).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.location.search).not.toContain("alertId"));
+    expect(getAlert).not.toHaveBeenCalled();
   });
 
   it("does not load dashboard data when oidc bootstrap reports an expired session", async () => {
@@ -304,7 +341,8 @@ describe("App", () => {
     expect(authenticatedClientCreations.length).toBeGreaterThanOrEqual(2);
     expect(authenticatedClientCreations.at(-1)[0].session.userId).toBe(refreshedSession.userId);
     expect(authenticatedClientCreations.at(-1)[0].session.roles).toEqual(refreshedSession.roles);
-    expect(new Set(authenticatedClientCreations.at(-1)[0].session.authorities)).toEqual(new Set(refreshedSession.authorities));
+    expect(new Set(authenticatedClientCreations.at(-1)[0].session.authorities))
+      .toEqual(new Set(normalizeSession(refreshedSession).authorities));
   });
 
   it("marks workspace counters degraded when one counter fails without hiding successful counters", async () => {
@@ -478,7 +516,7 @@ describe("App", () => {
     expect(listSuspiciousTransactions).not.toHaveBeenCalled();
   });
 
-  it("dashboardHiddenWithoutShadowPerformanceRead", async () => {
+  it("modelGovernanceVisibleWithModelPromotionRead", async () => {
     callbackPath.value = false;
     refreshSession.mockResolvedValue(authenticatedSession());
     providerState.value = {
@@ -490,8 +528,7 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("link", { name: "Model Governance" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Model evidence/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Model Governance" })).toBeInTheDocument();
     expect(getCurrentShadowPerformanceSummary).not.toHaveBeenCalled();
   });
 
@@ -839,6 +876,7 @@ function authenticatedSession(overrides = {}) {
 
 function authenticatedSessionWithSuspiciousRead() {
   return authenticatedSession({
+    extraAuthorities: ["suspicious-transaction:read"],
     authorities: [
       "alert:read",
       "fraud-case:read",

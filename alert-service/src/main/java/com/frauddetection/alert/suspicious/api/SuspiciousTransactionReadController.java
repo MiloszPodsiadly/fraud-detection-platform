@@ -64,7 +64,8 @@ public class SuspiciousTransactionReadController {
     }
 
     @GetMapping
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH,
+            resourceType = ReadAccessResourceType.SUSPICIOUS_TRANSACTION)
     public SuspiciousTransactionSliceResponse search(
             @RequestParam MultiValueMap<String, String> rawParams,
             HttpServletRequest request
@@ -85,7 +86,7 @@ public class SuspiciousTransactionReadController {
             SuspiciousTransactionSliceResponse response = service.search(query);
             metrics.recordSuspiciousTransactionApiSearch("success", statusLabel(query), riskLevelLabel(query));
             recordQueryTelemetry(queryTelemetryClassifier.search(query, "success", response, elapsed(started)));
-            // AuditedSensitiveRead is marker-only; explicit audit records the bounded slice result count.
+            // Explicit audit records the bounded slice result count; policy metadata covers fallback auditing.
             sensitiveReadAuditService.audit(
                     ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH,
                     ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
@@ -106,7 +107,8 @@ public class SuspiciousTransactionReadController {
     }
 
     @GetMapping("/summary")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY,
+            resourceType = ReadAccessResourceType.SUSPICIOUS_TRANSACTION)
     public SuspiciousTransactionSummaryResponse summary(HttpServletRequest request) {
         try {
             SuspiciousTransactionSummaryResponse response = service.summary();
@@ -126,7 +128,9 @@ public class SuspiciousTransactionReadController {
     }
 
     @GetMapping(value = "/{suspiciousTransactionId}/linked-alert", params = "alertId")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
+            resourceType = ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+            resourceIdVariable = "suspiciousTransactionId")
     public AlertLinkedContextResponse rejectClientSelectedAlertId(
             @PathVariable String suspiciousTransactionId,
             HttpServletRequest request
@@ -143,7 +147,9 @@ public class SuspiciousTransactionReadController {
     }
 
     @GetMapping(value = "/{suspiciousTransactionId}/linked-alert", params = "!alertId")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
+            resourceType = ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+            resourceIdVariable = "suspiciousTransactionId")
     public AlertLinkedContextResponse linkedAlertContext(
             @PathVariable String suspiciousTransactionId,
             HttpServletRequest request
@@ -184,7 +190,9 @@ public class SuspiciousTransactionReadController {
     }
 
     @GetMapping("/{suspiciousTransactionId}")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_READ,
+            resourceType = ReadAccessResourceType.SUSPICIOUS_TRANSACTION,
+            resourceIdVariable = "suspiciousTransactionId")
     public SuspiciousTransactionResponse findById(
             @PathVariable String suspiciousTransactionId,
             HttpServletRequest request

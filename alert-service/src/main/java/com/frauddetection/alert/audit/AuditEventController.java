@@ -23,7 +23,8 @@ public class AuditEventController {
     }
 
     @GetMapping
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.AUDIT_EVENT_LIST,
+            resourceType = ReadAccessResourceType.AUDIT_EVENT)
     public AuditEventReadResponse listAuditEvents(
             @RequestParam(name = "event_type", required = false) String eventType,
             @RequestParam(name = "actor_id", required = false) String actorId,

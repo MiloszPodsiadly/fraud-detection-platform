@@ -32,6 +32,7 @@ The platform is built around explicit service ownership and event-driven handoff
 | Fraud scoring | `fraud-scoring-service` | Rule scoring plus ML integration in rule, shadow, ML, or compare modes. |
 | ML runtime | `ml-inference-service` | Python model inference, governance snapshots, drift and advisory endpoints. |
 | Alert workflow | `alert-service` | Alerts, fraud cases, analyst decisions, RBAC, audit, recovery, and regulated mutation controls. |
+| Model-promotion policy publication | `model-promotion-policy-publisher` | Isolated worker verifies approvals, signs policies, and durably publishes evidence. |
 | Trust authority | `audit-trust-authority` | Local signing and verification authority for audit anchor material. |
 | Analyst UI | `analyst-console-ui` | React console for monitoring, alert review, case workflow, and security UX. |
 | Shared contracts | `common-events` | Kafka event contracts and shared value objects. |
@@ -136,8 +137,17 @@ currently provided by the repository. It:
   observability, and the application container hardening overlay.
 
 `deployment/.local/` is ignored by Git and excluded from Docker build contexts. Generated private keys stay on
-the local workstation. Ordinary startup preserves valid identity material; intentionally rotate it with
-`make regenerate-local-runtime-fixtures`.
+the local workstation. Ordinary startup preserves valid identity material; intentionally rotate service-identity
+fixtures with `make regenerate-local-runtime-fixtures`. The separate local model-promotion issuer key, author A,
+approver B and publisher credentials, plus their public registries, are created by
+`node scripts/bootstrap-local-model-promotion-keys.mjs --ensure`. Only the public issuer, approval and actor registries
+are mounted into `alert-service`; private credentials stay outside its image. Startup never creates an approved policy. Follow the
+explicit [local approval and publication procedure](docs/operations/model_promotion_policy_publication.md).
+For separate production provisioning, fingerprint review, key rotation, revocation, protected generation floors and
+recovery, use [model-promotion trust operations](docs/operations/model_promotion_trust_operations.md). The local
+fixture keys and generation-1 Compose overlay are not production credentials or a production trust deployment.
+`VERIFIED` confirms the issuer signature; new institutional decisions require the separate approval evidence too.
+Model review, `CHAMPION`, and runtime deployment remain separate.
 
 `make up` and `.\scripts\app.cmd up` generate the local Shadow Performance Summary artifact before starting
 Docker Compose. For manual inspection, the equivalent Compose startup after running
@@ -150,6 +160,7 @@ docker compose --project-name fraud-detection-platform --env-file deployment/.en
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.model-promotion-policy-trust.yml \
   -f deployment/docker-compose.hardened.yml \
   -f deployment/docker-compose.shadow-performance-generated.yml \
   up --build -d
@@ -218,6 +229,8 @@ Expected resolved security-relevant values for this exact command:
 | `alert-service.APP_SECURITY_DEMO_AUTH_ENABLED` | `false` |
 | `alert-service.AUDIT_TRUST_AUTHORITY_ENABLED` | `true` |
 | `alert-service.AUDIT_TRUST_AUTHORITY_SIGNING_REQUIRED` | `true` |
+| `alert-service.MODEL_PROMOTION_TRUSTED_ISSUERS_PATH` | `/run/model-promotion-policy/trusted-issuers.json` (issuer public registry; separate approval and actor registries are also mounted read-only) |
+| `alert-service.MODEL_PROMOTION_TRUST_MIN_GENERATION` | `1` (local fixture floor; production requires protected monotonic floor) |
 | `alert-service.ASSISTANT_MODE` | `DETERMINISTIC` |
 | `analyst-console-ui` build arg `VITE_AUTH_PROVIDER` | `bff` |
 
@@ -258,14 +271,25 @@ Open:
 - Grafana: `http://localhost:3000` (initial local default: `admin` / `admin`; `grafana-data` retains password changes)
 - Keycloak: `http://localhost:8086`
 
-Local analyst-console users:
+Local Keycloak users for the analyst console and model-policy workflow:
 
-| Username | Password | Role |
+| Username | Password | Role / institutional group |
 | --- | --- | --- |
 | `readonly` | `readonly` | `READ_ONLY_ANALYST` |
 | `analyst` | `analyst` | `ANALYST` |
-| `reviewer` | `reviewer` | `REVIEWER` |
-| `opsadmin` | `opsadmin` | `FRAUD_OPS_ADMIN` |
+| `reviewer` | `reviewer` | `REVIEWER`, `model-policy-credential-holder` |
+| `opsadmin` | `opsadmin` | `FRAUD_OPS_ADMIN`, `model-policy-credential-holder` |
+| `policy-author` | `policy-author` | `model-policy-author` |
+| `policy-approver` | `policy-approver` | `model-policy-approver` |
+| `policy-requester` | `policy-requester` | `model-policy-publisher` |
+| `policy-recovery` | `policy-recovery` | `model-policy-recovery`, `model-policy-production`, `model-policy-approver` |
+| `audit-recovery` | `audit-recovery` | dedicated audit recovery, audit read, production scope |
+| `policy-security-a` | `policy-security-a` | credential admin/holder, trust requester, production |
+| `policy-security-b` | `policy-security-b` | credential admin/holder, trust approver, production |
+| `policy-security-c` | `policy-security-c` | credential admin/holder |
+| `model-retirement-requester` | `model-retirement-requester` | reviewer, retirement operator, production scope, emergency requester |
+| `model-retirement-authorizer` | `model-retirement-authorizer` | read-only analyst, production scope, independent emergency authorizer |
+| `model-retirement-auditor` | `model-retirement-auditor` | read-only analyst, production scope, emergency audit read |
 
 These credentials are local-only and must not be reused outside local test environments.
 
@@ -301,6 +325,7 @@ docker compose --project-name fraud-detection-platform --env-file deployment/.en
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.model-promotion-policy-trust.yml \
   -f deployment/docker-compose.hardened.yml \
   -f deployment/docker-compose.shadow-performance-generated.yml \
   down
@@ -327,6 +352,7 @@ docker compose --project-name fraud-detection-platform --env-file deployment/.en
   -f deployment/docker-compose.oidc.yml \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.model-promotion-policy-trust.yml \
   -f deployment/docker-compose.hardened.yml \
   -f deployment/docker-compose.shadow-performance-generated.yml \
   down -v
@@ -439,6 +465,7 @@ feature-enricher-service/        Redis-backed feature enrichment
 fraud-scoring-service/           Rule and ML-assisted scoring
 ml-inference-service/            Python model inference and governance API
 alert-service/                   Alerts, cases, audit, RBAC, recovery APIs
+model-promotion-policy-publisher/ Isolated policy publication worker and signing
 audit-trust-authority/           Local trust-signing authority
 analyst-console-ui/              React analyst console
 deployment/                      Docker Compose, service images, monitoring config
@@ -467,4 +494,4 @@ Milosz Podsiadly
 
 ## License
 
-Licensed under the [MIT License](https://opensource.org/licenses/MIT).
+See [LICENSE](LICENSE.md) for the full terms and conditions.

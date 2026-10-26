@@ -6,6 +6,7 @@ import com.frauddetection.alert.security.auth.BffSecurityProperties;
 import com.frauddetection.alert.security.auth.DemoAuthFilter;
 import com.frauddetection.alert.security.auth.JwtAnalystAuthenticationConverter;
 import com.frauddetection.alert.security.auth.OidcAnalystAuthoritiesMapper;
+import com.frauddetection.alert.security.auth.ModelPolicyIamMapping;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
@@ -27,7 +28,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
-@EnableConfigurationProperties(BffSecurityProperties.class)
+@EnableConfigurationProperties({BffSecurityProperties.class, ModelPolicyIamMapping.class})
 public class AlertSecurityConfig {
 
     /**

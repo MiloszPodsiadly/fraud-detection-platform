@@ -1,6 +1,7 @@
 package com.frauddetection.alert.audit.read;
 
 import com.frauddetection.alert.api.PagedResponse;
+import com.frauddetection.alert.assistant.AnalystCaseSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceTimelineResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
@@ -23,8 +24,17 @@ public class ReadAccessResultCountExtractor {
         if (body == null) {
             return 0;
         }
+        if (body instanceof java.util.Collection<?> collection) {
+            return size(collection);
+        }
+        if (body instanceof java.util.Map<?, ?>) {
+            return 1;
+        }
         if (body instanceof PagedResponse<?> pagedResponse) {
             return size(pagedResponse.content());
+        }
+        if (body instanceof AnalystCaseSummaryResponse) {
+            return 1;
         }
         if (body instanceof FraudCaseWorkQueueSliceResponse sliceResponse) {
             return size(sliceResponse.content());
@@ -64,15 +74,31 @@ public class ReadAccessResultCountExtractor {
         }
         return switch (category) {
             case ALERT_DETAIL,
+                    ALERT_ASSISTANT_SUMMARY,
                     FRAUD_CASE_DETAIL,
                     FRAUD_CASE_EVIDENCE_SUMMARY,
                     SCORED_TRANSACTION_DETAIL,
+                    FRAUD_FEEDBACK_READ,
                     GOVERNANCE_ADVISORY_DETAIL,
                     SHADOW_PERFORMANCE_SUMMARY,
                     PROMOTION_REVIEW_READINESS,
                     MODEL_CARD,
-                    EXACT_MODEL_SHADOW_PERFORMANCE -> 1;
-            case SCORED_TRANSACTION_SEARCH,
+                    AUDIT_INTEGRITY,
+                    AUDIT_TRUST_ATTESTATION,
+                    EXACT_MODEL_SHADOW_PERFORMANCE,
+                    MODEL_PROMOTION_STATE,
+                    MODEL_PROMOTION_ASSESSMENT,
+                    POLICY_TRUST_CANDIDATE,
+                    POLICY_TRUST_INSTALLATION,
+                    MODEL_PROMOTION_EMERGENCY_DETAIL,
+                    MODEL_POLICY_OPERATION,
+                    MODEL_POLICY_DETAIL,
+                    POLICY_CREDENTIAL_GRANT_REVIEW,
+                    POLICY_CREDENTIAL_GRANT_STATUS,
+                    POLICY_CREDENTIAL_GRANT_EVIDENCE,
+                    MODEL_POLICY_PUBLICATION_STATUS -> 1;
+            case ALERT_LIST,
+                    SCORED_TRANSACTION_SEARCH,
                     ENGINE_INTELLIGENCE_READ,
                     ENGINE_INTELLIGENCE_FEEDBACK_READ,
                     SUSPICIOUS_TRANSACTION_SEARCH,
@@ -95,7 +121,35 @@ public class ReadAccessResultCountExtractor {
                     REGULATED_MUTATION_INSPECTION,
                     REGULATED_MUTATION_RECOVERY_BACKLOG,
                     OUTBOX_RECOVERY_BACKLOG,
-                    AUDIT_DEGRADATION_LIST -> 0;
+                    AUDIT_DEGRADATION_LIST,
+                    UNCLASSIFIED,
+                    POLICY_TRUST_REGISTRY_LIST,
+                    POLICY_TRUST_REQUEST_LIST,
+                    POLICY_TRUST_REQUEST_AUDIT,
+                    POLICY_TRUST_REQUEST_DEPLOYMENT,
+                    MODEL_PROMOTION_EMERGENCY_ACTIVE,
+                    MODEL_PROMOTION_EMERGENCY_AUDIT,
+                    MODEL_POLICY_LIST,
+                    MODEL_POLICY_PAGE,
+                    MODEL_POLICY_ACTOR_CAPABILITIES,
+                    MODEL_POLICY_SCHEMA,
+                    MODEL_POLICY_HISTORY,
+                    MODEL_POLICY_HISTORY_PAGE,
+                    MODEL_POLICY_CREDENTIALS,
+                    MODEL_POLICY_CREDENTIAL_SECURITY_EVENTS,
+                    MODEL_PROMOTION_SIGNED_REVIEW_OPERATION,
+                    MODEL_PROMOTION_APPROVER_DIRECTORY,
+                    POLICY_SECURITY_ACTOR,
+                    POLICY_SECURITY_OPERATIONS,
+                    POLICY_CREDENTIAL_GRANT_MINE,
+                    POLICY_CREDENTIAL_GRANT_INCIDENTS,
+                    MODEL_POLICY_PUBLICATION_RECOVERY,
+                    GOVERNANCE_AUDIT_COMMITMENT,
+                    GOVERNANCE_AUDIT_CHAIN_RANGE,
+                    GOVERNANCE_AUDIT_HISTORICAL_PROOF,
+                    GOVERNANCE_AUDIT_RECOVERY,
+                    GOVERNANCE_AUDIT_RECOVERY_HISTORY,
+                    AUDIT_TRUST_KEY_REGISTRY -> 0;
         };
     }
 

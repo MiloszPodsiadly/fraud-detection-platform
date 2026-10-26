@@ -35,7 +35,8 @@ public class FraudCaseEvidenceSummaryController {
         this.metrics = metrics;
     }
 
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.FRAUD_CASE_EVIDENCE_SUMMARY,
+            resourceType = ReadAccessResourceType.FRAUD_CASE, resourceIdVariable = "caseId")
     @GetMapping("/{caseId}/evidence-summary")
     public FraudCaseEvidenceSummaryResponse summary(@PathVariable String caseId, HttpServletRequest request) {
         try {

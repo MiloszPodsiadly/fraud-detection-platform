@@ -9,14 +9,28 @@ const shadowApiSource = [
 ].join("\n");
 const shadowSources = [
   "src/components/ShadowPerformanceDashboard.jsx",
-  "src/workspace/ShadowPerformanceWorkspaceRuntime.jsx",
-  "src/workspace/useShadowPerformanceSummary.js",
-  "src/pages/ShadowPerformanceDashboardPage.jsx"
+  "src/workspace/useShadowPerformanceSummary.js"
 ].map((path) => readFileSync(join(process.cwd(), path), "utf8")).concat(shadowApiSource).join("\n");
+const promotionRuntime = readFileSync(join(process.cwd(), "src/workspace/ShadowPerformanceWorkspaceRuntime.jsx"), "utf8");
+const promotionPanel = readFileSync(join(process.cwd(), "src/components/ModelPromotionPanel.jsx"), "utf8");
+const promotionWorkflow = readFileSync(join(process.cwd(), "src/workspace/useModelPromotionWorkflow.js"), "utf8");
 
 const docs = readFileSync(join(process.cwd(), "../docs/architecture/shadow_performance_dashboard_ui.md"), "utf8");
 
 describe("shadow performance UI scope guards", () => {
+  it("keepsModelPromotionCommandsInTheSeparatelyAuthorizedGovernanceComponent", () => {
+    expect(promotionRuntime).toContain("canReadModelPromotion === true");
+    expect(promotionRuntime).toContain("useModelPromotionWorkflow");
+    expect(promotionPanel).toContain("canRegister === true");
+    expect(promotionPanel).toContain("canPropose === true");
+    expect(promotionPanel).toContain("canApprove === true");
+    expect(promotionPanel).toContain("canReject === true");
+    expect(promotionPanel).toContain("canRetire === true");
+    expect(promotionWorkflow).toContain("client.registerModelPromotionCandidate");
+    expect(promotionWorkflow).toContain("client.proposeModelPromotionTransition");
+    expect(promotionWorkflow).not.toMatch(/scoreTransaction|updateFraudCase|authorizePayment|kafka/i);
+  });
+
   it("doesNotAddPromotionWorkflow", () => {
     expect(shadowSources).not.toMatch(/promotionWorkflow|promoteModel|safe to promote|promotion readiness score/i);
   });

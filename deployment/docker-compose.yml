@@ -57,6 +57,8 @@ services:
     networks:
       - backend
 
+  # Local single-member replica set so transaction-dependent workflows can be evaluated locally.
+  # This topology is not a production availability or recovery design.
   mongodb:
     <<: *service-defaults
     image: mongo:7.0
@@ -70,6 +72,7 @@ services:
       retries: 10
       start_period: 20s
 
+  # Standalone local Redis. Redis Cluster is unsupported by the model-promotion quota Lua script.
   redis:
     <<: *service-defaults
     image: redis:8.10-alpine
@@ -123,6 +126,39 @@ services:
       TRUST_AUTHORITY_ACTIVE_PUBLIC_KEY_PATH: /tmp/audit-trust-authority/ed25519-public.key
       TRUST_AUTHORITY_AUDIT_PATH: /tmp/audit-trust-authority/trust-authority-audit.jsonl
     healthcheck: *java-healthcheck
+
+  # Activated by the JWT trust overlay; copies protected local keys for uid 10001.
+  audit-trust-key-loader:
+    profiles:
+      - audit-trust-loader
+    image: eclipse-temurin:21-jre
+    restart: "no"
+    network_mode: none
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        for file in ed25519-private.key ed25519-public.key; do
+          source="/run/audit-trust-source/$${file}"
+          test -f "$${source}" && test ! -L "$${source}" && test -s "$${source}"
+          temporary="$$(mktemp /run/audit-trust-keys/.key.XXXXXX)"
+          cp "$${source}" "$${temporary}"
+          chown 10001:10001 "$${temporary}"
+          chmod 0400 "$${temporary}"
+          mv -f "$${temporary}" "/run/audit-trust-keys/$${file}"
+        done
+        chown 10001:10001 /run/audit-trust-keys
+        chmod 0500 /run/audit-trust-keys
+    volumes:
+      - type: bind
+        source: ./.local/audit-trust-authority
+        target: /run/audit-trust-source
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: audit-trust-keys
+        target: /run/audit-trust-keys
 
   prometheus:
     <<: *service-defaults
@@ -275,6 +311,8 @@ services:
       SPRING_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      # Plain "docker" profile requires Redis; in-memory needs an allowlisted single-node profile and bank fail-closed=false.
+      MODEL_PROMOTION_API_RATE_LIMITER_MODE: ${MODEL_PROMOTION_API_RATE_LIMITER_MODE:-redis}
       OUTBOX_PUBLISHER_ENABLED: ${OUTBOX_PUBLISHER_ENABLED:-true}
       OUTBOX_RECOVERY_ENABLED: ${OUTBOX_RECOVERY_ENABLED:-true}
       OUTBOX_LEASE_DURATION: ${OUTBOX_LEASE_DURATION:-PT1M}
@@ -308,6 +346,23 @@ services:
       ASSISTANT_MODE: ${ASSISTANT_MODE:-DETERMINISTIC}
     healthcheck: *java-healthcheck
 
+  # Complete but inactive without the policy-trust overlay; hardening may safely reference it.
+  model-promotion-policy-publisher:
+    <<: *service-defaults
+    profiles:
+      - policy-trust
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+      args:
+        MODULE_NAME: model-promotion-policy-publisher
+    user: "10001:10001"
+    command:
+      - worker
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
   analyst-console-ui:
     <<: *service-defaults
     build:
@@ -331,6 +386,7 @@ networks:
   edge:
 
 volumes:
+  audit-trust-keys:
   mongodb-data:
   redis-data:
   prometheus-data:

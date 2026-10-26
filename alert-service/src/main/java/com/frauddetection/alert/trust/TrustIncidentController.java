@@ -41,7 +41,8 @@ public class TrustIncidentController {
     }
 
     @GetMapping
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.TRUST_INCIDENT_LIST,
+            resourceType = ReadAccessResourceType.TRUST_INCIDENT)
     public List<TrustIncidentResponse> listOpen(HttpServletRequest request) {
         List<TrustIncidentResponse> response = service.listOpen();
         sensitiveReadAuditService.audit(
@@ -55,7 +56,8 @@ public class TrustIncidentController {
     }
 
     @GetMapping("/signals/preview")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.PREVIEW_TRUST_INCIDENT_SIGNALS,
+            resourceType = ReadAccessResourceType.TRUST_INCIDENT_SIGNAL)
     public TrustSignalPreviewResponse preview(Authentication authentication, HttpServletRequest request) {
         if (!previewRateLimiter.allow(rateLimitIdentity(authentication, request))) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Trust incident signal preview rate limit exceeded.");

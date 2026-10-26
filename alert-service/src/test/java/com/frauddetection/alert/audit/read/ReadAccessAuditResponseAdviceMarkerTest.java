@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ReadAccessAuditResponseAdviceMarkerTest {
 
@@ -28,7 +29,8 @@ class ReadAccessAuditResponseAdviceMarkerTest {
         ReadAccessAuditResponseAdvice advice = new ReadAccessAuditResponseAdvice(
                 provider(classifier),
                 provider(new ReadAccessResultCountExtractor()),
-                provider(auditService)
+                provider(auditService),
+                provider(failOpenPolicy())
         );
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/fraud-cases/work-queue");
         request.setAttribute(ReadAccessAuditResponseAdvice.AUDITED_ATTRIBUTE, Boolean.TRUE);
@@ -54,7 +56,8 @@ class ReadAccessAuditResponseAdviceMarkerTest {
         ReadAccessAuditResponseAdvice advice = new ReadAccessAuditResponseAdvice(
                 provider(new ReadAccessAuditClassifier()),
                 provider(new ReadAccessResultCountExtractor()),
-                provider(auditService)
+                provider(auditService),
+                provider(failOpenPolicy())
         );
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/transactions/scored");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/transactions/scored");
@@ -118,5 +121,11 @@ class ReadAccessAuditResponseAdviceMarkerTest {
                 return stream();
             }
         };
+    }
+
+    private static SensitiveReadAuditPolicy failOpenPolicy() {
+        SensitiveReadAuditPolicy policy = mock(SensitiveReadAuditPolicy.class);
+        when(policy.failClosed()).thenReturn(false);
+        return policy;
     }
 }

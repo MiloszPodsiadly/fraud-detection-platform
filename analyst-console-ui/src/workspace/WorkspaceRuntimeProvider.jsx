@@ -1,16 +1,25 @@
 import { useMemo } from "react";
 import { createAlertsApiClient } from "../api/alertsApi.js";
 import { AUTHORITIES, MODEL_GOVERNANCE_READ_AUTHORITIES, hasAuthority } from "../auth/session.js";
+import { MODEL_POLICY_AUTHORITIES as POLICY } from "../auth/modelPolicyAuthorities.js";
 import { WorkspaceRuntimeContext } from "./useWorkspaceRuntime.js";
 
-export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true, children }) {
+export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, sessionBootstrapPending = false,
+  enabled = true, children }) {
   const authenticated = Boolean(session?.userId);
+  const resolvedSessionState = sessionState || authProvider?.getSessionState?.(session) || {
+    status: authenticated ? "authenticated" : "unauthenticated"
+  };
   const apiClient = useMemo(
     () => (enabled && authenticated ? createAlertsApiClient({ session, authProvider }) : null),
     [authProvider, authenticated, enabled, session]
   );
   const workspaceSessionResetKey = useMemo(
     () => workspaceSessionResetKeyFor(session, authProvider),
+    [authProvider, session]
+  );
+  const sessionOwnerBoundaryKey = useMemo(
+    () => sessionOwnerBoundaryKeyFor(session, authProvider),
     [authProvider, session]
   );
   const shadowPerformanceRead = authorityState(session, AUTHORITIES.SHADOW_PERFORMANCE_READ);
@@ -22,8 +31,11 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
   const value = useMemo(() => ({
     session,
     authProvider,
+    sessionState: resolvedSessionState,
+    sessionBootstrapPending,
     apiClient,
     workspaceSessionResetKey,
+    sessionOwnerBoundaryKey,
     canReadAlerts: authorityState(session, AUTHORITIES.ALERT_READ),
     canReadFraudCases: authorityState(session, AUTHORITIES.FRAUD_CASE_READ),
     canReadTransactions: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
@@ -33,6 +45,21 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadPromotionReadiness: promotionReadinessRead,
     canReadModelCard: modelCardRead,
     canReadExactModelShadowPerformance: modelShadowPerformanceRead,
+    canReadModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_READ),
+    canReadPolicyGovernance: authorityState(session, POLICY.READ),
+    canReadPolicySecurity: authorityGroupState(session, [
+      POLICY.CREDENTIAL_ENROLL, POLICY.CREDENTIAL_ADMIN, POLICY.TRUST_READ,
+      POLICY.TRUST_REQUEST, POLICY.TRUST_APPROVE, POLICY.PUBLICATION_RECOVER
+    ]),
+    canRegisterModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_REGISTER),
+    canProposeModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_PROPOSE),
+    canApproveModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_APPROVE),
+    canRejectModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_REJECT),
+    canRetireModelPromotion: authorityState(session, AUTHORITIES.MODEL_PROMOTION_RETIRE),
+    canRequestEmergencyModelRetirement: authorityState(session, AUTHORITIES.MODEL_PROMOTION_EMERGENCY_REQUEST),
+    canAuthorizeEmergencyModelRetirement: authorityState(session, AUTHORITIES.MODEL_PROMOTION_EMERGENCY_AUTHORIZE),
+    canAuditEmergencyModelRetirement: authorityState(session, POLICY.AUDIT_READ) === true
+      && authorityState(session, AUTHORITIES.MODEL_PROMOTION_SCOPE_PRODUCTION) === true,
     // Governance advisory read views are backed by TRANSACTION_MONITOR_READ in the current backend authorization model.
     // Governance audit writes require GOVERNANCE_ADVISORY_AUDIT_WRITE; do not reuse read capability for write affordances.
     canReadGovernanceAdvisories: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
@@ -48,8 +75,11 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     modelGovernanceRead,
     promotionReadinessRead,
     session,
+    resolvedSessionState,
+    sessionBootstrapPending,
     shadowPerformanceRead,
-    workspaceSessionResetKey
+    workspaceSessionResetKey,
+    sessionOwnerBoundaryKey
   ]);
 
   return (
@@ -79,7 +109,19 @@ function workspaceSessionResetKeyFor(session, authProvider) {
   return [
     authProvider?.kind || "none",
     session?.userId || "",
+    session?.actorId || "",
+    session?.issuer || "",
+    session?.subject || "",
     roles,
     authorities
+  ].join(":");
+}
+
+function sessionOwnerBoundaryKeyFor(session, authProvider) {
+  return [
+    authProvider?.kind || "none",
+    session?.actorId || "",
+    session?.issuer || "",
+    session?.subject || ""
   ].join(":");
 }

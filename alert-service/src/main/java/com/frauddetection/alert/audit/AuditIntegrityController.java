@@ -1,5 +1,8 @@
 package com.frauddetection.alert.audit;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -16,6 +19,8 @@ public class AuditIntegrityController {
     }
 
     @GetMapping
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.AUDIT_INTEGRITY,
+            resourceType = ReadAccessResourceType.AUDIT_INTEGRITY)
     public AuditIntegrityResponse verifyAuditIntegrity(
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,

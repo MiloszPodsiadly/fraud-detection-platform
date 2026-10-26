@@ -138,7 +138,7 @@ test("Make targets share one project identity and keep down non-destructive", (c
 
   const makefile = fs.readFileSync(path.join(repositoryRoot, "Makefile"), "utf8");
   assert.match(makefile, /^COMPOSE_PROJECT_NAME \?= fraud-detection-platform$/m);
-  assert.match(makefile, /^local-runtime-fixtures:\r?\n\tbash scripts\/bootstrap-local-fixtures\.sh --ensure$/m);
+  assert.match(makefile, /^local-runtime-fixtures:\r?\n\tbash scripts\/bootstrap-local-fixtures\.sh --ensure\r?\n\tnode scripts\/bootstrap-local-model-promotion-keys\.mjs --ensure\r?\n\tnode scripts\/bootstrap-local-audit-trust-key\.mjs --ensure$/m);
   assert.match(makefile, /^regenerate-local-runtime-fixtures:\r?\n\tbash scripts\/bootstrap-local-fixtures\.sh --force$/m);
   assert.doesNotMatch(makeTarget(makefile, "app-down"), /\b-v\b|--volumes/);
 

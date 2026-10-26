@@ -6,13 +6,17 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marker-only annotation for endpoints that require sensitive-read audit.
- *
- * <p>The annotation does not execute auditing by itself. Architecture tests enforce
- * that annotated endpoints also call {@link SensitiveReadAuditService} explicitly.</p>
+ * Executable read-audit policy for a sensitive GET endpoint. The response advice
+ * and failure interceptor resolve this metadata from the mapped Spring handler.
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface AuditedSensitiveRead {
-    String action() default "READ";
+    ReadAccessEndpointCategory category() default ReadAccessEndpointCategory.UNCLASSIFIED;
+
+    ReadAccessResourceType resourceType() default ReadAccessResourceType.UNKNOWN;
+
+    String resourceIdVariable() default "";
+
+    String resourceIdParameter() default "";
 }

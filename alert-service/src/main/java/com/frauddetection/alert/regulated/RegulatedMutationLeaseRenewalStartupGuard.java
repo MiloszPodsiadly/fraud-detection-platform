@@ -1,5 +1,6 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.runtime.InstitutionalModePolicy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -7,8 +8,6 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.Locale;
 
 @Component
 public class RegulatedMutationLeaseRenewalStartupGuard implements ApplicationRunner {
@@ -77,12 +76,7 @@ public class RegulatedMutationLeaseRenewalStartupGuard implements ApplicationRun
     }
 
     private boolean prodLike() {
-        return bankModeFailClosed || Arrays.stream(environment.getActiveProfiles())
-                .map(profile -> profile.toLowerCase(Locale.ROOT))
-                .anyMatch(profile -> profile.equals("prod")
-                        || profile.equals("production")
-                        || profile.equals("staging")
-                        || profile.equals("bank"));
+        return InstitutionalModePolicy.isInstitutionalMode(environment, bankModeFailClosed);
     }
 
     private boolean positive(Duration duration) {

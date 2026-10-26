@@ -7,6 +7,9 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Map;
 
 public final class GovernanceCanonicalJson {
@@ -20,6 +23,18 @@ public final class GovernanceCanonicalJson {
                     .getBytes(StandardCharsets.UTF_8);
         } catch (JacksonException exception) {
             throw new GovernanceArtifactReadException("governance artifact canonical JSON unavailable", exception);
+        }
+    }
+
+    public static String sha256(ObjectMapper objectMapper, Object value) {
+        return sha256(serialize(objectMapper, objectMapper.valueToTree(value)));
+    }
+
+    public static String sha256(byte[] value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
         }
     }
 

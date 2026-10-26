@@ -174,6 +174,29 @@ class ReadAccessAuditClassifierTest {
     }
 
     @Test
+    void shouldClassifyModelPromotionStateAsArtifactScopedSensitiveRead() {
+        MockHttpServletRequest request = modelPromotionRequest("/api/v1/governance/model-promotion/state");
+
+        ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.MODEL_PROMOTION_STATE);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.MODEL_PROMOTION);
+        assertThat(target.resourceId()).isEqualTo("a".repeat(64));
+        assertThat(target.queryHash()).hasSize(32);
+    }
+
+    @Test
+    void shouldClassifyModelPromotionAssessmentAsArtifactScopedSensitiveRead() {
+        MockHttpServletRequest request = modelPromotionRequest("/api/v1/governance/model-promotion/assessment");
+
+        ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.MODEL_PROMOTION_ASSESSMENT);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.MODEL_PROMOTION);
+        assertThat(target.resourceId()).isEqualTo("a".repeat(64));
+    }
+
+    @Test
     void shouldNotClassifyRetiredLegacyFraudCaseRouteAsSuccessfulSensitiveRead() {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/fraud-cases/work-queue");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/fraud-cases/**");
@@ -244,6 +267,18 @@ class ReadAccessAuditClassifierTest {
                 "/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback"
         );
         request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, Map.of("transactionId", transactionId));
+        return request;
+    }
+
+    private MockHttpServletRequest modelPromotionRequest(String path) {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, path);
+        request.setParameter("modelName", "fraud-model");
+        request.setParameter("modelVersion", "2026.10");
+        request.setParameter("featureContractVersion", "features-v2");
+        request.setParameter("modelArtifactSha256", "a".repeat(64));
+        request.setParameter("environment", "PRODUCTION");
+        request.setParameter("intendedUse", "FRAUD_RISK_SCORING");
         return request;
     }
 }
