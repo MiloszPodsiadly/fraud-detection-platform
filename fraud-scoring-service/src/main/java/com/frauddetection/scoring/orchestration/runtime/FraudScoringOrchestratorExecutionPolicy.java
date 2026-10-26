@@ -11,11 +11,7 @@ import java.util.Set;
 public record FraudScoringOrchestratorExecutionPolicy(
         List<FraudEngineExecutionPolicy> enginePolicies
 ) {
-    private static final Set<String> ALLOWED_ENGINE_IDS = Set.of(
-            FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
-            FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
-            FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID
-    );
+    private static final Set<String> ALLOWED_ENGINE_IDS = Set.copyOf(FraudEngineIdentityContract.engineOrder());
 
     public FraudScoringOrchestratorExecutionPolicy {
         Objects.requireNonNull(enginePolicies, "enginePolicies is required");
@@ -31,8 +27,7 @@ public record FraudScoringOrchestratorExecutionPolicy(
         }
         requirePolicy(engineIds, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID);
         requirePolicy(engineIds, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID);
-        if (engineIds.contains(FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID)
-                && policyFor(enginePolicies, FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID).required()) {
+        if (enginePolicies.stream().anyMatch(policy -> isOptionalEngine(policy.engineId()) && policy.required())) {
             throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_OPTIONAL_ENGINE_REQUIRED");
         }
         enginePolicies = List.copyOf(enginePolicies);
@@ -54,6 +49,11 @@ public record FraudScoringOrchestratorExecutionPolicy(
                         FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
                         Duration.ofMillis(250),
                         false
+                ),
+                new FraudEngineExecutionPolicy(
+                        FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID,
+                        Duration.ofMillis(250),
+                        false
                 )
         ));
     }
@@ -72,10 +72,8 @@ public record FraudScoringOrchestratorExecutionPolicy(
         }
     }
 
-    private static FraudEngineExecutionPolicy policyFor(List<FraudEngineExecutionPolicy> policies, String engineId) {
-        return policies.stream()
-                .filter(policy -> policy.engineId().equals(engineId))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("ENGINE_EXECUTION_POLICY_MISSING"));
+    private static boolean isOptionalEngine(String engineId) {
+        return FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID.equals(engineId)
+                || FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engineId);
     }
 }

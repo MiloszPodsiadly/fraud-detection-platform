@@ -52,8 +52,8 @@ enable production mode and does not replace environment-specific release approva
   source, change thresholds, or change analyst recommended actions.
 - Velocity v1 requires the Feature Enricher recent-transaction window to remain exactly `PT1M`; unsupported windows
   fail startup/configuration or consumer validation rather than silently changing score meaning.
-- The current engine-intelligence contract allows three known engine identities: Rules and ML model are required;
-  Velocity is an optional third diagnostic engine. Future Device, Merchant, or Graph engines require a versioned
+- The current Engine Intelligence contract allows four known identities in canonical order: Rules and ML model are
+  required; Velocity and Device Risk are optional diagnostic engines. Merchant, Graph, or any fifth engine requires a
   contract update.
 
 ## Rules V2 Input Configuration

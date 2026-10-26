@@ -11,7 +11,6 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceVersionedIdentity;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
@@ -35,7 +34,7 @@ public class EngineIntelligenceProjectionPolicy {
 
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().findAndAddModules().build();
 
-    public static final int MAX_ENGINES = EngineIntelligenceVersionedIdentity.MAX_V2_ENGINES;
+    public static final int MAX_ENGINES = FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES;
     public static final int MAX_DIAGNOSTIC_SIGNALS = 5;
     public static final int MAX_WARNINGS = 10;
     public static final int MAX_REASON_CODES_PER_ENGINE = 5;
@@ -78,7 +77,7 @@ public class EngineIntelligenceProjectionPolicy {
 
     public EngineIntelligenceSummary validatedCopy(EngineIntelligenceSummary source) {
         requireShape(source);
-        if (!EngineIntelligenceVersionedIdentity.supportedVersion(source.contractVersion())) {
+        if (source.contractVersion() != EngineIntelligenceSummary.CONTRACT_VERSION) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION);
         }
         // Alert-service projection revalidates engine intelligence through the shared bounded public event
@@ -87,18 +86,17 @@ public class EngineIntelligenceProjectionPolicy {
         EngineIntelligenceSummary validated = publicContract(() -> new EngineIntelligenceSummary(
                 source.contractVersion(),
                 source.generatedAt(),
-                copyBounded(source.engines(), EngineIntelligenceVersionedIdentity.maxEngines(source.contractVersion()),
-                        engine -> validatedEngine(engine, source.contractVersion())),
+                copyBounded(source.engines(), MAX_ENGINES, this::validatedEngine),
                 validatedComparison(source.comparison()),
                 copyBounded(
                         source.diagnosticSignals(),
                         MAX_DIAGNOSTIC_SIGNALS,
-                        signal -> validatedDiagnosticSignal(signal, source.contractVersion())
+                        this::validatedDiagnosticSignal
                 ),
                 copyBounded(source.warnings(), MAX_WARNINGS, this::validatedWarning)
         ));
         try {
-            EngineIntelligenceVersionedIdentity.requireSerializedSize(OBJECT_MAPPER.writeValueAsBytes(validated).length);
+            FraudEngineIdentityContract.requireEngineIntelligenceSerializedSize(OBJECT_MAPPER.writeValueAsBytes(validated).length);
         } catch (JacksonException | IllegalArgumentException exception) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
         }
@@ -128,10 +126,10 @@ public class EngineIntelligenceProjectionPolicy {
         return value;
     }
 
-    private EngineIntelligenceEngineResult validatedEngine(EngineIntelligenceEngineResult source, int version) {
+    private EngineIntelligenceEngineResult validatedEngine(EngineIntelligenceEngineResult source) {
         requireShape(source);
         return publicContract(() -> new EngineIntelligenceEngineResult(
-                allowedEngineId(source.engineId(), version),
+                allowedEngineId(source.engineId()),
                 boundedEnum(source.engineType(), FraudEngineType.class),
                 boundedEnum(source.status(), FraudEngineStatus.class),
                 boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
@@ -153,11 +151,11 @@ public class EngineIntelligenceProjectionPolicy {
     }
 
     private EngineIntelligenceDiagnosticSignal validatedDiagnosticSignal(
-            EngineIntelligenceDiagnosticSignal source, int version
+            EngineIntelligenceDiagnosticSignal source
     ) {
         requireShape(source);
         return publicContract(() -> new EngineIntelligenceDiagnosticSignal(
-                allowedEngineId(source.engineId(), version),
+                allowedEngineId(source.engineId()),
                 boundedEnum(source.engineType(), FraudEngineType.class),
                 boundedEnum(source.engineStatus(), FraudEngineStatus.class),
                 boundedEnum(source.signalCategory(), EngineIntelligenceSignalCategory.class),
@@ -175,9 +173,9 @@ public class EngineIntelligenceProjectionPolicy {
         ));
     }
 
-    private String allowedEngineId(String engineId, int version) {
+    private String allowedEngineId(String engineId) {
         String safe = boundedString(engineId);
-        if (!EngineIntelligenceVersionedIdentity.engineOrder(version).contains(safe)) {
+        if (!FraudEngineIdentityContract.engineOrder().contains(safe)) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
         }
         return safe;

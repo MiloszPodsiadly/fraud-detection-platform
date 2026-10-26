@@ -13,6 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -45,7 +46,7 @@ class EngineIntelligenceReadModelMapperTest {
 
         assertThat(response.transactionId()).isEqualTo("txn-fdp96-001");
         assertThat(response.available()).isTrue();
-        assertThat(response.contractVersion()).isEqualTo(1);
+        assertThat(response.contractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
         assertThat(response.generatedAt()).isEqualTo(EngineIntelligenceProjectionTestFixtures.GENERATED_AT);
         assertThat(response.engineCount()).isEqualTo(2);
         assertThat(response.diagnosticSignalCount()).isEqualTo(2);
@@ -218,7 +219,7 @@ class EngineIntelligenceReadModelMapperTest {
         EngineIntelligenceProjection oversized = new EngineIntelligenceProjection(
                 "txn-oversized",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 List.of("rules.primary", "ml.python.primary"),
@@ -343,7 +344,7 @@ class EngineIntelligenceReadModelMapperTest {
         return new EngineIntelligenceProjection(
                 "txn-fdp96-operational",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 List.of("rules.primary", "ml.python.primary"),
@@ -406,7 +407,7 @@ class EngineIntelligenceReadModelMapperTest {
         return new EngineIntelligenceProjection(
                 "txn-corrupted",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 null,
                 null,
@@ -429,7 +430,7 @@ class EngineIntelligenceReadModelMapperTest {
         return new EngineIntelligenceProjection(
                 "txn-corrupted-comparison",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 comparisonType,
                 comparedEngineIds,
@@ -456,7 +457,7 @@ class EngineIntelligenceReadModelMapperTest {
         return new EngineIntelligenceProjection(
                 "txn-corrupted-available-bucket",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 List.of("rules.primary", "ml.python.primary"),

@@ -9,7 +9,7 @@ import java.util.Set;
 
 public final class FraudEngineEvidenceSanitizer {
     private static final String DEFAULT_DESCRIPTION = "Bounded engine signal.";
-    private static final Set<String> ALLOWED_SOURCES = Set.of("RULES", "ML_MODEL", "ORCHESTRATOR", "VELOCITY");
+    private static final Set<String> ALLOWED_SOURCES = Set.of("RULES", "ML_MODEL", "ORCHESTRATOR", "VELOCITY", "DEVICE_RISK");
     private final FraudEngineReasonCodeNormalizer reasonCodeNormalizer = new FraudEngineReasonCodeNormalizer();
 
     public List<BoundedFraudEngineEvidenceSummary> sanitize(

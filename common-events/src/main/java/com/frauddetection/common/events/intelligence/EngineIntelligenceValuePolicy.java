@@ -18,9 +18,18 @@ final class EngineIntelligenceValuePolicy {
     static final int MAX_REASON_CODES_PER_ENGINE = 5;
     static final int MAX_STRING_LENGTH = 128;
 
-    private static final Set<String> DEVICE_V2_REASON_CODES = Set.of(
+    private static final Set<String> DEVICE_REASON_CODES = Set.of(
             "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE",
-            "DEVICE_EVIDENCE_PARTIAL", "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED");
+            "DEVICE_EVIDENCE_PARTIAL", "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED",
+            "DEVICE_SIGNALS_UNSUPPORTED", "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW",
+            "DEVICE_NOVELTY_SEEN_IN_WINDOW", "DEVICE_NOVELTY_HISTORY_INCOMPLETE",
+            "DEVICE_NOVELTY_HISTORY_UNAVAILABLE", "DEVICE_NOVELTY_HISTORY_INVALID",
+            "DEVICE_NOVELTY_UNTRUSTED_SOURCE", "DEVICE_SWITCH_OBSERVED", "DEVICE_SWITCH_NOT_OBSERVED",
+            "DEVICE_SWITCH_HISTORY_INCOMPLETE", "DEVICE_SWITCH_HISTORY_UNAVAILABLE",
+            "DEVICE_SWITCH_HISTORY_INVALID", "DEVICE_SWITCH_UNTRUSTED_SOURCE",
+            "DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE", "DEVICE_SHARED_DEVICE_UNTRUSTED_SOURCE",
+            "DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE", "DEVICE_COUNTRY_MISMATCH_UNTRUSTED_SOURCE",
+            "DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE", "DEVICE_PROXY_OR_VPN_UNTRUSTED_SOURCE");
     private static final Set<String> ALLOWED_REASON_CODES = allowedReasonCodes();
     private static final Set<String> FORBIDDEN_COMPACT_TEXT = Set.of(
             "transactionid",
@@ -51,11 +60,10 @@ final class EngineIntelligenceValuePolicy {
 
     static void requireEngineIdentity(String engineId, FraudEngineType engineType) {
         requireBoundedSafeText(engineId, "ENGINE_INTELLIGENCE_ENGINE_ID_INVALID");
-        if (!FraudEngineIdentityContract.isKnownEngineId(engineId)
-                && !EngineIntelligenceVersionedIdentity.DEVICE_PRIMARY_ENGINE_ID.equals(engineId)) {
+        if (!FraudEngineIdentityContract.isKnownEngineId(engineId)) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_UNKNOWN_ENGINE_ID");
         }
-        if (!EngineIntelligenceVersionedIdentity.hasExpectedType(engineId, engineType)) {
+        if (!FraudEngineIdentityContract.hasExpectedType(engineId, engineType)) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_ENGINE_TYPE_MISMATCH");
         }
     }
@@ -68,12 +76,12 @@ final class EngineIntelligenceValuePolicy {
         return reasonCode;
     }
 
-    static boolean isDeviceV2Reason(String reasonCode) {
-        return DEVICE_V2_REASON_CODES.contains(reasonCode);
+    static boolean isDeviceReason(String reasonCode) {
+        return DEVICE_REASON_CODES.contains(reasonCode);
     }
 
     static boolean allowedForDevice(String reasonCode) {
-        return DEVICE_V2_REASON_CODES.contains(reasonCode)
+        return DEVICE_REASON_CODES.contains(reasonCode)
                 || reasonCode.equals("ORCHESTRATOR_ENGINE_EXCEPTION")
                 || reasonCode.equals("ORCHESTRATOR_ENGINE_NULL_RESULT")
                 || reasonCode.equals("ORCHESTRATOR_ENGINE_REJECTED")
@@ -144,6 +152,6 @@ final class EngineIntelligenceValuePolicy {
                 "VELOCITY_FEATURES_INCONSISTENT"
         );
         return Stream.concat(Stream.concat(sharedReasonCodes, engineReasonCodes),
-                DEVICE_V2_REASON_CODES.stream()).collect(Collectors.toUnmodifiableSet());
+                DEVICE_REASON_CODES.stream()).collect(Collectors.toUnmodifiableSet());
     }
 }

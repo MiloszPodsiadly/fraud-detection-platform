@@ -22,8 +22,9 @@ FDP-97 does not add case-level aggregation.
 
 UI consumes only `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence`.
 The read-only display does not call Mongo, scoring, ML, rules, orchestrator, Kafka, alert mutation, fraud case mutation, severity mutation, or status mutation APIs.
-The current contract version accepts at most three engine rows: `rules.primary / RULES`,
-`ml.python.primary / ML_MODEL`, and `velocity.primary / VELOCITY`.
+The current nested contract version is `2` and accepts up to four rows in canonical order:
+`rules.primary / RULES`, `ml.python.primary / ML_MODEL`, optional `velocity.primary / VELOCITY`, and optional
+`device.primary / DEVICE_RISK`. Device Risk remains non-AVAILABLE, without a risk level or calibrated score bucket.
 
 ## UI Placement
 

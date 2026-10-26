@@ -27,10 +27,10 @@ to the public DTOs. It is called only for disabled-by-default producer diagnosti
 `transactions.scored` consumer boundary. Missing, malformed, retired, and future versions fail closed. Absence of this
 marker is not evidence that a record is safely historical and never selects a permissive parser.
 
-`EngineIntelligenceSummary.contractVersion` is required. The producer currently emits v1; the shared typed reader
-supports v1 and v2. V2 adds the optional `device.primary` result while preserving the Rules-vs-ML-only comparator.
-Alert projection/API/OpenAPI/Analyst Console support for v2 is pending consumer-first migration. A v2 producer must
-remain disabled until that migration and retained-data/replay handling are proven. The outer
+`EngineIntelligenceSummary.contractVersion` is required and equals `2` on the current wire. The producer uses this
+version even when optional engines are absent. Current readers reject nested v1, missing, and unknown versions. Rules
+and ML are required; Velocity and Device Risk are optional in canonical order. The comparator remains exactly
+`RULES_VS_ML` over `[rules.primary, ml.python.primary]`. The outer
 `TransactionScoredEvent.eventContractVersion=2` is independent from this nested version.
 
 ## Backward Compatibility Rules
@@ -69,16 +69,16 @@ bucket or detached from its summary. The exact field is not part of the public E
 
 ## Payload Limits
 
-V1 allows at most three engines; v2 allows at most four. Both versions allow five diagnostic signals, ten warning
-summaries, five reason codes per engine, and 128 characters per bounded string. V2 additionally has a 16 KiB UTF-8
-serialized summary cap, checked at byte-oriented ingress and egress before parsing or publishing.
+The current nested contract allows at most four engines, five diagnostic signals, ten warning summaries, five reason
+codes per engine, and 128 characters per bounded string. The summary is also capped at 16 KiB of serialized UTF-8,
+checked at byte-oriented ingress and egress before parsing or publishing.
 
-Version 1 allows three known engine identities: `rules.primary`, `ml.python.primary`, and `velocity.primary`. Version
-2 adds optional `device.primary` / `DEVICE_RISK` after Velocity. Each version enforces its own identity set, type,
-order, and engine cap. Rules
-and ML are required. Velocity and Device are optional diagnostics. Missing Rules or ML in a current
-`contractVersion=1` summary is corruption, not an operational representation. Operational failure is represented by a
-present engine result with a non-AVAILABLE status and bounded reason code, not by omitting the engine.
+The one known identity set is `rules.primary`, `ml.python.primary`, `velocity.primary`, and `device.primary`, in that
+canonical order. Rules and ML are required; Velocity and Device Risk are optional diagnostics. Missing required engines
+or an unsupported nested version is corruption, not an operational representation. Operational failure is represented
+by a present engine result with a non-AVAILABLE status and bounded reason code, not by omitting the engine. Historical
+nested v1 records are not reinterpreted by current readers; see the code/deployment matrix in the
+[contract version decision](engine_intelligence_contract_version_adr.md).
 
 Public timestamps use canonical UTC RFC3339 with uppercase `Z`, valid calendar dates from year `0001` through `9999`,
 hour `00-23`, second `00-59`, and optional fractional seconds from 1 through 9 digits. Offsets, timezone-less strings,
@@ -115,9 +115,9 @@ text, raw contribution values, internal objects, and decisioning fields.
 
 Score is bucketed or omitted, not raw, unless explicitly approved. A score bucket is diagnostic,
 not a calibrated probability and not a final score. Score delta is also bucketed and is not
-calibration proof. For v1, score delta applies only to `RULES_VS_ML` comparison identity:
+calibration proof. Score delta applies only to `RULES_VS_ML` comparison identity:
 `comparedEngineIds=["rules.primary","ml.python.primary"]`. Velocity is not included in score-delta semantics.
-For v1, available scores map to `LOW` for `0.00-0.25`, `MEDIUM` for
+Available scores map to `LOW` for `0.00-0.25`, `MEDIUM` for
 `>0.25-0.50`, `HIGH` for `>0.50-0.75`, and `VERY_HIGH` for `>0.75-1.00`. `NONE` is reserved for an
 explicitly omitted value and is not a missing-score fallback. Comparable score deltas map to `NONE`
 for exact zero, `SMALL` for `>0.00-0.15`, `MEDIUM` for `>0.15-0.35`, and `LARGE` for `>0.35-1.00`.
@@ -137,8 +137,8 @@ type, or availability status.
 
 ## Evidence Exposure Decision
 
-Evidence free-text descriptions are omitted or templated, not raw. Contract version 1 also omits evidence
-titles and display text.
+Evidence free-text descriptions are omitted or templated, not raw. The current contract also omits evidence titles and
+display text.
 
 ## Diagnostic Signal Exposure Decision
 

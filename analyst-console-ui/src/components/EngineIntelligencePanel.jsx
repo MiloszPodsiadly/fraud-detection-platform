@@ -71,6 +71,7 @@ export function EngineIntelligencePanel({
           <p className="sectionCopy">Diagnostic engine output for this transaction.</p>
           <p className="sectionCopy">Diagnostic only. Operational statuses and disagreement are investigation context.</p>
           <p className="sectionCopy">{VELOCITY_SEVERITY_COPY}</p>
+          <p className="sectionCopy">Device Risk is not production-ready: authenticated evidence admission and score calibration are unavailable. It does not change Rules/ML decisions.</p>
         </div>
       </div>
 

@@ -25,7 +25,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceVersionedIdentity;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
@@ -74,7 +74,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                         Instant.parse("2026-06-18T10:00:01Z"),
                         "a".repeat(64)
                 ),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 null,
                 null,
@@ -114,7 +114,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     }
 
     @Test
-    void instanceValidationAcceptsVersion2FourEngineDeviceResponse() {
+    void instanceValidationAcceptsCurrentFourEngineDeviceResponse() {
         assertValid("EngineIntelligenceResponse", v2DeviceResponse());
     }
 
@@ -143,6 +143,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     @Test
     void instanceValidationRejectsNegativeInstances() {
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("extra", "x")));
+        assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("contractVersion", 1)));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.remove("status")));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("generatedAt", "2026-06-11T10:15:30+00:00")));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("reasonCodes", List.of("A".repeat(129)))));
@@ -255,7 +256,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     private EngineIntelligenceResponse canonicalResponse() {
         return new EngineIntelligenceResponse(
                 EngineIntelligenceResponseStatus.AVAILABLE,
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 comparisonResponse(
                         EngineIntelligenceAgreementStatus.DISAGREEMENT,
@@ -296,7 +297,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     private EngineIntelligenceResponse threeEngineResponse() {
         return new EngineIntelligenceResponse(
                 EngineIntelligenceResponseStatus.AVAILABLE,
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 comparisonResponse(
                         EngineIntelligenceAgreementStatus.AGREEMENT,
@@ -316,7 +317,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     private EngineIntelligenceResponse v2DeviceResponse() {
         return new EngineIntelligenceResponse(
                 EngineIntelligenceResponseStatus.DEGRADED,
-                EngineIntelligenceVersionedIdentity.V2,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 comparisonResponse(
                         EngineIntelligenceAgreementStatus.DISAGREEMENT,
@@ -343,7 +344,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     private EngineIntelligenceResponse degradedResponse() {
         return new EngineIntelligenceResponse(
                 EngineIntelligenceResponseStatus.DEGRADED,
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 comparisonResponse(
                         EngineIntelligenceAgreementStatus.PARTIAL,
@@ -526,7 +527,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         }
         Object versionValue = instance.get("contractVersion");
         int version = versionValue instanceof Number number ? number.intValue() : 0;
-        if (!EngineIntelligenceVersionedIdentity.supportedVersion(version)) {
+        if (version != EngineIntelligenceSummary.CONTRACT_VERSION) {
             errors.add("unsupported engine-intelligence contract version");
             return errors;
         }
@@ -537,11 +538,11 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         int previousOrder = -1;
         for (Map<String, Object> engine : engines(instance)) {
             String engineId = engine.get("engineId").toString();
-            if (!EngineIntelligenceVersionedIdentity.hasExpectedType(
+            if (!FraudEngineIdentityContract.hasExpectedType(
                     engineId, FraudEngineType.valueOf(engine.get("engineType").toString()))) {
                 errors.add("unknown or mismatched engine identity");
             }
-            int currentOrder = EngineIntelligenceVersionedIdentity.engineOrder(version).indexOf(engineId);
+            int currentOrder = FraudEngineIdentityContract.engineOrder().indexOf(engineId);
             if (enginesById.put(engineId, engine) != null || currentOrder <= previousOrder) {
                 errors.add("engine ids must be unique and canonical ordered");
             }
@@ -556,22 +557,17 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 errors.add("non-available engine must not expose risk");
             }
         }
-        if (enginesById.size() < 2 || enginesById.size() > EngineIntelligenceVersionedIdentity.maxEngines(version)) {
-            errors.add("engine set must remain within the versioned engine bound");
+        if (enginesById.size() < 2 || enginesById.size() > FraudEngineIdentityContract.maxEngineIntelligenceEngines()) {
+            errors.add("engine set must remain within the current contract bound");
         }
         if (!enginesById.containsKey("rules.primary") || !enginesById.containsKey("ml.python.primary")) {
             errors.add("required Rules and ML engines missing");
         }
-        if (enginesById.size() == 4
-                && (!enginesById.containsKey("velocity.primary") || !enginesById.containsKey("device.primary"))) {
-            errors.add("fourth engine requires canonical Velocity then Device Risk order");
-        }
         Map<String, Object> device = enginesById.get("device.primary");
-        if (device != null && (version != EngineIntelligenceVersionedIdentity.V2
-                || "AVAILABLE".equals(device.get("status"))
+        if (device != null && ("AVAILABLE".equals(device.get("status"))
                 || device.get("riskLevel") != null
                 || !"UNAVAILABLE".equals(device.get("scoreBucket")))) {
-            errors.add("Device Risk is v2-only and must remain uncalibrated");
+            errors.add("Device Risk must remain uncalibrated");
         }
         if (enginesById.containsKey("rules.primary") && enginesById.containsKey("ml.python.primary")) {
             errors.addAll(validateComparisonCoherence(comparison(instance), enginesById.get("rules.primary"), enginesById.get("ml.python.primary")));
@@ -616,7 +612,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             return "DEGRADED";
         }
         Object velocityStatus = statusFor(enginesById, FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID);
-        Object deviceStatus = statusFor(enginesById, EngineIntelligenceVersionedIdentity.DEVICE_PRIMARY_ENGINE_ID);
+        Object deviceStatus = statusFor(enginesById, FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID);
         if (isOptionalDiagnosticAvailable(velocityStatus) && isOptionalDiagnosticAvailable(deviceStatus)) {
             return "AVAILABLE";
         }

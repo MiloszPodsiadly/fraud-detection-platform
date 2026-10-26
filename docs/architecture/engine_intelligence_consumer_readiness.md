@@ -72,9 +72,10 @@ Fixture names describe the current `TransactionScoredEvent` shape used for contr
 `v2_without_engine_intelligence` proves legitimate optional absence.
 `v2_*_engine_intelligence` means the current scored-event shape with optional engineIntelligence present.
 This does not change `EngineIntelligenceSummary.contractVersion`.
-The nested public engine-intelligence producer contract was `contractVersion = 1` for FDP-93. FDP-149 adds a common
-v2 reader for the optional fourth Device result; current alert projection/API/UI consumers still require v1 until the
-consumer-first migration and tests complete.
+The historical nested public engine-intelligence producer contract used `contractVersion = 1`. The current in-repository
+producer, common contract, alert projection/API, and Analyst Console use nested `contractVersion = 2`, with Device Risk
+optional and uncalibrated. Current readers reject nested v1 and unknown versions; deployments must confirm that all
+reader instances are upgraded before enabling the current producer wire shape.
 Identity-free historical comparison payloads are not fixtures and are rejected rather than normalized during replay.
 
 ## Alert-service Readiness
@@ -147,7 +148,7 @@ Producer emission must not hide projection/API/UI changes unless they are explic
 A separate reviewed branch could add producer emission behind a disabled-by-default rollout flag after
 consumer-readiness proof. Later projection, persistence, and API/UI work required separate scope and review.
 FDP-93 fixtures cover valid and forward-compatible event shapes.
-FDP-93 did not validate nested engineIntelligence versions. FDP-149 now accepts only nested versions 1 and 2 in the
-shared contract, while alert projection/API/UI support for v2 remains a migration gate.
-Future producer emission branch should test that unsupported engineIntelligence contract versions fail safely and boundedly.
-Invalid-version handling must not be interpreted as consumer tolerance.
+The current shared contract, projection, API, and UI accept only nested version 2. A v1-only deployed reader is
+incompatible with the current producer. External consumers remain unknown until identified and verified. Unsupported
+nested versions fail safely and boundedly; invalid-version handling is not consumer tolerance. See the explicit
+[code and deployment compatibility matrix](engine_intelligence_contract_version_adr.md).

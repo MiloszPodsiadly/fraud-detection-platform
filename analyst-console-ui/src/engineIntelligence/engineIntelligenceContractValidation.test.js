@@ -11,6 +11,7 @@ import {
   isComparisonShape,
   isDiagnosticSignalShape,
   isEngineIntelligenceResponseShape,
+  isWithinEngineIntelligenceSerializedByteLimit,
   isEngineShape,
   hasRequiredRulesMlEngineSet,
   isModelIdentityShape,
@@ -19,6 +20,16 @@ import {
 } from "./engineIntelligenceContractValidation.js";
 
 describe("engineIntelligenceContractValidation", () => {
+  it("measures the serialized payload limit in UTF-8 bytes", () => {
+    const maximum = 16_384;
+    const exact = { padding: "é".repeat((maximum - 14) / 2) };
+    const oversized = { padding: `${"é".repeat((maximum - 14) / 2)}a` };
+
+    expect(new TextEncoder().encode(JSON.stringify(exact)).byteLength).toBe(maximum);
+    expect(isWithinEngineIntelligenceSerializedByteLimit(exact)).toBe(true);
+    expect(isWithinEngineIntelligenceSerializedByteLimit(oversized)).toBe(false);
+  });
+
   it("matches shared canonical engine registry fixture", () => {
     const registry = sharedFixture("engine_registry_contract.json");
 
@@ -51,11 +62,34 @@ describe("engineIntelligenceContractValidation", () => {
     expect(isEngineIntelligenceResponseShape(value)).toBe(true);
   });
 
-  it("rejects unsupported versions in the required-engine helper", () => {
+  it("accepts bounded non-sensitive per-signal Device Risk reason codes", () => {
+    const value = v2Fixture();
+    const reasonCodes = [
+      "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW",
+      "DEVICE_SWITCH_OBSERVED",
+      "DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE",
+      "DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE",
+      "DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE"
+    ];
+    value.engines[3].reasonCodes = reasonCodes;
+    value.diagnosticSignals = reasonCodes.map((reasonCode) => ({
+      engineId: "device.primary",
+      engineType: "DEVICE_RISK",
+      engineStatus: "DEGRADED",
+      signalCategory: "OPERATIONAL_SIGNAL",
+      riskLevel: null,
+      scoreBucket: "UNAVAILABLE",
+      reasonCode
+    }));
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(true);
+  });
+
+  it("recognizes required Rules and ML identities independently of the envelope version", () => {
     expect(hasRequiredRulesMlEngineSet([
       { engineId: "rules.primary" },
       { engineId: "ml.python.primary" }
-    ], 3)).toBe(false);
+    ])).toBe(true);
   });
 
   it.each([

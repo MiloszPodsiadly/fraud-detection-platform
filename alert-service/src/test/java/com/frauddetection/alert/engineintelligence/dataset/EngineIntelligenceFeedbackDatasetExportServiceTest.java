@@ -21,6 +21,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import org.junit.jupiter.api.Test;
 
@@ -309,10 +310,10 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
-    void missingMlScoreIsNullNotZero() {
+    void unavailableMlScoreRemainsUnavailableNotZero() {
         EngineIntelligenceFeedbackDatasetRecord record = exportWithProjection(projectionWithRulesOnly()).records().getFirst();
 
-        assertThat(record.mlScoreBucket()).isNull();
+        assertThat(record.mlScoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
     }
 
     @Test
@@ -323,10 +324,10 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
-    void missingRulesScoreIsNullNotZero() {
+    void unavailableRulesScoreRemainsUnavailableNotZero() {
         EngineIntelligenceFeedbackDatasetRecord record = exportWithProjection(projectionWithMlOnly()).records().getFirst();
 
-        assertThat(record.rulesScoreBucket()).isNull();
+        assertThat(record.rulesScoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
     }
 
     @Test
@@ -411,7 +412,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
 
     @Test
     void projectionTransactionMismatchFailsClosed() {
-        assertThat(exportWithProjection(projection(1, "txn-other", projectionEngines())).failureReason())
+        assertThat(exportWithProjection(projection(EngineIntelligenceSummary.CONTRACT_VERSION, "txn-other", projectionEngines())).failureReason())
                 .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION);
     }
 
@@ -427,7 +428,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     @Test
     void projectionMismatchDoesNotExportEngineSignals() {
         EngineIntelligenceFeedbackDatasetExportResult result = exportWithProjection(
-                projection(1, "txn-other", projectionEngines())
+                projection(EngineIntelligenceSummary.CONTRACT_VERSION, "txn-other", projectionEngines())
         );
 
         assertThat(result.records()).isEmpty();
@@ -457,7 +458,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     @Test
     void unsafeProjectionReasonCodeFailsAsCorruptedProjection() {
         EngineIntelligenceProjection projection = projection(
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 "txn-1",
                 List.of(engine(FraudEngineType.ML_MODEL, "ml.python.primary", List.of("deviceId:abc")))
         );
@@ -469,7 +470,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     @Test
     void tooManyProjectionReasonCodesFailsAsCorruptedProjection() {
         EngineIntelligenceProjection projection = projection(
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 "txn-1",
                 List.of(engine(FraudEngineType.ML_MODEL, "ml.python.primary", List.of(
                         "CODE_A", "CODE_B", "CODE_C", "CODE_D", "CODE_E", "CODE_F"
@@ -483,7 +484,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     @Test
     void unsafeProjectionDiagnosticSignalFailsAsCorruptedProjection() {
         EngineIntelligenceProjection projection = projection(
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 "txn-1",
                 projectionEngines(),
                 "customer_123_flagged"
@@ -509,7 +510,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
         EngineIntelligenceProjection corrupted = new EngineIntelligenceProjection(
                 null,
                 occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 FROM,
                 null,
                 null,
@@ -821,7 +822,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     private EngineIntelligenceProjection projectionWithBothEngines() {
-        return projection(1, "txn-1", projectionEngines());
+        return projection(EngineIntelligenceSummary.CONTRACT_VERSION, "txn-1", projectionEngines());
     }
 
     private EngineIntelligenceProjection v2DeviceProjection() {
@@ -864,17 +865,39 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     private EngineIntelligenceProjection projectionWithMlOnly() {
-        return projection(1, "txn-1", List.of(engine(FraudEngineType.ML_MODEL, "ml.python.primary")));
+        return projection(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                "txn-1",
+                List.of(
+                        unavailableEngine(FraudEngineType.RULES, "rules.primary", "ORCHESTRATOR_ENGINE_TIMEOUT"),
+                        engine(FraudEngineType.ML_MODEL, "ml.python.primary")
+                ),
+                "ML_MODEL_SIGNAL",
+                EngineIntelligenceAgreementStatus.PARTIAL,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+        );
     }
 
     private EngineIntelligenceProjection projectionWithRulesOnly() {
-        return projection(1, "txn-1", List.of(engine(FraudEngineType.RULES, "rules.primary")));
+        return projection(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                "txn-1",
+                List.of(
+                        engine(FraudEngineType.RULES, "rules.primary"),
+                        unavailableEngine(FraudEngineType.ML_MODEL, "ml.python.primary", "ML_MODEL_UNAVAILABLE")
+                ),
+                null,
+                EngineIntelligenceAgreementStatus.PARTIAL,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+        );
     }
 
     private List<EngineIntelligenceEngineProjection> projectionEngines() {
         return List.of(
-                engine(FraudEngineType.ML_MODEL, "ml.python.primary"),
-                engine(FraudEngineType.RULES, "rules.primary")
+                engine(FraudEngineType.RULES, "rules.primary"),
+                engine(FraudEngineType.ML_MODEL, "ml.python.primary")
         );
     }
 
@@ -892,6 +915,26 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
             List<EngineIntelligenceEngineProjection> engines,
             String diagnosticReasonCode
     ) {
+        return projection(
+                contractVersion,
+                transactionId,
+                engines,
+                diagnosticReasonCode,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                EngineIntelligenceScoreDeltaBucket.NONE
+        );
+    }
+
+    private EngineIntelligenceProjection projection(
+            int contractVersion,
+            String transactionId,
+            List<EngineIntelligenceEngineProjection> engines,
+            String diagnosticReasonCode,
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
+    ) {
         return new EngineIntelligenceProjection(
                 transactionId,
                 occurrence(),
@@ -899,11 +942,11 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                 FROM,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 List.of("rules.primary", "ml.python.primary"),
-                EngineIntelligenceAgreementStatus.AGREEMENT,
-                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
-                EngineIntelligenceScoreDeltaBucket.NONE,
+                agreementStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
                 engines,
-                List.of(new EngineIntelligenceDiagnosticSignalProjection(
+                diagnosticReasonCode == null ? List.of() : List.of(new EngineIntelligenceDiagnosticSignalProjection(
                         "ml.python.primary",
                         FraudEngineType.ML_MODEL,
                         FraudEngineStatus.AVAILABLE,
@@ -938,6 +981,21 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                 RiskLevel.HIGH,
                 EngineIntelligenceScoreBucket.HIGH,
                 reasonCodes
+        );
+    }
+
+    private EngineIntelligenceEngineProjection unavailableEngine(
+            FraudEngineType engineType,
+            String engineId,
+            String reasonCode
+    ) {
+        return new EngineIntelligenceEngineProjection(
+                engineId,
+                engineType,
+                FraudEngineStatus.UNAVAILABLE,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of(reasonCode)
         );
     }
 

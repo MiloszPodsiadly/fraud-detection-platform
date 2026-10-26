@@ -2,6 +2,7 @@ package com.frauddetection.common.events.intelligence;
 
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
@@ -10,7 +11,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class EngineIntelligenceV2ContractTest {
+class EngineIntelligenceContractTest {
     private static final String DEVICE_REASON = "DEVICE_SCORE_NOT_CALIBRATED";
 
     @Test
@@ -29,7 +30,7 @@ class EngineIntelligenceV2ContractTest {
         var decoded = EngineIntelligenceTestSupport.objectMapper().readValue(json, EngineIntelligenceSummary.class);
         assertThat(decoded).isEqualTo(summary);
         assertThat(json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
-                .isLessThanOrEqualTo(EngineIntelligenceVersionedIdentity.MAX_SERIALIZED_BYTES);
+                .isLessThanOrEqualTo(FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES);
     }
 
     @Test
@@ -44,8 +45,32 @@ class EngineIntelligenceV2ContractTest {
                 EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
                 velocity(), device), List.of(diagnostic));
 
+        assertThat(summary.contractVersion()).isEqualTo(2);
         assertThat(summary.engines()).hasSize(4);
         assertThat(summary.diagnosticSignals()).containsExactly(diagnostic);
+    }
+
+    @Test
+    void v2CarriesAllFiveFixedDeviceSignalDiagnosticsWithoutRiskBuckets() {
+        List<String> reasons = List.of(
+                "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW",
+                "DEVICE_SWITCH_OBSERVED",
+                "DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE",
+                "DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE",
+                "DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE");
+        var signals = reasons.stream().map(reason -> new EngineIntelligenceDiagnosticSignal(
+                "device.primary", FraudEngineType.DEVICE_RISK, FraudEngineStatus.DEGRADED,
+                EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL, null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE, reason)).toList();
+        var summary = v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                device(reasons)), signals);
+
+        assertThat(summary.engines().getLast().reasonCodes()).containsExactlyElementsOf(reasons);
+        assertThat(summary.diagnosticSignals()).containsExactlyElementsOf(signals);
+        assertThat(summary.engines().getLast().riskLevel()).isNull();
+        assertThat(summary.engines().getLast().scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
     }
 
     @Test
@@ -57,28 +82,58 @@ class EngineIntelligenceV2ContractTest {
                 EngineIntelligenceTestSupport.rulesEngine(),
                 EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
                 velocity()));
+        var deviceOnly = v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                device(List.of(DEVICE_REASON))));
 
         assertThat(twoEngines.engines()).hasSize(2);
+        assertThat(twoEngines.contractVersion()).isEqualTo(2);
+        assertThat(velocityOnly.contractVersion()).isEqualTo(2);
+        assertThat(deviceOnly.contractVersion()).isEqualTo(2);
         assertThat(velocityOnly.engines()).extracting(EngineIntelligenceEngineResult::engineId)
                 .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
+        assertThat(deviceOnly.engines()).extracting(EngineIntelligenceEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary", "device.primary");
     }
 
     @Test
-    void v1RemainsStrictAndDeviceOnlyReasonsCannotLeakIntoIt() {
+    void currentReadersRejectV1AndWrongEngineReasonCodes() {
         assertThatThrownBy(() -> new EngineIntelligenceSummary(1,
                 EngineIntelligenceTestSupport.GENERATED_AT,
                 List.of(EngineIntelligenceTestSupport.rulesEngine(),
                         EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
                         device(List.of(DEVICE_REASON))),
                 EngineIntelligenceTestSupport.comparison(), List.of(), List.of()))
-                .hasMessage("ENGINE_INTELLIGENCE_UNKNOWN_ENGINE_ID");
+                .hasMessage("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
 
         assertThatThrownBy(() -> new EngineIntelligenceSummary(1,
                 EngineIntelligenceTestSupport.GENERATED_AT,
                 List.of(EngineIntelligenceTestSupport.rulesEngine(List.of(DEVICE_REASON)),
                         EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)),
                 EngineIntelligenceTestSupport.comparison(), List.of(), List.of()))
-                .hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+                .hasMessage("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
+    }
+
+    @Test
+    void currentNestedReaderRejectsV1Summaries() throws Exception {
+        String json = "{\"contractVersion\":1,\"generatedAt\":\"2026-06-18T10:00:00Z\","
+                + "\"engines\":[],\"comparison\":{\"comparisonType\":\"RULES_VS_ML\","
+                + "\"comparedEngineIds\":[\"rules.primary\",\"ml.python.primary\"],"
+                + "\"agreementStatus\":\"PARTIAL\",\"riskMismatchStatus\":\"NOT_COMPARABLE\","
+                + "\"scoreDeltaBucket\":\"UNAVAILABLE\"},\"diagnosticSignals\":[],\"warnings\":[]}";
+
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.objectMapper()
+                .readValue(json, EngineIntelligenceSummary.class))
+                .hasMessageContaining("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
+    }
+
+    @Test
+    void currentProducerAndIdentityUseOneFourEngineContract() {
+        assertThat(EngineIntelligenceSummary.CONTRACT_VERSION).isEqualTo(2);
+        assertThat(FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES).isEqualTo(4);
+        assertThat(FraudEngineIdentityContract.engineOrder())
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary", "device.primary");
     }
 
     @Test
@@ -115,11 +170,11 @@ class EngineIntelligenceV2ContractTest {
 
     @Test
     void byteBoundaryIsExplicitAndFailClosed() {
-        EngineIntelligenceVersionedIdentity.requireSerializedSize(1);
-        EngineIntelligenceVersionedIdentity.requireSerializedSize(
-                EngineIntelligenceVersionedIdentity.MAX_SERIALIZED_BYTES);
-        for (int invalid : new int[]{0, EngineIntelligenceVersionedIdentity.MAX_SERIALIZED_BYTES + 1}) {
-            assertThatThrownBy(() -> EngineIntelligenceVersionedIdentity.requireSerializedSize(invalid))
+        FraudEngineIdentityContract.requireEngineIntelligenceSerializedSize(1);
+        FraudEngineIdentityContract.requireEngineIntelligenceSerializedSize(
+                FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES);
+        for (int invalid : new int[]{0, FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES + 1}) {
+            assertThatThrownBy(() -> FraudEngineIdentityContract.requireEngineIntelligenceSerializedSize(invalid))
                     .hasMessage("ENGINE_INTELLIGENCE_PAYLOAD_BYTES_INVALID");
         }
     }

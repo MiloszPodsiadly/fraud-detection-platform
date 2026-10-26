@@ -146,7 +146,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         verify(publisher).publish(scoredEvent);
         assertThat(scoredEvent.engineIntelligence()).isEqualTo(summary);
         assertThat(json(scoredEvent))
-                .contains("\"engineIntelligence\"", "\"contractVersion\":1")
+                .contains("\"engineIntelligence\"", "\"contractVersion\":2")
                 .doesNotContain(
                         "FraudEngineAggregationResult",
                         "NormalizedFraudEngineResult",

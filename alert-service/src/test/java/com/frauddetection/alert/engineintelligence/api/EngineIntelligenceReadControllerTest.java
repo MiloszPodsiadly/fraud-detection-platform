@@ -5,6 +5,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreement
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -47,7 +48,7 @@ class EngineIntelligenceReadControllerTest {
     void apiReturnsBoundedEngineIntelligenceWhenProjectionExists() throws Exception {
         when(service.read("txn-1")).thenReturn(EngineIntelligenceReadModel.projected(
                 "txn-1",
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-02T13:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
                         EngineIntelligenceComparisonType.RULES_VS_ML,

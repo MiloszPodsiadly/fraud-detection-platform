@@ -3,6 +3,7 @@ package com.frauddetection.common.events.contract;
 import tools.jackson.databind.ObjectMapper;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +33,7 @@ class TransactionScoredEventCompatibilityTest {
         TransactionScoredEvent event = objectMapper().readValue(newJson(""), TransactionScoredEvent.class);
 
         assertThat(event.engineIntelligence()).isNotNull();
-        assertThat(event.engineIntelligence().contractVersion()).isEqualTo(1);
+        assertThat(event.engineIntelligence().contractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
     }
 
     @Test
@@ -175,7 +176,7 @@ class TransactionScoredEventCompatibilityTest {
                 """
                 "alertRecommended": true,
                 "engineIntelligence": {
-                  "contractVersion": 1,
+                  "contractVersion": 2,
                   "generatedAt": "2026-06-01T06:00:00Z",
                   "engines": [
                     {
@@ -246,7 +247,7 @@ class TransactionScoredEventCompatibilityTest {
                 """
                 "alertRecommended": true,
                 "engineIntelligence": {
-                  "contractVersion": 1,
+                  "contractVersion": 2,
                   "generatedAt": "2026-06-01T06:00:00Z",
                   "engines": [
                     {

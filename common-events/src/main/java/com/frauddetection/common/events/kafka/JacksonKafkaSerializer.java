@@ -2,6 +2,7 @@ package com.frauddetection.common.events.kafka;
 
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.serialization.Serializer;
+import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -18,7 +19,11 @@ public final class JacksonKafkaSerializer<T> implements Serializer<T> {
         }
 
         try {
-            return OBJECT_MAPPER.writeValueAsBytes(data);
+            byte[] serialized = OBJECT_MAPPER.writeValueAsBytes(data);
+            if (data instanceof TransactionScoredEvent) {
+                EngineIntelligenceKafkaPayloadBoundary.requireBoundedEngineIntelligenceField(serialized);
+            }
+            return serialized;
         } catch (Exception exception) {
             throw new SerializationException("Unable to serialize Kafka payload for topic " + topic, exception);
         }

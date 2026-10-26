@@ -41,7 +41,7 @@ class ProducerEngineIntelligenceEnabledEventContractTest {
         ).path("engineIntelligence");
 
         assertThat(intelligence.isMissingNode()).isFalse();
-        assertThat(intelligence.path("contractVersion").intValue()).isEqualTo(1);
+        assertThat(intelligence.path("contractVersion").intValue()).isEqualTo(2);
         assertThat(intelligence.path("engines")).hasSizeLessThanOrEqualTo(2);
         assertThat(intelligence.path("diagnosticSignals")).hasSizeLessThanOrEqualTo(5);
         assertThat(intelligence.path("warnings")).hasSizeLessThanOrEqualTo(10);

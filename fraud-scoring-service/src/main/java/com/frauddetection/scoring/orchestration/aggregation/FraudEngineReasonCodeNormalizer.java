@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.reason.ReasonCode;
+import com.frauddetection.scoring.device.DeviceRiskSignalReasonCode;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalReasonCode;
 import com.frauddetection.scoring.engine.rules.RuleBasedSignalReasonCode;
 import com.frauddetection.scoring.engine.velocity.VelocitySignalReasonCode;
@@ -37,7 +38,8 @@ public final class FraudEngineReasonCodeNormalizer {
             }
             if (trimmed.length() > policy.maxStringLength()
                     || !FraudEngineAggregationSafety.isSafe(trimmed)
-                    || !ALLOWED_REASON_CODES.contains(trimmed)) {
+                    || !ALLOWED_REASON_CODES.contains(trimmed)
+                    || !isAllowedForEngine(engineId, trimmed)) {
                 warn(warnings, policy, engineId, FraudEngineAggregationWarningCode.REASON_CODE_UNSUPPORTED_DROPPED);
                 continue;
             }
@@ -52,6 +54,12 @@ public final class FraudEngineReasonCodeNormalizer {
 
     boolean isAllowed(String reasonCode) {
         return reasonCode != null && ALLOWED_REASON_CODES.contains(reasonCode);
+    }
+
+    private boolean isAllowedForEngine(String engineId, String reasonCode) {
+        boolean deviceCode = DeviceRiskSignalReasonCode.owns(reasonCode);
+        return "device.primary".equals(engineId) ? deviceCode
+                || reasonCode.startsWith("ORCHESTRATOR_ENGINE_") : !deviceCode;
     }
 
     private void warn(
@@ -77,6 +85,7 @@ public final class FraudEngineReasonCodeNormalizer {
                         Stream.of(PythonMlSignalReasonCode.values()).map(PythonMlSignalReasonCode::wireValue),
                         Stream.of(RuleBasedSignalReasonCode.values()).map(RuleBasedSignalReasonCode::wireValue),
                         Stream.of(VelocitySignalReasonCode.values()).map(VelocitySignalReasonCode::wireValue),
+                        Stream.of(DeviceRiskSignalReasonCode.values()).map(DeviceRiskSignalReasonCode::wireValue),
                         orchestrationCodes.stream()
                 )
                 .flatMap(stream -> stream)

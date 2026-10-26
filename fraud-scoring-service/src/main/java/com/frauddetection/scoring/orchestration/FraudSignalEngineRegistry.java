@@ -13,6 +13,7 @@ public final class FraudSignalEngineRegistry {
     public static final String RULES_PRIMARY_ENGINE_ID = FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID;
     public static final String PYTHON_ML_PRIMARY_ENGINE_ID = FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID;
     public static final String VELOCITY_PRIMARY_ENGINE_ID = FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID;
+    public static final String DEVICE_PRIMARY_ENGINE_ID = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID;
 
     private static final List<String> KNOWN_ENGINE_ORDER = FraudEngineIdentityContract.engineOrder();
 
@@ -34,7 +35,8 @@ public final class FraudSignalEngineRegistry {
             if (!FraudEngineIdentityContract.hasExpectedType(engineId, descriptor.engineType())) {
                 throw new IllegalArgumentException("ENGINE_REGISTRY_ENGINE_TYPE_MISMATCH");
             }
-            if (VELOCITY_PRIMARY_ENGINE_ID.equals(engineId) && descriptor.required()) {
+            if ((VELOCITY_PRIMARY_ENGINE_ID.equals(engineId) || DEVICE_PRIMARY_ENGINE_ID.equals(engineId))
+                    && descriptor.required()) {
                 throw new IllegalArgumentException("ENGINE_REGISTRY_OPTIONAL_ENGINE_REQUIRED");
             }
             if (engineIds.contains(engineId)) {

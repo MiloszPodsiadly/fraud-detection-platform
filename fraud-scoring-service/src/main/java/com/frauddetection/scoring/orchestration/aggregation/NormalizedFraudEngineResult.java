@@ -53,6 +53,10 @@ public record NormalizedFraudEngineResult(
         reasonCodes = copy(reasonCodes, "reasonCodes");
         evidence = copy(evidence, "evidence");
         contributions = copy(contributions, "contributions");
+        if (FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engineId)
+                && (status == FraudEngineStatus.AVAILABLE || score != null || riskLevel != null || !contributions.isEmpty())) {
+            throw new IllegalArgumentException("AGGREGATION_DEVICE_SCORE_UNCALIBRATED");
+        }
         requireSize(reasonCodes, MAX_REASON_CODES, "reasonCodes");
         requireSize(evidence, MAX_EVIDENCE_ITEMS, "evidence");
         requireSize(contributions, MAX_CONTRIBUTIONS, "contributions");

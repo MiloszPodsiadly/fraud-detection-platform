@@ -10,6 +10,8 @@ import * as engineIntelligenceContract from "../engineIntelligence/engineIntelli
 export { isAbortError } from "./apiErrors.js";
 
 const API_BASE_URL = import.meta.env.VITE_ALERT_API_BASE_URL ?? "";
+const MAX_ENGINE_INTELLIGENCE_RESPONSE_BYTES =
+  engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES + 2_048;
 
 export function createAlertsApiClient({
   session = null,
@@ -237,6 +239,7 @@ async function requestWithContext(path, options = {}, context = {}) {
   const {
     includeAuth = true,
     headers = {},
+    maxResponseBytes = null,
     ...fetchOptions
   } = options;
   const {
@@ -263,7 +266,9 @@ async function requestWithContext(path, options = {}, context = {}) {
   if (!response.ok) {
     const fallback = `Request failed with status ${response.status}`;
     try {
-      const errorBody = await response.json();
+      const errorBody = maxResponseBytes === null
+        ? await response.json()
+        : await readBoundedJsonResponse(response, maxResponseBytes);
       const details = errorBody.details || errorBody.validationErrors || [];
       const detailText = Array.isArray(details) && details.length > 0 ? ` ${details.join(" ")}` : "";
       throw new ApiError({
@@ -284,7 +289,46 @@ async function requestWithContext(path, options = {}, context = {}) {
     return null;
   }
 
-  return response.json();
+  return maxResponseBytes === null
+    ? response.json()
+    : readBoundedJsonResponse(response, maxResponseBytes);
+}
+
+async function readBoundedJsonResponse(response, maximumBytes) {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    throw new Error("ENGINE_INTELLIGENCE_RESPONSE_BODY_UNAVAILABLE");
+  }
+
+  const chunks = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value.byteLength === 0) {
+      continue;
+    }
+    totalBytes += value.byteLength;
+    if (totalBytes > maximumBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error("ENGINE_INTELLIGENCE_RESPONSE_BYTES_INVALID");
+    }
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+  } catch {
+    throw new Error("ENGINE_INTELLIGENCE_RESPONSE_JSON_INVALID");
+  }
 }
 
 function listAlertsWithRequest(request, { page = 0, size = 10 } = {}, { signal } = {}) {
@@ -687,7 +731,8 @@ function engineIntelligenceFeedbackFailureState(error) {
 
 function engineIntelligenceRequestOptions({ signal } = {}) {
   return {
-    ...(signal ? { signal } : {})
+    ...(signal ? { signal } : {}),
+    maxResponseBytes: MAX_ENGINE_INTELLIGENCE_RESPONSE_BYTES
   };
 }
 
@@ -709,6 +754,17 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     });
   }
 
+  if (!engineIntelligenceContract.isWithinEngineIntelligenceSerializedByteLimit({
+    contractVersion: response.contractVersion,
+    generatedAt: response.generatedAt,
+    engines: response.engines,
+    comparison: response.comparison,
+    diagnosticSignals: response.diagnosticSignals,
+    warnings: response.warnings
+  })) {
+    return unavailableEngineIntelligence(transactionId);
+  }
+
   if (
     response.available !== true
     || !engineIntelligenceContract.isSupportedEngineIntelligenceVersion(response.contractVersion)
@@ -721,9 +777,8 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     return unavailableEngineIntelligence(transactionId);
   }
 
-  const version = response.contractVersion;
-  const engines = normalizeEngineResults(response.engines, version);
-  const diagnosticSignals = normalizeDiagnosticSignals(response.diagnosticSignals, version);
+  const engines = normalizeEngineResults(response.engines);
+  const diagnosticSignals = normalizeDiagnosticSignals(response.diagnosticSignals);
   const warnings = normalizeEngineWarnings(response.warnings);
   if (!engines || !diagnosticSignals || !warnings) {
     return unavailableEngineIntelligence(transactionId);
@@ -741,7 +796,7 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     state: "available",
     available: true,
     transactionId,
-    contractVersion: version,
+    contractVersion: engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION,
     generatedAt: response.generatedAt,
     comparison,
     engineCount: engines.length,
@@ -771,19 +826,19 @@ function unavailableEngineIntelligence(transactionId) {
   });
 }
 
-function normalizeEngineResults(values, version) {
+function normalizeEngineResults(values) {
   if (!Array.isArray(values)) {
     return null;
   }
-  if (values.length > engineIntelligenceContract.maxEnginesForVersion(version)) {
+  if (values.length > engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_ENGINES) {
     return null;
   }
-  if (!engineIntelligenceContract.hasRequiredRulesMlEngineSet(values, version)) {
+  if (!engineIntelligenceContract.hasRequiredRulesMlEngineSet(values)) {
     return null;
   }
   const normalized = [];
   for (const value of values) {
-    if (!engineIntelligenceContract.isEngineShape(value, version)) {
+    if (!engineIntelligenceContract.isEngineShape(value)) {
       return null;
     }
     const reasonCodes = normalizeReasonCodes(value.reasonCodes);
@@ -806,7 +861,7 @@ function normalizeEngineResults(values, version) {
   return normalized;
 }
 
-function normalizeDiagnosticSignals(values, version) {
+function normalizeDiagnosticSignals(values) {
   if (!Array.isArray(values)) {
     return null;
   }
@@ -815,7 +870,7 @@ function normalizeDiagnosticSignals(values, version) {
   }
   const normalized = [];
   for (const value of values) {
-    if (!engineIntelligenceContract.isDiagnosticSignalShape(value, version)) {
+    if (!engineIntelligenceContract.isDiagnosticSignalShape(value)) {
       return null;
     }
     const reasonCode = safeRenderableString(value.reasonCode);

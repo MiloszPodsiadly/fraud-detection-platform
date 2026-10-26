@@ -67,7 +67,8 @@ class EngineIntelligenceGoldenFixtureTest {
                 .containsExactly(
                         FraudEngineType.RULES.name(),
                         FraudEngineType.ML_MODEL.name(),
-                        FraudEngineType.VELOCITY.name()
+                        FraudEngineType.VELOCITY.name(),
+                        FraudEngineType.DEVICE_RISK.name()
                 );
     }
 

@@ -5,7 +5,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProje
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackDocument;
 import com.frauddetection.alert.persistence.AlertDocument;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceVersionedIdentity;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineType;
 
 import java.util.ArrayList;
@@ -89,7 +89,7 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
     private EngineSignals signalsFrom(EngineIntelligenceFeedbackDocument feedback, EngineIntelligenceProjection projection) {
         if (projection.getTransactionId() == null
                 || !feedback.getTransactionId().equals(projection.getTransactionId())
-                || !EngineIntelligenceVersionedIdentity.supportedVersion(projection.getContractVersion())
+                || projection.getContractVersion() != FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
                 || projection.getGeneratedAt() == null
                 || projection.getEngines() == null
                 || projection.getDiagnosticSignals() == null) {
@@ -110,7 +110,7 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
             if (engine.engineType() == FraudEngineType.RULES) {
                 rules = new EngineValues(engine.status(), engine.scoreBucket(), engine.riskLevel());
             }
-            if (EngineIntelligenceVersionedIdentity.DEVICE_PRIMARY_ENGINE_ID.equals(engine.engineId())) {
+            if (FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engine.engineId())) {
                 device = new EngineValues(engine.status(), engine.scoreBucket(), engine.riskLevel());
             }
         }
@@ -149,10 +149,10 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
                     EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
             );
         }
-        boolean device = EngineIntelligenceVersionedIdentity.DEVICE_PRIMARY_ENGINE_ID.equals(engine.engineId());
-        if (!EngineIntelligenceVersionedIdentity.engineOrder(contractVersion).contains(engine.engineId())
-                || !EngineIntelligenceVersionedIdentity.hasExpectedType(engine.engineId(), engine.engineType())
-                || device && (contractVersion != EngineIntelligenceVersionedIdentity.V2
+        boolean device = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engine.engineId());
+        if (!FraudEngineIdentityContract.engineOrder().contains(engine.engineId())
+                || !FraudEngineIdentityContract.hasExpectedType(engine.engineId(), engine.engineType())
+                || device && (contractVersion != FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
                         || engine.status() == com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE
                         || engine.riskLevel() != null
                         || engine.scoreBucket() != com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket.UNAVAILABLE)) {
@@ -198,9 +198,9 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
             );
         }
         try {
-            boolean device = EngineIntelligenceVersionedIdentity.DEVICE_PRIMARY_ENGINE_ID.equals(signal.engineId());
+            boolean device = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(signal.engineId());
             if (device) {
-                if (contractVersion != EngineIntelligenceVersionedIdentity.V2
+                if (contractVersion != FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
                         || signal.engineType() != FraudEngineType.DEVICE_RISK
                         || signal.engineStatus() == com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE
                         || signal.riskLevel() != null

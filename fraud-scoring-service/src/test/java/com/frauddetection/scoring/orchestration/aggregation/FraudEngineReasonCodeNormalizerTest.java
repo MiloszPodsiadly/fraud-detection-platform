@@ -43,6 +43,16 @@ class FraudEngineReasonCodeNormalizerTest {
     }
 
     @Test
+    void devicePolicyReasonsCannotBeEmittedByAnotherEngine() {
+        List<FraudEngineAggregationWarning> warnings = new ArrayList<>();
+
+        assertThat(normalizer.normalize("rules.primary",
+                List.of("DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW"), policy, warnings)).isEmpty();
+        assertThat(warnings).extracting(FraudEngineAggregationWarning::code)
+                .containsExactly(FraudEngineAggregationWarningCode.REASON_CODE_UNSUPPORTED_DROPPED);
+    }
+
+    @Test
     void truncatesDeterministicallyAtPolicyLimit() {
         FraudEngineAggregationPolicy strict = new FraudEngineAggregationPolicy(2, 2, 5, 5, 5, 20, 128, 120, 256);
         List<String> source = List.of("MODEL_HIGH_RISK", "LOW_MODEL_RISK", "ML_MODEL_UNAVAILABLE");

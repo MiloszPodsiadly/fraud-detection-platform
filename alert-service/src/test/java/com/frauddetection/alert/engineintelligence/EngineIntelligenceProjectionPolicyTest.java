@@ -76,9 +76,9 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
-    void alertServiceStorageLimitsStillApplyAfterPublicContractValidation() {
+    void rejectsMoreThanFourEngineResultsAtThePublicContractBoundary() {
         EngineIntelligenceSummary source = summaryMock();
-        when(source.engines()).thenReturn(Collections.nCopies(4, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
+        when(source.engines()).thenReturn(Collections.nCopies(5, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
         assertOversized(source);
     }

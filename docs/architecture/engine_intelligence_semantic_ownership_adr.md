@@ -38,11 +38,11 @@ The orchestrator owns optional-engine failure isolation and execution metadata. 
 break Rules/ML diagnostic runtime execution or baseline scoring. Published `latencyMs` comes from monotonic elapsed
 measurement; `generatedAt` is a wall-clock timestamp and must not be used as the latency source.
 
-The public event contract owns the atomic `contractVersion=1` shape under the documented assumption that supported
-consumers are repository-controlled and migrated atomically. Version 1 allows three known engine identities:
-`rules.primary`, `ml.python.primary`, and `velocity.primary`. Rules and ML are required. Velocity is an optional third
-diagnostic engine. Any fourth engine, changed order, changed comparison identity, changed PT1M meaning, or changed
-Velocity probability claim requires an explicit versioned contract review.
+The public event contract owns one current nested `contractVersion=2` shape with a four-ID allowlist. Rules and ML are
+required; Velocity and Device Risk are optional diagnostics in canonical order. The comparator remains strictly
+Rules-versus-ML. Current readers reject v1 or unknown versions; compatibility with older deployed readers and external
+consumers must be verified separately. Changes to comparison identity, changed PT1M meaning, or any probability claim
+still require explicit contract review.
 
 ## Rejected Alternatives
 

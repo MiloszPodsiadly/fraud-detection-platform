@@ -12,28 +12,24 @@ import java.util.Objects;
 final class EngineIntelligenceSummarySemanticPolicy {
     private static final String RULES = FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID;
     private static final String ML = FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID;
-    private static final String VELOCITY = FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID;
-    private static final String DEVICE = EngineIntelligenceVersionedIdentity.DEVICE_PRIMARY_ENGINE_ID;
 
     private EngineIntelligenceSummarySemanticPolicy() {
     }
 
     static void validate(
-            int version,
             List<EngineIntelligenceEngineResult> engines,
             EngineIntelligenceComparison comparison,
             List<EngineIntelligenceDiagnosticSignal> diagnosticSignals
     ) {
-        Map<String, EngineIntelligenceEngineResult> byEngineId = requireMandatoryEngineSet(version, engines);
+        Map<String, EngineIntelligenceEngineResult> byEngineId = requireMandatoryEngineSet(engines);
         requireComparisonCoherence(comparison, byEngineId);
         requireDiagnosticSignalCoherence(diagnosticSignals, byEngineId);
     }
 
     private static Map<String, EngineIntelligenceEngineResult> requireMandatoryEngineSet(
-            int version,
             List<EngineIntelligenceEngineResult> engines
     ) {
-        if (engines.size() < 2 || engines.size() > EngineIntelligenceVersionedIdentity.maxEngines(version)) {
+        if (engines.size() < 2 || engines.size() > FraudEngineIdentityContract.maxEngineIntelligenceEngines()) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REQUIRED_ENGINES_MISSING");
         }
         Map<String, EngineIntelligenceEngineResult> byEngineId = new HashMap<>();
@@ -42,14 +38,6 @@ final class EngineIntelligenceSummarySemanticPolicy {
         }
         if (!byEngineId.containsKey(RULES) || !byEngineId.containsKey(ML)) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REQUIRED_ENGINES_MISSING");
-        }
-        if (version == EngineIntelligenceVersionedIdentity.V1
-                && engines.size() == 3 && !byEngineId.containsKey(VELOCITY)) {
-            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_UNKNOWN_ENGINE_ID");
-        }
-        if (version == EngineIntelligenceVersionedIdentity.V2 && engines.size() == 4
-                && (!byEngineId.containsKey(VELOCITY) || !byEngineId.containsKey(DEVICE))) {
-            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_UNKNOWN_ENGINE_ID");
         }
         return Map.copyOf(byEngineId);
     }

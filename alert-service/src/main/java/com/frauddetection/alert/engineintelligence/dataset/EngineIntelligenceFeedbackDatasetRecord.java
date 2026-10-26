@@ -3,13 +3,13 @@ package com.frauddetection.alert.engineintelligence.dataset;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackAccuracyAssessment;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceVersionedIdentity;
 
 import java.time.Instant;
 import java.util.List;
@@ -54,7 +54,8 @@ public record EngineIntelligenceFeedbackDatasetRecord(
         accuracyAssessment = Objects.requireNonNull(accuracyAssessment, "accuracyAssessment is required");
         projectionStatus = Objects.requireNonNull(projectionStatus, "projectionStatus is required");
         boolean hasBoundedDeviceState = deviceEngineStatus != null
-                && Objects.equals(engineIntelligenceContractVersion, EngineIntelligenceVersionedIdentity.V2);
+                && Objects.equals(engineIntelligenceContractVersion,
+                        FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION);
         Set<String> deviceReasonCodes = hasBoundedDeviceState
                 ? EngineIntelligenceFeedbackDatasetSafety.DEVICE_ALLOWED_REASON_CODES
                 : Set.of();
@@ -67,13 +68,14 @@ public record EngineIntelligenceFeedbackDatasetRecord(
                 deviceReasonCodes
         );
         if (engineIntelligenceContractVersion != null
-                && !EngineIntelligenceVersionedIdentity.supportedVersion(engineIntelligenceContractVersion)) {
+                && engineIntelligenceContractVersion != FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_DATASET_CONTRACT_VERSION_UNSUPPORTED");
         }
         if ((deviceEngineStatus == null) != (deviceScoreBucket == null)
                 || (deviceEngineStatus != null && deviceRiskLevel != null)
                 || (deviceEngineStatus != null && !Objects.equals(
-                        engineIntelligenceContractVersion, EngineIntelligenceVersionedIdentity.V2))
+                        engineIntelligenceContractVersion,
+                        FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION))
                 || (deviceEngineStatus != null && deviceEngineStatus == FraudEngineStatus.AVAILABLE)
                 || (deviceEngineStatus != null && deviceScoreBucket != EngineIntelligenceScoreBucket.UNAVAILABLE)) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_DATASET_DEVICE_STATE_INVALID");

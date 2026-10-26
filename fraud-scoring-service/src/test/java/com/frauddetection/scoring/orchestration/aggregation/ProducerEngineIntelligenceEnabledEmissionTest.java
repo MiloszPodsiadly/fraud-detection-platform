@@ -43,7 +43,7 @@ class ProducerEngineIntelligenceEnabledEmissionTest {
         assertThat(summary.engines().get(1).riskLevel()).isNull();
         assertThat(summary.engines().get(1).scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
         assertThat(json)
-                .contains("\"contractVersion\":1", "\"status\":\"TIMEOUT\"")
+                .contains("\"contractVersion\":2", "\"status\":\"TIMEOUT\"")
                 .doesNotContain("FraudEngineAggregationResult", "contributions", "evidence", "raw");
     }
 }

@@ -56,7 +56,7 @@ class EngineIntelligenceGoldenContractParityTest {
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
         assertThat(response.contractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
         assertThat(response.engines()).extracting(engine -> engine.engineId())
-                .containsExactlyElementsOf(registryOrder);
+                .containsExactlyElementsOf(registryOrder.subList(0, 3));
         assertThat(response.engines()).extracting(engine -> engine.engineType())
                 .containsExactly(FraudEngineType.RULES, FraudEngineType.ML_MODEL, FraudEngineType.VELOCITY);
         assertThat(response.comparison().comparisonType().name()).isEqualTo("RULES_VS_ML");

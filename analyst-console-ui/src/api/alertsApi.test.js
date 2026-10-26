@@ -1719,6 +1719,17 @@ describe("alertsApi auth headers", () => {
     });
   });
 
+  it("bounds raw UTF-8 response bytes before parsing engine intelligence", async () => {
+    const body = `${JSON.stringify(engineIntelligenceAvailable())}${" ".repeat(20_000)}`;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+
+    await expect(getEngineIntelligence("txn.valid:001")).resolves.toMatchObject({ state: "unavailable" });
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("maxResponseBytes");
+  });
+
   it("getEngineIntelligenceAcceptsVersion2DeviceDiagnosticWithoutDroppingIt", async () => {
     const response = engineIntelligenceAvailable({
       contractVersion: 2,
@@ -1955,6 +1966,7 @@ describe("alertsApi auth headers", () => {
     ["getEngineIntelligenceFailsClosedForWrongCanonicalTypePair", { engines: [
       engineResult({ engineId: "velocity.primary", engineType: "RULES" })
     ] }],
+    ["getEngineIntelligenceFailsClosedForRetiredNestedContractVersion", { contractVersion: 1 }],
     ["getEngineIntelligenceFailsClosedForUnsupportedContractVersion", { contractVersion: 3 }],
     ["getEngineIntelligenceFailsClosedForUnparseableGeneratedAt", { generatedAt: "not-a-date" }],
     ["getEngineIntelligenceFailsClosedForOffsetGeneratedAt", { generatedAt: "2026-06-02T10:00:00+00:00" }],
@@ -2173,7 +2185,7 @@ function engineIntelligenceAvailable(overrides = {}) {
   return {
     transactionId: "txn.valid:001",
     available: true,
-    contractVersion: 1,
+    contractVersion: 2,
     generatedAt: "2026-06-02T10:00:00Z",
     comparison: comparison(),
     engines: [engineResult(), mlEngineResult()],
@@ -2406,7 +2418,7 @@ function scoredTransactionDetail(overrides = {}) {
     reasonCodes: ["HIGH_VELOCITY"],
     engineIntelligence: {
       status: "AVAILABLE",
-      contractVersion: 1,
+      contractVersion: 2,
       generatedAt: "2026-06-18T10:00:02Z",
       comparison: comparison(),
       engines: [{

@@ -8,6 +8,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceCompariso
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -24,7 +25,7 @@ class EngineIntelligenceReadModelTest {
     void projectedNullListsBecomeEmptyLists() {
         EngineIntelligenceReadModel response = EngineIntelligenceReadModel.projected(
                 "txn-null-lists",
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-02T13:00:00Z"),
                 null,
                 null,
@@ -85,7 +86,7 @@ class EngineIntelligenceReadModelTest {
 
         EngineIntelligenceReadModel response = EngineIntelligenceReadModel.projected(
                 "txn-copied-lists",
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-02T13:00:00Z"),
                 null,
                 engines,
@@ -104,7 +105,7 @@ class EngineIntelligenceReadModelTest {
         EngineIntelligenceEngineReadModel engine = engine(List.of("HIGH_VELOCITY"));
         EngineIntelligenceReadModel response = EngineIntelligenceReadModel.projected(
                 "txn-immutable-lists",
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-02T13:00:00Z"),
                 null,
                 List.of(engine),

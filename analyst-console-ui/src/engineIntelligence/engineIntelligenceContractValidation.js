@@ -1,10 +1,6 @@
-export const ENGINE_INTELLIGENCE_CONTRACT_VERSION = 1;
-export const ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1 = 1;
-export const ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2 = 2;
-export const MAX_ENGINE_INTELLIGENCE_ENGINES_V1 = 3;
-export const MAX_ENGINE_INTELLIGENCE_ENGINES_V2 = 4;
-// The legacy registry fixture describes the v1 runtime, so keep this alias at v1.
-export const MAX_ENGINE_INTELLIGENCE_ENGINES = MAX_ENGINE_INTELLIGENCE_ENGINES_V1;
+export const ENGINE_INTELLIGENCE_CONTRACT_VERSION = 2;
+export const MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES = 16_384;
+export const MAX_ENGINE_INTELLIGENCE_ENGINES = 4;
 export const MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS = 5;
 export const MAX_ENGINE_INTELLIGENCE_WARNINGS = 10;
 export const MAX_ENGINE_INTELLIGENCE_REASON_CODES = 5;
@@ -46,14 +42,21 @@ const ML_MODEL_IDENTITY_PART_PATTERN = /^[A-Za-z0-9._-]+$/;
 export const ENGINE_TYPE_BY_ID = Object.freeze({
   "rules.primary": "RULES",
   "ml.python.primary": "ML_MODEL",
-  "velocity.primary": "VELOCITY"
-});
-export const ENGINE_ORDER = Object.freeze(Object.keys(ENGINE_TYPE_BY_ID));
-export const ENGINE_TYPE_BY_ID_V2 = Object.freeze({
-  ...ENGINE_TYPE_BY_ID,
+  "velocity.primary": "VELOCITY",
   "device.primary": "DEVICE_RISK"
 });
-export const ENGINE_ORDER_V2 = Object.freeze(Object.keys(ENGINE_TYPE_BY_ID_V2));
+export const ENGINE_ORDER = Object.freeze(Object.keys(ENGINE_TYPE_BY_ID));
+
+const DEVICE_SIGNAL_REASON_CODES = new Set([
+  "DEVICE_SIGNALS_UNSUPPORTED", "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW", "DEVICE_NOVELTY_SEEN_IN_WINDOW",
+  "DEVICE_NOVELTY_HISTORY_INCOMPLETE", "DEVICE_NOVELTY_HISTORY_UNAVAILABLE", "DEVICE_NOVELTY_HISTORY_INVALID",
+  "DEVICE_NOVELTY_UNTRUSTED_SOURCE", "DEVICE_SWITCH_OBSERVED", "DEVICE_SWITCH_NOT_OBSERVED",
+  "DEVICE_SWITCH_HISTORY_INCOMPLETE", "DEVICE_SWITCH_HISTORY_UNAVAILABLE", "DEVICE_SWITCH_HISTORY_INVALID",
+  "DEVICE_SWITCH_UNTRUSTED_SOURCE", "DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE",
+  "DEVICE_SHARED_DEVICE_UNTRUSTED_SOURCE", "DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE",
+  "DEVICE_COUNTRY_MISMATCH_UNTRUSTED_SOURCE", "DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE",
+  "DEVICE_PROXY_OR_VPN_UNTRUSTED_SOURCE"
+]);
 
 const PUBLIC_REASON_CODES = new Set([
   "DEVICE_NOVELTY", "COUNTRY_MISMATCH", "PROXY_OR_VPN", "HIGH_VELOCITY", "MERCHANT_CONCENTRATION",
@@ -69,15 +72,16 @@ const PUBLIC_REASON_CODES = new Set([
   "ORCHESTRATOR_ENGINE_REJECTED", "ORCHESTRATOR_ENGINE_TIMEOUT", "VELOCITY_FEATURES_UNAVAILABLE",
   "VELOCITY_FEATURE_TYPE_INVALID", "VELOCITY_FEATURE_VALUE_INVALID", "VELOCITY_FEATURES_INCONSISTENT",
   "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE", "DEVICE_EVIDENCE_PARTIAL",
-  "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED"
+  "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED", ...DEVICE_SIGNAL_REASON_CODES
 ]);
 const DEVICE_EVIDENCE_REASON_CODES = new Set([
   "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE", "DEVICE_EVIDENCE_PARTIAL",
   "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED"
 ]);
-const DEVICE_V2_REASON_CODES = new Set([
+const DEVICE_REASON_CODES = new Set([
   ...DEVICE_EVIDENCE_REASON_CODES, "ORCHESTRATOR_ENGINE_EXCEPTION",
-  "ORCHESTRATOR_ENGINE_NULL_RESULT", "ORCHESTRATOR_ENGINE_REJECTED", "ORCHESTRATOR_ENGINE_TIMEOUT"
+  "ORCHESTRATOR_ENGINE_NULL_RESULT", "ORCHESTRATOR_ENGINE_REJECTED", "ORCHESTRATOR_ENGINE_TIMEOUT",
+  ...DEVICE_SIGNAL_REASON_CODES
 ]);
 
 export const CANONICAL_UTC_TIMESTAMP_PATTERN = "^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$";
@@ -161,34 +165,34 @@ export function isEngineIntelligenceResponseShape(value) {
   return isSupportedEngineIntelligenceVersion(version)
     && isCanonicalUtcTimestamp(value.generatedAt)
     && isComparisonShape(value.comparison)
-    && isBoundedArray(value.engines, maxEnginesForVersion(version))
+    && isBoundedArray(value.engines, MAX_ENGINE_INTELLIGENCE_ENGINES)
     && value.engines.length >= 2
-    && value.engines.every((engine) => isEngineShape(engine, version))
-    && hasRequiredRulesMlEngineSet(value.engines, version)
+    && value.engines.every((engine) => isEngineShape(engine))
+    && hasRequiredRulesMlEngineSet(value.engines)
     && isComparisonCoherent(value.comparison, value.engines)
     && isBoundedArray(value.diagnosticSignals, MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS)
-    && value.diagnosticSignals.every((signal) => isDiagnosticSignalShape(signal, version))
+    && value.diagnosticSignals.every((signal) => isDiagnosticSignalShape(signal))
     && areDiagnosticSignalsCoherent(value.diagnosticSignals, value.engines)
     && isBoundedArray(value.warnings, MAX_ENGINE_INTELLIGENCE_WARNINGS)
     && value.warnings.every((warning) => isWarningShape(warning))
     && value.status === deriveEngineIntelligenceResponseStatus(value.engines, value.warnings);
 }
 
-export function isEngineShape(engine, version = ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1) {
+export function isEngineShape(engine) {
   return isPlainObject(engine)
     && hasRequiredKeys(engine, ENGINE_RESULT_REQUIRED_KEYS)
     && hasOnlyKnownKeys(engine, ENGINE_RESULT_ALLOWED_KEYS)
     && safeString(engine.engineId, MAX_PUBLIC_STRING_LENGTH)
     && oneOf(engine.engineType, ENGINE_TYPES)
-    && isExpectedEngineType(engine.engineId, engine.engineType, version)
+    && isExpectedEngineType(engine.engineId, engine.engineType)
     && oneOf(engine.status, ENGINE_STATUSES)
     && optionalOneOf(engine.riskLevel, RISK_LEVELS)
     && oneOf(engine.scoreBucket, SCORE_BUCKETS)
     && safeStringArray(engine.reasonCodes, MAX_ENGINE_INTELLIGENCE_REASON_CODES, MAX_PUBLIC_STRING_LENGTH)
-    && engine.reasonCodes.every((reasonCode) => isAllowedReasonCode(engine.engineId, reasonCode, version))
+    && engine.reasonCodes.every((reasonCode) => isAllowedReasonCode(engine.engineId, reasonCode))
     && isEngineModelIdentityConsistent(engine)
     && isEngineResultOperationallyConsistent(engine.status, engine.scoreBucket, engine.riskLevel)
-    && isDeviceEngineOperationallyConsistent(engine, version);
+    && isDeviceEngineOperationallyConsistent(engine);
 }
 
 export function isModelIdentityShape(identity) {
@@ -206,20 +210,20 @@ export function validateMlModelIdentityPart(value, maxLength) {
     && ML_MODEL_IDENTITY_PART_PATTERN.test(value);
 }
 
-export function isDiagnosticSignalShape(signal, version = ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1) {
+export function isDiagnosticSignalShape(signal) {
   return isPlainObject(signal)
     && hasOnlyKeys(signal, ["engineId", "engineType", "engineStatus", "signalCategory", "riskLevel", "scoreBucket", "reasonCode"])
     && safeString(signal.engineId, MAX_PUBLIC_STRING_LENGTH)
     && oneOf(signal.engineType, ENGINE_TYPES)
-    && isExpectedEngineType(signal.engineId, signal.engineType, version)
+    && isExpectedEngineType(signal.engineId, signal.engineType)
     && oneOf(signal.engineStatus, ENGINE_STATUSES)
     && oneOf(signal.signalCategory, SIGNAL_CATEGORIES)
     && optionalOneOf(signal.riskLevel, RISK_LEVELS)
     && oneOf(signal.scoreBucket, SCORE_BUCKETS)
     && safeString(signal.reasonCode, MAX_PUBLIC_STRING_LENGTH)
-    && isAllowedReasonCode(signal.engineId, signal.reasonCode, version)
+    && isAllowedReasonCode(signal.engineId, signal.reasonCode)
     && isDiagnosticSignalOperationallyConsistent(signal.signalCategory, signal.engineStatus, signal.scoreBucket, signal.riskLevel)
-    && isDeviceSignalOperationallyConsistent(signal, version);
+    && isDeviceSignalOperationallyConsistent(signal);
 }
 
 export function isWarningShape(warning, allowedWarningCodes = null) {
@@ -231,16 +235,12 @@ export function isWarningShape(warning, allowedWarningCodes = null) {
     && warning.count >= 0;
 }
 
-export function hasUniqueCanonicalEngineOrder(values, version = ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1) {
+export function hasUniqueCanonicalEngineOrder(values) {
   const seen = new Set();
   let previousOrder = -1;
-  const orderForVersion = engineOrderForVersion(version);
-  if (!orderForVersion) {
-    return false;
-  }
   for (const value of values) {
     const engineId = typeof value?.engineId === "string" ? value.engineId : "";
-    const order = orderForVersion.indexOf(engineId);
+    const order = ENGINE_ORDER.indexOf(engineId);
     if (order < 0) {
       return false;
     }
@@ -253,21 +253,11 @@ export function hasUniqueCanonicalEngineOrder(values, version = ENGINE_INTELLIGE
   return true;
 }
 
-export function hasRequiredRulesMlEngineSet(values, version = ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1) {
-  if (!isSupportedEngineIntelligenceVersion(version)) {
-    return false;
-  }
-  return hasUniqueCanonicalEngineOrder(values, version)
+export function hasRequiredRulesMlEngineSet(values) {
+  return hasUniqueCanonicalEngineOrder(values)
     && values.length >= 2
     && values[0]?.engineId === "rules.primary"
-    && values[1]?.engineId === "ml.python.primary"
-    && (values.length === 2
-      || values[2]?.engineId === "velocity.primary"
-      || (version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2 && values[2]?.engineId === "device.primary"))
-    && (version !== ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1 || values.length <= MAX_ENGINE_INTELLIGENCE_ENGINES_V1)
-    && (version !== ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2
-      || values.length < 4
-      || (values[2]?.engineId === "velocity.primary" && values[3]?.engineId === "device.primary"));
+    && values[1]?.engineId === "ml.python.primary";
 }
 
 export function isComparisonCoherent(comparison, engines) {
@@ -376,41 +366,33 @@ export function isPlainObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-export function isExpectedEngineType(engineId, engineType, version = ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1) {
-  const identities = version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2 ? ENGINE_TYPE_BY_ID_V2 : ENGINE_TYPE_BY_ID;
-  return isSupportedEngineIntelligenceVersion(version) && identities[engineId] === engineType;
+export function isExpectedEngineType(engineId, engineType) {
+  return ENGINE_TYPE_BY_ID[engineId] === engineType;
 }
 
 export function isSupportedEngineIntelligenceVersion(version) {
-  return version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1 || version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2;
+  return version === ENGINE_INTELLIGENCE_CONTRACT_VERSION;
 }
 
-export function maxEnginesForVersion(version) {
-  if (version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1) {
-    return MAX_ENGINE_INTELLIGENCE_ENGINES_V1;
+export function isWithinEngineIntelligenceSerializedByteLimit(value) {
+  if (!isPlainObject(value) || typeof TextEncoder !== "function") {
+    return false;
   }
-  if (version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2) {
-    return MAX_ENGINE_INTELLIGENCE_ENGINES_V2;
+  try {
+    const serialized = JSON.stringify(value);
+    return typeof serialized === "string"
+      && new TextEncoder().encode(serialized).byteLength <= MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES;
+  } catch {
+    return false;
   }
-  return 0;
 }
 
-function engineOrderForVersion(version) {
-  if (version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1) {
-    return ENGINE_ORDER;
-  }
-  if (version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2) {
-    return ENGINE_ORDER_V2;
-  }
-  return null;
-}
-
-function isAllowedReasonCode(engineId, reasonCode, version) {
+function isAllowedReasonCode(engineId, reasonCode) {
   if (!PUBLIC_REASON_CODES.has(reasonCode)) {
     return false;
   }
   if (engineId === "device.primary") {
-    return version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2 && DEVICE_V2_REASON_CODES.has(reasonCode);
+    return DEVICE_REASON_CODES.has(reasonCode);
   }
   return !DEVICE_EVIDENCE_REASON_CODES.has(reasonCode);
 }
@@ -419,22 +401,20 @@ function isOptionalDiagnosticAvailable(engine) {
   return !engine || engine.status === "AVAILABLE" || engine.status === "NOT_APPLICABLE";
 }
 
-function isDeviceEngineOperationallyConsistent(engine, version) {
+function isDeviceEngineOperationallyConsistent(engine) {
   if (engine.engineId !== "device.primary") {
     return true;
   }
-  return version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2
-    && engine.status !== "AVAILABLE"
+  return engine.status !== "AVAILABLE"
     && (engine.riskLevel === null || engine.riskLevel === undefined)
     && engine.scoreBucket === "UNAVAILABLE";
 }
 
-function isDeviceSignalOperationallyConsistent(signal, version) {
+function isDeviceSignalOperationallyConsistent(signal) {
   if (signal.engineId !== "device.primary") {
     return true;
   }
-  return version === ENGINE_INTELLIGENCE_CONTRACT_VERSION_V2
-    && signal.engineStatus !== "AVAILABLE"
+  return signal.engineStatus !== "AVAILABLE"
     && signal.signalCategory === "OPERATIONAL_SIGNAL"
     && (signal.riskLevel === null || signal.riskLevel === undefined)
     && signal.scoreBucket === "UNAVAILABLE";

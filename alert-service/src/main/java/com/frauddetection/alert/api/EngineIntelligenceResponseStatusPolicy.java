@@ -1,7 +1,6 @@
 package com.frauddetection.alert.api;
 
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceVersionedIdentity;
 
 import java.util.List;
 import java.util.Objects;
@@ -10,7 +9,7 @@ public final class EngineIntelligenceResponseStatusPolicy {
     private static final String RULES = FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID;
     private static final String ML = FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID;
     private static final String VELOCITY = FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID;
-    private static final String DEVICE = EngineIntelligenceVersionedIdentity.DEVICE_PRIMARY_ENGINE_ID;
+    private static final String DEVICE = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID;
 
     private EngineIntelligenceResponseStatusPolicy() {
     }

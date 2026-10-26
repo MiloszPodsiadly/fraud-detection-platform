@@ -63,9 +63,10 @@ The reachable Velocity v1 score table is: rapid burst plus high rate -> `0.95`, 
 `0.75`, high amount activity -> `0.50`, and valid baseline -> `0.10`. `RECENT_TRANSACTION_SPIKE` is not emitted by
 Velocity v1 because the PT1M count threshold is the same official fact as the per-minute rate threshold.
 
-The current public engine-intelligence contract allows three known engine identities: `rules.primary`,
-`ml.python.primary`, and `velocity.primary`. Rules and ML are required. Velocity is an optional third diagnostic
-engine. Device, Merchant, Graph, or any fourth engine requires an intentional versioned contract update. Velocity
+The current public Engine Intelligence contract allows four known engine identities in canonical order:
+`rules.primary`, `ml.python.primary`, `velocity.primary`, and `device.primary`. Rules and ML are required; Velocity and
+Device Risk are optional diagnostic engines. Merchant, Graph, or any fifth engine requires an intentional contract
+update. Velocity
 cannot authorize, block, create cases, alter final decision source, change thresholds, or change analyst recommended
 actions.
 

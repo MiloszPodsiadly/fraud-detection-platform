@@ -168,7 +168,7 @@ class EngineIntelligenceOpenApiContractTest {
                 "enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]",
                 "EngineIntelligenceDiagnosticSignalResponse:",
                 "EngineIntelligenceWarningResponse:"
-        ).contains("16,384 serialized bytes", "Version 2", "DEVICE_RISK");
+        ).contains("16,384 serialized bytes", "contractVersion 2", "DEVICE_RISK");
     }
 
     @Test
@@ -314,7 +314,7 @@ class EngineIntelligenceOpenApiContractTest {
                 .toList())
                 .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
         assertThat(enumValues(property(response, "contractVersion")))
-                .containsExactly(1, 2);
+                .containsExactly(2);
         assertThat(property(response, "engines"))
                 .containsEntry("maxItems", 4);
         Map<String, Object> comparison = schema(schemas, "EngineIntelligenceComparisonResponse");
