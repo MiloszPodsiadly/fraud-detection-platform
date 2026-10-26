@@ -36,6 +36,8 @@ class SensitiveReadAuditServiceTest {
                 request
         )).isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("503 SERVICE_UNAVAILABLE");
+        org.mockito.Mockito.verify(request).setAttribute(
+                ReadAccessAuditResponseAdvice.AUDITED_ATTRIBUTE, Boolean.TRUE);
     }
 
     @Test
@@ -85,5 +87,39 @@ class SensitiveReadAuditServiceTest {
         );
 
         assertThat(request.getAttribute(ReadAccessAuditResponseAdvice.AUDITED_ATTRIBUTE)).isEqualTo(Boolean.TRUE);
+    }
+
+    @Test
+    void mappedAnnotationIsTheSourceOfCategoryAndResourceMetadata() throws NoSuchMethodException {
+        ReadAccessAuditService delegate = mock(ReadAccessAuditService.class);
+        SensitiveReadAuditPolicy policy = mock(SensitiveReadAuditPolicy.class);
+        when(policy.failClosed()).thenReturn(false);
+        SensitiveReadAuditService service = new SensitiveReadAuditService(delegate, policy);
+        var request = new org.springframework.mock.web.MockHttpServletRequest("GET", "/test/policies/policy-17");
+        var handler = new org.springframework.web.method.HandlerMethod(new AnnotatedReadController(), "read");
+        request.setAttribute(org.springframework.web.servlet.HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE, handler);
+        request.setAttribute(org.springframework.web.servlet.HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+                "/test/policies/{id}");
+        request.setAttribute(org.springframework.web.servlet.HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,
+                java.util.Map.of("id", "policy-17"));
+
+        service.audit(ReadAccessEndpointCategory.SYSTEM_TRUST_LEVEL, ReadAccessResourceType.SYSTEM_TRUST_LEVEL,
+                "stale-controller-value", 1, request);
+
+        verify(delegate).audit(
+                org.mockito.ArgumentMatchers.argThat(target -> target.endpointCategory() == ReadAccessEndpointCategory.MODEL_POLICY_DETAIL
+                        && target.resourceType() == ReadAccessResourceType.MODEL_POLICY
+                        && "policy-17".equals(target.resourceId())),
+                org.mockito.ArgumentMatchers.eq(ReadAccessAuditOutcome.SUCCESS),
+                org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    static class AnnotatedReadController {
+        @org.springframework.web.bind.annotation.GetMapping("/test/policies/{id}")
+        @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_DETAIL,
+                resourceType = ReadAccessResourceType.MODEL_POLICY, resourceIdVariable = "id")
+        public Object read() {
+            return null;
+        }
     }
 }

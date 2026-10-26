@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.governance.modelpromotion.PolicyPublicationRecoveryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -22,6 +25,8 @@ public class PolicyPublicationRecoveryController {
     }
 
     @GetMapping
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_PUBLICATION_RECOVERY,
+            resourceType = ReadAccessResourceType.MODEL_POLICY_PUBLICATION, resourceIdVariable = "id")
     public PolicyPublicationRecoveryService.Diagnostics inspect(Authentication authentication,
             @PathVariable String id) {
         return recovery.inspect(PolicyGovernanceActor.from(authentication), id);

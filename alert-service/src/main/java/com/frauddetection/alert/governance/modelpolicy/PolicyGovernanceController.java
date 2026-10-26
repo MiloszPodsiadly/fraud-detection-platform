@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import jakarta.validation.Valid;
 import jakarta.validation.Validator;
 import jakarta.validation.ConstraintViolationException;
@@ -48,11 +51,15 @@ public class PolicyGovernanceController {
     }
 
     @GetMapping
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_LIST,
+            resourceType = ReadAccessResourceType.MODEL_POLICY)
     public List<PolicyProposalDocument> list(Authentication authentication) {
         return service.list(PolicyGovernanceActor.from(authentication));
     }
 
     @GetMapping("/page")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_PAGE,
+            resourceType = ReadAccessResourceType.MODEL_POLICY)
     public PolicyGovernanceService.ProposalPage page(Authentication authentication,
             @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String cursor,
@@ -62,6 +69,8 @@ public class PolicyGovernanceController {
     }
 
     @GetMapping("/me")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_ACTOR_CAPABILITIES,
+            resourceType = ReadAccessResourceType.POLICY_ACTOR)
     public ActorCapabilities me(Authentication authentication) {
         PolicyGovernanceActor actor = PolicyGovernanceActor.from(authentication);
         return new ActorCapabilities(actor.id(), actor.authorities().stream()
@@ -72,6 +81,8 @@ public class PolicyGovernanceController {
     public record ActorCapabilities(String actorId, List<String> authorities) { }
 
     @GetMapping("/schema")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_SCHEMA,
+            resourceType = ReadAccessResourceType.MODEL_POLICY)
     public List<CriterionSchema> schema(Authentication authentication) {
         var actor = PolicyGovernanceActor.from(authentication);
         if (!actor.authorities().contains(ModelPolicyAuthority.READ)) {
@@ -93,23 +104,31 @@ public class PolicyGovernanceController {
             boolean nonWaivable) { }
 
     @GetMapping("/operations/{operationId}")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_OPERATION,
+            resourceType = ReadAccessResourceType.MODEL_POLICY, resourceIdVariable = "operationId")
     public PolicyProposalDocument operation(Authentication authentication, @PathVariable String operationId) {
         return service.operation(PolicyGovernanceActor.from(authentication), operationId);
     }
 
     @GetMapping("/{id}")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_DETAIL,
+            resourceType = ReadAccessResourceType.MODEL_POLICY, resourceIdVariable = "id")
     public PolicyProposalDocument get(Authentication authentication,
             @PathVariable @NotBlank @Pattern(regexp = ID) String id) {
         return service.get(PolicyGovernanceActor.from(authentication), id);
     }
 
     @GetMapping("/{id}/history")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_HISTORY,
+            resourceType = ReadAccessResourceType.MODEL_POLICY, resourceIdVariable = "id")
     public List<PolicyGovernanceHistoryDocument> history(Authentication authentication,
             @PathVariable @NotBlank @Pattern(regexp = ID) String id) {
         return service.history(PolicyGovernanceActor.from(authentication), id);
     }
 
     @GetMapping("/{id}/history/page")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_HISTORY_PAGE,
+            resourceType = ReadAccessResourceType.MODEL_POLICY, resourceIdVariable = "id")
     public PolicyGovernanceService.HistoryPage historyPage(Authentication authentication,
             @PathVariable @NotBlank @Pattern(regexp = ID) String id,
             @RequestParam(defaultValue = "25") int size,
@@ -172,11 +191,15 @@ public class PolicyGovernanceController {
     }
 
     @GetMapping("/webauthn/credentials")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_CREDENTIALS,
+            resourceType = ReadAccessResourceType.POLICY_ACTOR)
     public List<PolicyWebAuthnService.CredentialSummary> credentials(Authentication authentication) {
         return webAuthn.credentials(PolicyGovernanceActor.fromOidcSession(authentication));
     }
 
     @GetMapping("/webauthn/security-events")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_CREDENTIAL_SECURITY_EVENTS,
+            resourceType = ReadAccessResourceType.POLICY_ACTOR)
     public List<PolicyCredentialSecurityEventDocument> credentialSecurityEvents(Authentication authentication) {
         return webAuthn.securityEvents(PolicyGovernanceActor.fromOidcSession(authentication));
     }

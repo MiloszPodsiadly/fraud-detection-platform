@@ -59,14 +59,13 @@ public class SensitiveReadAuditService {
         ReadAccessAuditTarget target = target(endpointCategory, resourceType, resourceId, request);
         int boundedResultCount = resultCount == null ? 0 : Math.max(0, Math.min(resultCount, 100));
         String correlationId = request == null ? null : request.getHeader("X-Correlation-Id");
+        markAudited(request);
         if (!policy.failClosed()) {
             readAccessAuditService.audit(target, outcome, boundedResultCount, correlationId);
-            markAudited(request);
             return;
         }
         try {
             readAccessAuditService.auditOrThrow(target, outcome, boundedResultCount, correlationId);
-            markAudited(request);
         } catch (RuntimeException exception) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Sensitive read audit unavailable.");
         }
@@ -79,14 +78,17 @@ public class SensitiveReadAuditService {
             HttpServletRequest request
     ) {
         ReadAccessAuditTarget classified = request == null ? null : classifier.classify(request).orElse(null);
+        if (classified != null) {
+            return classified;
+        }
         return new ReadAccessAuditTarget(
                 endpointCategory,
                 resourceType,
                 normalize(resourceId),
-                classified == null ? null : classified.queryHash(),
-                classified == null ? null : classified.filterBucket(),
-                classified == null ? null : classified.page(),
-                classified == null ? null : classified.size()
+                null,
+                null,
+                null,
+                null
         );
     }
 

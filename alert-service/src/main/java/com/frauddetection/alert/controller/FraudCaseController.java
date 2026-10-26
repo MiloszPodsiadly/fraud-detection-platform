@@ -57,7 +57,8 @@ public class FraudCaseController {
         this.sensitiveReadAuditService = sensitiveReadAuditService;
     }
 
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.FRAUD_CASE_WORK_QUEUE,
+            resourceType = ReadAccessResourceType.FRAUD_CASE)
     @GetMapping(VERSIONED_BASE_PATH + "/work-queue")
     public FraudCaseWorkQueueSliceResponse workQueue(
             @RequestParam(defaultValue = "0") int page,
@@ -138,7 +139,8 @@ public class FraudCaseController {
         }
     }
 
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.FRAUD_CASE_DETAIL,
+            resourceType = ReadAccessResourceType.FRAUD_CASE, resourceIdVariable = "caseId")
     @GetMapping(VERSIONED_BASE_PATH + "/{caseId}")
     public FraudCaseResponse getCase(@PathVariable String caseId, HttpServletRequest request) {
         try {

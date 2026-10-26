@@ -18,6 +18,10 @@ import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalAuditCoverageRateLimiter;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityController;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.ReadAccessAuditService;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.controller.AlertController;
@@ -116,11 +120,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
+import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -184,13 +190,17 @@ import static org.assertj.core.api.Assertions.assertThat;
         EngineIntelligenceResponseMapper.class,
         ScoredTransactionSearchPolicy.class,
         EngineIntelligenceFeedbackReadQueryPolicy.class,
-        AlertServiceExceptionHandler.class
+        AlertServiceExceptionHandler.class,
+        ReadAccessAuditClassifier.class
 })
 @ActiveProfiles("test")
 class RouteCoverageAgainstMvcMappingsTest {
 
     @Autowired
     private RequestMappingHandlerMapping handlerMapping;
+
+    @Autowired
+    private ReadAccessAuditClassifier readAccessAuditClassifier;
 
     @MockitoBean
     private AlertManagementUseCase alertManagementUseCase;
@@ -397,6 +407,72 @@ class RouteCoverageAgainstMvcMappingsTest {
 
         assertThat(methodlessMappings).as(String.join(System.lineSeparator(), methodlessMappings)).isEmpty();
         assertThat(unmappedRoutes).as(String.join(System.lineSeparator(), unmappedRoutes)).isEmpty();
+    }
+
+    @Test
+    void securitySensitiveGetMappingsHaveExecutableAuditPolicies() {
+        List<String> violations = handlerMapping.getHandlerMethods().entrySet().stream()
+                .filter(entry -> entry.getValue().getBeanType().getName().startsWith("com.frauddetection.alert"))
+                .flatMap(entry -> routeDescriptors(entry)
+                        .filter(route -> route.method().equals("GET"))
+                        .filter(route -> route.pattern().startsWith("/api/v1/governance/")
+                                || route.pattern().startsWith("/api/v1/audit/")
+                                || route.pattern().startsWith("/governance/")
+                                || route.pattern().startsWith("/api/v1/fraud-cases/")
+                                || route.pattern().startsWith("/api/v1/transactions/scored")
+                                || route.pattern().startsWith("/internal/suspicious-transactions")
+                                || route.pattern().equals("/system/trust-level")
+                                || route.pattern().startsWith("/api/v1/trust/incidents")
+                                || route.pattern().startsWith("/api/v1/regulated-mutations")
+                                || route.pattern().startsWith("/api/v1/outbox")
+                                || org.springframework.core.annotation.AnnotatedElementUtils
+                                        .hasAnnotation(entry.getValue().getMethod(), AuditedSensitiveRead.class))
+                        .map(route -> auditedRouteViolation(entry.getValue(), route.pattern())))
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .toList();
+
+        assertThat(violations).as(String.join(System.lineSeparator(), violations)).isEmpty();
+    }
+
+    private String auditedRouteViolation(HandlerMethod handlerMethod, String pattern) {
+        AuditedSensitiveRead policy = org.springframework.core.annotation.AnnotatedElementUtils
+                .findMergedAnnotation(handlerMethod.getMethod(), AuditedSensitiveRead.class);
+        String route = handlerMethod.getBeanType().getSimpleName() + "#"
+                + handlerMethod.getMethod().getName() + " GET " + pattern;
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", pattern);
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, pattern);
+        request.setAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE, handlerMethod);
+        java.util.Map<String, String> variables = new java.util.HashMap<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\{([^/}]+)}").matcher(pattern);
+        while (matcher.find()) {
+            variables.put(matcher.group(1), "sample-" + matcher.group(1));
+        }
+        request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, variables);
+        if (policy == null) {
+            return readAccessAuditClassifier.classify(request).isPresent()
+                    ? null : route + " has no effective read-audit policy.";
+        }
+        if (policy.category() == ReadAccessEndpointCategory.UNCLASSIFIED
+                || policy.resourceType() == ReadAccessResourceType.UNKNOWN) {
+            return route + " has incomplete @AuditedSensitiveRead metadata.";
+        }
+        if (!policy.resourceIdParameter().isBlank()) {
+            request.setParameter(policy.resourceIdParameter(), "a".repeat(64));
+        }
+        var target = readAccessAuditClassifier.classify(request).orElse(null);
+        if (target == null) {
+            return route + " has metadata that is not applied by the runtime audit classifier.";
+        }
+        if (!policy.resourceIdVariable().isBlank()
+                && !java.util.Objects.equals(target.resourceId(), variables.get(policy.resourceIdVariable()))) {
+            return route + " does not audit the declared URI resource ID.";
+        }
+        if (!policy.resourceIdParameter().isBlank()
+                && !java.util.Objects.equals(target.resourceId(), request.getParameter(policy.resourceIdParameter()))) {
+            return route + " does not audit the declared query resource ID.";
+        }
+        return null;
     }
 
     @Test

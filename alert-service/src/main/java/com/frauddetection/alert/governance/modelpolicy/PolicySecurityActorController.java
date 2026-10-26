@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -13,6 +16,8 @@ import java.util.List;
 @RequestMapping("/api/v1/governance/policy-security")
 public class PolicySecurityActorController {
     @GetMapping("/me")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_SECURITY_ACTOR,
+            resourceType = ReadAccessResourceType.POLICY_ACTOR)
     public Capabilities me(Authentication authentication) {
         PolicyGovernanceActor actor = PolicyGovernanceActor.from(authentication);
         List<String> authorities = actor.authorities().stream()

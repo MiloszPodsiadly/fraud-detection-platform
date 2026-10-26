@@ -113,3 +113,13 @@ Audit and regulated mutation controls are local service contracts. They are not 
 - UI auth-sensitive calls go through `createAlertsApiClient({ session, authProvider })`.
 - New metrics use bounded low-cardinality labels.
 - New service-to-service calls use `InternalServiceAuthHeaders` and the shared internal HTTP client boundary.
+
+### Sensitive read audit response boundary
+
+Sensitive MVC responses use buffered response bodies (`DTO`, maps, lists and `ResponseEntity` bodies). The audit is
+persisted before Spring serializes those bodies. Successful `200`, bodyless `204`, and conditional `304` responses
+are covered; controller failures and authorization denials are audited while preserving their selected status.
+In bank, staging, production, or explicitly fail-closed mode, an unavailable audit store produces a bounded `503`
+before sensitive content is written. Missing actor identity also fails closed; ordinary `401`/`403` responses remain
+intact. Streaming, asynchronous, `Resource`, and raw `InputStream` response types are unsupported for sensitive reads
+and are rejected in fail-closed mode. Local fail-open mode remains best effort and emits bounded audit-failure metrics.

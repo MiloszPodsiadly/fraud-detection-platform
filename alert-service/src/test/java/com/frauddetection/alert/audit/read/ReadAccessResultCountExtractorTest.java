@@ -83,4 +83,10 @@ class ReadAccessResultCountExtractorTest {
         assertThat(extractor.resultCount(new Object(), ReadAccessEndpointCategory.SCORED_TRANSACTION_DETAIL))
                 .isEqualTo(1);
     }
+
+    @Test
+    void shouldCountFraudFeedbackAsOneTransactionScopedRead() {
+        assertThat(extractor.resultCount(new Object(), ReadAccessEndpointCategory.FRAUD_FEEDBACK_READ))
+                .isEqualTo(1);
+    }
 }

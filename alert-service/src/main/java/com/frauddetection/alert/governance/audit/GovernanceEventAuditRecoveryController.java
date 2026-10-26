@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.audit;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRecoveryService;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import org.springframework.security.core.Authentication;
@@ -22,11 +25,15 @@ public class GovernanceEventAuditRecoveryController {
     }
 
     @GetMapping("/recovery")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.GOVERNANCE_AUDIT_RECOVERY,
+            resourceType = ReadAccessResourceType.AUDIT_COMMITMENT)
     public List<WriteActionAuditOutboxRecoveryService.RecoveryView> list(Authentication authentication) {
         return recovery.list(PolicyGovernanceActor.from(authentication));
     }
 
     @GetMapping("/recovery/history")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.GOVERNANCE_AUDIT_RECOVERY_HISTORY,
+            resourceType = ReadAccessResourceType.AUDIT_COMMITMENT)
     public List<WriteActionAuditOutboxRecoveryService.RecoveryView> history(Authentication authentication) {
         return recovery.history(PolicyGovernanceActor.from(authentication));
     }

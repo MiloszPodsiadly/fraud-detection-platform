@@ -1,6 +1,8 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -33,6 +35,8 @@ public class PolicyCredentialEnrollmentGrantController {
     }
 
     @GetMapping("/mine")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_CREDENTIAL_GRANT_MINE,
+            resourceType = ReadAccessResourceType.POLICY_CREDENTIAL_GRANT)
     public java.util.List<PolicyCredentialEnrollmentGrantService.GrantView> mine(
             Authentication authentication) {
         return grants.mine(PolicyGovernanceActor.fromOidcSession(authentication));
@@ -45,12 +49,15 @@ public class PolicyCredentialEnrollmentGrantController {
     }
 
     @GetMapping("/{id}/review")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_CREDENTIAL_GRANT_REVIEW,
+            resourceType = ReadAccessResourceType.POLICY_CREDENTIAL_GRANT, resourceIdVariable = "id")
     public PolicyCredentialEnrollmentGrantService.GrantReviewView reviewView(
             Authentication authentication, @PathVariable String id) {
         return grants.reviewView(PolicyGovernanceActor.fromOidcSession(authentication), id);
     }
 
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_CREDENTIAL_GRANT_STATUS,
+            resourceType = ReadAccessResourceType.POLICY_CREDENTIAL_GRANT, resourceIdVariable = "id")
     @GetMapping("/{id}/status")
     public PolicyCredentialEnrollmentGrantService.GrantStatus status(Authentication authentication,
             @PathVariable String id) {
@@ -64,7 +71,9 @@ public class PolicyCredentialEnrollmentGrantController {
         return grants.revoke(PolicyGovernanceActor.fromOidcSession(authentication), id, command);
     }
 
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_CREDENTIAL_GRANT_INCIDENTS,
+            resourceType = ReadAccessResourceType.POLICY_CREDENTIAL_GRANT,
+            resourceIdParameter = "actorId")
     @GetMapping("/incidents")
     public PolicyCredentialEnrollmentGrantService.IncidentGrantPage incidentGrants(
             Authentication authentication, @RequestParam String actorId,
@@ -90,7 +99,8 @@ public class PolicyCredentialEnrollmentGrantController {
         return reviews.bootstrapApprove(PolicyGovernanceActor.fromOidcSession(authentication), id);
     }
 
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_CREDENTIAL_GRANT_EVIDENCE,
+            resourceType = ReadAccessResourceType.POLICY_CREDENTIAL_GRANT, resourceIdVariable = "id")
     @GetMapping("/{id}/evidence")
     public PolicyCredentialGrantReviewService.ReviewEvidence evidence(
             Authentication authentication, @PathVariable String id) {

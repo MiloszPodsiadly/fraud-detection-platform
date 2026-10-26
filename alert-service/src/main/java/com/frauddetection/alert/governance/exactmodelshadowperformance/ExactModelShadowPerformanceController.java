@@ -1,6 +1,8 @@
 package com.frauddetection.alert.governance.exactmodelshadowperformance;
 
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,7 +22,9 @@ public class ExactModelShadowPerformanceController {
     }
 
     @GetMapping
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.EXACT_MODEL_SHADOW_PERFORMANCE,
+            resourceType = ReadAccessResourceType.EXACT_MODEL_SHADOW_PERFORMANCE,
+            resourceIdParameter = "modelArtifactSha256")
     public JsonNode find(
             @RequestParam String modelName,
             @RequestParam String modelVersion,

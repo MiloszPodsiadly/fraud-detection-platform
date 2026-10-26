@@ -50,18 +50,20 @@ public class ReadAccessAuditService {
             boolean failClosed
     ) {
         try {
-            ReadAccessAuditEvent event = event(target, outcome, resultCount, correlationId);
+            ReadAccessAuditEvent event = event(target, outcome, resultCount, correlationId, failClosed);
             repository.save(ReadAccessAuditEventDocument.from(event));
             metrics.recordReadAccessAuditPersisted(target.endpointCategory(), outcome);
         } catch (RuntimeException exception) {
-            metrics.recordReadAccessAuditPersistenceFailure(target.endpointCategory());
-            log.atWarn()
-                    .addKeyValue("endpointCategory", target.endpointCategory())
-                    .addKeyValue("resourceType", target.resourceType())
-                    .addKeyValue("outcome", outcome)
-                    .addKeyValue("errorType", exception.getClass().getSimpleName())
-                    .addKeyValue("failClosed", failClosed)
-                    .log("Read-access audit persistence failed.");
+            if (!(exception instanceof MissingReadAccessActorException)) {
+                metrics.recordReadAccessAuditPersistenceFailure(target.endpointCategory());
+                log.atWarn()
+                        .addKeyValue("endpointCategory", target.endpointCategory())
+                        .addKeyValue("resourceType", target.resourceType())
+                        .addKeyValue("outcome", outcome)
+                        .addKeyValue("errorType", exception.getClass().getSimpleName())
+                        .addKeyValue("failClosed", failClosed)
+                        .log("Read-access audit persistence failed.");
+            }
             if (failClosed) {
                 throw exception;
             }
@@ -72,21 +74,26 @@ public class ReadAccessAuditService {
             ReadAccessAuditTarget target,
             ReadAccessAuditOutcome outcome,
             int resultCount,
-            String correlationId
+            String correlationId,
+            boolean requireActor
     ) {
         Optional<AnalystPrincipal> principalOptional = currentAnalystUser.get();
         AnalystPrincipal principal = principalOptional == null ? null : principalOptional.orElse(null);
-        if (principal == null) {
+        if (principal == null || principal.userId() == null || principal.userId().isBlank()) {
             metrics.recordReadAccessAuditActorMissing(target.endpointCategory());
             log.atWarn()
                     .addKeyValue("endpointCategory", target.endpointCategory())
                     .addKeyValue("resourceType", target.resourceType())
-                    .log("Read-access audit actor principal was missing; persisted audit with unknown actor.");
+                    .log("Read-access audit actor principal is missing or invalid.");
+            if (requireActor) {
+                throw new MissingReadAccessActorException();
+            }
         }
         return new ReadAccessAuditEvent(
                 UUID.randomUUID().toString(),
                 Instant.now(),
-                principal == null ? "unknown" : principal.userId(),
+                principal == null || principal.userId() == null || principal.userId().isBlank()
+                        ? "unknown" : principal.userId(),
                 principal == null ? Set.of() : roles(principal),
                 ReadAccessAuditAction.READ,
                 target.resourceType(),
@@ -112,5 +119,12 @@ public class ReadAccessAuditService {
 
     private String normalize(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static final class MissingReadAccessActorException extends IllegalStateException {
+
+        private MissingReadAccessActorException() {
+            super("Sensitive read actor identity is unavailable.");
+        }
     }
 }

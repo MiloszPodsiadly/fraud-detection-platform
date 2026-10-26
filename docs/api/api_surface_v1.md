@@ -69,6 +69,7 @@ Alert service:
 | `PATCH` | `/api/v1/fraud-cases/{caseId}` | Updates fraud case status/assignment fields through a regulated mutation command. Non-terminal command states return operation metadata without target business fields. |
 | `GET` | `/api/v1/transactions/scored` | Lists scored transaction projections. |
 | `GET` | `/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback` | Bounded first page of captured engine intelligence feedback for one scored transaction. Requires explicit `ENGINE_INTELLIGENCE_FEEDBACK_READ`, default 25, max 50, no submittedBy, no internal hashes, no audit internals, and no raw data. No execution, decisioning, retraining, or rule updates. |
+| `GET` | `/api/v1/transactions/scored/{transactionId}/feedback` | Returns the transaction's bounded fraud feedback record, if present. Requires `FRAUD_FEEDBACK_READ`; the transaction ID is recorded as the audited resource. |
 | `GET` | `/api/v1/audit/events` | Returns bounded newest-first durable platform audit events; requires `audit:read`. |
 | `GET` | `/api/v1/audit/integrity` | Performs bounded read-only hash-chain integrity verification; requires `audit:read`. |
 | `GET` | `/api/v1/audit/integrity/external` | Performs bounded read-only external anchor verification; requires `audit:verify`. |
@@ -91,6 +92,12 @@ Alert service:
 | `POST` | `/governance/advisories/{event_id}/audit` | Appends one authenticated human-review audit entry for a governance advisory event. |
 
 Governance advisory audit and lifecycle projection endpoints are owned by `alert-service`, not `ml-inference-service`, because lifecycle status is derived from authenticated human-review audit history. They do not mutate advisory events, scoring, model behavior, retraining, rollback, or fraud decisioning.
+
+`GET /api/v1/governance/audit/recovery`, `GET /api/v1/governance/audit/recovery/history`, and
+`POST /api/v1/governance/audit/commitments/{kind}/{eventId}/recovery` return `localReceiptStatus`,
+`receiptIntegrityStatus`, `referencedEvidenceStatus`, and `independentWitnessStatus`. The receipt digest is held in local
+MongoDB and does not prove independent witnessing; consumers must treat `NOT_INDEPENDENTLY_ANCHORED` and `NOT_VERIFIED`
+as explicit assurance limits, even when the local operation succeeded.
 
 FDP-81 intentionally removes obsolete FraudCase list and lifecycle HTTP handlers that are not used by the current
 React analyst console. The retained FraudCase rows above are the supported current product surface; this is API
@@ -262,7 +269,7 @@ Platform Local Trust Authority API:
 
 Sensitive read-access audit:
 
-- Implemented for `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback`, `GET /governance/advisories`, `GET /governance/advisories/{event_id}`, `GET /governance/advisories/{event_id}/audit`, and `GET /governance/advisories/analytics`.
+- Implemented for `GET /api/v1/alerts/{alertId}`, `GET /api/v1/fraud-cases/{caseId}`, `GET /api/v1/transactions/scored`, `GET /api/v1/transactions/scored/{transactionId}/feedback`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence`, `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback`, `GET /governance/advisories`, `GET /governance/advisories/{event_id}`, `GET /governance/advisories/{event_id}/audit`, and `GET /governance/advisories/analytics`.
 - Records authenticated backend principal identity, roles, `action=READ`, resource type/id where applicable, endpoint category, canonical hashed query shape, page/size, bounded result count, outcome, correlation id, source service, schema version, and indexed timestamps.
 - If actor principal is missing, records `actor_id=unknown`, emits a low-cardinality anomaly metric, and logs a bounded warning without URL/query/payload/token content.
 - Does not store raw query parameters, filters, response payloads, transaction data, customer/account/card data, advisory content, full URLs, exception messages, tokens, secrets, or stack traces.

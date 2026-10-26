@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelpolicy;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +20,8 @@ public class PolicyPublicationStatusController {
     }
 
     @GetMapping("/{id}/publication")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_POLICY_PUBLICATION_STATUS,
+            resourceType = ReadAccessResourceType.MODEL_POLICY_PUBLICATION, resourceIdVariable = "id")
     public PolicyPublicationStatusService.Status publication(Authentication authentication,
             @PathVariable String id) {
         return service.publication(PolicyGovernanceActor.from(authentication), id);

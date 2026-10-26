@@ -23,7 +23,8 @@ public class AuditEvidenceExportController {
     }
 
     @GetMapping
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.AUDIT_EVIDENCE_EXPORT,
+            resourceType = ReadAccessResourceType.AUDIT_EVIDENCE_EXPORT)
     public AuditEvidenceExportResponse exportEvidence(
             @RequestParam String from,
             @RequestParam String to,

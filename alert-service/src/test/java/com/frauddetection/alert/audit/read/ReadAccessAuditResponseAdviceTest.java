@@ -15,6 +15,7 @@ import java.util.stream.Stream;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ReadAccessAuditResponseAdviceTest {
 
@@ -24,7 +25,8 @@ class ReadAccessAuditResponseAdviceTest {
         ReadAccessAuditResponseAdvice advice = new ReadAccessAuditResponseAdvice(
                 provider(new ReadAccessAuditClassifier()),
                 provider(new ReadAccessResultCountExtractor()),
-                provider(auditService)
+                provider(auditService),
+                provider(failOpenPolicy())
         );
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/transactions/scored");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/transactions/scored");
@@ -90,5 +92,11 @@ class ReadAccessAuditResponseAdviceTest {
                 return stream();
             }
         };
+    }
+
+    private static SensitiveReadAuditPolicy failOpenPolicy() {
+        SensitiveReadAuditPolicy policy = mock(SensitiveReadAuditPolicy.class);
+        when(policy.failClosed()).thenReturn(false);
+        return policy;
     }
 }

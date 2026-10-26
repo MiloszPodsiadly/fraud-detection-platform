@@ -1,5 +1,8 @@
 package com.frauddetection.alert.audit.external;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,6 +20,8 @@ public class AuditTrustKeysController {
     }
 
     @GetMapping
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.AUDIT_TRUST_KEY_REGISTRY,
+            resourceType = ReadAccessResourceType.AUDIT_TRUST_KEY_REGISTRY)
     public List<AuditTrustAuthorityKey> keys() {
         return trustAuthorityClient.keys();
     }

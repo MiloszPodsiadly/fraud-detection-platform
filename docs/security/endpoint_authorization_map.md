@@ -59,6 +59,13 @@ Do not choose an owner based on URL prefix alone. Choose owner by resource seman
 - `SessionAuthorizationRules` owns session/bootstrap/OAuth routes only.
 - If ownership is ambiguous, prefer the most restrictive operational owner and add tests for wrong-authority rejection.
 
+Sensitive GET auditing is a separate runtime control from authorization. `@AuditedSensitiveRead` supplies route
+category and resource metadata; `ReadAccessAuditClassifier` resolves the request target, `SensitiveReadAuditPolicy`
+selects fail-closed behavior, and MVC response advice gates successful sensitive bodies on one bounded durable audit;
+the interceptor handles rejected, failed and unsupported reads. `RouteCoverageAgainstMvcMappingsTest` checks live MVC mappings for governance, audit, fraud-case,
+scored-transaction, suspicious-transaction, trust, regulated-recovery and outbox read routes. Operational counters
+remain in metrics and do not replace the durable read-audit event.
+
 ## Auth observability boundaries
 
 Auth/session/security metrics are operational signals, not audit evidence. They must not place raw tokens, session IDs, user IDs, authorities, role values, provider groups, raw OIDC claim values, provider logout URLs, or query strings in metric labels.

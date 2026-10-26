@@ -1,6 +1,8 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
 import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.governance.modelpolicy.PolicyWebAuthnService;
 import org.springframework.security.core.Authentication;
@@ -26,35 +28,45 @@ public class PolicyTrustAdministrationController {
     }
 
     @GetMapping("/registries")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_TRUST_REGISTRY_LIST,
+            resourceType = ReadAccessResourceType.POLICY_TRUST)
     public List<PolicyTrustRegistrySnapshotService.RegistryView> registries(Authentication authentication) {
         return registries.inspect(PolicyGovernanceActor.from(authentication));
     }
 
     @GetMapping("/requests")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_TRUST_REQUEST_LIST,
+            resourceType = ReadAccessResourceType.POLICY_TRUST)
     public List<PolicyTrustChangeDocument> requests(Authentication authentication) {
         return changes.recent(PolicyGovernanceActor.from(authentication));
     }
 
     @GetMapping("/requests/{id}/audit")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_TRUST_REQUEST_AUDIT,
+            resourceType = ReadAccessResourceType.POLICY_TRUST, resourceIdVariable = "id")
     public List<PolicyTrustChangeAuditDocument> audit(Authentication authentication, @PathVariable String id) {
         return changes.audit(PolicyGovernanceActor.from(authentication), id);
     }
 
     @GetMapping("/requests/{id}/deployment")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_TRUST_REQUEST_DEPLOYMENT,
+            resourceType = ReadAccessResourceType.POLICY_TRUST, resourceIdVariable = "id")
     public PolicyTrustChangeService.DeploymentView deployment(Authentication authentication,
             @PathVariable String id) {
         return changes.deployment(PolicyGovernanceActor.from(authentication), id);
     }
 
     @GetMapping("/requests/{id}/candidate")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_TRUST_CANDIDATE,
+            resourceType = ReadAccessResourceType.POLICY_TRUST, resourceIdVariable = "id")
     public PolicyTrustChangeService.CandidateView candidate(Authentication authentication,
             @PathVariable String id) {
         return changes.candidate(PolicyGovernanceActor.from(authentication), id);
     }
 
     @GetMapping("/requests/{id}/installation")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_TRUST_INSTALLATION,
+            resourceType = ReadAccessResourceType.POLICY_TRUST, resourceIdVariable = "id")
     public PolicyTrustChangeService.InstallationBundle installation(Authentication authentication,
             @PathVariable String id) {
         return changes.installation(PolicyGovernanceActor.from(authentication), id);

@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import com.frauddetection.alert.governance.modelpolicy.PolicyPublicationJobDocument;
 import com.frauddetection.alert.security.authorization.ModelPolicyAuthority;
@@ -51,6 +54,8 @@ public class PolicySecurityOperationsController {
     }
 
     @GetMapping("/operations")
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.POLICY_SECURITY_OPERATIONS,
+            resourceType = ReadAccessResourceType.POLICY_SECURITY)
     public Diagnostics operations(Authentication authentication) {
         var actor = PolicyGovernanceActor.from(authentication);
         if (!actor.authorities().contains(ModelPolicyAuthority.PRODUCTION)

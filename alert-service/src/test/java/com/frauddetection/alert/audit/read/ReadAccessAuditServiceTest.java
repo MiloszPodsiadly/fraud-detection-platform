@@ -16,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class ReadAccessAuditServiceTest {
@@ -142,5 +143,31 @@ class ReadAccessAuditServiceTest {
                 .tag("endpoint_category", "alert_detail")
                 .counter()
                 .count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void shouldRejectMissingActorWhenCallerRequiresFailClosedRead() {
+        when(currentAnalystUser.get()).thenReturn(java.util.Optional.empty());
+        ReadAccessAuditTarget target = new ReadAccessAuditTarget(
+                ReadAccessEndpointCategory.POLICY_TRUST_CANDIDATE,
+                ReadAccessResourceType.POLICY_TRUST,
+                "request-1",
+                null,
+                null,
+                null,
+                null
+        );
+
+        assertThatThrownBy(() -> service.auditOrThrow(target, ReadAccessAuditOutcome.SUCCESS, 1, "corr-1"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Sensitive read actor identity is unavailable.");
+
+        verify(repository, never()).save(org.mockito.ArgumentMatchers.any());
+        assertThat(meterRegistry.get("fraud_read_access_audit_actor_missing_total")
+                .tag("endpoint_category", "policy_trust_candidate")
+                .counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.find("fraud_platform_read_access_audit_persistence_failures_total")
+                .tag("endpoint_category", "policy_trust_candidate")
+                .counter()).isNull();
     }
 }

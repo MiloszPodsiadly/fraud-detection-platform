@@ -1,5 +1,8 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
+import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
+import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +22,8 @@ public class OnlinePolicyApproverDirectoryController {
     }
 
     @GetMapping
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.MODEL_PROMOTION_APPROVER_DIRECTORY,
+            resourceType = ReadAccessResourceType.MODEL_PROMOTION)
     public List<OnlinePolicyApproverDirectory.Entry> eligible(Authentication authentication,
             @RequestParam ModelGovernanceEnvironment environment,
             @RequestParam ModelPromotionIntendedUse intendedUse) {

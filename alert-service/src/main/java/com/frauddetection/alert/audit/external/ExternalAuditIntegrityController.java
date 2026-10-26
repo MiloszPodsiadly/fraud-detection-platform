@@ -46,7 +46,8 @@ public class ExternalAuditIntegrityController {
     }
 
     @GetMapping
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.EXTERNAL_AUDIT_INTEGRITY,
+            resourceType = ReadAccessResourceType.EXTERNAL_AUDIT_INTEGRITY)
     public ExternalAuditIntegrityResponse verifyExternalIntegrity(
             @RequestParam(name = "source_service", required = false) String sourceService,
             @RequestParam(required = false) Integer limit,
@@ -58,7 +59,8 @@ public class ExternalAuditIntegrityController {
     }
 
     @GetMapping("/coverage")
-    @AuditedSensitiveRead
+    @AuditedSensitiveRead(category = ReadAccessEndpointCategory.EXTERNAL_AUDIT_COVERAGE,
+            resourceType = ReadAccessResourceType.EXTERNAL_AUDIT_COVERAGE)
     public ExternalAuditAnchorCoverageResponse coverage(
             @RequestParam(name = "source_service", required = false) String sourceService,
             @RequestParam(required = false) Integer limit,
