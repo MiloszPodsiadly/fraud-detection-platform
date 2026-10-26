@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 
 import java.util.List;
 import java.util.Set;
@@ -43,5 +45,21 @@ class CurrentAnalystUserTest {
 
         assertThat(currentAnalystUser.get())
                 .contains(principal);
+    }
+
+    @Test
+    void shouldPreserveValidatedIssuerAndSubjectForReadAuditIdentity() {
+        java.time.Instant issuedAt = java.time.Instant.parse("2026-01-01T00:00:00Z");
+        OidcIdToken token = new OidcIdToken("token", issuedAt, issuedAt.plusSeconds(300),
+                java.util.Map.of("iss", "https://issuer.example", "sub", "same-subject"));
+        DefaultOidcUser oidcUser = new DefaultOidcUser(
+                List.of(new SimpleGrantedAuthority("ROLE_ANALYST")), token);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                oidcUser, "credentials", List.of(new SimpleGrantedAuthority("ROLE_ANALYST"))));
+
+        assertThat(currentAnalystUser.get())
+                .get()
+                .extracting(AnalystPrincipal::institutionalActorId)
+                .isEqualTo("https://issuer.example#same-subject");
     }
 }

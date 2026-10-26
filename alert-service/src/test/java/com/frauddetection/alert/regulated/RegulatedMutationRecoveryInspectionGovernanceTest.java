@@ -3,6 +3,7 @@ package com.frauddetection.alert.regulated;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditSliceTestConfiguration;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
@@ -45,6 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(RegulatedMutationRecoveryController.class)
 @Import({
         AlertSecurityConfig.class,
+        SensitiveReadAuditSliceTestConfiguration.class,
         ApiAuthenticationEntryPoint.class,
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,

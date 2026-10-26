@@ -1,6 +1,7 @@
 package com.frauddetection.alert.suspicious.api;
 
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditSliceTestConfiguration;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
@@ -46,6 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
         SecurityDeniedAccessTelemetrySliceTestConfig.class,
+        SensitiveReadAuditSliceTestConfiguration.class,
         AlertServiceExceptionHandler.class
 })
 @ActiveProfiles("test")

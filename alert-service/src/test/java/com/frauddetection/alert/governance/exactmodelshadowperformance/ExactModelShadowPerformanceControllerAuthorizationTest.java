@@ -84,7 +84,7 @@ class ExactModelShadowPerformanceControllerAuthorizationTest {
         mockMvc.perform(request().with(authentication(auth(AnalystAuthority.MODEL_SHADOW_PERFORMANCE_READ))))
                 .andExpect(status().isOk());
 
-        verify(readAccessAuditService).audit(
+        verify(readAccessAuditService).auditOrThrow(
                 argThat(target -> target.endpointCategory() == ReadAccessEndpointCategory.EXACT_MODEL_SHADOW_PERFORMANCE
                         && target.resourceType() == ReadAccessResourceType.EXACT_MODEL_SHADOW_PERFORMANCE
                         && SHA.equals(target.resourceId())

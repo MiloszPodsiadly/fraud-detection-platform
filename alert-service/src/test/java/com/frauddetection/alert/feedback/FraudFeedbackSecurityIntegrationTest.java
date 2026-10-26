@@ -1,6 +1,7 @@
 package com.frauddetection.alert.feedback;
 
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditSliceTestConfiguration;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.config.AlertSecurityConfig;
@@ -37,7 +38,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
         SecurityDeniedAccessTelemetrySliceTestConfig.class,
-        AlertServiceExceptionHandler.class
+        AlertServiceExceptionHandler.class,
+        SensitiveReadAuditSliceTestConfiguration.class
 })
 class FraudFeedbackSecurityIntegrationTest {
 

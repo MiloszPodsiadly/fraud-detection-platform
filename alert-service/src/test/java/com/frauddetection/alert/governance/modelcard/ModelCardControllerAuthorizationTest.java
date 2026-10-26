@@ -103,7 +103,7 @@ class ModelCardControllerAuthorizationTest {
                 .andExpect(jsonPath("$.promotionState").value("NOT_EVALUATED_FOR_PROMOTION"))
                 .andExpect(jsonPath("$.verifiedUsageBoundary.runtimeDecisionAuthority").value("NONE"));
 
-        verify(readAccessAuditService).audit(
+        verify(readAccessAuditService).auditOrThrow(
                 argThat(target -> target.endpointCategory() == ReadAccessEndpointCategory.MODEL_CARD
                         && target.resourceType() == ReadAccessResourceType.MODEL_CARD
                         && target.resourceId() == null),

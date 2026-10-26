@@ -8,6 +8,7 @@ import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditSliceTestConfiguration;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
@@ -58,7 +59,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         }
 )
 @AutoConfigureMockMvc(addFilters = false)
-@Import({FraudCaseResponseMapper.class, AlertResponseMapper.class, AlertServiceExceptionHandler.class})
+@Import({FraudCaseResponseMapper.class, AlertResponseMapper.class, AlertServiceExceptionHandler.class,
+        SensitiveReadAuditSliceTestConfiguration.class})
 class FraudCaseControllerTest {
 
     @Autowired

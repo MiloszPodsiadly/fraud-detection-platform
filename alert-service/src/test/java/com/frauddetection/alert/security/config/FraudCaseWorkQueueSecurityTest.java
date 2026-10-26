@@ -4,6 +4,7 @@ import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditSliceTestConfiguration;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -41,6 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
         SecurityDeniedAccessTelemetrySliceTestConfig.class,
+        SensitiveReadAuditSliceTestConfiguration.class,
         FraudCaseResponseMapper.class,
         AlertResponseMapper.class,
         AlertServiceExceptionHandler.class

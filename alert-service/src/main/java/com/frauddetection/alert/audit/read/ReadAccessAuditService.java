@@ -3,6 +3,7 @@ package com.frauddetection.alert.audit.read;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -49,25 +50,24 @@ public class ReadAccessAuditService {
             String correlationId,
             boolean failClosed
     ) {
+        ReadAccessAuditEvent event = event(target, outcome, resultCount, correlationId, failClosed);
         try {
-            ReadAccessAuditEvent event = event(target, outcome, resultCount, correlationId, failClosed);
             repository.save(ReadAccessAuditEventDocument.from(event));
-            metrics.recordReadAccessAuditPersisted(target.endpointCategory(), outcome);
         } catch (RuntimeException exception) {
-            if (!(exception instanceof MissingReadAccessActorException)) {
-                metrics.recordReadAccessAuditPersistenceFailure(target.endpointCategory());
-                log.atWarn()
-                        .addKeyValue("endpointCategory", target.endpointCategory())
-                        .addKeyValue("resourceType", target.resourceType())
-                        .addKeyValue("outcome", outcome)
-                        .addKeyValue("errorType", exception.getClass().getSimpleName())
-                        .addKeyValue("failClosed", failClosed)
-                        .log("Read-access audit persistence failed.");
-            }
+            bestEffort(() -> metrics.recordReadAccessAuditPersistenceFailure(target.endpointCategory()));
+            log.atWarn()
+                    .addKeyValue("endpointCategory", target.endpointCategory())
+                    .addKeyValue("resourceType", target.resourceType())
+                    .addKeyValue("outcome", outcome)
+                    .addKeyValue("errorType", exception.getClass().getSimpleName())
+                    .addKeyValue("failClosed", failClosed)
+                    .log("Read-access audit persistence failed.");
             if (failClosed) {
                 throw exception;
             }
+            return;
         }
+        bestEffort(() -> metrics.recordReadAccessAuditPersisted(target.endpointCategory(), outcome));
     }
 
     private ReadAccessAuditEvent event(
@@ -79,8 +79,9 @@ public class ReadAccessAuditService {
     ) {
         Optional<AnalystPrincipal> principalOptional = currentAnalystUser.get();
         AnalystPrincipal principal = principalOptional == null ? null : principalOptional.orElse(null);
-        if (principal == null || principal.userId() == null || principal.userId().isBlank()) {
-            metrics.recordReadAccessAuditActorMissing(target.endpointCategory());
+        String actorId = resolveActorId(principal, requireActor);
+        if (actorId == null) {
+            bestEffort(() -> metrics.recordReadAccessAuditActorMissing(target.endpointCategory()));
             log.atWarn()
                     .addKeyValue("endpointCategory", target.endpointCategory())
                     .addKeyValue("resourceType", target.resourceType())
@@ -92,8 +93,7 @@ public class ReadAccessAuditService {
         return new ReadAccessAuditEvent(
                 UUID.randomUUID().toString(),
                 Instant.now(),
-                principal == null || principal.userId() == null || principal.userId().isBlank()
-                        ? "unknown" : principal.userId(),
+                actorId == null ? "unknown" : actorId,
                 principal == null ? Set.of() : roles(principal),
                 ReadAccessAuditAction.READ,
                 target.resourceType(),
@@ -109,6 +109,42 @@ public class ReadAccessAuditService {
                 "alert-service",
                 SCHEMA_VERSION
         );
+    }
+
+    private void bestEffort(Runnable telemetry) {
+        try {
+            telemetry.run();
+        } catch (RuntimeException ignored) {
+            // Metrics are advisory; persistence and fail-closed actor checks remain authoritative.
+        }
+    }
+
+    private String resolveActorId(AnalystPrincipal principal, boolean requireTrustedActor) {
+        if (principal != null && principal.readAuditActorId() != null
+                && !principal.readAuditActorId().isBlank()) {
+            return principal.readAuditActorId();
+        }
+        if (principal != null && principal.institutionalActorId() != null) {
+            int separator = principal.institutionalActorId().lastIndexOf('#');
+            if (separator > 0 && separator < principal.institutionalActorId().length() - 1) {
+                try {
+                    return PolicyGovernanceActor.identityId(
+                            principal.institutionalActorId().substring(0, separator),
+                            principal.institutionalActorId().substring(separator + 1));
+                } catch (IllegalArgumentException ignored) {
+                    return null;
+                }
+            }
+        }
+        if (principal == null || principal.userId() == null || principal.userId().isBlank()) {
+            return null;
+        }
+        if (requireTrustedActor) {
+            return null;
+        }
+        return "unverified:" + PolicyGovernanceActor.identityId("unverified-user-id",
+                java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(principal.userId().trim().getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .substring("oidc:".length());
     }
 
     private Set<String> roles(AnalystPrincipal principal) {

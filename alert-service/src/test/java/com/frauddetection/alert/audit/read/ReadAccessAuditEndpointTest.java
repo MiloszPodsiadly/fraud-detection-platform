@@ -85,7 +85,8 @@ class ReadAccessAuditEndpointTest {
         when(currentAnalystUser.get()).thenReturn(Optional.of(new AnalystPrincipal(
                 "opsadmin",
                 java.util.Set.of(AnalystRole.FRAUD_OPS_ADMIN),
-                java.util.Set.of("transaction-monitor:read")
+                java.util.Set.of("transaction-monitor:read"),
+                "https://issuer.example#opsadmin"
         )));
     }
 
@@ -128,7 +129,8 @@ class ReadAccessAuditEndpointTest {
                 );
         assertThat(documents).allSatisfy(document -> {
             assertThat(document.action()).isEqualTo(ReadAccessAuditAction.READ);
-            assertThat(document.actorId()).isEqualTo("opsadmin");
+            assertThat(document.actorId()).isEqualTo(com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor.identityId(
+                    "https://issuer.example", "opsadmin"));
             assertThat(document.outcome()).isEqualTo(ReadAccessAuditOutcome.SUCCESS);
             assertThat(document.sourceService()).isEqualTo("alert-service");
             assertThat(document.schemaVersion()).isEqualTo(1);
@@ -154,7 +156,8 @@ class ReadAccessAuditEndpointTest {
         assertThat(event.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.POLICY_TRUST_CANDIDATE);
         assertThat(event.resourceType()).isEqualTo(ReadAccessResourceType.POLICY_TRUST);
         assertThat(event.resourceId()).isEqualTo("request-17");
-        assertThat(event.actorId()).isEqualTo("opsadmin");
+        assertThat(event.actorId()).isEqualTo(com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor.identityId(
+                "https://issuer.example", "opsadmin"));
         assertThat(event.outcome()).isEqualTo(ReadAccessAuditOutcome.SUCCESS);
         assertThat(event.correlationId()).isEqualTo("corr-policy-candidate");
     }

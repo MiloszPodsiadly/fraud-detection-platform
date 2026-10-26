@@ -389,7 +389,7 @@ class SuspiciousTransactionReadAuditTest {
     }
 
     @Test
-    void auditedSensitiveReadAnnotationIsMarkerOnlyForSuspiciousTransactionEndpoint() throws Exception {
+    void auditedSensitiveReadMetadataIsAppliedByRuntimeClassifier() throws Exception {
         Method search = SuspiciousTransactionReadController.class.getMethod(
                 "search",
                 org.springframework.util.MultiValueMap.class,
@@ -410,13 +410,38 @@ class SuspiciousTransactionReadAuditTest {
                 jakarta.servlet.http.HttpServletRequest.class
         );
 
-        assertThat(search.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
-        assertThat(read.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
-        assertThat(summary.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
-        assertThat(linkedAlertContext.getAnnotation(AuditedSensitiveRead.class)).isNotNull();
-        assertThat(AuditedSensitiveRead.class.getDeclaredMethods())
-                .extracting(Method::getName)
-                .containsExactly("action");
+        assertRuntimeClassification(search, ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SEARCH, null);
+        assertRuntimeClassification(read, ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_READ, "suspiciousTransactionId");
+        assertRuntimeClassification(summary, ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_SUMMARY, null);
+        assertRuntimeClassification(linkedAlertContext,
+                ReadAccessEndpointCategory.SUSPICIOUS_TRANSACTION_LINKED_ALERT_CONTEXT,
+                "suspiciousTransactionId");
+    }
+
+    private void assertRuntimeClassification(
+            Method method,
+            ReadAccessEndpointCategory expectedCategory,
+            String resourceIdVariable
+    ) {
+        AuditedSensitiveRead policy = org.springframework.core.annotation.AnnotatedElementUtils
+                .findMergedAnnotation(method, AuditedSensitiveRead.class);
+        assertThat(policy).isNotNull();
+        assertThat(policy.category()).isEqualTo(expectedCategory);
+        assertThat(policy.resourceType()).isEqualTo(ReadAccessResourceType.SUSPICIOUS_TRANSACTION);
+        assertThat(policy.resourceIdVariable()).isEqualTo(resourceIdVariable == null ? "" : resourceIdVariable);
+
+        org.springframework.web.method.HandlerMethod handler =
+                new org.springframework.web.method.HandlerMethod(controller, method);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/internal/suspicious-transactions");
+        request.setAttribute(HandlerMapping.BEST_MATCHING_HANDLER_ATTRIBUTE, handler);
+        request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/internal/suspicious-transactions");
+        request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,
+                resourceIdVariable == null ? java.util.Map.of() : java.util.Map.of(resourceIdVariable, "suspicious-123"));
+
+        var target = new ReadAccessAuditClassifier().classify(request).orElseThrow();
+        assertThat(target.endpointCategory()).isEqualTo(expectedCategory);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.SUSPICIOUS_TRANSACTION);
+        assertThat(target.resourceId()).isEqualTo(resourceIdVariable == null ? null : "suspicious-123");
     }
 
     private SuspiciousTransactionQueryTelemetrySink testTelemetrySink() {

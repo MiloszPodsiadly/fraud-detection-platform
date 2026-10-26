@@ -82,7 +82,8 @@ class SensitiveReadAuditFailureInjectionTest {
             when(currentAnalystUser.get()).thenReturn(Optional.of(new AnalystPrincipal(
                     "ops-admin",
                     Set.of(AnalystRole.FRAUD_OPS_ADMIN),
-                    AnalystRole.FRAUD_OPS_ADMIN.authorities()
+                    AnalystRole.FRAUD_OPS_ADMIN.authorities(),
+                    "https://issuer.example#ops-admin"
             )));
             when(request.getHeader("X-Correlation-Id")).thenReturn("corr-1");
             doThrow(new DataAccessResourceFailureException("mongo unavailable"))

@@ -58,7 +58,10 @@ public class JwtAnalystAuthenticationConverter {
                 || !StringUtils.hasText(properties.issuerUri())
                 || !properties.issuerUri().trim().equals(issuer.toString())
                 ? null : issuer + "#" + subject;
-        AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities, stableActor);
+        String readAuditActorId = stableActor == null ? null
+                : com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceActor.identityId(
+                        issuer.toString(), subject);
+        AnalystPrincipal principal = new AnalystPrincipal(userId, roles, authorities, stableActor, readAuditActorId);
         return (UsernamePasswordAuthenticationToken) authenticationFactory.authenticated(principal);
     }
 

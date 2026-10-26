@@ -64,6 +64,7 @@ import com.frauddetection.alert.governance.modelpromotion.OnlinePolicyApproverDi
 import com.frauddetection.alert.governance.modelpromotion.PolicyPublicationRecoveryService;
 import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiRateLimiter;
 import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionApiService;
+import com.frauddetection.alert.governance.modelpromotion.api.ModelPromotionRateLimitActorKeyResolver;
 import com.frauddetection.alert.governance.modelpolicy.PolicyGovernanceController;
 import com.frauddetection.alert.governance.modelpolicy.PolicySecurityActorController;
 import com.frauddetection.alert.governance.modelpromotion.PolicySecurityOperationsController;
@@ -324,6 +325,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockitoBean
     private ModelPromotionApiRateLimiter modelPromotionApiRateLimiter;
+
+    @MockitoBean
+    private ModelPromotionRateLimitActorKeyResolver modelPromotionRateLimitActorKeyResolver;
 
     @MockitoBean
     private PolicyGovernanceService policyGovernanceService;

@@ -156,6 +156,9 @@ public class ReadAccessAuditResponseAdvice implements ResponseBodyAdvice<Object>
         response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
         response.setHeader("Content-Length", null);
         response.setHeader("Content-Encoding", null);
+        response.setHeader("ETag", null);
+        response.setHeader("Last-Modified", null);
+        response.setHeader("Content-Range", null);
         response.setHeader("Cache-Control", "no-store");
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         try {

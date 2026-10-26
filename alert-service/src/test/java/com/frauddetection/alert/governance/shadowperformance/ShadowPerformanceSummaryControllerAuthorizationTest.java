@@ -128,7 +128,7 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
                 .andExpect(jsonPath("$.metrics.alertRecommendedPrecision.value").value(0.666667))
                 .andExpect(jsonPath("$.banner").value(ShadowPerformanceSummaryContract.REQUIRED_BANNER));
 
-        verify(readAccessAuditService).audit(
+        verify(readAccessAuditService).auditOrThrow(
                 argThat(target -> target.endpointCategory() == ReadAccessEndpointCategory.SHADOW_PERFORMANCE_SUMMARY
                         && target.resourceType() == ReadAccessResourceType.SHADOW_PERFORMANCE_SUMMARY
                         && target.resourceId() == null),

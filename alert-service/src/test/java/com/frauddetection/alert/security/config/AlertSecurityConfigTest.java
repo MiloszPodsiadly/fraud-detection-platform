@@ -28,6 +28,7 @@ import com.frauddetection.alert.audit.AuditTrustAttestationResponse;
 import com.frauddetection.alert.audit.AuditTrustAttestationService;
 import com.frauddetection.alert.audit.AuditTrustLevel;
 import com.frauddetection.alert.audit.read.ReadAccessAuditService;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditSliceTestConfiguration;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportController;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportResponse;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportService;
@@ -216,6 +217,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
         SecurityDeniedAccessTelemetrySliceTestConfig.class,
+        SensitiveReadAuditSliceTestConfiguration.class,
         AlertResponseMapper.class,
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,
