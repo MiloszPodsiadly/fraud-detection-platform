@@ -5,49 +5,63 @@ the observation store and this policy are not wired into scoring. `AUTHENTICATED
 claim made by its creator, not proof of authentication. A future admission boundary must independently prove and
 bind that claim before any result may be used.
 
-Policy version `1` interprets **only** a complete, sealed, pre-occurrence 30-day history within one authenticated
-institution/customer/device scope. The observation's `asOf` is the occurrence event time; `windowStart` must equal
-`asOf - 30 days`, coverage must reach `asOf`, and the source observation time must not be in the future relative to
-`asOf`. A count of zero has meaning only under that full proof. Equal-time, late, missing, evicted, key-rotation, and
-capacity-limited histories cannot be silently counted as zero. `DeviceRiskEvidence` validates structure but does not
-establish the missing producer trust boundary.
+Policy version `1` interprets **only** a complete, sealed, pre-occurrence 30-day history within one institution,
+source, customer and versioned-device scope. The observation's `asOf` is the occurrence event time; `windowStart`
+must equal `asOf - 30 days`, coverage must reach `asOf`, and the source observation time must not be in the future
+relative to `asOf`. A count of zero means only “not observed in this complete bounded window.” Equal-time, late,
+missing, evicted, key-rotation, and capacity-limited histories cannot be silently counted as zero.
+`DeviceRiskEvidence` validates structure but does not establish the missing producer trust boundary.
 
-| Signal in fixed output order | Predicate when admissible | Required proof and failure result | Local reason and confidence | Interpretation |
+| Signal in fixed output order | Support | Predicate and required proof | Outcome and fixed diagnostic reason codes | Interpretation |
 | --- | --- | --- | --- | --- |
-| Device not seen recently | `priorDevice.count == 0` | Authenticated binding and full 30-day prior history; otherwise `UNAVAILABLE` | `NOT_SEEN_IN_WINDOW` or `SEEN_IN_WINDOW`; `MEDIUM` when evaluated | Absence in this window, never first-ever or fraud. |
-| Device switch | `switches.count > 0` | Same complete history with deduplicated, event-time ordered switches; otherwise `UNAVAILABLE` | `SWITCH_OBSERVED` or `NO_SWITCH_OBSERVED`; `MEDIUM` when evaluated | One or more observed transitions, not a risk threshold. |
-| Other customers | No admitted predicate | Verified physical-device linking across authenticated customers is absent; always `UNAVAILABLE` | `UNSUPPORTED_SOURCE`; `UNKNOWN` | Matching client strings do not prove a shared device. |
-| Device country mismatch | No admitted predicate | Trusted device geolocation and reference-country policy are absent; always `UNAVAILABLE` | `UNSUPPORTED_SOURCE`; `UNKNOWN` | Existing Rules `COUNTRY_MISMATCH` compares different facts. |
-| Proxy or VPN | No admitted predicate | Trusted peer origin and detector assertion are absent; always `UNAVAILABLE` | `UNSUPPORTED_SOURCE`; `UNKNOWN` | Request booleans are not detector evidence. |
+| Device not seen recently | `SUPPORTED` | `priorDevice.count == 0`; authenticated binding and full 30-day prior history required | `AVAILABLE` + `DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW` or `DEVICE_NOVELTY_SEEN_IN_WINDOW`; otherwise `UNAVAILABLE`, `UNTRUSTED`, or `INVALID` evidence with a matching fixed reason code | Bounded absence only; never first-ever or fraud. |
+| Device switch | `SUPPORTED` | `switches.count > 0`; full prior history plus the transition into the current event. Ambiguous equal-time transition is `UNAVAILABLE` | `AVAILABLE` + `DEVICE_SWITCH_OBSERVED` or `DEVICE_SWITCH_NOT_OBSERVED`; otherwise `UNAVAILABLE`, `UNTRUSTED`, or `INVALID` evidence with a matching fixed reason code | Count covers transitions in `[t-30d,t)` plus current transition; no threshold or fraud verdict. |
+| Other customers / shared device | `UNSUPPORTED` | No verified scoped identifier or authorized cross-customer join exists | Always `UNAVAILABLE`; `DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE` (or the untrusted-source variant) | Matching client strings do not prove the same physical device. |
+| Device country mismatch | `UNSUPPORTED` | Requires an independent, fresh device-country provider and an authorized reference-country policy; existing transaction-home `COUNTRY_MISMATCH` is not device geography | Always `UNAVAILABLE`; `DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE` (or the untrusted-source variant) | A missing provider or a structurally supplied country never becomes a negative result. |
+| Proxy or VPN | `UNSUPPORTED` | Requires an independently bounded detector assertion bound to provider, time and subject; request booleans are not evidence | Always `UNAVAILABLE`; `DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE` (or the untrusted-source variant) | `false`, `true`, and missing caller values all remain unsupported. |
 
-History failures use a fixed, bounded reason vocabulary: `HISTORY_INCOMPLETE` for a short or late window,
-`HISTORY_UNAVAILABLE` for absent/key/capacity data, and `HISTORY_INVALID` for rejected provenance or time.
-Client-asserted and synthetic sources yield `SKIPPED` and `UNTRUSTED_SOURCE` for every signal. No user-supplied
-text, identifier, IP, location, or raw detector value appears in the result. Signal order above is the deterministic
-tie rule; the policy ranks no signals by severity. It does not export or extend public `ReasonCode`. In particular,
-the existing `DEVICE_NOVELTY` code and Rules weights are not reused for an uncalibrated 30-day absence.
+History failures use fixed reason codes such as `DEVICE_NOVELTY_HISTORY_INCOMPLETE`,
+`DEVICE_SWITCH_HISTORY_UNAVAILABLE`, `DEVICE_SWITCH_HISTORY_INVALID`, and signal-specific
+`*_UNTRUSTED_SOURCE`. Client-asserted and synthetic top-level sources yield `SKIPPED` and `UNTRUSTED` evidence
+state for every signal. Each outcome separately exposes support (`SUPPORTED`/`UNSUPPORTED`), evidence state
+(`AVAILABLE`/`UNAVAILABLE`/`UNTRUSTED`/`INVALID`/`UNSUPPORTED`), predicate observation when valid, and a
+fixed non-sensitive reason code. No user-supplied text, identifier, IP, location, commitment, or raw detector value
+appears in diagnostic output. Signal order is deterministic; the policy ranks no signals by severity. It does not
+reuse the existing Rules `DEVICE_NOVELTY` code or weights as an uncalibrated verdict.
 
-The aggregate status is `AVAILABLE` only when both supported history signals evaluate, `DEGRADED` when one does,
-`UNAVAILABLE` when neither does, and `SKIPPED` for client/synthetic input. Aggregate confidence is respectively
-`MEDIUM`, `LOW`, or `UNKNOWN`; these describe evidence coverage, **not** probability of fraud. There is no numeric
-score or HIGH/CRITICAL risk level in version 1. `score` is null in every result until measured false-positive rates,
-source reliability, population sensitivity, and a calibrated threshold are available and reviewed. Repeated client
-tokens, shared workstations, device resets, travel, and incomplete recovery can all make the apparent pattern
-misleading. No isolated signal changes the Rules/ML score, alert decision, or payment outcome.
+Switch-count temporal semantics are recorded in the [Device Risk switch semantics ADR](../adr/device_risk_switch_semantics.md).
+
+The operating status is `DEGRADED` whenever one or both supported history predicates are available, because there is
+no calibrated Device Risk score; it is `UNAVAILABLE` when no supported predicate can be evaluated, and `SKIPPED`
+for client/synthetic top-level input. Confidence (`MEDIUM` for both history predicates, `LOW` for one, otherwise
+`UNKNOWN`) describes evidence coverage only, **not** probability of fraud. `riskInference` is explicitly
+`NOT_CALIBRATED`; `score` and risk level remain null. A future calibration gate requires measured false-positive
+rates, source reliability, population sensitivity, a reviewed threshold, and a separate model-risk approval.
+Repeated client values, shared workstations, device resets, travel, and incomplete recovery can all make a pattern
+misleading. No isolated signal changes Rules/ML score, alert decision, or payment outcome.
+
+`DeviceRiskSignalEvaluationMapper` keeps the five ordered reason codes and fixed descriptions in
+`FraudSignalEvaluation`; the aggregation sanitizer applies existing length/count and safe-text bounds, and the
+current public contract accepts only the fixed Device Risk code allowlist. The identity registry permits this optional
+fourth diagnostic engine, but the candidate is not registered in the running engine set. The engine has no evidence
+reader and emits only `DEVICE_EVIDENCE_NOT_ADMITTED` until independently bound evidence exists. Public diagnostics
+therefore do not mean a risk inference is available or calibrated.
 
 ## Internal engine staging
 
 `DeviceRiskSignalEngine` has the candidate descriptor `device.primary` / `DEVICE_RISK` / `java` / `device-v1`
-with `required=false`. It has no production `AdmittedDeviceRiskEvidenceReader` and is not a Spring bean or a
-member of `FraudSignalEngineRegistry`; the current three-engine public contract still rejects its identity.
-`fraud.scoring.engines.device.enabled` defaults to `false`. Setting it to `true` fails startup until an
-occurrence-bound authenticated reader and a migrated public contract are proved. The flag does not start an
-observation consumer or mutate history; any future lawful observation collection needs its own explicit gate.
+with `required=false`. It is not a Spring bean or a member of `FraudSignalEngineRegistry`. `fraud.scoring.engines.device.enabled` defaults to
+`false`, and setting it to `true` fails startup. The candidate has no evidence-reader dependency and always
+returns `UNAVAILABLE` / `DEVICE_EVIDENCE_NOT_ADMITTED`, with one bounded operational explanation.
 
-The pure policy's `AVAILABLE` means the two supported historical predicates were evaluated. The present
-`FraudEngineResult` contract uses `AVAILABLE` only with a calibrated score and risk level. Therefore the candidate
-engine maps complete policy facts to `DEGRADED` with `DEVICE_SCORE_NOT_CALIBRATED` and no score, public reason,
-or risk level. Partial facts are also `DEGRADED`; absent facts are `UNAVAILABLE`; untrusted sources are `SKIPPED`.
-This mapping is internal and does not publish a fourth result. Bounded executor failure, timeout, and rejection
-behavior remains the existing optional-engine behavior; it cannot affect required Rules execution while the
-candidate is disconnected.
+`ScoringContext` is built from the enriched Kafka event and has no independently authenticated institution,
+source, transaction-occurrence, sequence, key epoch, erasure generation, or immutable snapshot commitment.
+Its transaction and correlation IDs cannot serve as trusted binding values. The former reader API that returned
+an arbitrary `Optional<DeviceRiskEvidence>` has been removed, so a structurally valid record labelled
+`AUTHENTICATED_INSTITUTION` cannot reach this engine. The pure policy remains separately testable, but the
+candidate engine does not invoke it. A future reader must compare every persisted occurrence attribute and
+commitment against values supplied by a separately verified authority; this repository has no such authority,
+so the evidence-consumption contract and engine remain disabled.
+
+This candidate does not publish a fourth result and cannot affect Rules/ML behavior. Any future lawful
+observation collection needs its own explicit gate, independently of scoring-engine activation.

@@ -11,6 +11,7 @@ import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.mongodb.client.model.IndexOptions;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -40,6 +41,7 @@ class MongoDeviceObservationStoreIntegrationTest {
     private static final String OTHER_CUSTOMER = token('d');
     private static final String DEVICE = token('e');
     private static final Instant A_TIME = Instant.parse("2026-10-26T10:05:00Z");
+    private static final Instant C_TIME = Instant.parse("2026-10-26T10:03:00Z");
     private static final Instant B_TIME = Instant.parse("2026-10-26T10:00:00Z");
     private static final Instant NOW = Instant.parse("2026-10-26T10:10:00Z");
     private static final String SOURCE = "BANK";
@@ -183,10 +185,106 @@ class MongoDeviceObservationStoreIntegrationTest {
         DeviceRiskEvidence equalEvidence = store.commit(INSTITUTION, SOURCE, equal.sourceEventKey()).evidence();
         DeviceRiskEvidence laterEvidence = store.commit(INSTITUTION, SOURCE, later.sourceEventKey()).evidence();
         assertThat(firstEvidence.switches().count()).isZero();
-        assertThat(equalEvidence.switches().count()).isZero();
+        assertThat(equalEvidence.switches().state()).isEqualTo(DeviceRiskEvidence.State.UNAVAILABLE);
+        assertThat(equalEvidence.switches().count()).isNull();
         assertThat(laterEvidence.switches().state()).isEqualTo(DeviceRiskEvidence.State.UNAVAILABLE);
         assertThat(laterEvidence.switches().count()).isNull();
         assertThat(laterEvidence.priorDevice().count()).isEqualTo(1);
+    }
+
+    @Test
+    void currentDeviceSwitchIncludesTransitionFromLastPriorDevice() {
+        Observation prior = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        Observation current = observation(INSTITUTION, CUSTOMER, token('f'), '3', '4', 2, 1, A_TIME);
+        store.stage(prior);
+        store.stage(current);
+        store.seal(seal(INSTITUTION, 2, A_TIME, 1));
+
+        store.commit(INSTITUTION, SOURCE, prior.sourceEventKey());
+        DeviceRiskEvidence currentEvidence = store.commit(INSTITUTION, SOURCE, current.sourceEventKey()).evidence();
+
+        assertThat(currentEvidence.switches().state()).isEqualTo(DeviceRiskEvidence.State.AVAILABLE);
+        assertThat(currentEvidence.switches().count()).isEqualTo(1);
+    }
+
+    @Test
+    void sameDeviceAtCurrentOccurrenceDoesNotCountAsSwitch() {
+        Observation prior = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        Observation current = observation(INSTITUTION, CUSTOMER, DEVICE, '3', '4', 2, 1, A_TIME);
+        store.stage(prior);
+        store.stage(current);
+        store.seal(seal(INSTITUTION, 2, A_TIME, 1));
+        store.commit(INSTITUTION, SOURCE, prior.sourceEventKey());
+
+        DeviceRiskEvidence currentEvidence = store.commit(INSTITUTION, SOURCE, current.sourceEventKey()).evidence();
+
+        assertThat(currentEvidence.priorDevice().count()).isEqualTo(1);
+        assertThat(currentEvidence.switches().count()).isZero();
+    }
+
+    @Test
+    void returningToPriorDeviceCountsHistoricalAndCurrentTransitions() {
+        Observation first = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        Observation second = observation(INSTITUTION, CUSTOMER, token('f'), '3', '4', 2, 1, C_TIME);
+        Observation current = observation(INSTITUTION, CUSTOMER, DEVICE, '5', '6', 3, 1, A_TIME);
+        store.stage(first);
+        store.stage(second);
+        store.stage(current);
+        store.seal(seal(INSTITUTION, 3, A_TIME, 1));
+        store.commit(INSTITUTION, SOURCE, first.sourceEventKey());
+        store.commit(INSTITUTION, SOURCE, second.sourceEventKey());
+
+        DeviceRiskEvidence currentEvidence = store.commit(INSTITUTION, SOURCE, current.sourceEventKey()).evidence();
+
+        assertThat(currentEvidence.switches().state()).isEqualTo(DeviceRiskEvidence.State.AVAILABLE);
+        assertThat(currentEvidence.switches().count()).isEqualTo(2);
+    }
+
+    @Test
+    void concurrentCapacityQuarantineDecrementsPendingCountOnlyOnce() throws Exception {
+        Observation next = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, A_TIME);
+        store.stage(next);
+        store.seal(seal(INSTITUTION, 1, A_TIME, 1));
+        List<Document> rows = new ArrayList<>();
+        for (int i = 0; i <= 2_000; i++) {
+            String distinctCustomer = String.format("%064x", i + 1);
+            rows.add(new Document("_id", "seed-" + i).append("institution", INSTITUTION)
+                    .append("source", SOURCE).append("sourceEvent", String.format("%064x", i + 1))
+                    .append("customer", distinctCustomer).append("device", DEVICE).append("keyVersion", 1)
+                    .append("eventTime", Date.from(B_TIME))
+                    .append("expireAt", Date.from(A_TIME.plus(Duration.ofDays(30)))));
+        }
+        client.getDatabase(databaseName).getCollection("device_observations").insertMany(rows);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            List<Callable<DeviceObservationStore.CommitResult>> work = List.of(
+                    () -> store.commit(INSTITUTION, SOURCE, next.sourceEventKey()),
+                    () -> store.commit(INSTITUTION, SOURCE, next.sourceEventKey()));
+            List<Future<DeviceObservationStore.CommitResult>> results = executor.invokeAll(work);
+            assertThat(results.get(0).get().status()).isEqualTo(CommitStatus.QUARANTINED);
+            assertThat(results.get(1).get().status()).isEqualTo(CommitStatus.QUARANTINED);
+        }
+
+        assertThat(store.commit(INSTITUTION, SOURCE, next.sourceEventKey()).status())
+                .isEqualTo(CommitStatus.QUARANTINED);
+
+        Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+        Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + next.sourceEventKey())).first();
+        assertThat(progress.getInteger("pendingCount")).isZero();
+        assertThat(candidate.getString("status")).isEqualTo("QUARANTINED");
+    }
+
+    @Test
+    void stagedCandidateDoesNotExpireBeforeItsPendingStateIsReconciled() {
+        Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        store.stage(pending);
+
+        Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())).first();
+
+        assertThat(candidate.getDate("expireAt")).isNull();
     }
 
     @Test
@@ -231,9 +329,93 @@ class MongoDeviceObservationStoreIntegrationTest {
         store.eraseDevice(INSTITUTION, SOURCE, 1, DEVICE);
         assertThat(count("device_observations")).isZero();
         assertThat(count("device_erasure_tombstones")).isEqualTo(1);
+        assertThat(count("device_occurrences")).isEqualTo(1);
         assertThatThrownBy(() -> store.stage(first)).hasMessage("DEVICE_STORE_ERASED_DEVICE");
         assertThatThrownBy(() -> store.commit(INSTITUTION, SOURCE, first.sourceEventKey()))
                 .hasMessage("DEVICE_STORE_ERASED_DEVICE");
+    }
+
+    @Test
+    void erasureQuarantinesPendingCandidatesAndReconcilesTheScopeCounter() {
+        Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        store.stage(pending);
+
+        store.eraseDevice(INSTITUTION, SOURCE, 1, DEVICE);
+
+        Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+        Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())).first();
+        assertThat(candidate.getString("status")).isEqualTo("QUARANTINED");
+        assertThat(candidate.getString("terminalReason")).isEqualTo("ERASURE_REQUESTED");
+        assertThat(candidate.getDate("terminalExpireAt")).isEqualTo(Date.from(NOW.plus(Duration.ofDays(45))));
+        assertThat(progress.getInteger("pendingCount")).isZero();
+        assertThat(progress.getBoolean("invalidated")).isTrue();
+    }
+
+    @Test
+    void replayAfterTombstoneAndReceiptHorizonCannotResurrectErasedDevice() {
+        Observation nearFuture = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1,
+                NOW.plus(Duration.ofMinutes(2)));
+        store.stage(nearFuture);
+        store.seal(seal(INSTITUTION, 1, nearFuture.eventTime(), 1));
+        store.commit(INSTITUTION, SOURCE, nearFuture.sourceEventKey());
+        store.eraseDevice(INSTITUTION, SOURCE, 1, DEVICE);
+
+        Clock afterRetention = Clock.offset(Clock.fixed(NOW, ZoneOffset.UTC),
+                Duration.ofDays(45).plus(Duration.ofMinutes(3)));
+        MongoDeviceObservationStore restarted = new MongoDeviceObservationStore(client, databaseName, afterRetention);
+
+        assertThatThrownBy(() -> restarted.stage(nearFuture))
+                .hasMessage("DEVICE_STORE_REPLAY_HORIZON_EXCEEDED");
+        assertThat(count("device_observations")).isZero();
+    }
+
+    @Test
+    void startupMigratesLegacyStagedExpiryOffTheTtlIndex() {
+        var collection = client.getDatabase(databaseName).getCollection("device_observation_candidates");
+        collection.createIndex(com.mongodb.client.model.Indexes.ascending("expireAt"),
+                new IndexOptions().expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS));
+        Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        collection.insertOne(new Document("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())
+                .append("institution", INSTITUTION).append("source", SOURCE)
+                .append("sourceEvent", pending.sourceEventKey()).append("transaction", pending.transactionKey())
+                .append("customer", CUSTOMER).append("device", DEVICE).append("keyVersion", 1)
+                .append("sequence", 1L).append("eventTime", Date.from(B_TIME)).append("status", "STAGED")
+                .append("expireAt", Date.from(NOW.plus(Duration.ofDays(45)))));
+        client.getDatabase(databaseName).getCollection("device_source_coverage").insertOne(
+                new Document("_id", INSTITUTION + ':' + SOURCE).append("pendingCount", 3).append("revision", 0L));
+
+        new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        Document migrated = collection.find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey()))
+                .first();
+        assertThat(migrated.getDate("expireAt")).isNull();
+        assertThat(migrated.getDate("terminalExpireAt")).isNull();
+        Document reconciled = client.getDatabase(databaseName).getCollection("device_source_coverage")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+        assertThat(reconciled.getInteger("pendingCount")).isEqualTo(1);
+        assertThat(reconciled.getInteger("pendingCounterVersion")).isEqualTo(1);
+        assertThat(reconciled.getBoolean("invalidated")).isTrue();
+        assertThat(collection.listIndexes().into(new ArrayList<>()).stream()
+                .map(index -> index.getString("name")))
+                .doesNotContain("expireAt_1")
+                .contains("candidate_terminal_expiry_ttl");
+    }
+
+    @Test
+    void exactReplayUsesBoundEvidenceWhenLegacyOccurrenceLacksSourceEventColumn() {
+        Observation input = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, A_TIME);
+        store.stage(input);
+        store.seal(seal(INSTITUTION, 1, A_TIME, 1));
+        store.commit(INSTITUTION, SOURCE, input.sourceEventKey());
+        client.getDatabase(databaseName).getCollection("device_observation_candidates")
+                .deleteOne(eq("_id", INSTITUTION + ':' + SOURCE + ':' + input.sourceEventKey()));
+        client.getDatabase(databaseName).getCollection("device_occurrences")
+                .updateOne(eq("_id", INSTITUTION + ':' + SOURCE + ':' + input.sourceEventKey()),
+                        com.mongodb.client.model.Updates.unset("sourceEvent"));
+
+        assertThat(store.stage(input)).isEqualTo(StageResult.DUPLICATE);
     }
 
     @Test

@@ -24,7 +24,8 @@ public final class EngineIntelligenceRuntimeConfigurationValidator implements In
     public void afterPropertiesSet() {
         if (deviceRiskEngineProperties.enabled()) {
             throw new IllegalStateException(DeviceRiskEngineProperties.PROPERTY_NAME
-                    + " requires an authenticated occurrence-bound reader and a migrated public contract");
+                    + " requires independently authenticated occurrence ownership and a verifiable evidence binding "
+                    + "contract");
         }
         if (!emissionProperties.emitEnabled() && velocityEngineProperties.enabled()) {
             throw new IllegalStateException(

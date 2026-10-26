@@ -161,20 +161,20 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
                         assertThat(context.getStartupFailure())
                                 .hasRootCauseInstanceOf(IllegalStateException.class)
                                 .hasRootCauseMessage(DeviceRiskEngineProperties.PROPERTY_NAME
-                                        + " requires an authenticated occurrence-bound reader and a migrated public contract");
+                                        + " requires independently authenticated occurrence ownership and a verifiable evidence binding "
+                                        + "contract");
                     });
         }
     }
 
     @Test
-    void disabledDeviceFlagNeverCreatesAReaderEngineOrFourthRegistryEntry() {
+    void disabledDeviceFlagNeverCreatesAnEngineOrFourthRegistryEntry() {
         enabledContextRunner()
                 .withPropertyValues(DeviceRiskEngineProperties.PROPERTY_NAME + "=false",
                         VelocityEngineProperties.PROPERTY_NAME + "=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(DeviceRiskSignalEngine.class);
-                    assertThat(context).doesNotHaveBean(com.frauddetection.scoring.device.AdmittedDeviceRiskEvidenceReader.class);
                     assertThat(context.getBean(FraudSignalEngineRegistry.class).orderedEngines())
                             .extracting(engine -> engine.descriptor().engineId())
                             .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");

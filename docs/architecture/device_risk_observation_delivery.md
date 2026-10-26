@@ -124,10 +124,16 @@ earlier enriched event or claim that the earlier answer was verified.
 If a signal needs device geography or network detection and that provider's coverage is absent, only that
 signal is `NOT_EVALUATED`; the other signal windows must still pass their own coverage checks. Missing
 history, provider identity, institutional scope, key version or source seal never becomes zero risk.
-Candidate states are `STAGED -> WAITING_SEAL -> READY -> COMMITTED`; malformed/conflicting or
-post-seal input goes to `QUARANTINED`, and transient infrastructure failure leaves the prior state
-retryable. The occurrence is inserted once as `COMMITTED` with its immutable snapshot. State changes
-use expected-state/version conditions, never a blind replacement.
+Persisted candidate states are `STAGED -> COMMITTED` or `STAGED -> QUARANTINED`; duplicate staging
+does not create a second candidate. `WAITING_FOR_SEAL` and `WAITING_FOR_EARLIER_EVENT` are retry
+outcomes that leave the candidate `STAGED`. Transient infrastructure failure also leaves its prior
+state retryable. The durable `pendingCount` equals the number of `STAGED` candidates in that
+institution/source scope: staging inserts and increments in one transaction, while commit or
+quarantine first compare-and-sets exactly one `STAGED` candidate and decrements the count in that
+same transaction. A missing/zero counter is an invariant failure, never a reason to decrement again.
+Capacity quarantine also invalidates the source coverage epoch. The occurrence is inserted once as
+`COMMITTED` with its immutable snapshot. Unknown transaction commit acknowledgements are retried
+boundedly and then reconciled from durable state; unresolved outcomes stay unavailable.
 
 ## Delivery state and failure recovery
 
@@ -164,6 +170,38 @@ therefore may change Rules/ML output for out-of-order arrivals. This ADR has **n
 equivalence. If targeted interleaving tests cannot prove it without changing historical semantics,
 the optional diagnostic needs a separate later delivery contract; the integrated enriched-event path
 remains disabled. No production baseline behavior is changed by this design document.
+
+### Implemented adapter lifecycle limits
+
+The package-private Mongo adapter currently has these concrete lifecycle rules, for adapter tests and
+future review only:
+
+- `STAGED` candidates have no TTL. A previously deployed `expireAt_1` candidate TTL index is removed,
+  staged `expireAt` values are cleared, and terminal legacy expiries move to `terminalExpireAt`.
+  Terminal candidates expire 45 days after disposition. Startup reconciliation repairs scopes whose
+  `pendingCounterVersion` is absent by recounting actual `STAGED` rows, recording the version, and
+  invalidating that source coverage epoch.
+- Membership history expires at `eventTime + 31 days + 5 minutes`. Occurrence receipts expire 45 days
+  after commit. Tombstones expire 45 days and 2 minutes after erasure, covering the accepted two-minute
+  future timestamp skew. Reads check expiry themselves because Mongo TTL cleanup is asynchronous.
+  Admission rejects events at or beyond the 45-day replay boundary.
+- `eraseDevice` is source scoped: it removes that scope's membership, quarantines its staged candidates,
+  invalidates that source epoch, and writes a scoped pseudonym tombstone. It retains terminal candidate
+  receipts and committed occurrence/evidence documents until their receipt expiry. This is **partial
+  erasure**, not full deletion; there is no approved legal basis or retention schedule for those retained
+  records yet.
+- Identity and history are scoped by `(institution, source, keyVersion)`. A key-version change does not
+  infer cross-version device identity. The old source history is not joined to the new version; a complete
+  fresh window and trusted continuity protocol would be needed before history-dependent signals could be
+  available. Erasure of one source does not erase or aggregate other source scopes.
+
+These rules do not implement an operational drain/recovery service. There is no scheduled worker to
+resolve prolonged `STAGED` work, no operator recovery interface, and no low-cardinality metrics for
+blocked, timed-out, quarantined, or unresolved states. The 10,000-candidate per-source cap only bounds
+stored pending work; it does not guarantee progress. Startup reconciliation covers legacy counter drift,
+not ongoing repair or restart recovery of unsealed work. The adapter is not production wired, so none of
+these proposed retention periods is an authorization to collect data. Approved purpose, retention,
+erasure obligations, recovery ownership, and monitoring are activation blockers.
 
 | Interleaving | Durable facts and pre-event snapshot | External emission and recovery |
 | --- | --- | --- |
@@ -211,41 +249,83 @@ the contract is inert and cannot produce a verified Device Risk result.
 
 The current `MongoDeviceObservationStore` foundation stages pseudonymous candidates, seals one
 institution/source sequence, commits a scoped pre-event snapshot and observation in one Mongo
-transaction, and retains bounded duplicate and erasure markers. It uses the synchronous Mongo
+transaction, and retains bounded duplicate and erasure receipts. `STAGED` candidates have no TTL;
+terminal candidates use a 45-day terminal receipt, history membership uses a 31-day-and-5-minute
+event-time horizon, occurrences use a 45-day receipt, and tombstones use 45 days plus the maximum
+accepted two-minute future skew. Reads enforce expiry before Mongo TTL cleanup. Startup migrates the
+old candidate TTL and reconciles legacy pending counters, invalidating those source epochs. These are
+provisional software horizons, not approved retention periods. Erasure removes membership and blocks
+replay but retains candidate/occurrence receipts, so it is partial. No scheduled staged-work drain,
+operator recovery service, or lifecycle metrics exist yet. It uses the synchronous Mongo
 driver without Spring Mongo auto-configuration, so merely adding the dependency does not connect
-the running enricher to Mongo. The adapter is not constructed by production configuration.
-It caps uncommitted candidates at 10,000 per source and rejects events older than its provisional
-45-day replay horizon; these limits require production load and retention approval before wiring.
-Its `CoverageSeal` is a **structural input**, not a verified source statement: no authenticated
-producer currently signs or binds it. One source code is authoritative per scoped history in this
-foundation; cross-source completeness and provider assertions are unavailable. Kafka publication,
-the exact-payload outbox, runtime key custody, approved retention, operator recovery and the
-baseline Redis ordering proof remain activation gates. Real-store tests prove adapter behavior
+the running enricher to Mongo. The adapter is not constructed by production configuration. It caps
+uncommitted candidates at 10,000 per source and rejects events older than its provisional 45-day replay
+horizon; these limits require production load and retention approval before wiring. Its `CoverageSeal`
+is a **structural input**, not a verified source statement: no authenticated producer currently signs
+or binds it. One source code is authoritative per scoped history in this foundation; cross-source
+completeness and provider assertions are unavailable. No cross-key identity inference exists. Kafka
+publication, the exact-payload outbox, runtime key custody, approved retention, drain/recovery ownership
+and the baseline Redis ordering proof remain activation gates. Real-store tests prove adapter behavior
 for supplied inputs, not authenticity of those inputs.
 
 ## Runtime integration gate
+
+Admission is explicitly denied by `DisabledDeviceRiskAdmissionAdapter`. The feature-enricher property
+`fraud.device-risk.admission.enabled` defaults to `false`; setting it to `true` fails startup because no trusted
+issuer, scoped source authorization, or signed coverage seal is implemented. The adapter does not call the Mongo
+store, and no production bean constructs that store. The package-private persistence seam and its structural
+`AUTHENTICATED_INSTITUTION` label are not authentication controls.
 
 The running ingest path has no authenticated institution principal or independently bound device
 assertion. `deviceId`, `trustedDevice`, proxy/VPN and `sourceSystem` are request fields; `sourceSystem`
 is not carried into the enriched event. The simulator creates raw events outside HTTP validation.
 Neither a trace header nor a Mongo pseudonym converts these inputs into institutional evidence.
 No authenticated source currently issues the contiguous event-time seal required by this ledger.
-The adapter therefore has **no production caller or Mongo connection configuration**.
+The adapter therefore has **no production caller or Mongo connection configuration**. On the scoring side,
+`ScoringContext` has no independent occurrence authority; `DeviceRiskSignalEngine` has no evidence reader and
+always reports `UNAVAILABLE` until a separately authenticated binding can be verified.
+
+### Synthetic replay identity
+
+The simulator and canonical replay generators keep `SYNTHETIC_GENERATOR` or `BASH_JSONL_GENERATOR` source labels
+and synthetic markers. A fingerprint is stable for one synthetic device ID and is never an admission credential.
+The simulator property `app.replay.synthetic.deterministic-test-mode` and generator flag
+`--deterministic-test-mode` are disabled by default and exist only for fixed-seed/reference-time test snapshots.
+They intentionally reproduce event, correlation, transaction, and trace IDs for the same seed, reference instant,
+scenario configuration, and dimension data. Deterministic output must not be replayed into a shared or production
+topic where those IDs may already exist. Default run mode creates a fresh run identity for every generation.
+
+### Admission activation prerequisites
+
+- [ ] Identify an independently operated institution/source identity provider and validate its issuer, signature,
+  audience, scope, expiry, revocation, and key rotation behavior.
+- [ ] Bind the authenticated principal to an allowlisted institution and source; ignore request `sourceSystem`,
+  customer/device identifiers, and caller-supplied trust flags for authority decisions.
+- [ ] Specify how that authority signs and authorizes event sequence, event-time watermark, coverage interval, and
+  each provider assertion; reject gaps, replay, cross-scope IDs, and stale or revoked statements.
+- [ ] Define the authoritative transaction/customer/device binding and its quality limits independently of issuer
+  authentication; a valid issuer does not prove a physical handset.
+- [ ] Approve key custody/versioning, privacy erasure, tombstone lifetime, history and evidence retention, and replay
+  horizon; verify old occurrences cannot be silently re-linked after rotation.
+- [ ] Select and approve durable exact-payload delivery/recovery, consumer rollout, bounded retry/DLT, and unknown
+  commit/broker-ack reconciliation before wiring Mongo or publishing Device Risk evidence.
+- [ ] Prove with a separately rooted test issuer that production configuration cannot accept synthetic/test identity
+  and that Rules/ML baseline decisions remain identical while Device Risk admission is disabled.
 
 The current enricher creates a new enriched event ID on each attempt, publishes it to Kafka, then
 performs multiple Redis writes. There is no durable inbox/occurrence payload or outbox for that
 baseline operation. Adding a Mongo call or reversing the two calls would leave crash and lost-ACK
 windows and could change Rules/ML results. Attaching evidence to the existing feature map would
-also require a typed consumer adapter, size policy and deliberate wire migration; the current
-strict public engine contract allows only three engine identities. Consequently, the integrated
-enabled path described above is a **design candidate, not an approved runtime path**. Disabled
+also require a typed consumer adapter and size policy. The current nested public contract allows four known engine
+identities, but that does not admit Device Risk evidence or activate its engine. Consequently, the integrated enabled
+path described above is a **design candidate, not an approved runtime path**. Disabled
 mode leaves existing enriched events and business decisions unchanged and captures no Device Risk
 observations. It makes no verified, zero-risk or low-risk claim.
 
 Before runtime wiring, supply an authenticated institutional/device evidence issuer and a sealed
-coverage protocol; approve key custody and retention; deploy a consumer-first versioned evidence
-contract; then prove an exact-payload inbox/outbox or a separate diagnostic delivery path against
-duplicate delivery, commit uncertainty, lost broker ACK and restart. The selected path must keep
+coverage protocol; approve key custody and retention; verify every deployed reader against the current nested
+contract and the documented external-consumer compatibility boundary; then prove an exact-payload inbox/outbox or a
+separate diagnostic delivery path against duplicate delivery, commit uncertainty, lost broker ACK and restart. The selected path must keep
 mandatory baseline scoring moving during a recoverable device-only outage and prove identical
 Rules/ML business effects. If a Mongo commit is ambiguous, reconcile its exact occurrence before
 any alternative device publication. Until these conditions hold, production admission remains off.

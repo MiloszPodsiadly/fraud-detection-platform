@@ -6,8 +6,8 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-/** Persistence boundary only. A future authenticated admission boundary must supply these inputs. */
-public interface DeviceObservationStore {
+/** Internal persistence seam only. This type does not authenticate observations or coverage seals. */
+interface DeviceObservationStore {
     StageResult stage(Observation input);
 
     void seal(CoverageSeal seal);

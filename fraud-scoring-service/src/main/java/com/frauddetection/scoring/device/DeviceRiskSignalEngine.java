@@ -1,6 +1,9 @@
 package com.frauddetection.scoring.device;
 
 import com.frauddetection.common.events.engine.FraudEngineConfidence;
+import com.frauddetection.common.events.engine.FraudEngineEvidence;
+import com.frauddetection.common.events.engine.FraudEngineEvidenceStatus;
+import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.scoring.context.ScoringContext;
@@ -11,39 +14,23 @@ import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import java.util.List;
 import java.util.Objects;
 
-/** Internal candidate only. No production reader, Spring bean, registry entry or public mapping exists yet. */
+/** Disabled candidate. No occurrence authority is available to bind evidence to this scoring context. */
 public final class DeviceRiskSignalEngine implements FraudSignalEngine {
     public static final String ENGINE_ID = "device.primary";
     private static final String VERSION = "device-v1";
-    private static final String NOT_ADMITTED = "DEVICE_EVIDENCE_NOT_ADMITTED";
-    private static final String SCORE_NOT_CALIBRATED = "DEVICE_SCORE_NOT_CALIBRATED";
-    private static final String PARTIAL_EVIDENCE = "DEVICE_EVIDENCE_PARTIAL";
-    private static final String UNAVAILABLE_EVIDENCE = "DEVICE_EVIDENCE_UNAVAILABLE";
-    private static final String UNTRUSTED_EVIDENCE = "DEVICE_EVIDENCE_UNTRUSTED";
-
-    private final AdmittedDeviceRiskEvidenceReader reader;
-    private final DeviceRiskSignalPolicy policy;
-
-    public DeviceRiskSignalEngine(AdmittedDeviceRiskEvidenceReader reader, DeviceRiskSignalPolicy policy) {
-        this.reader = Objects.requireNonNull(reader, "reader is required");
-        this.policy = Objects.requireNonNull(policy, "policy is required");
-    }
+    private static final DeviceRiskSignalReasonCode NOT_ADMITTED = DeviceRiskSignalReasonCode.DEVICE_EVIDENCE_NOT_ADMITTED;
 
     @Override
     public FraudSignalEvaluation evaluate(ScoringContext context) {
         Objects.requireNonNull(context, "context is required");
-        var evidence = Objects.requireNonNull(reader.read(context), "DEVICE_EVIDENCE_READ_RESULT_REQUIRED");
-        if (evidence.isEmpty()) {
-            return result(FraudEngineStatus.UNAVAILABLE, FraudEngineConfidence.UNKNOWN, NOT_ADMITTED);
-        }
-        var outcome = policy.evaluate(evidence.get());
-        return switch (outcome.status()) {
-            case AVAILABLE -> result(FraudEngineStatus.DEGRADED, outcome.confidence(), SCORE_NOT_CALIBRATED);
-            case DEGRADED -> result(FraudEngineStatus.DEGRADED, outcome.confidence(), PARTIAL_EVIDENCE);
-            case UNAVAILABLE -> result(FraudEngineStatus.UNAVAILABLE, FraudEngineConfidence.UNKNOWN, UNAVAILABLE_EVIDENCE);
-            case SKIPPED -> result(FraudEngineStatus.SKIPPED, FraudEngineConfidence.UNKNOWN, UNTRUSTED_EVIDENCE);
-            default -> throw new IllegalStateException("DEVICE_POLICY_UNEXPECTED_STATUS");
-        };
+        // ScoringContext contains no independently authenticated institution/occurrence binding.
+        // Do not read Optional<DeviceRiskEvidence> or infer trust from transaction/correlation fields.
+        return new FraudSignalEvaluation(FraudEngineStatus.UNAVAILABLE, null, null, FraudEngineConfidence.UNKNOWN,
+                List.of(NOT_ADMITTED.wireValue()), List.of(),
+                List.of(new FraudEngineEvidence(FraudEngineEvidenceType.DEVICE_SIGNAL, NOT_ADMITTED.wireValue(),
+                        "Device evidence admission", "No independently verified occurrence binding was supplied.",
+                        "DEVICE_RISK", FraudEngineEvidenceStatus.UNAVAILABLE)),
+                null, null, null, NOT_ADMITTED.wireValue());
     }
 
     @Override
@@ -51,9 +38,4 @@ public final class DeviceRiskSignalEngine implements FraudSignalEngine {
         return new FraudEngineDescriptor(ENGINE_ID, FraudEngineType.DEVICE_RISK, "java", VERSION, false);
     }
 
-    private static FraudSignalEvaluation result(FraudEngineStatus status, FraudEngineConfidence confidence,
-                                                String statusReason) {
-        return new FraudSignalEvaluation(status, null, null, confidence,
-                List.of(), List.of(), List.of(), null, null, null, statusReason);
-    }
 }

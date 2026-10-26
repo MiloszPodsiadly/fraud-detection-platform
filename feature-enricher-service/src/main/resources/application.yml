@@ -43,3 +43,8 @@ app:
     transaction-key-ttl: P8D
     known-device-ttl: P180D
     last-transaction-ttl: P30D
+
+fraud:
+  device-risk:
+    admission:
+      enabled: false

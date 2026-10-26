@@ -16,7 +16,13 @@ public final class DeviceRiskSignalPolicy {
 
     public enum Signal { DEVICE_NOT_SEEN_RECENTLY, DEVICE_SWITCH, OTHER_CUSTOMERS, COUNTRY_MISMATCH, PROXY_OR_VPN }
 
-    /** Fixed local codes; none is a public ReasonCode or a verdict that fraud occurred. */
+    public enum Support { SUPPORTED, UNSUPPORTED }
+
+    public enum EvidenceState { AVAILABLE, UNAVAILABLE, UNTRUSTED, INVALID, UNSUPPORTED }
+
+    public enum RiskInference { NOT_CALIBRATED }
+
+    /** Fixed internal outcomes; they map to bounded public diagnostic codes, never a fraud verdict. */
     public enum Reason {
         NOT_SEEN_IN_WINDOW, SEEN_IN_WINDOW, SWITCH_OBSERVED, NO_SWITCH_OBSERVED,
         HISTORY_INCOMPLETE, HISTORY_UNAVAILABLE, HISTORY_INVALID,
@@ -51,6 +57,31 @@ public final class DeviceRiskSignalPolicy {
                 throw new IllegalArgumentException("DEVICE_POLICY_OUTCOME_REASON");
             }
         }
+
+        public Support support() {
+            return signal == Signal.DEVICE_NOT_SEEN_RECENTLY || signal == Signal.DEVICE_SWITCH
+                    ? Support.SUPPORTED : Support.UNSUPPORTED;
+        }
+
+        public EvidenceState evidenceState() {
+            if (status == FraudEngineStatus.AVAILABLE) {
+                return EvidenceState.AVAILABLE;
+            }
+            if (reason == Reason.UNTRUSTED_SOURCE) {
+                return EvidenceState.UNTRUSTED;
+            }
+            if (reason == Reason.HISTORY_INVALID) {
+                return EvidenceState.INVALID;
+            }
+            if (reason == Reason.UNSUPPORTED_SOURCE) {
+                return EvidenceState.UNSUPPORTED;
+            }
+            return EvidenceState.UNAVAILABLE;
+        }
+
+        public String reasonCode() {
+            return DeviceRiskSignalReasonCode.forOutcome(signal, reason);
+        }
     }
 
     /** score is deliberately absent until an observed and calibrated scoring policy exists. */
@@ -73,8 +104,7 @@ public final class DeviceRiskSignalPolicy {
                 throw new IllegalArgumentException("DEVICE_POLICY_MIXED_SOURCE");
             }
             long available = signals.stream().filter(signal -> signal.status() == FraudEngineStatus.AVAILABLE).count();
-            FraudEngineStatus expectedStatus = available == 2 ? FraudEngineStatus.AVAILABLE
-                    : available == 1 ? FraudEngineStatus.DEGRADED
+            FraudEngineStatus expectedStatus = available > 0 ? FraudEngineStatus.DEGRADED
                     : signals.get(0).status() == FraudEngineStatus.SKIPPED ? FraudEngineStatus.SKIPPED
                     : FraudEngineStatus.UNAVAILABLE;
             FraudEngineConfidence expectedConfidence = available == 2 ? FraudEngineConfidence.MEDIUM
@@ -82,6 +112,10 @@ public final class DeviceRiskSignalPolicy {
             if (status != expectedStatus || confidence != expectedConfidence) {
                 throw new IllegalArgumentException("DEVICE_POLICY_AGGREGATE_STATE");
             }
+        }
+
+        public RiskInference riskInference() {
+            return RiskInference.NOT_CALIBRATED;
         }
     }
 
@@ -107,8 +141,7 @@ public final class DeviceRiskSignalPolicy {
 
         long available = outcomes.stream().filter(outcome -> outcome.status() == FraudEngineStatus.AVAILABLE).count();
         return new Evaluation(VERSION,
-                available == 2 ? FraudEngineStatus.AVAILABLE : available == 1
-                        ? FraudEngineStatus.DEGRADED : FraudEngineStatus.UNAVAILABLE,
+                available > 0 ? FraudEngineStatus.DEGRADED : FraudEngineStatus.UNAVAILABLE,
                 available == 2 ? FraudEngineConfidence.MEDIUM : available == 1
                         ? FraudEngineConfidence.LOW : FraudEngineConfidence.UNKNOWN,
                 outcomes, null);
