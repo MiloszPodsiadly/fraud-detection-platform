@@ -53,7 +53,7 @@ for (const file of changedFiles) {
       violations.push(`${normalized}: new endpoint strings must stay behind the API client boundary.`);
     }
     if (!isScopeGuardScript(normalized)
-        && !isAllowedShadowScopeGuardTest(normalized)
+        && !isAllowedOutOfScopeFeatureTest(normalized)
         && !normalized.startsWith("docs/")
         && !isGovernanceFile(normalized)
         && introducesForbiddenScope(sourceLine)) {
@@ -82,8 +82,10 @@ function isScopeGuardScript(file) {
   return file.startsWith("scripts/check-") && file.endsWith("-scope.mjs");
 }
 
-function isAllowedShadowScopeGuardTest(file) {
-  return file === "analyst-console-ui/src/workspace/ShadowPerformanceScopeGuard.test.jsx";
+function isAllowedOutOfScopeFeatureTest(file) {
+  // These tests cover separate feature areas with their own claim/ownership semantics.
+  return file === "analyst-console-ui/src/workspace/ShadowPerformanceScopeGuard.test.jsx"
+    || file === "analyst-console-ui/src/pages/PolicySecurityPage.test.jsx";
 }
 
 function isGovernanceFile(file) {

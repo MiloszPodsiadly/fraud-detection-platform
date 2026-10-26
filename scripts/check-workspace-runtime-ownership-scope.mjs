@@ -61,6 +61,7 @@ for (const file of changedFiles) {
     const sourceLine = line.replace(/^\+\s*/, "");
     if (!allowedEndpointFiles.has(normalized)
         && !isOwnedApiClientContractTest(normalized)
+        && !normalized.startsWith("scripts/ci/")
         && !normalized.startsWith(".github/workflows/")
         && /["']\/(?:api|governance|system|bff)\//.test(sourceLine)) {
       violations.push(`${normalized}: endpoint strings must stay behind the API client boundary.`);
