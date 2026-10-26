@@ -100,7 +100,7 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
     }
 
     @Test
-    void realApprovedSignedPolicyAndIndependentModelReviewCommitThroughOneMongoBoundary() throws Exception {
+    void realApprovedSignedPolicyPublishesAndUnboundProductionReviewIsRejectedAtomically() throws Exception {
         ModelPromotionPolicyPublisher.Draft exactPolicy = proposal("policy-full-e2e", 1,
                 "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z");
         InternalPolicyApprovalArtifact proof = firstPartyProof(exactPolicy);
@@ -177,32 +177,26 @@ class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
         authenticate("independent-reviewer-d", Set.of(AnalystAuthority.MODEL_PROMOTION_APPROVE,
                 AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION));
-        ModelPromotionProposalResult accepted = workflow.reviewProposal(review);
-        assertThat(accepted.idempotentReplay()).isFalse();
-        assertThat(workflow.reviewProposal(review).idempotentReplay()).isTrue();
+        long decisionsBeforeUnboundReview = mongo.count(new Query(), ModelPromotionDecisionDocument.class);
+        long historyBeforeUnboundReview = modelStore.history(
+                identity, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING, 10).size();
+        assertThatThrownBy(() -> workflow.reviewProposal(review))
+                .isInstanceOf(ModelPromotionPersistenceConflictException.class)
+                .hasMessageContaining("requires a bound WebAuthn assertion");
         ModelPromotionAggregate aggregate = modelStore.currentState(
                 identity, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING).orElseThrow();
-        assertThat(aggregate.lifecycleState()).isEqualTo(ModelPromotionLifecycleState.CHALLENGER);
-        assertThat(aggregate.revision()).isEqualTo(1);
-        assertThat(aggregate.acceptedDecisionId()).isNotBlank();
+        assertThat(aggregate.lifecycleState()).isEqualTo(ModelPromotionLifecycleState.CANDIDATE);
+        assertThat(aggregate.revision()).isZero();
+        assertThat(aggregate.acceptedDecisionId()).isNull();
         assertThat(modelStore.history(identity, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING, 10))
-                .hasSize(2).allSatisfy(decision -> assertThat(decision.localAudit()).isNotNull());
-        assertThat(mongo.count(new Query(), ModelPromotionDecisionDocument.class)).isEqualTo(2);
-        assertThat(mongo.findById("proposal-e2e", ModelPromotionProposalDocument.class).reviewAudit()).isNotNull();
+                .hasSize((int) historyBeforeUnboundReview);
+        assertThat(mongo.count(new Query(), ModelPromotionDecisionDocument.class))
+                .isEqualTo(decisionsBeforeUnboundReview);
+        ModelPromotionProposalDocument unchangedProposal = mongo.findById(
+                "proposal-e2e", ModelPromotionProposalDocument.class);
+        assertThat(unchangedProposal.reviewStatus()).isEqualTo(ModelPromotionProposalDocument.ReviewStatus.PENDING);
+        assertThat(unchangedProposal.reviewAudit()).isNull();
 
-        authenticate("model-governance-actor-c", Set.of(AnalystAuthority.MODEL_PROMOTION_PROPOSE,
-                AnalystAuthority.MODEL_PROMOTION_SCOPE_PRODUCTION));
-        assertThatThrownBy(() -> workflow.proposeTransition(new ModelPromotionWorkflowService.TransitionProposalRequest(
-                identity, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING,
-                ModelPromotionLifecycleState.CHALLENGER, 1, ModelPromotionLifecycleState.SHADOW_APPROVED,
-                window, "submit-shadow-no-evidence", "proposal-shadow-no-evidence", rationale,
-                ModelPromotionDecisionRationale.sha256(rationale))))
-                .isInstanceOf(ModelPromotionWorkflowBlockedException.class)
-                .satisfies(error -> assertThat(((ModelPromotionWorkflowBlockedException) error).reason())
-                        .isEqualTo(ModelPromotionWorkflowBlockedException.Reason.EVIDENCE_UNAVAILABLE));
-        assertThat(modelStore.currentState(identity, scope(), ModelPromotionIntendedUse.FRAUD_RISK_SCORING)
-                .orElseThrow().lifecycleState()).isEqualTo(ModelPromotionLifecycleState.CHALLENGER);
-        assertThat(mongo.count(new Query(), ModelPromotionProposalDocument.class)).isEqualTo(1);
     }
 
     @Test

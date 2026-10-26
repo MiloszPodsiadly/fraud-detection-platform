@@ -22,6 +22,19 @@ promote. Release readiness and external platform controls are documented under [
 
 Prod-like profiles must not use local/noop/in-memory/same-database external evidence sinks. FDP-27 is a production closure gate; it does not add KMS/HSM, legal notarization, WORM storage, broker-side verification, or a pre-commit/finalize redesign.
 
+## Model-promotion API rate limiting
+
+| Runtime | `MODEL_PROMOTION_API_RATE_LIMITER_MODE` | Expected behavior |
+| --- | --- | --- |
+| local single-node, `test`, `bank-local` smoke | `in-memory` or `redis` | In-memory is process-local and is suitable only while one instance serves the API. |
+| `staging`, `prod`, `production`, `bank` (including mixed profiles) | `redis` | Shared standalone Redis is mandatory; selecting `in-memory` fails application startup. |
+| Any runtime, unset/blank/unknown mode | invalid | Application startup fails; there is no implicit in-memory fallback. |
+
+The supported Redis topology is standalone/non-Cluster. Redis Cluster is deliberately unsupported because the current
+Lua quota operation touches keys without a common hash tag; a `CROSSSLOT` or other Redis error is treated as limiter
+unavailability and the governance request fails closed with `503`, while an exhausted quota returns `429`. See the
+[rate-limiting operations runbook](../operations/model_promotion_api_rate_limiting.md) for configuration acceptance.
+
 ## Model-promotion issuer trust (separate from audit trust)
 
 | Setting | Local default | Production deployment requirement |

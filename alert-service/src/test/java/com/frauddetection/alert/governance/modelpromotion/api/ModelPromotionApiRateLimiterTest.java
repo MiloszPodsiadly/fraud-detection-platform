@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.modelpromotion.api;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -46,7 +47,7 @@ class ModelPromotionApiRateLimiterTest {
     }
 
     @Test
-    void redisFailureIsDistinctFromQuotaAndIsObservableWithoutActorLabels() {
+    void redisAndClusterCrossSlotFailuresFailClosedWithoutActorLabels() {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         doThrow(new RedisConnectionFailureException("redis unavailable"))
                 .when(redis).execute(any(RedisScript.class), anyList(), any(Object[].class));
@@ -61,6 +62,17 @@ class ModelPromotionApiRateLimiterTest {
         assertThat(registry.get("model_promotion_api_rate_limit_total").tag("outcome", "UNAVAILABLE")
                 .counter().getId().getTags()).extracting(io.micrometer.core.instrument.Tag::getKey)
                 .containsExactly("outcome");
+
+        StringRedisTemplate clusterRedis = mock(StringRedisTemplate.class);
+        doThrow(new IllegalStateException("CROSSSLOT Keys in request do not hash to the same slot"))
+                .when(clusterRedis).execute(any(RedisScript.class), anyList(), any(Object[].class));
+        ModelPromotionApiRateLimiter clusterLimiter = new ModelPromotionApiRateLimiter(clusterRedis,
+                Clock.systemUTC(), java.time.Duration.ofMinutes(1), 30, 100, metrics);
+        assertThat(clusterLimiter.check("actor-1")).isEqualTo(ModelPromotionApiRateLimiter.Decision.UNAVAILABLE);
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> clusterLimiter.enforce("actor-2")))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .satisfies(failure -> assertThat(((org.springframework.web.server.ResponseStatusException) failure)
+                        .getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
     }
 
     private static final class MutableClock extends Clock {

@@ -28,3 +28,7 @@ release governance.
 - Production-like profiles must not use local, noop, in-memory, same-database, or disabled external evidence sinks.
 - Bank-grade posture requires the current source-of-truth controls plus environment-specific release evidence.
 - Local and smoke profiles are not regulator-grade deployment claims.
+
+See the [model-promotion API rate-limiting runbook](../operations/model_promotion_api_rate_limiting.md) for supported
+profile and Redis topology requirements.
+Sensitive read-audit evidence boundaries are described in the [read-audit operations note](../operations/sensitive_read_audit_assurance.md).
