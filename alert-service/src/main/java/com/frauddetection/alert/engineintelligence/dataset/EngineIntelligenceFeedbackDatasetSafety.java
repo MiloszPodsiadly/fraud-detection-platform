@@ -15,6 +15,13 @@ final class EngineIntelligenceFeedbackDatasetSafety {
     private static final Pattern EVALUATION_RECORD_ID = Pattern.compile("eval-[a-f0-9]{32}");
     private static final Pattern TRANSACTION_REFERENCE = Pattern.compile("txnref-[a-f0-9]{32}");
     private static final Pattern MACHINE_CODE = Pattern.compile("[A-Z0-9_]{1,64}");
+    static final Set<String> DEVICE_EVIDENCE_REASON_CODES = Set.of(
+            "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE", "DEVICE_EVIDENCE_PARTIAL",
+            "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED");
+    static final Set<String> DEVICE_ALLOWED_REASON_CODES = Set.of(
+            "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE", "DEVICE_EVIDENCE_PARTIAL",
+            "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED", "ORCHESTRATOR_ENGINE_EXCEPTION",
+            "ORCHESTRATOR_ENGINE_NULL_RESULT", "ORCHESTRATOR_ENGINE_REJECTED", "ORCHESTRATOR_ENGINE_TIMEOUT");
     private static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
     private static final Pattern IBAN = Pattern.compile("[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}");
     private static final Pattern PAN = Pattern.compile("\\b(?:\\d[ -]*?){13,19}\\b");
@@ -89,6 +96,15 @@ final class EngineIntelligenceFeedbackDatasetSafety {
     }
 
     static List<String> copyMachineCodes(List<String> source, String fieldName, int maxSize) {
+        return copyMachineCodes(source, fieldName, maxSize, Set.of());
+    }
+
+    static List<String> copyMachineCodes(
+            List<String> source,
+            String fieldName,
+            int maxSize,
+            Set<String> exactAdditionalSafeCodes
+    ) {
         if (source == null) {
             return List.of();
         }
@@ -96,7 +112,9 @@ final class EngineIntelligenceFeedbackDatasetSafety {
             throw new IllegalArgumentException(fieldName + " exceeds max size");
         }
         return source.stream()
-                .map(value -> requireMachineCode(value, fieldName))
+                .map(value -> value != null && exactAdditionalSafeCodes.contains(value)
+                        ? value
+                        : requireMachineCode(value, fieldName))
                 .toList();
     }
 

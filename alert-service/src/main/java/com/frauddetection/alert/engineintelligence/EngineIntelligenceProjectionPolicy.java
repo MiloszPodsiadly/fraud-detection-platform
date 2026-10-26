@@ -11,6 +11,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceVersionedIdentity;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
@@ -18,6 +19,9 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 import java.util.Locale;
@@ -29,7 +33,9 @@ import java.util.regex.Pattern;
 @Component
 public class EngineIntelligenceProjectionPolicy {
 
-    public static final int MAX_ENGINES = FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES;
+    private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().findAndAddModules().build();
+
+    public static final int MAX_ENGINES = EngineIntelligenceVersionedIdentity.MAX_V2_ENGINES;
     public static final int MAX_DIAGNOSTIC_SIGNALS = 5;
     public static final int MAX_WARNINGS = 10;
     public static final int MAX_REASON_CODES_PER_ENGINE = 5;
@@ -72,24 +78,31 @@ public class EngineIntelligenceProjectionPolicy {
 
     public EngineIntelligenceSummary validatedCopy(EngineIntelligenceSummary source) {
         requireShape(source);
-        if (source.contractVersion() != EngineIntelligenceSummary.CONTRACT_VERSION) {
+        if (!EngineIntelligenceVersionedIdentity.supportedVersion(source.contractVersion())) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION);
         }
         // Alert-service projection revalidates engine intelligence through the shared bounded public event
         // contract. This avoids maintaining a divergent second source of truth for public reason codes and
         // enum semantics while the projection adds storage-specific size and omission safeguards.
-        return publicContract(() -> new EngineIntelligenceSummary(
+        EngineIntelligenceSummary validated = publicContract(() -> new EngineIntelligenceSummary(
                 source.contractVersion(),
                 source.generatedAt(),
-                copyBounded(source.engines(), MAX_ENGINES, this::validatedEngine),
+                copyBounded(source.engines(), EngineIntelligenceVersionedIdentity.maxEngines(source.contractVersion()),
+                        engine -> validatedEngine(engine, source.contractVersion())),
                 validatedComparison(source.comparison()),
                 copyBounded(
                         source.diagnosticSignals(),
                         MAX_DIAGNOSTIC_SIGNALS,
-                        this::validatedDiagnosticSignal
+                        signal -> validatedDiagnosticSignal(signal, source.contractVersion())
                 ),
                 copyBounded(source.warnings(), MAX_WARNINGS, this::validatedWarning)
         ));
+        try {
+            EngineIntelligenceVersionedIdentity.requireSerializedSize(OBJECT_MAPPER.writeValueAsBytes(validated).length);
+        } catch (JacksonException | IllegalArgumentException exception) {
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
+        }
+        return validated;
     }
 
     public MlPredictionEvidence validatedEvidenceCopy(MlPredictionEvidence source) {
@@ -115,10 +128,10 @@ public class EngineIntelligenceProjectionPolicy {
         return value;
     }
 
-    private EngineIntelligenceEngineResult validatedEngine(EngineIntelligenceEngineResult source) {
+    private EngineIntelligenceEngineResult validatedEngine(EngineIntelligenceEngineResult source, int version) {
         requireShape(source);
         return publicContract(() -> new EngineIntelligenceEngineResult(
-                allowedEngineId(source.engineId()),
+                allowedEngineId(source.engineId(), version),
                 boundedEnum(source.engineType(), FraudEngineType.class),
                 boundedEnum(source.status(), FraudEngineStatus.class),
                 boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
@@ -139,10 +152,12 @@ public class EngineIntelligenceProjectionPolicy {
         ));
     }
 
-    private EngineIntelligenceDiagnosticSignal validatedDiagnosticSignal(EngineIntelligenceDiagnosticSignal source) {
+    private EngineIntelligenceDiagnosticSignal validatedDiagnosticSignal(
+            EngineIntelligenceDiagnosticSignal source, int version
+    ) {
         requireShape(source);
         return publicContract(() -> new EngineIntelligenceDiagnosticSignal(
-                allowedEngineId(source.engineId()),
+                allowedEngineId(source.engineId(), version),
                 boundedEnum(source.engineType(), FraudEngineType.class),
                 boundedEnum(source.engineStatus(), FraudEngineStatus.class),
                 boundedEnum(source.signalCategory(), EngineIntelligenceSignalCategory.class),
@@ -160,9 +175,9 @@ public class EngineIntelligenceProjectionPolicy {
         ));
     }
 
-    private String allowedEngineId(String engineId) {
+    private String allowedEngineId(String engineId, int version) {
         String safe = boundedString(engineId);
-        if (!FraudEngineIdentityContract.isKnownEngineId(safe)) {
+        if (!EngineIntelligenceVersionedIdentity.engineOrder(version).contains(safe)) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
         }
         return safe;

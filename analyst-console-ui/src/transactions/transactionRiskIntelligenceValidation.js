@@ -123,7 +123,7 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   }
   if (engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED") {
     if (
-      engineIntelligence.contractVersion !== engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
+      !engineIntelligenceContract.isSupportedEngineIntelligenceVersion(engineIntelligence.contractVersion)
       || !parseableDateString(engineIntelligence.generatedAt)
     ) {
       return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
@@ -147,23 +147,26 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (engineIntelligence.comparison !== null && !isComparisonShape(engineIntelligence.comparison)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
   }
-  if (!isBoundedArray(engineIntelligence.engines, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_ENGINES)) {
+  const contractVersion = engineIntelligenceContract.isSupportedEngineIntelligenceVersion(engineIntelligence.contractVersion)
+    ? engineIntelligence.contractVersion
+    : engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION_V1;
+  if (!isBoundedArray(engineIntelligence.engines, engineIntelligenceContract.maxEnginesForVersion(contractVersion))) {
     return invalid("ENGINE_LIMIT_EXCEEDED");
   }
-  if (!engineIntelligence.engines.every(isEngineShape)) {
+  if (!engineIntelligence.engines.every((engine) => isEngineShape(engine, contractVersion))) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE");
   }
-  if (!hasUniqueCanonicalEngineOrder(engineIntelligence.engines)) {
+  if (!hasUniqueCanonicalEngineOrder(engineIntelligence.engines, contractVersion)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
   }
   if ((engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED")
-    && !engineIntelligenceContract.hasRequiredRulesMlEngineSet(engineIntelligence.engines)) {
+    && !engineIntelligenceContract.hasRequiredRulesMlEngineSet(engineIntelligence.engines, contractVersion)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
   }
   if (!isBoundedArray(engineIntelligence.diagnosticSignals, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS)) {
     return invalid("DIAGNOSTIC_SIGNAL_LIMIT_EXCEEDED");
   }
-  if (!engineIntelligence.diagnosticSignals.every(isDiagnosticSignalShape)) {
+  if (!engineIntelligence.diagnosticSignals.every((signal) => isDiagnosticSignalShape(signal, contractVersion))) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNAL");
   }
   if (!isBoundedArray(engineIntelligence.warnings, MAX_WARNINGS)) {
@@ -205,12 +208,12 @@ function isComparisonShape(value) {
   return engineIntelligenceContract.isComparisonShape(value);
 }
 
-function isEngineShape(engine) {
-  return engineIntelligenceContract.isEngineShape(engine);
+function isEngineShape(engine, version) {
+  return engineIntelligenceContract.isEngineShape(engine, version);
 }
 
-function isDiagnosticSignalShape(signal) {
-  return engineIntelligenceContract.isDiagnosticSignalShape(signal);
+function isDiagnosticSignalShape(signal, version) {
+  return engineIntelligenceContract.isDiagnosticSignalShape(signal, version);
 }
 
 function isWarningShape(warning) {
@@ -310,8 +313,8 @@ function oneOf(value, allowedValues) {
   return typeof value === "string" && allowedValues.has(value);
 }
 
-function hasUniqueCanonicalEngineOrder(values) {
-  return engineIntelligenceContract.hasUniqueCanonicalEngineOrder(values);
+function hasUniqueCanonicalEngineOrder(values, version) {
+  return engineIntelligenceContract.hasUniqueCanonicalEngineOrder(values, version);
 }
 
 function containsUnsafeFieldName(value) {

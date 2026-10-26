@@ -33,6 +33,16 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
+    void acceptsVersion2DeviceResultWithoutChangingRulesMlComparison() {
+        var summary = EngineIntelligenceProjectionTestFixtures.v2DeviceSummary();
+
+        assertThat(policy.validatedCopy(summary)).isEqualTo(summary);
+        assertThat(summary.engines()).extracting(EngineIntelligenceEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary", "device.primary");
+        assertThat(summary.comparison().comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
+    }
+
+    @Test
     void evidenceProjectionUsesCanonicalModelIdentityPolicyWithoutFreeTextBlacklist() {
         MlPredictionEvidence source = new MlPredictionEvidence(
                 0.8123d,

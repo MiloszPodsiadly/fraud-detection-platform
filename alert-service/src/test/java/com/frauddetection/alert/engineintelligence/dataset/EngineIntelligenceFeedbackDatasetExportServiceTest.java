@@ -21,6 +21,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -368,14 +369,35 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void version2ProjectionWithDeviceStatusIsAcceptedWithoutRiskInference() {
+        EngineIntelligenceFeedbackDatasetExportResult result = exportWithProjection(v2DeviceProjection());
+
+        assertThat(result.failed()).as("failureReason=%s", result.failureReason()).isFalse();
+        assertThat(result.records().getFirst().engineIntelligenceContractVersion()).isEqualTo(2);
+        assertThat(result.records().getFirst().deviceEngineStatus()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(result.records().getFirst().deviceScoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
+        assertThat(result.records().getFirst().deviceRiskLevel()).isNull();
+    }
+
+    @Test
+    void version2ProjectionRejectsUnknownDeviceReasonCode() {
+        EngineIntelligenceFeedbackDatasetExportResult result = exportWithProjection(
+                v2DeviceProjection("DEVICE_CUSTOMER_123"));
+
+        assertThat(result.failureReason())
+                .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION);
+        assertThat(result.records()).isEmpty();
+    }
+
+    @Test
     void unsupportedProjectionContractVersionFailsClosed() {
-        assertThat(exportWithProjection(projection(2, "txn-1", projectionEngines())).failureReason())
+        assertThat(exportWithProjection(projection(3, "txn-1", projectionEngines())).failureReason())
                 .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION);
     }
 
     @Test
     void unsupportedProjectionVersionDoesNotCreateDatasetRecord() {
-        EngineIntelligenceFeedbackDatasetExportResult result = exportWithProjection(projection(2, "txn-1", projectionEngines()));
+        EngineIntelligenceFeedbackDatasetExportResult result = exportWithProjection(projection(3, "txn-1", projectionEngines()));
 
         assertThat(result.failed()).isTrue();
         assertThat(result.records()).isEmpty();
@@ -800,6 +822,45 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
 
     private EngineIntelligenceProjection projectionWithBothEngines() {
         return projection(1, "txn-1", projectionEngines());
+    }
+
+    private EngineIntelligenceProjection v2DeviceProjection() {
+        return v2DeviceProjection("DEVICE_SCORE_NOT_CALIBRATED");
+    }
+
+    private EngineIntelligenceProjection v2DeviceProjection(String deviceReasonCode) {
+        return new EngineIntelligenceProjection(
+                "txn-1",
+                occurrence(),
+                2,
+                FROM,
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
+                EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                EngineIntelligenceScoreDeltaBucket.LARGE,
+                List.of(
+                        new EngineIntelligenceEngineProjection("rules.primary", FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")),
+                        new EngineIntelligenceEngineProjection("ml.python.primary", FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.AVAILABLE, RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW,
+                                List.of("LOW_MODEL_RISK"), new MlModelIdentity(
+                                        "python-logistic-fraud-model", "2026-06-18.v1", "feature-contract-v2")),
+                        new EngineIntelligenceEngineProjection("velocity.primary", FraudEngineType.VELOCITY,
+                                FraudEngineStatus.SKIPPED, null, EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("VELOCITY_FEATURES_UNAVAILABLE")),
+                        new EngineIntelligenceEngineProjection("device.primary", FraudEngineType.DEVICE_RISK,
+                                FraudEngineStatus.DEGRADED, null, EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of(deviceReasonCode))
+                ),
+                List.of(new EngineIntelligenceDiagnosticSignalProjection("device.primary", FraudEngineType.DEVICE_RISK,
+                        FraudEngineStatus.DEGRADED, EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL, null,
+                        EngineIntelligenceScoreBucket.UNAVAILABLE, deviceReasonCode)),
+                List.of(),
+                FROM,
+                FROM
+        );
     }
 
     private EngineIntelligenceProjection projectionWithMlOnly() {

@@ -168,7 +168,7 @@ class EngineIntelligenceOpenApiContractTest {
                 "enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]",
                 "EngineIntelligenceDiagnosticSignalResponse:",
                 "EngineIntelligenceWarningResponse:"
-        );
+        ).contains("16,384 serialized bytes", "Version 2", "DEVICE_RISK");
     }
 
     @Test
@@ -285,7 +285,10 @@ class EngineIntelligenceOpenApiContractTest {
                 "enum: [ML_MODEL]",
                 "VelocityEngineIdentity:",
                 "enum: [velocity.primary]",
-                "enum: [VELOCITY]"
+                "enum: [VELOCITY]",
+                "DeviceEngineIdentity:",
+                "enum: [device.primary]",
+                "enum: [DEVICE_RISK]"
         );
         assertThat(schema("EngineIntelligenceEngineResponse")).contains(
                 "oneOf:",
@@ -311,9 +314,9 @@ class EngineIntelligenceOpenApiContractTest {
                 .toList())
                 .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
         assertThat(enumValues(property(response, "contractVersion")))
-                .containsExactly(EngineIntelligenceSummaryContract.VERSION);
+                .containsExactly(1, 2);
         assertThat(property(response, "engines"))
-                .containsEntry("maxItems", FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES);
+                .containsEntry("maxItems", 4);
         Map<String, Object> comparison = schema(schemas, "EngineIntelligenceComparisonResponse");
         assertThat(list(comparison, "required")).containsExactly(
                 "comparisonType",
@@ -334,13 +337,15 @@ class EngineIntelligenceOpenApiContractTest {
                 .containsExactly(
                         "#/components/schemas/RulesEngineIdentity",
                         "#/components/schemas/MlEngineIdentity",
-                        "#/components/schemas/VelocityEngineIdentity"
+                        "#/components/schemas/VelocityEngineIdentity",
+                        "#/components/schemas/DeviceEngineIdentity"
                 );
         assertThat(identityOneOfRefs(schema(schemas, "EngineIntelligenceDiagnosticSignalResponse")))
                 .containsExactly(
                         "#/components/schemas/RulesEngineIdentity",
                         "#/components/schemas/MlEngineIdentity",
-                        "#/components/schemas/VelocityEngineIdentity"
+                        "#/components/schemas/VelocityEngineIdentity",
+                        "#/components/schemas/DeviceEngineIdentity"
                 );
         assertIdentitySchema(
                 schemas,
@@ -359,6 +364,12 @@ class EngineIntelligenceOpenApiContractTest {
                 "VelocityEngineIdentity",
                 FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
                 FraudEngineType.VELOCITY
+        );
+        assertIdentitySchema(
+                schemas,
+                "DeviceEngineIdentity",
+                "device.primary",
+                FraudEngineType.DEVICE_RISK
         );
     }
 
@@ -600,7 +611,4 @@ class EngineIntelligenceOpenApiContractTest {
         return (List<Object>) source.get(key);
     }
 
-    private static final class EngineIntelligenceSummaryContract {
-        private static final int VERSION = com.frauddetection.common.events.intelligence.EngineIntelligenceSummary.CONTRACT_VERSION;
-    }
 }

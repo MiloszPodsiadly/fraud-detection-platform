@@ -31,6 +31,39 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
     }
 
     @Test
+    void alertServiceDeserializesVersion2DeviceSummaryAndKeepsMlEvidenceOmissionOwnership() throws Exception {
+        ObjectNode eventJson = (ObjectNode) objectMapper.readTree(
+                AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson()
+        );
+        ObjectNode summary = (ObjectNode) eventJson.path("engineIntelligence");
+        summary.put("contractVersion", 2);
+        summary.set("engines", objectMapper.readTree("""
+                [
+                  {"engineId":"rules.primary","engineType":"RULES","status":"AVAILABLE","riskLevel":"HIGH","scoreBucket":"HIGH","reasonCodes":["HIGH_VELOCITY"]},
+                  {"engineId":"ml.python.primary","engineType":"ML_MODEL","status":"TIMEOUT","riskLevel":null,"scoreBucket":"UNAVAILABLE","reasonCodes":["ML_MODEL_TIMEOUT"]},
+                  {"engineId":"velocity.primary","engineType":"VELOCITY","status":"SKIPPED","riskLevel":null,"scoreBucket":"UNAVAILABLE","reasonCodes":["VELOCITY_FEATURES_UNAVAILABLE"]},
+                  {"engineId":"device.primary","engineType":"DEVICE_RISK","status":"DEGRADED","riskLevel":null,"scoreBucket":"UNAVAILABLE","reasonCodes":["DEVICE_SCORE_NOT_CALIBRATED"]}
+                ]
+                """));
+        summary.set("comparison", objectMapper.readTree("""
+                {"comparisonType":"RULES_VS_ML","comparedEngineIds":["rules.primary","ml.python.primary"],"agreementStatus":"PARTIAL","riskMismatchStatus":"NOT_COMPARABLE","scoreDeltaBucket":"UNAVAILABLE"}
+                """));
+        summary.set("diagnosticSignals", objectMapper.readTree("""
+                [{"engineId":"device.primary","engineType":"DEVICE_RISK","engineStatus":"DEGRADED","signalCategory":"OPERATIONAL_SIGNAL","riskLevel":null,"scoreBucket":"UNAVAILABLE","reasonCode":"DEVICE_SCORE_NOT_CALIBRATED"}]
+                """));
+
+        TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.deserializeJson(eventJson.toString());
+
+        assertThat(event.engineIntelligence().contractVersion()).isEqualTo(2);
+        assertThat(event.engineIntelligence().engines())
+                .extracting(com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary", "device.primary");
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason()).isEqualTo(
+                com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
+    }
+
+    @Test
     void alertServiceRejectsHistoricalComparisonNormalization() throws Exception {
         ObjectNode eventJson = (ObjectNode) objectMapper.readTree(
                 AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson()
@@ -68,6 +101,18 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
 
         assertExistingFields(event);
         assertThat(event.engineIntelligence()).isNotNull();
+    }
+
+    @Test
+    void alertServiceRejectsOversizedNestedEngineIntelligenceBeforeTypedDeserialization() throws Exception {
+        ObjectNode eventJson = (ObjectNode) objectMapper.readTree(
+                AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson()
+        );
+        ((ObjectNode) eventJson.path("engineIntelligence")).put("futureExtension", "x".repeat(17_000));
+
+        assertThatThrownBy(() -> AlertServiceTransactionScoredEventFixtureLoader.deserializeJson(eventJson.toString()))
+                .isInstanceOf(org.apache.kafka.common.errors.SerializationException.class)
+                .hasMessageContaining("Unable to deserialize Kafka payload");
     }
 
     @Test

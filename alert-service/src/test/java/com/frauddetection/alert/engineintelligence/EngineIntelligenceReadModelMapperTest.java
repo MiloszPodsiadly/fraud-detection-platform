@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModelMapper;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
+import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
@@ -49,6 +50,28 @@ class EngineIntelligenceReadModelMapperTest {
         assertThat(response.engineCount()).isEqualTo(2);
         assertThat(response.diagnosticSignalCount()).isEqualTo(2);
         assertThat(response.warningCount()).isEqualTo(2);
+    }
+
+    @Test
+    void mapsVersion2DeviceProjectionThroughReadModelAndRestResponseWithoutTruncation() {
+        EngineIntelligenceProjection projection = new EngineIntelligenceProjectionMapper(
+                new EngineIntelligenceProjectionPolicy()
+        ).map(
+                "txn-device-v2",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
+                EngineIntelligenceProjectionTestFixtures.v2DeviceSummary(),
+                null
+        ).projection().orElseThrow();
+
+        var readModel = mapper.map(projection);
+        var response = new EngineIntelligenceResponseMapper().toResponse(readModel);
+
+        assertThat(response.contractVersion()).isEqualTo(2);
+        assertThat(response.engines()).hasSize(4);
+        assertThat(response.engines().getLast().engineId()).isEqualTo("device.primary");
+        assertThat(response.engines().getLast().riskLevel()).isNull();
+        assertThat(response.engines().getLast().scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
+        assertThat(response.status()).isEqualTo(com.frauddetection.alert.api.EngineIntelligenceResponseStatus.DEGRADED);
     }
 
     @Test

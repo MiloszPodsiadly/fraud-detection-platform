@@ -56,6 +56,36 @@ describe("transactionRiskIntelligenceValidation", () => {
     ]);
   });
 
+  it("accepts v2 Device Risk as bounded operational diagnostic", () => {
+    const result = validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: {
+        ...engineIntelligence(),
+        status: "DEGRADED",
+        contractVersion: 2,
+        engines: [engine(), mlEngine(), deviceEngine()],
+        diagnosticSignals: [signal(), deviceSignal()]
+      }
+    }));
+
+    expect(result.valid, result.reason).toBe(true);
+  });
+
+  it("rejects Device Risk with a calibrated public score", () => {
+    const result = validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: {
+        ...engineIntelligence(),
+        status: "DEGRADED",
+        contractVersion: 2,
+        engines: [engine(), mlEngine(), deviceEngine({
+          status: "AVAILABLE", riskLevel: "HIGH", scoreBucket: "HIGH"
+        })],
+        diagnosticSignals: [signal()]
+      }
+    }));
+
+    expect(result).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_ENGINE" });
+  });
+
   it.each([
     ["review", recommendReviewDetail()],
     ["case creation", recommendCaseCreationDetail()],
@@ -552,7 +582,7 @@ describe("transactionRiskIntelligenceValidation", () => {
 
   it("rejects unsupported available contract version", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail({
-      engineIntelligence: { ...engineIntelligence(), contractVersion: 2 }
+      engineIntelligence: { ...engineIntelligence(), contractVersion: 3 }
     }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_METADATA" });
   });
 });
@@ -615,6 +645,31 @@ function signal(overrides = {}) {
     reasonCode: "HIGH_VELOCITY",
     ...overrides
   };
+}
+
+function deviceEngine(overrides = {}) {
+  return engine({
+    engineId: "device.primary",
+    engineType: "DEVICE_RISK",
+    status: "DEGRADED",
+    riskLevel: null,
+    scoreBucket: "UNAVAILABLE",
+    reasonCodes: ["DEVICE_SCORE_NOT_CALIBRATED"],
+    ...overrides
+  });
+}
+
+function deviceSignal(overrides = {}) {
+  return signal({
+    engineId: "device.primary",
+    engineType: "DEVICE_RISK",
+    engineStatus: "DEGRADED",
+    signalCategory: "OPERATIONAL_SIGNAL",
+    riskLevel: null,
+    scoreBucket: "UNAVAILABLE",
+    reasonCode: "DEVICE_SCORE_NOT_CALIBRATED",
+    ...overrides
+  });
 }
 
 function analystRecommendation(overrides = {}) {

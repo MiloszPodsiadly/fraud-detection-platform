@@ -43,9 +43,10 @@ Records are assembled from:
 - the engine-intelligence projection for comparison, engine status, score buckets, risk levels, and diagnostic codes.
 
 Labels are not derived from model output, risk level, alert severity, or projection agreement. Feedback, alert, and
-projection transaction IDs must match before any dataset record is emitted. FDP-102 exports only supported projection
-contract version `1`; unsupported projection versions fail closed as `CORRUPTED_PROJECTION`. Unsupported projection
-does not mean no fraud or low risk. Missing ML score does not mean zero. Missing ML risk does not mean `LOW`. Missing
+projection transaction IDs must match before any dataset record is emitted. The export accepts supported projection
+contract versions `1` and `2`; version 2 may include bounded Device Risk status and the explicit `UNAVAILABLE` score
+bucket, with no risk level or raw device/customer evidence. The export fails closed for unsupported projection versions
+as `CORRUPTED_PROJECTION`. Unsupported projection data does not mean no fraud or low risk. Missing ML score does not mean zero. Missing ML risk does not mean `LOW`. Missing
 rules score does not mean zero. Missing rules risk does not mean `LOW`. Missing projection is exported explicitly as
 `projectionStatus = MISSING`; it does not mean no fraud. Old transactions without engine intelligence do not crash the
 export.

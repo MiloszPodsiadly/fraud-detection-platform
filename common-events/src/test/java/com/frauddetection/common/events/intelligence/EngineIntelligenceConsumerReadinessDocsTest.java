@@ -69,7 +69,9 @@ class EngineIntelligenceConsumerReadinessDocsTest {
                 "does not change `EngineIntelligenceSummary.contractVersion`",
                 "`contractVersion = 1`",
                 "FDP-93 fixtures cover valid and forward-compatible event shapes",
-                "Invalid nested engineIntelligence versions remain a future producer/contract-validation hardening case",
+                "FDP-93 did not validate nested engineIntelligence versions",
+                "FDP-149 now accepts only nested versions 1 and 2 in the",
+                "alert projection/API/UI support for v2 remains a migration gate",
                 "unsupported engineIntelligence contract versions fail safely and boundedly",
                 "Invalid-version handling must not be interpreted as consumer tolerance"
         );

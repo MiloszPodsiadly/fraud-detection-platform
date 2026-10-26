@@ -9,10 +9,12 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreement
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceVersionedIdentity;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 public record EngineIntelligenceFeedbackDatasetRecord(
         String evaluationRecordId,
@@ -34,7 +36,11 @@ public record EngineIntelligenceFeedbackDatasetRecord(
         EngineIntelligenceScoreBucket rulesScoreBucket,
         RiskLevel rulesRiskLevel,
         List<String> reasonCodes,
-        List<String> diagnosticSignals
+        List<String> diagnosticSignals,
+        Integer engineIntelligenceContractVersion,
+        FraudEngineStatus deviceEngineStatus,
+        EngineIntelligenceScoreBucket deviceScoreBucket,
+        RiskLevel deviceRiskLevel
 ) {
 
     public EngineIntelligenceFeedbackDatasetRecord {
@@ -47,11 +53,58 @@ public record EngineIntelligenceFeedbackDatasetRecord(
         usefulness = Objects.requireNonNull(usefulness, "usefulness is required");
         accuracyAssessment = Objects.requireNonNull(accuracyAssessment, "accuracyAssessment is required");
         projectionStatus = Objects.requireNonNull(projectionStatus, "projectionStatus is required");
-        reasonCodes = EngineIntelligenceFeedbackDatasetSafety.copyMachineCodes(reasonCodes, "reasonCodes", 10);
+        boolean hasBoundedDeviceState = deviceEngineStatus != null
+                && Objects.equals(engineIntelligenceContractVersion, EngineIntelligenceVersionedIdentity.V2);
+        Set<String> deviceReasonCodes = hasBoundedDeviceState
+                ? EngineIntelligenceFeedbackDatasetSafety.DEVICE_ALLOWED_REASON_CODES
+                : Set.of();
+        reasonCodes = EngineIntelligenceFeedbackDatasetSafety.copyMachineCodes(
+                reasonCodes, "reasonCodes", 10, deviceReasonCodes);
         diagnosticSignals = EngineIntelligenceFeedbackDatasetSafety.copyMachineCodes(
                 diagnosticSignals,
                 "diagnosticSignals",
-                10
+                10,
+                deviceReasonCodes
         );
+        if (engineIntelligenceContractVersion != null
+                && !EngineIntelligenceVersionedIdentity.supportedVersion(engineIntelligenceContractVersion)) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_DATASET_CONTRACT_VERSION_UNSUPPORTED");
+        }
+        if ((deviceEngineStatus == null) != (deviceScoreBucket == null)
+                || (deviceEngineStatus != null && deviceRiskLevel != null)
+                || (deviceEngineStatus != null && !Objects.equals(
+                        engineIntelligenceContractVersion, EngineIntelligenceVersionedIdentity.V2))
+                || (deviceEngineStatus != null && deviceEngineStatus == FraudEngineStatus.AVAILABLE)
+                || (deviceEngineStatus != null && deviceScoreBucket != EngineIntelligenceScoreBucket.UNAVAILABLE)) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_DATASET_DEVICE_STATE_INVALID");
+        }
+    }
+
+    public EngineIntelligenceFeedbackDatasetRecord(
+            String evaluationRecordId,
+            String transactionReference,
+            Instant feedbackSubmittedAt,
+            EngineIntelligenceFeedbackDatasetLabel evaluationLabel,
+            EngineIntelligenceFeedbackDatasetLabelSource labelSource,
+            EngineIntelligenceFeedbackType feedbackType,
+            EngineIntelligenceFeedbackUsefulness usefulness,
+            EngineIntelligenceFeedbackAccuracyAssessment accuracyAssessment,
+            EngineIntelligenceFeedbackDatasetProjectionStatus projectionStatus,
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            FraudEngineStatus mlEngineStatus,
+            EngineIntelligenceScoreBucket mlScoreBucket,
+            RiskLevel mlRiskLevel,
+            FraudEngineStatus rulesEngineStatus,
+            EngineIntelligenceScoreBucket rulesScoreBucket,
+            RiskLevel rulesRiskLevel,
+            List<String> reasonCodes,
+            List<String> diagnosticSignals
+    ) {
+        this(evaluationRecordId, transactionReference, feedbackSubmittedAt, evaluationLabel, labelSource,
+                feedbackType, usefulness, accuracyAssessment, projectionStatus, agreementStatus, riskMismatchStatus,
+                scoreDeltaBucket, mlEngineStatus, mlScoreBucket, mlRiskLevel, rulesEngineStatus, rulesScoreBucket,
+                rulesRiskLevel, reasonCodes, diagnosticSignals, null, null, null, null);
     }
 }

@@ -67,9 +67,9 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
         String doc = Files.readString(DOC);
 
         assertThat(doc)
-                .contains("FDP-102 exports only supported projection")
-                .contains("contract version `1`")
-                .contains("unsupported projection versions fail closed")
+                .contains("accepts supported projection")
+                .contains("contract versions `1` and `2`")
+                .contains("fails closed for unsupported projection versions")
                 .contains("Unsupported projection")
                 .contains("does not mean no fraud or low risk");
     }

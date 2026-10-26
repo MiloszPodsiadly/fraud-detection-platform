@@ -1,0 +1,152 @@
+package com.frauddetection.common.events.intelligence;
+
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.enums.RiskLevel;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class EngineIntelligenceV2ContractTest {
+    private static final String DEVICE_REASON = "DEVICE_SCORE_NOT_CALIBRATED";
+
+    @Test
+    void v2AcceptsDeviceAfterExistingCanonicalEnginesWithoutChangingComparisonIdentity() throws Exception {
+        var summary = v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                device(List.of(DEVICE_REASON))));
+
+        assertThat(summary.contractVersion()).isEqualTo(2);
+        assertThat(summary.engines()).extracting(EngineIntelligenceEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary", "device.primary");
+        assertThat(summary.comparison().comparedEngineIds())
+                .containsExactly("rules.primary", "ml.python.primary");
+        String json = EngineIntelligenceTestSupport.objectMapper().writeValueAsString(summary);
+        var decoded = EngineIntelligenceTestSupport.objectMapper().readValue(json, EngineIntelligenceSummary.class);
+        assertThat(decoded).isEqualTo(summary);
+        assertThat(json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
+                .isLessThanOrEqualTo(EngineIntelligenceVersionedIdentity.MAX_SERIALIZED_BYTES);
+    }
+
+    @Test
+    void v2AllowsFourOrderedEnginesAndCoherentOperationalDeviceSignal() {
+        var device = device(List.of(DEVICE_REASON));
+        var diagnostic = new EngineIntelligenceDiagnosticSignal(
+                "device.primary", FraudEngineType.DEVICE_RISK, FraudEngineStatus.DEGRADED,
+                EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL, null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE, DEVICE_REASON);
+        var summary = v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                velocity(), device), List.of(diagnostic));
+
+        assertThat(summary.engines()).hasSize(4);
+        assertThat(summary.diagnosticSignals()).containsExactly(diagnostic);
+    }
+
+    @Test
+    void v2KeepsDeviceAndVelocityOptional() {
+        var twoEngines = v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)));
+        var velocityOnly = v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                velocity()));
+
+        assertThat(twoEngines.engines()).hasSize(2);
+        assertThat(velocityOnly.engines()).extracting(EngineIntelligenceEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
+    }
+
+    @Test
+    void v1RemainsStrictAndDeviceOnlyReasonsCannotLeakIntoIt() {
+        assertThatThrownBy(() -> new EngineIntelligenceSummary(1,
+                EngineIntelligenceTestSupport.GENERATED_AT,
+                List.of(EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                        device(List.of(DEVICE_REASON))),
+                EngineIntelligenceTestSupport.comparison(), List.of(), List.of()))
+                .hasMessage("ENGINE_INTELLIGENCE_UNKNOWN_ENGINE_ID");
+
+        assertThatThrownBy(() -> new EngineIntelligenceSummary(1,
+                EngineIntelligenceTestSupport.GENERATED_AT,
+                List.of(EngineIntelligenceTestSupport.rulesEngine(List.of(DEVICE_REASON)),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)),
+                EngineIntelligenceTestSupport.comparison(), List.of(), List.of()))
+                .hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+    }
+
+    @Test
+    void v2RejectsUnknownVersionInvalidOrderDeviceScoreAndReasonMisuse() {
+        assertThatThrownBy(() -> v2(3, List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH))))
+                .hasMessage("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
+        assertThatThrownBy(() -> v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(), device(List.of(DEVICE_REASON)),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH))))
+                .hasMessage("ENGINE_INTELLIGENCE_ENGINE_ORDER_INVALID");
+        assertThatThrownBy(() -> v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                velocity(), device(List.of(DEVICE_REASON)), device(List.of(DEVICE_REASON)))))
+                .hasMessage("ENGINE_INTELLIGENCE_ENGINES_LIMIT_EXCEEDED");
+        assertThatThrownBy(() -> new EngineIntelligenceEngineResult("device.primary", FraudEngineType.VELOCITY,
+                FraudEngineStatus.UNAVAILABLE, null, EngineIntelligenceScoreBucket.UNAVAILABLE, List.of()))
+                .hasMessage("ENGINE_INTELLIGENCE_ENGINE_TYPE_MISMATCH");
+        assertThatThrownBy(() -> v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                device(List.of("HIGH_VELOCITY")))))
+                .hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+        assertThatThrownBy(() -> v2(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                new EngineIntelligenceEngineResult("device.primary", FraudEngineType.DEVICE_RISK,
+                        FraudEngineStatus.AVAILABLE, RiskLevel.LOW,
+                        EngineIntelligenceScoreBucket.LOW, List.of("DEVICE_NOVELTY")))))
+                .hasMessage("ENGINE_INTELLIGENCE_DEVICE_SCORE_UNCALIBRATED");
+    }
+
+    @Test
+    void byteBoundaryIsExplicitAndFailClosed() {
+        EngineIntelligenceVersionedIdentity.requireSerializedSize(1);
+        EngineIntelligenceVersionedIdentity.requireSerializedSize(
+                EngineIntelligenceVersionedIdentity.MAX_SERIALIZED_BYTES);
+        for (int invalid : new int[]{0, EngineIntelligenceVersionedIdentity.MAX_SERIALIZED_BYTES + 1}) {
+            assertThatThrownBy(() -> EngineIntelligenceVersionedIdentity.requireSerializedSize(invalid))
+                    .hasMessage("ENGINE_INTELLIGENCE_PAYLOAD_BYTES_INVALID");
+        }
+    }
+
+    private static EngineIntelligenceSummary v2(List<EngineIntelligenceEngineResult> engines) {
+        return v2(2, engines);
+    }
+
+    private static EngineIntelligenceSummary v2(List<EngineIntelligenceEngineResult> engines,
+                                                List<EngineIntelligenceDiagnosticSignal> signals) {
+        return new EngineIntelligenceSummary(2, EngineIntelligenceTestSupport.GENERATED_AT,
+                engines, EngineIntelligenceTestSupport.comparison(), signals, List.of());
+    }
+
+    private static EngineIntelligenceSummary v2(int version, List<EngineIntelligenceEngineResult> engines) {
+        return new EngineIntelligenceSummary(version, EngineIntelligenceTestSupport.GENERATED_AT,
+                engines, EngineIntelligenceTestSupport.comparison(), List.of(), List.of());
+    }
+
+    private static EngineIntelligenceEngineResult device(List<String> reasons) {
+        return new EngineIntelligenceEngineResult("device.primary", FraudEngineType.DEVICE_RISK,
+                FraudEngineStatus.DEGRADED, null, EngineIntelligenceScoreBucket.UNAVAILABLE, reasons);
+    }
+
+    private static EngineIntelligenceEngineResult velocity() {
+        return new EngineIntelligenceEngineResult("velocity.primary", FraudEngineType.VELOCITY,
+                FraudEngineStatus.UNAVAILABLE, null, EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of("VELOCITY_FEATURES_UNAVAILABLE"));
+    }
+}

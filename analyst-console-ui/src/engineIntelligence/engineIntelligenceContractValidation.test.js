@@ -12,6 +12,7 @@ import {
   isDiagnosticSignalShape,
   isEngineIntelligenceResponseShape,
   isEngineShape,
+  hasRequiredRulesMlEngineSet,
   isModelIdentityShape,
   isWarningShape,
   safeString
@@ -31,6 +32,41 @@ describe("engineIntelligenceContractValidation", () => {
 
   it("accepts shared three-engine golden fixture", () => {
     expect(isValidEngineIntelligence(sharedFixture("engine_intelligence_three_engine_golden.json"))).toBe(true);
+  });
+
+  it("accepts bounded v2 with operational Device Risk and Rules-vs-ML comparison", () => {
+    const value = v2Fixture();
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(true);
+    expect(value.engines.map((engine) => engine.engineId)).toEqual([
+      "rules.primary", "ml.python.primary", "velocity.primary", "device.primary"
+    ]);
+  });
+
+  it("accepts v2 Device Risk when optional Velocity is absent", () => {
+    const value = v2Fixture();
+    value.engines.splice(2, 1);
+    value.diagnosticSignals = value.diagnosticSignals.filter((signal) => signal.engineId !== "velocity.primary");
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(true);
+  });
+
+  it("rejects unsupported versions in the required-engine helper", () => {
+    expect(hasRequiredRulesMlEngineSet([
+      { engineId: "rules.primary" },
+      { engineId: "ml.python.primary" }
+    ], 3)).toBe(false);
+  });
+
+  it.each([
+    ["available Device Risk", (value) => { value.engines[3] = deviceEngine({ status: "AVAILABLE", riskLevel: "HIGH", scoreBucket: "HIGH" }); }],
+    ["unknown Device Risk reason", (value) => { value.engines[3] = deviceEngine({ reasonCodes: ["device-id:customer-123"] }); }],
+    ["Device Risk under v1", (value) => { value.contractVersion = 1; }]
+  ])("rejects %s", (_name, mutate) => {
+    const value = v2Fixture();
+    mutate(value);
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(false);
   });
 
   it("accepts full-path public API composition fixture", () => {
@@ -177,6 +213,50 @@ function operationalMlEngine(status) {
     riskLevel: null,
     scoreBucket: "UNAVAILABLE",
     reasonCodes: ["ML_MODEL_UNAVAILABLE"]
+  };
+}
+
+function v2Fixture() {
+  const engines = [
+    availableEngine("rules.primary", "RULES"),
+    { ...availableEngine("ml.python.primary", "ML_MODEL"), modelIdentity: canonicalModelIdentity() },
+    { ...availableEngine("velocity.primary", "VELOCITY"), status: "NOT_APPLICABLE", riskLevel: null, scoreBucket: "UNAVAILABLE", reasonCodes: ["VELOCITY_FEATURES_UNAVAILABLE"] },
+    deviceEngine()
+  ];
+  return {
+    status: "DEGRADED",
+    contractVersion: 2,
+    generatedAt: "2026-06-02T10:00:00Z",
+    comparison: {
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
+      agreementStatus: "AGREEMENT",
+      riskMismatchStatus: "SAME_RISK_LEVEL",
+      scoreDeltaBucket: "NONE"
+    },
+    engines,
+    diagnosticSignals: [{
+      engineId: "device.primary",
+      engineType: "DEVICE_RISK",
+      engineStatus: "DEGRADED",
+      signalCategory: "OPERATIONAL_SIGNAL",
+      riskLevel: null,
+      scoreBucket: "UNAVAILABLE",
+      reasonCode: "DEVICE_SCORE_NOT_CALIBRATED"
+    }],
+    warnings: []
+  };
+}
+
+function deviceEngine(overrides = {}) {
+  return {
+    engineId: "device.primary",
+    engineType: "DEVICE_RISK",
+    status: "DEGRADED",
+    riskLevel: null,
+    scoreBucket: "UNAVAILABLE",
+    reasonCodes: ["DEVICE_SCORE_NOT_CALIBRATED"],
+    ...overrides
   };
 }
 

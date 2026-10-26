@@ -25,6 +25,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceVersionedIdentity;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
@@ -110,6 +111,11 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     @Test
     void instanceValidationAcceptsThreeEngineResponse() {
         assertValid("EngineIntelligenceResponse", threeEngineResponse());
+    }
+
+    @Test
+    void instanceValidationAcceptsVersion2FourEngineDeviceResponse() {
+        assertValid("EngineIntelligenceResponse", v2DeviceResponse());
     }
 
     @Test
@@ -307,6 +313,33 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         );
     }
 
+    private EngineIntelligenceResponse v2DeviceResponse() {
+        return new EngineIntelligenceResponse(
+                EngineIntelligenceResponseStatus.DEGRADED,
+                EngineIntelligenceVersionedIdentity.V2,
+                Instant.parse("2026-06-18T10:00:02Z"),
+                comparisonResponse(
+                        EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                        EngineIntelligenceScoreDeltaBucket.LARGE
+                ),
+                List.of(
+                        engineResponse("rules.primary", FraudEngineType.RULES, EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                                RiskLevel.CRITICAL, EngineIntelligenceScoreBucket.HIGH, List.of("HIGH_VELOCITY")),
+                        engineResponse("ml.python.primary", FraudEngineType.ML_MODEL, EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                                RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW, List.of("LOW_MODEL_RISK")),
+                        engineResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE,
+                                null, EngineIntelligenceScoreBucket.UNAVAILABLE, List.of("VELOCITY_FEATURES_UNAVAILABLE")),
+                        engineResponse("device.primary", FraudEngineType.DEVICE_RISK, EngineIntelligenceEngineStatusResponse.DEGRADED,
+                                null, EngineIntelligenceScoreBucket.UNAVAILABLE, List.of("DEVICE_SCORE_NOT_CALIBRATED"))
+                ),
+                List.of(signalResponse("device.primary", FraudEngineType.DEVICE_RISK,
+                        EngineIntelligenceEngineStatusResponse.DEGRADED, EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL,
+                        null, EngineIntelligenceScoreBucket.UNAVAILABLE, "DEVICE_SCORE_NOT_CALIBRATED")),
+                List.of()
+        );
+    }
+
     private EngineIntelligenceResponse degradedResponse() {
         return new EngineIntelligenceResponse(
                 EngineIntelligenceResponseStatus.DEGRADED,
@@ -491,6 +524,12 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             }
             return errors;
         }
+        Object versionValue = instance.get("contractVersion");
+        int version = versionValue instanceof Number number ? number.intValue() : 0;
+        if (!EngineIntelligenceVersionedIdentity.supportedVersion(version)) {
+            errors.add("unsupported engine-intelligence contract version");
+            return errors;
+        }
         if (!FraudEngineIdentityContract.rulesVsMlComparisonEngineIds().equals(list(comparison(instance).get("comparedEngineIds")))) {
             errors.add("comparison ids must be exact and ordered");
         }
@@ -498,10 +537,11 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         int previousOrder = -1;
         for (Map<String, Object> engine : engines(instance)) {
             String engineId = engine.get("engineId").toString();
-            if (!FraudEngineIdentityContract.hasExpectedType(engineId, FraudEngineType.valueOf(engine.get("engineType").toString()))) {
+            if (!EngineIntelligenceVersionedIdentity.hasExpectedType(
+                    engineId, FraudEngineType.valueOf(engine.get("engineType").toString()))) {
                 errors.add("unknown or mismatched engine identity");
             }
-            int currentOrder = FraudEngineIdentityContract.orderOf(engineId);
+            int currentOrder = EngineIntelligenceVersionedIdentity.engineOrder(version).indexOf(engineId);
             if (enginesById.put(engineId, engine) != null || currentOrder <= previousOrder) {
                 errors.add("engine ids must be unique and canonical ordered");
             }
@@ -516,14 +556,22 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 errors.add("non-available engine must not expose risk");
             }
         }
-        if (enginesById.size() != 2 && enginesById.size() != 3) {
-            errors.add("engine set must contain Rules and ML with optional Velocity");
+        if (enginesById.size() < 2 || enginesById.size() > EngineIntelligenceVersionedIdentity.maxEngines(version)) {
+            errors.add("engine set must remain within the versioned engine bound");
         }
         if (!enginesById.containsKey("rules.primary") || !enginesById.containsKey("ml.python.primary")) {
             errors.add("required Rules and ML engines missing");
         }
-        if (enginesById.size() == 3 && !enginesById.containsKey("velocity.primary")) {
-            errors.add("third engine must be Velocity");
+        if (enginesById.size() == 4
+                && (!enginesById.containsKey("velocity.primary") || !enginesById.containsKey("device.primary"))) {
+            errors.add("fourth engine requires canonical Velocity then Device Risk order");
+        }
+        Map<String, Object> device = enginesById.get("device.primary");
+        if (device != null && (version != EngineIntelligenceVersionedIdentity.V2
+                || "AVAILABLE".equals(device.get("status"))
+                || device.get("riskLevel") != null
+                || !"UNAVAILABLE".equals(device.get("scoreBucket")))) {
+            errors.add("Device Risk is v2-only and must remain uncalibrated");
         }
         if (enginesById.containsKey("rules.primary") && enginesById.containsKey("ml.python.primary")) {
             errors.addAll(validateComparisonCoherence(comparison(instance), enginesById.get("rules.primary"), enginesById.get("ml.python.primary")));
@@ -568,10 +616,15 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             return "DEGRADED";
         }
         Object velocityStatus = statusFor(enginesById, FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID);
-        if (velocityStatus == null || "AVAILABLE".equals(velocityStatus) || "NOT_APPLICABLE".equals(velocityStatus)) {
+        Object deviceStatus = statusFor(enginesById, EngineIntelligenceVersionedIdentity.DEVICE_PRIMARY_ENGINE_ID);
+        if (isOptionalDiagnosticAvailable(velocityStatus) && isOptionalDiagnosticAvailable(deviceStatus)) {
             return "AVAILABLE";
         }
         return "DEGRADED";
+    }
+
+    private boolean isOptionalDiagnosticAvailable(Object status) {
+        return status == null || "AVAILABLE".equals(status) || "NOT_APPLICABLE".equals(status);
     }
 
     private Object statusFor(Map<String, Map<String, Object>> enginesById, String engineId) {

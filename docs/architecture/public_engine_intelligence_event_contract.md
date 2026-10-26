@@ -27,8 +27,11 @@ to the public DTOs. It is called only for disabled-by-default producer diagnosti
 `transactions.scored` consumer boundary. Missing, malformed, retired, and future versions fail closed. Absence of this
 marker is not evidence that a record is safely historical and never selects a permissive parser.
 
-`EngineIntelligenceSummary.contractVersion` is required and equals `1`. A future incompatible
-shape requires explicit compatibility review and a new contract version.
+`EngineIntelligenceSummary.contractVersion` is required. The producer currently emits v1; the shared typed reader
+supports v1 and v2. V2 adds the optional `device.primary` result while preserving the Rules-vs-ML-only comparator.
+Alert projection/API/OpenAPI/Analyst Console support for v2 is pending consumer-first migration. A v2 producer must
+remain disabled until that migration and retained-data/replay handling are proven. The outer
+`TransactionScoredEvent.eventContractVersion=2` is independent from this nested version.
 
 ## Backward Compatibility Rules
 
@@ -66,11 +69,14 @@ bucket or detached from its summary. The exact field is not part of the public E
 
 ## Payload Limits
 
-The public payload allows at most three engines, five diagnostic signals, ten warning summaries, five
-reason codes per engine, and 128 characters per bounded string.
+V1 allows at most three engines; v2 allows at most four. Both versions allow five diagnostic signals, ten warning
+summaries, five reason codes per engine, and 128 characters per bounded string. V2 additionally has a 16 KiB UTF-8
+serialized summary cap, checked at byte-oriented ingress and egress before parsing or publishing.
 
-Version 1 allows three known engine identities: `rules.primary`, `ml.python.primary`, and `velocity.primary`. Rules
-and ML are required. Velocity is an optional third diagnostic engine. Missing Rules or ML in a current
+Version 1 allows three known engine identities: `rules.primary`, `ml.python.primary`, and `velocity.primary`. Version
+2 adds optional `device.primary` / `DEVICE_RISK` after Velocity. Each version enforces its own identity set, type,
+order, and engine cap. Rules
+and ML are required. Velocity and Device are optional diagnostics. Missing Rules or ML in a current
 `contractVersion=1` summary is corruption, not an operational representation. Operational failure is represented by a
 present engine result with a non-AVAILABLE status and bounded reason code, not by omitting the engine.
 

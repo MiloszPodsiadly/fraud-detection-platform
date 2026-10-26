@@ -711,7 +711,7 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
 
   if (
     response.available !== true
-    || response.contractVersion !== engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
+    || !engineIntelligenceContract.isSupportedEngineIntelligenceVersion(response.contractVersion)
     || !engineIntelligenceContract.isCanonicalUtcTimestamp(response.generatedAt)
   ) {
     return unavailableEngineIntelligence(transactionId);
@@ -721,8 +721,9 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     return unavailableEngineIntelligence(transactionId);
   }
 
-  const engines = normalizeEngineResults(response.engines);
-  const diagnosticSignals = normalizeDiagnosticSignals(response.diagnosticSignals);
+  const version = response.contractVersion;
+  const engines = normalizeEngineResults(response.engines, version);
+  const diagnosticSignals = normalizeDiagnosticSignals(response.diagnosticSignals, version);
   const warnings = normalizeEngineWarnings(response.warnings);
   if (!engines || !diagnosticSignals || !warnings) {
     return unavailableEngineIntelligence(transactionId);
@@ -731,12 +732,16 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     || !engineIntelligenceContract.areDiagnosticSignalsCoherent(response.diagnosticSignals, response.engines)) {
     return unavailableEngineIntelligence(transactionId);
   }
+  const derivedStatus = engineIntelligenceContract.deriveEngineIntelligenceResponseStatus(response.engines, response.warnings);
+  if (response.status !== undefined && response.status !== derivedStatus) {
+    return unavailableEngineIntelligence(transactionId);
+  }
 
   return Object.freeze({
     state: "available",
     available: true,
     transactionId,
-    contractVersion: engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION,
+    contractVersion: version,
     generatedAt: response.generatedAt,
     comparison,
     engineCount: engines.length,
@@ -766,19 +771,19 @@ function unavailableEngineIntelligence(transactionId) {
   });
 }
 
-function normalizeEngineResults(values) {
+function normalizeEngineResults(values, version) {
   if (!Array.isArray(values)) {
     return null;
   }
-  if (values.length > engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_ENGINES) {
+  if (values.length > engineIntelligenceContract.maxEnginesForVersion(version)) {
     return null;
   }
-  if (!engineIntelligenceContract.hasUniqueCanonicalEngineOrder(values)) {
+  if (!engineIntelligenceContract.hasRequiredRulesMlEngineSet(values, version)) {
     return null;
   }
   const normalized = [];
   for (const value of values) {
-    if (!engineIntelligenceContract.isEngineShape(value)) {
+    if (!engineIntelligenceContract.isEngineShape(value, version)) {
       return null;
     }
     const reasonCodes = normalizeReasonCodes(value.reasonCodes);
@@ -801,7 +806,7 @@ function normalizeEngineResults(values) {
   return normalized;
 }
 
-function normalizeDiagnosticSignals(values) {
+function normalizeDiagnosticSignals(values, version) {
   if (!Array.isArray(values)) {
     return null;
   }
@@ -810,7 +815,7 @@ function normalizeDiagnosticSignals(values) {
   }
   const normalized = [];
   for (const value of values) {
-    if (!engineIntelligenceContract.isDiagnosticSignalShape(value)) {
+    if (!engineIntelligenceContract.isDiagnosticSignalShape(value, version)) {
       return null;
     }
     const reasonCode = safeRenderableString(value.reasonCode);
