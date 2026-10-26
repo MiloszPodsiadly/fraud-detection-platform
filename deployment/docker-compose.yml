@@ -61,7 +61,7 @@ services:
   # This topology is not a production availability or recovery design.
   mongodb:
     <<: *service-defaults
-    image: mongo:7.0
+    image: mongo:9.0
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - mongodb-data:/data/db
