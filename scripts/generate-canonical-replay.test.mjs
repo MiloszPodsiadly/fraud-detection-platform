@@ -30,6 +30,8 @@ test("canonical replay generator produces identical test output for a fixed seed
       assert.equal(new Set(events.map((event) => event.traceId)).size, events.length);
       assert.ok(events.every((event) => event.sourceSystem === "BASH_JSONL_GENERATOR"));
       assert.ok(events.every((event) => event.deviceInfo.attributes.synthetic === true));
+      assert.ok(events.every((event) => event.attributes.deviceEvidenceProvenance === "SYNTHETIC_UNTRUSTED"));
+      assert.ok(events.every((event) => event.deviceInfo.attributes.deviceEvidenceProvenance === "SYNTHETIC_UNTRUSTED"));
 
       const fingerprintByDevice = new Map();
       for (const event of events) {
@@ -42,6 +44,30 @@ test("canonical replay generator produces identical test output for a fixed seed
     } finally {
       rmSync(temporaryDirectory, { recursive: true, force: true });
     }
+});
+
+test("canonical replay keeps A→A bytes while A→B→A separates deterministic identities", () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "fdp149-canonical-replay-identity-"));
+  try {
+    const dimensionsPath = join(temporaryDirectory, "dimensions.json");
+    const firstA = join(temporaryDirectory, "first-a.jsonl");
+    const changedB = join(temporaryDirectory, "changed-b.jsonl");
+    const repeatedA = join(temporaryDirectory, "repeated-a.jsonl");
+    writeFileSync(dimensionsPath, JSON.stringify(dimensionsFixture()), "utf8");
+
+    generate(firstA, dimensionsPath, true, { seed: "7341" });
+    generate(changedB, dimensionsPath, true, { seed: "7342" });
+    generate(repeatedA, dimensionsPath, true, { seed: "7341" });
+
+    assert.deepEqual(readFileSync(firstA), readFileSync(repeatedA));
+    const aEvents = readFileSync(firstA, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const bEvents = readFileSync(changedB, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const aIdentities = new Set(aEvents.flatMap((event) => [event.eventId, event.correlationId, event.transactionId, event.traceId]));
+    assert.ok(bEvents.flatMap((event) => [event.eventId, event.correlationId, event.transactionId, event.traceId])
+      .every((identity) => !aIdentities.has(identity)));
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
 });
 
 test("canonical replay default mode creates fresh transaction and trace identities per run", () => {
@@ -82,7 +108,7 @@ test("synthetic replay wrapper forwards deterministic test mode", () => {
   }
 });
 
-function generate(outputPath, dimensionsPath, deterministicTestMode = true) {
+function generate(outputPath, dimensionsPath, deterministicTestMode = true, { seed = "7341" } = {}) {
   const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
   const bash = process.env.BASH || (process.platform === "win32"
     ? "C:\\Program Files\\Git\\bin\\bash.exe"
@@ -90,7 +116,7 @@ function generate(outputPath, dimensionsPath, deterministicTestMode = true) {
   execFileSync(bash, [
     "scripts/generate-canonical-replay.sh",
     "--count", "40",
-    "--seed", "7341",
+    "--seed", seed,
     "--dimensions", dimensionsPath,
     "--output", outputPath,
     "--reference-instant", "2026-01-01T08:00:00Z",

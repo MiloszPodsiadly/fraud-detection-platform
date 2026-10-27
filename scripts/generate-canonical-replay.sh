@@ -301,7 +301,12 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
                 "trustedDevice": trusted_device,
                 "proxyDetected": proxy,
                 "vpnDetected": vpn,
-                "attributes": {"synthetic": True, "scenario": scenario, "deviceAgeDays": 0 if not trusted_device else 180},
+                "attributes": {
+                    "synthetic": True,
+                    "deviceEvidenceProvenance": "SYNTHETIC_UNTRUSTED",
+                    "scenario": scenario,
+                    "deviceAgeDays": 0 if not trusted_device else 180,
+                },
             },
             "locationInfo": {
                 "countryCode": country_code,
@@ -332,6 +337,7 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
             "traceId": f"trace-syn-{replay_run_id}-{index + 1}",
             "attributes": {
                 "generator": "bash-canonical-replay",
+                "deviceEvidenceProvenance": "SYNTHETIC_UNTRUSTED",
                 "seed": seed,
                 "scenario": scenario,
                 "suspicious": expected_fraud,

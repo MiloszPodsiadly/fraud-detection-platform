@@ -77,7 +77,11 @@ class SyntheticReplayDataSourceTest {
         assertThat(first).extracting(TransactionRawEvent::eventId).doesNotHaveDuplicates();
         assertThat(first).extracting(TransactionRawEvent::correlationId).doesNotHaveDuplicates();
         assertThat(first).allSatisfy(event -> {
-            assertThat(event.attributes()).containsEntry("generator", "synthetic");
+            assertThat(event.attributes())
+                    .containsEntry("generator", "synthetic")
+                    .containsEntry("deviceEvidenceProvenance", "SYNTHETIC_UNTRUSTED");
+            assertThat(event.deviceInfo().attributes())
+                    .containsEntry("deviceEvidenceProvenance", "SYNTHETIC_UNTRUSTED");
             assertThat(event.sourceSystem()).isEqualTo("SYNTHETIC_GENERATOR");
         });
         assertThat(first.stream().collect(java.util.stream.Collectors.toMap(

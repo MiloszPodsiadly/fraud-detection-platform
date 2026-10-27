@@ -25,6 +25,7 @@ import java.util.stream.Stream;
 public class SyntheticReplayDataSource implements ReplayDataSource {
 
     private static final int SCENARIO_CYCLE = 1_000;
+    private static final String SYNTHETIC_UNTRUSTED = "SYNTHETIC_UNTRUSTED";
 
     private static final String[] HOME_COUNTRIES = {"US", "GB", "DE", "PL", "FR", "NL"};
     private static final String[] HIGH_RISK_COUNTRIES = {"BR", "NG", "RO", "MX"};
@@ -154,6 +155,7 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
                         vpnDetected,
                         Map.of(
                                 "synthetic", true,
+                                "deviceEvidenceProvenance", SYNTHETIC_UNTRUSTED,
                                 "deviceAgeDays", elevatedRisk ? 0 : 180,
                                 "scenario", scenario.scenarioName()
                         )
@@ -191,6 +193,7 @@ public class SyntheticReplayDataSource implements ReplayDataSource {
                 "trace-syn-" + runId + "-" + (index + 1),
                 Map.of(
                         "generator", "synthetic",
+                        "deviceEvidenceProvenance", SYNTHETIC_UNTRUSTED,
                         "suspicious", suspicious,
                         "scenario", scenario.scenarioName(),
                         "expectedRiskLevel", scenario.expectedRiskLevel()
