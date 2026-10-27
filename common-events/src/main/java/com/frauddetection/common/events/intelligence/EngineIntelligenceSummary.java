@@ -97,12 +97,6 @@ public record EngineIntelligenceSummary(
             if (device && engine.status() == FraudEngineStatus.AVAILABLE) {
                 throw new IllegalArgumentException("ENGINE_INTELLIGENCE_DEVICE_SCORE_UNCALIBRATED");
             }
-            for (String code : engine.reasonCodes()) {
-                if (device && !EngineIntelligenceValuePolicy.allowedForDevice(code)
-                        || !device && EngineIntelligenceValuePolicy.isDeviceReason(code)) {
-                    throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
-                }
-            }
         }
     }
 }

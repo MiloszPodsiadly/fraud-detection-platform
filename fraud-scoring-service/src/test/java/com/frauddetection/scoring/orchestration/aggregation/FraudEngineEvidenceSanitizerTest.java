@@ -93,6 +93,22 @@ class FraudEngineEvidenceSanitizerTest {
     }
 
     @Test
+    void dropsEvidenceWhoseReasonCodeIsOwnedByAnotherEngine() {
+        List<FraudEngineAggregationWarning> warnings = new ArrayList<>();
+
+        List<BoundedFraudEngineEvidenceSummary> result = sanitizer.sanitize(
+                "rules.primary",
+                List.of(evidence("DEVICE_SWITCH_OBSERVED", "Safe title", "Safe description")),
+                FraudEngineAggregationPolicy.defaultInternalPolicy(),
+                warnings
+        );
+
+        assertThat(result).isEmpty();
+        assertThat(warnings).extracting(FraudEngineAggregationWarning::code)
+                .containsExactly(FraudEngineAggregationWarningCode.EVIDENCE_UNSUPPORTED_REASON_CODE_DROPPED);
+    }
+
+    @Test
     void keepsEvidenceWithoutOptionalReasonCode() {
         List<FraudEngineAggregationWarning> warnings = new ArrayList<>();
 

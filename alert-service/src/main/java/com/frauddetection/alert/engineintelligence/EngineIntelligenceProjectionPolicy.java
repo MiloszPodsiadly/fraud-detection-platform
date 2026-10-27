@@ -7,6 +7,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceDiagnosti
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceReasonCodePolicy;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
@@ -134,7 +135,11 @@ public class EngineIntelligenceProjectionPolicy {
                 boundedEnum(source.status(), FraudEngineStatus.class),
                 boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
                 boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class),
-                copyBounded(source.reasonCodes(), MAX_REASON_CODES_PER_ENGINE, this::boundedPublicReasonCode),
+                copyBounded(
+                        source.reasonCodes(),
+                        MAX_REASON_CODES_PER_ENGINE,
+                        reasonCode -> boundedPublicReasonCode(source.engineId(), reasonCode)
+                ),
                 source.modelIdentity()
         ));
     }
@@ -161,7 +166,7 @@ public class EngineIntelligenceProjectionPolicy {
                 boundedEnum(source.signalCategory(), EngineIntelligenceSignalCategory.class),
                 boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
                 boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class),
-                boundedPublicReasonCode(source.reasonCode())
+                boundedPublicReasonCode(source.engineId(), source.reasonCode())
         ));
     }
 
@@ -181,17 +186,10 @@ public class EngineIntelligenceProjectionPolicy {
         return safe;
     }
 
-    private String boundedPublicReasonCode(String reasonCode) {
+    private String boundedPublicReasonCode(String engineId, String reasonCode) {
         String safe = boundedString(reasonCode);
         try {
-            new EngineIntelligenceEngineResult(
-                    FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
-                    FraudEngineType.RULES,
-                    FraudEngineStatus.AVAILABLE,
-                    RiskLevel.LOW,
-                    EngineIntelligenceScoreBucket.LOW,
-                    List.of(safe)
-            );
+            EngineIntelligenceReasonCodePolicy.requireOwnedByEngine(engineId, safe);
         } catch (RuntimeException exception) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
         }

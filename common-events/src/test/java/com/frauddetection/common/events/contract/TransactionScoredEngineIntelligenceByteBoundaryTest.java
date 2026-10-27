@@ -25,11 +25,39 @@ class TransactionScoredEngineIntelligenceByteBoundaryTest {
     }
 
     @Test
-    void duplicateDecodedEngineIntelligenceNamesAreRejectedWithBoundedReasonCode() {
+    void duplicateDecodedEngineIntelligenceNamesAreRejectedWithStableWireReasonCode() {
         String json = "{\"engineIntelligence\":null,\"engine\\u0049ntelligence\":null}";
 
         assertThatThrownBy(() -> deserializer.deserialize("transactions.scored", utf8(json)))
-                .hasRootCauseMessage("ENGINE_INTELLIGENCE_DUPLICATE_JSON_FIELD");
+                .hasRootCauseMessage("ENGINE_INTELLIGENCE_JSON_INVALID");
+    }
+
+    @Test
+    void duplicateTopLevelEventContractVersionIsRejectedAtTheRawWireBoundary() throws Exception {
+        String json = fullFixture().replace(
+                "\"eventContractVersion\": 2,",
+                "\"eventContractVersion\": 1,\n  \"eventContractVersion\": 2,"
+        );
+
+        assertThatThrownBy(() -> deserializer.deserialize("transactions.scored", utf8(json)))
+                .hasRootCauseMessage("ENGINE_INTELLIGENCE_JSON_INVALID");
+    }
+
+    @Test
+    void duplicateTopLevelFieldsAreRejectedBeforePojoDeserialization() throws Exception {
+        assertStableInvalid(fullFixture().replace(
+                "\"transactionId\": \"txn-engine-intelligence-contract-001\",",
+                "\"transactionId\": \"first\",\n  \"transactionId\": \"txn-engine-intelligence-contract-001\","));
+        assertStableInvalid(fullFixture().replace(
+                "\"mlPredictionEvidenceOmissionReason\": \"ML_ENGINE_UNAVAILABLE\"",
+                "\"mlPredictionEvidenceOmissionReason\": \"first\",\n"
+                        + "  \"mlPredictionEvidenceOmissionReason\": \"ML_ENGINE_UNAVAILABLE\""));
+        assertStableInvalid(fullFixture().replace(
+                "\"engineIntelligence\": {",
+                "\"engineIntelligence\": null,\n  \"engineIntelligence\": {"));
+        assertStableInvalid(fullFixture().replace(
+                "\n}",
+                ",\n  \"mlPredictionEvidence\": null,\n  \"mlPredictionEvidence\": null\n}"));
     }
 
     @Test
@@ -44,8 +72,17 @@ class TransactionScoredEngineIntelligenceByteBoundaryTest {
     void duplicateNestedKeysMalformedJsonAndExcessiveDepthUseStableReasons() {
         assertStableInvalid("{\"engineIntelligence\":{\"contractVersion\":2,\"contractVersion\":2}}");
         assertStableInvalid("{\"engineIntelligence\":{\"contractVersion\":2,\"contract\\u0056ersion\":2}}");
+        assertStableInvalid("{\"engineIntelligence\":{\"engines\":[{\"engineId\":\"rules.primary\","
+                + "\"engineId\":\"rules.primary\"}]}}");
         assertStableInvalid("{\"engineIntelligence\":{");
         assertStableInvalid("{\"engineIntelligence\":" + "[".repeat(65) + "0" + "]".repeat(65) + "}");
+    }
+
+    @Test
+    void additiveUnknownTopLevelFieldRemainsTolerated() throws Exception {
+        String json = fullFixture().replace("\n}", ",\n  \"futureProducerField\": {\"enabled\": true}\n}");
+
+        assertThat(deserializer.deserialize("transactions.scored", utf8(json)).eventContractVersion()).isEqualTo(2);
     }
 
     @Test
@@ -84,6 +121,14 @@ class TransactionScoredEngineIntelligenceByteBoundaryTest {
     private void assertStableInvalid(String json) {
         assertThatThrownBy(() -> deserializer.deserialize("transactions.scored", utf8(json)))
                 .hasRootCauseMessage("ENGINE_INTELLIGENCE_JSON_INVALID");
+    }
+
+    private String fullFixture() throws Exception {
+        try (InputStream input = Objects.requireNonNull(getClass().getResourceAsStream(
+                "/fixtures/transaction-scored-event/transaction_scored_event_v2_full_bounded_engine_intelligence.json"
+        ))) {
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private byte[] utf8(String value) {

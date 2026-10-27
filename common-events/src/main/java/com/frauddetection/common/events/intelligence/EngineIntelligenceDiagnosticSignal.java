@@ -52,5 +52,6 @@ public record EngineIntelligenceDiagnosticSignal(
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_OPERATIONAL_SIGNAL_SCORE_BUCKET_INVALID");
         }
         EngineIntelligenceValuePolicy.requireReasonCode(reasonCode);
+        EngineIntelligenceReasonCodePolicy.requireOwnedByEngine(engineId, reasonCode);
     }
 }

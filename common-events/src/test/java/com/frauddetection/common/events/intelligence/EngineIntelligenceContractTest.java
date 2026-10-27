@@ -107,12 +107,19 @@ class EngineIntelligenceContractTest {
                 EngineIntelligenceTestSupport.comparison(), List.of(), List.of()))
                 .hasMessage("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
 
-        assertThatThrownBy(() -> new EngineIntelligenceSummary(1,
-                EngineIntelligenceTestSupport.GENERATED_AT,
-                List.of(EngineIntelligenceTestSupport.rulesEngine(List.of(DEVICE_REASON)),
-                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)),
-                EngineIntelligenceTestSupport.comparison(), List.of(), List.of()))
-                .hasMessage("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.rulesEngine(List.of(DEVICE_REASON)))
+                .hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+    }
+
+    @Test
+    void rejectsReasonCodesOwnedByAnotherNonDeviceEngineInResultsAndDiagnostics() {
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.rulesEngine(List.of("ML_MODEL_TIMEOUT")))
+                .hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+        assertThatThrownBy(() -> new EngineIntelligenceDiagnosticSignal(
+                "rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceSignalCategory.FRAUD_SIGNAL, RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH, "ML_MODEL_TIMEOUT"
+        )).hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
     }
 
     @Test
@@ -164,7 +171,7 @@ class EngineIntelligenceContractTest {
                 EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
                 new EngineIntelligenceEngineResult("device.primary", FraudEngineType.DEVICE_RISK,
                         FraudEngineStatus.AVAILABLE, RiskLevel.LOW,
-                        EngineIntelligenceScoreBucket.LOW, List.of("DEVICE_NOVELTY")))))
+                        EngineIntelligenceScoreBucket.LOW, List.of(DEVICE_REASON)))))
                 .hasMessage("ENGINE_INTELLIGENCE_DEVICE_SCORE_UNCALIBRATED");
     }
 

@@ -307,9 +307,9 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 List.of(
                         engineResponse("rules.primary", FraudEngineType.RULES, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW, List.of("HIGH_VELOCITY")),
                         engineResponse("ml.python.primary", FraudEngineType.ML_MODEL, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW, List.of("ML_MODEL_SIGNAL")),
-                        engineResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, List.of("RAPID_TRANSFER_BURST_SIGNAL"))
+                        engineResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, List.of("RAPID_PLN_20K_BURST"))
                 ),
-                List.of(signalResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.AVAILABLE, EngineIntelligenceSignalCategory.FRAUD_SIGNAL, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, "RAPID_TRANSFER_BURST_SIGNAL")),
+                List.of(signalResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.AVAILABLE, EngineIntelligenceSignalCategory.FRAUD_SIGNAL, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, "RAPID_PLN_20K_BURST")),
                 List.of()
         );
     }

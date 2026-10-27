@@ -158,6 +158,15 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
+    void reasonCodeOwnedByAnotherEngineIsRejectedAtProjectionBoundary() {
+        EngineIntelligenceSummary source = summaryMock();
+        EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("ML_MODEL_TIMEOUT"));
+        when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
+
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
+    }
+
+    @Test
     void rejectsForbiddenRawEngineId() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rawEvidence.primary", List.of("HIGH_VELOCITY"));

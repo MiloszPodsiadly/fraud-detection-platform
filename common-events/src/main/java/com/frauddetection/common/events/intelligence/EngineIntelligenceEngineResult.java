@@ -42,6 +42,7 @@ public record EngineIntelligenceEngineResult(
                 "reasonCodes"
         );
         reasonCodes.forEach(EngineIntelligenceValuePolicy::requireReasonCode);
+        reasonCodes.forEach(reasonCode -> EngineIntelligenceReasonCodePolicy.requireOwnedByEngine(engineId, reasonCode));
         validateModelIdentity(engineType, status, modelIdentity);
     }
 

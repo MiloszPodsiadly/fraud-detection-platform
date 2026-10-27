@@ -73,7 +73,8 @@ public record NormalizedFraudEngineResult(
         );
         FraudEngineReasonCodeNormalizer reasonCodeNormalizer = new FraudEngineReasonCodeNormalizer();
         if (reasonCodes.stream().anyMatch(reasonCode ->
-                !FraudEngineAggregationSafety.isSafe(reasonCode) || !reasonCodeNormalizer.isAllowed(reasonCode))) {
+                !FraudEngineAggregationSafety.isSafe(reasonCode)
+                        || !reasonCodeNormalizer.isAllowedForEngine(engineId, reasonCode))) {
             throw new IllegalArgumentException("AGGREGATION_UNNORMALIZED_REASON_CODE");
         }
     }

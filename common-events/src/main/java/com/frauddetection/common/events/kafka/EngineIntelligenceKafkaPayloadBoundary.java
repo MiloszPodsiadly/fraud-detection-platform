@@ -14,7 +14,9 @@ final class EngineIntelligenceKafkaPayloadBoundary {
 
     private static final String FIELD_NAME = "engineIntelligence";
     private static final int MAX_JSON_NESTING_DEPTH = 64;
-    private static final JsonFactory ROOT_JSON_FACTORY = JsonFactory.builder().build();
+    private static final JsonFactory ROOT_JSON_FACTORY = JsonFactory.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .build();
     private static final JsonFactory ENGINE_INTELLIGENCE_JSON_FACTORY = JsonFactory.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .streamReadConstraints(StreamReadConstraints.builder()
