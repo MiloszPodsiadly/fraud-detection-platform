@@ -321,46 +321,47 @@ class MongoDeviceObservationStoreIntegrationTest {
     }
 
     @Test
-    void erasureRemovesMembershipAndBlocksReplay() {
+    void operationalRevocationRemovesMembershipRetainsReceiptsAndBlocksReplay() {
         Observation first = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
         store.stage(first);
         store.seal(seal(INSTITUTION, 1, B_TIME, 1));
         store.commit(INSTITUTION, SOURCE, first.sourceEventKey());
-        store.eraseDevice(INSTITUTION, SOURCE, 1, DEVICE);
+        store.revokeDeviceFromOperationalHistory(INSTITUTION, SOURCE, 1, DEVICE);
+        store.revokeDeviceFromOperationalHistory(INSTITUTION, SOURCE, 1, DEVICE);
         assertThat(count("device_observations")).isZero();
-        assertThat(count("device_erasure_tombstones")).isEqualTo(1);
+        assertThat(count("device_operational_revocation_tombstones")).isEqualTo(1);
         assertThat(count("device_occurrences")).isEqualTo(1);
-        assertThatThrownBy(() -> store.stage(first)).hasMessage("DEVICE_STORE_ERASED_DEVICE");
+        assertThatThrownBy(() -> store.stage(first)).hasMessage("DEVICE_STORE_DEVICE_OPERATIONALLY_REVOKED");
         assertThatThrownBy(() -> store.commit(INSTITUTION, SOURCE, first.sourceEventKey()))
-                .hasMessage("DEVICE_STORE_ERASED_DEVICE");
+                .hasMessage("DEVICE_STORE_DEVICE_OPERATIONALLY_REVOKED");
     }
 
     @Test
-    void erasureQuarantinesPendingCandidatesAndReconcilesTheScopeCounter() {
+    void operationalRevocationQuarantinesPendingCandidatesAndReconcilesTheScopeCounter() {
         Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
         store.stage(pending);
 
-        store.eraseDevice(INSTITUTION, SOURCE, 1, DEVICE);
+        store.revokeDeviceFromOperationalHistory(INSTITUTION, SOURCE, 1, DEVICE);
 
         Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
                 .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
         Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
                 .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())).first();
         assertThat(candidate.getString("status")).isEqualTo("QUARANTINED");
-        assertThat(candidate.getString("terminalReason")).isEqualTo("ERASURE_REQUESTED");
+        assertThat(candidate.getString("terminalReason")).isEqualTo("OPERATIONAL_REVOCATION_REQUESTED");
         assertThat(candidate.getDate("terminalExpireAt")).isEqualTo(Date.from(NOW.plus(Duration.ofDays(45))));
         assertThat(progress.getInteger("pendingCount")).isZero();
         assertThat(progress.getBoolean("invalidated")).isTrue();
     }
 
     @Test
-    void replayAfterTombstoneAndReceiptHorizonCannotResurrectErasedDevice() {
+    void replayAfterRevocationTombstoneAndReceiptHorizonCannotResurrectOperationalHistory() {
         Observation nearFuture = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1,
                 NOW.plus(Duration.ofMinutes(2)));
         store.stage(nearFuture);
         store.seal(seal(INSTITUTION, 1, nearFuture.eventTime(), 1));
         store.commit(INSTITUTION, SOURCE, nearFuture.sourceEventKey());
-        store.eraseDevice(INSTITUTION, SOURCE, 1, DEVICE);
+        store.revokeDeviceFromOperationalHistory(INSTITUTION, SOURCE, 1, DEVICE);
 
         Clock afterRetention = Clock.offset(Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofDays(45).plus(Duration.ofMinutes(3)));
@@ -372,7 +373,85 @@ class MongoDeviceObservationStoreIntegrationTest {
     }
 
     @Test
-    void startupMigratesLegacyStagedExpiryOffTheTtlIndex() {
+    void operationalRevocationIsScopedToOneDeviceAndKeyVersion() {
+        Observation revoked = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        Observation unrelated = observation(INSTITUTION, CUSTOMER, token('f'), '3', '4', 2, 1, C_TIME);
+        store.stage(revoked);
+        store.stage(unrelated);
+        store.seal(seal(INSTITUTION, 2, A_TIME, 1));
+        store.commit(INSTITUTION, SOURCE, revoked.sourceEventKey());
+        DeviceRiskEvidence unrelatedEvidence = store.commit(INSTITUTION, SOURCE, unrelated.sourceEventKey()).evidence();
+
+        store.revokeDeviceFromOperationalHistory(INSTITUTION, SOURCE, 1, DEVICE);
+
+        assertThat(store.commit(INSTITUTION, SOURCE, unrelated.sourceEventKey()).evidence()).isEqualTo(unrelatedEvidence);
+        Observation rotated = observation(INSTITUTION, CUSTOMER, DEVICE, '5', '6', 3, 2,
+                NOW.minus(Duration.ofMinutes(2)));
+        assertThat(store.stage(rotated)).isEqualTo(StageResult.CREATED);
+    }
+
+    @Test
+    void concurrentOperationalRevocationAndCommitCannotRestoreMembershipOrPendingCounter() throws Exception {
+        Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        store.stage(pending);
+        store.seal(seal(INSTITUTION, 1, B_TIME, 1));
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            List<Callable<Void>> work = List.of(
+                    () -> {
+                        store.commit(INSTITUTION, SOURCE, pending.sourceEventKey());
+                        return null;
+                    },
+                    () -> {
+                        store.revokeDeviceFromOperationalHistory(INSTITUTION, SOURCE, 1, DEVICE);
+                        return null;
+                    });
+            for (Future<Void> result : executor.invokeAll(work)) {
+                result.get();
+            }
+        }
+
+        Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+        Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())).first();
+        assertThat(count("device_observations")).isZero();
+        assertThat(count("device_operational_revocation_tombstones")).isEqualTo(1);
+        assertThat(candidate.getString("status")).isIn("COMMITTED", "QUARANTINED");
+        assertThat(progress.getInteger("pendingCount")).isZero();
+        assertThat(progress.getBoolean("invalidated")).isTrue();
+        assertThatThrownBy(() -> store.stage(pending)).hasMessage("DEVICE_STORE_DEVICE_OPERATIONALLY_REVOKED");
+    }
+
+    @Test
+    void cleanBootstrapCreatesOnlyCurrentNamedIndexesAndNoCounterVersionMarker() {
+        assertThat(indexNames("device_observation_candidates")).containsExactlyInAnyOrder(
+                "_id_", "candidate_source_event_unique", "candidate_transaction_unique", "candidate_sequence_unique",
+                "candidate_customer_event_status_sequence", "candidate_status_event_source_event",
+                "candidate_device_status", "candidate_terminal_expiry_ttl");
+        assertThat(indexNames("device_observations")).containsExactlyInAnyOrder(
+                "_id_", "observation_device_window", "observation_customer_window", "observation_expiry_ttl");
+        assertThat(indexNames("device_occurrences")).containsExactlyInAnyOrder(
+                "_id_", "occurrence_transaction_unique", "occurrence_device", "occurrence_expiry_ttl");
+        assertThat(indexNames("device_operational_revocation_tombstones")).containsExactlyInAnyOrder(
+                "_id_", "tombstone_expiry_ttl");
+
+        Document terminalExpiry = index("device_observation_candidates", "candidate_terminal_expiry_ttl");
+        assertThat(terminalExpiry.get("key", Document.class)).isEqualTo(new Document("terminalExpireAt", 1));
+        assertThat(((Number) terminalExpiry.get("expireAfterSeconds")).longValue()).isZero();
+        assertThat(index("device_observation_candidates", "candidate_source_event_unique").getBoolean("unique"))
+                .isTrue();
+
+        Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        store.stage(pending);
+        Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
+                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+        assertThat(progress).doesNotContainKey("pendingCounterVersion");
+        new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    void startupRejectsLegacyCandidateTtlSchemaWithoutMutatingData() {
         var collection = client.getDatabase(databaseName).getCollection("device_observation_candidates");
         collection.createIndex(com.mongodb.client.model.Indexes.ascending("expireAt"),
                 new IndexOptions().expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS));
@@ -383,24 +462,41 @@ class MongoDeviceObservationStoreIntegrationTest {
                 .append("customer", CUSTOMER).append("device", DEVICE).append("keyVersion", 1)
                 .append("sequence", 1L).append("eventTime", Date.from(B_TIME)).append("status", "STAGED")
                 .append("expireAt", Date.from(NOW.plus(Duration.ofDays(45)))));
-        client.getDatabase(databaseName).getCollection("device_source_coverage").insertOne(
-                new Document("_id", INSTITUTION + ':' + SOURCE).append("pendingCount", 3).append("revision", 0L));
 
-        new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC));
+        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC)))
+                .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
 
-        Document migrated = collection.find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey()))
+        Document retained = collection.find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey()))
                 .first();
-        assertThat(migrated.getDate("expireAt")).isNull();
-        assertThat(migrated.getDate("terminalExpireAt")).isNull();
-        Document reconciled = client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
-        assertThat(reconciled.getInteger("pendingCount")).isEqualTo(1);
-        assertThat(reconciled.getInteger("pendingCounterVersion")).isEqualTo(1);
-        assertThat(reconciled.getBoolean("invalidated")).isTrue();
-        assertThat(collection.listIndexes().into(new ArrayList<>()).stream()
-                .map(index -> index.getString("name")))
-                .doesNotContain("expireAt_1")
-                .contains("candidate_terminal_expiry_ttl");
+        assertThat(retained.getDate("expireAt")).isEqualTo(Date.from(NOW.plus(Duration.ofDays(45))));
+        assertThat(retained.getDate("terminalExpireAt")).isNull();
+        assertThat(indexNames("device_observation_candidates")).contains("expireAt_1");
+    }
+
+    @Test
+    void startupRejectsLegacyCounterVersionMarkerWithoutMutatingData() {
+        var progress = client.getDatabase(databaseName).getCollection("device_source_coverage");
+        progress.insertOne(new Document("_id", INSTITUTION + ':' + SOURCE)
+                .append("pendingCount", 0).append("revision", 0L).append("pendingCounterVersion", 1));
+
+        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC)))
+                .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
+
+        assertThat(progress.find(eq("_id", INSTITUTION + ':' + SOURCE)).first())
+                .containsEntry("pendingCounterVersion", 1)
+                .containsEntry("pendingCount", 0);
+    }
+
+    @Test
+    void startupRejectsPreRenameErasureTombstoneCollectionWithoutIgnoringItsRevocation() {
+        var oldTombstones = client.getDatabase(databaseName).getCollection("device_erasure_tombstones");
+        oldTombstones.insertOne(new Document("_id", INSTITUTION + ':' + SOURCE + ":1:" + DEVICE)
+                .append("expireAt", Date.from(NOW.plus(Duration.ofDays(45)))));
+
+        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC)))
+                .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
+
+        assertThat(oldTombstones.countDocuments()).isEqualTo(1);
     }
 
     @Test
@@ -488,6 +584,19 @@ class MongoDeviceObservationStoreIntegrationTest {
 
     private long count(String collection) {
         return client.getDatabase(databaseName).getCollection(collection).countDocuments();
+    }
+
+    private List<String> indexNames(String collection) {
+        return client.getDatabase(databaseName).getCollection(collection).listIndexes().into(new ArrayList<>()).stream()
+                .map(index -> index.getString("name"))
+                .toList();
+    }
+
+    private Document index(String collection, String name) {
+        return client.getDatabase(databaseName).getCollection(collection).listIndexes().into(new ArrayList<>()).stream()
+                .filter(index -> name.equals(index.getString("name")))
+                .findFirst()
+                .orElseThrow();
     }
 
     private static Observation observation(String institution, String customer, String device,

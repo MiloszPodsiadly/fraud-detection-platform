@@ -14,7 +14,15 @@ interface DeviceObservationStore {
 
     CommitResult commit(String institutionToken, String sourceCode, String sourceEventKey);
 
-    void eraseDevice(String institutionToken, String sourceCode, int keyVersion, String deviceToken);
+    /**
+     * Revokes one device/key-version from operational history for the bounded tombstone lifetime.
+     *
+     * <p>This removes active observation membership and quarantines staged work, but deliberately retains
+     * terminal candidates and occurrence/evidence receipts until their independently bounded retention expires.
+     * It is not a legal or complete data-erasure workflow.</p>
+     */
+    void revokeDeviceFromOperationalHistory(String institutionToken, String sourceCode, int keyVersion,
+                                            String deviceToken);
 
     enum StageResult { CREATED, DUPLICATE }
     enum CommitStatus { COMMITTED, EXISTING, WAITING_FOR_SEAL, WAITING_FOR_EARLIER_EVENT, QUARANTINED }

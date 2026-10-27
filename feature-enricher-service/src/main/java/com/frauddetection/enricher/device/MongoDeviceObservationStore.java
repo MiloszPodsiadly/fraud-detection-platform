@@ -40,11 +40,9 @@ import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.gt;
-import static com.mongodb.client.model.Filters.in;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.or;
-import static com.mongodb.client.model.Indexes.ascending;
 import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.inc;
 import static com.mongodb.client.model.Updates.set;
@@ -56,16 +54,37 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private static final Duration LATE_AND_REPAIR = Duration.ofDays(1).plusMinutes(5);
     private static final Duration RECEIPT_RETENTION = Duration.ofDays(45);
     private static final Duration MAX_FUTURE_EVENT_SKEW = Duration.ofMinutes(2);
-    private static final Duration TOMBSTONE_RETENTION = RECEIPT_RETENTION.plus(MAX_FUTURE_EVENT_SKEW);
+    private static final Duration REVOCATION_TOMBSTONE_RETENTION = RECEIPT_RETENTION.plus(MAX_FUTURE_EVENT_SKEW);
     private static final int MAX_TRANSACTION_ATTEMPTS = 3;
     private static final int MAX_COMMIT_ACK_ATTEMPTS = 3;
-    private static final int PENDING_COUNTER_VERSION = 1;
     private static final int MAX_SEAL_BATCH = 1_000;
     private static final int MAX_PENDING_CANDIDATES = 10_000;
     private static final int MAX_DEVICE_ROWS = 10_000;
     private static final int MAX_CUSTOMER_ROWS = 25_000;
     private static final TransactionOptions TRANSACTION_OPTIONS = TransactionOptions.builder()
             .readConcern(ReadConcern.SNAPSHOT).writeConcern(WriteConcern.MAJORITY).build();
+    private static final List<IndexSpec> CANDIDATE_INDEXES = List.of(
+            index("candidate_source_event_unique", true, false, "institution", "source", "sourceEvent"),
+            index("candidate_transaction_unique", true, false, "institution", "source", "transaction"),
+            index("candidate_sequence_unique", true, false, "institution", "source", "sequence"),
+            index("candidate_customer_event_status_sequence", false, false,
+                    "institution", "source", "customer", "eventTime", "status", "sequence"),
+            index("candidate_status_event_source_event", false, false,
+                    "institution", "source", "status", "eventTime", "sourceEvent"),
+            index("candidate_device_status", false, false, "institution", "source", "keyVersion", "device", "status"),
+            index("candidate_terminal_expiry_ttl", false, true, "terminalExpireAt"));
+    private static final List<IndexSpec> OBSERVATION_INDEXES = List.of(
+            index("observation_device_window", false, false,
+                    "institution", "source", "keyVersion", "device", "eventTime", "sourceEvent"),
+            index("observation_customer_window", false, false,
+                    "institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"),
+            index("observation_expiry_ttl", false, true, "expireAt"));
+    private static final List<IndexSpec> OCCURRENCE_INDEXES = List.of(
+            index("occurrence_transaction_unique", true, false, "institution", "source", "transaction"),
+            index("occurrence_device", false, false, "institution", "source", "keyVersion", "device"),
+            index("occurrence_expiry_ttl", false, true, "expireAt"));
+    private static final List<IndexSpec> TOMBSTONE_INDEXES = List.of(
+            index("tombstone_expiry_ttl", false, true, "expireAt"));
 
     private final MongoClient client;
     private final MongoDatabase database;
@@ -74,7 +93,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private final MongoCollection<Document> occurrences;
     private final MongoCollection<Document> coverage;
     private final MongoCollection<Document> fences;
-    private final MongoCollection<Document> tombstones;
+    private final MongoCollection<Document> revocationTombstones;
     private final Clock clock;
     private final JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
 
@@ -90,88 +109,77 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         occurrences = database.getCollection("device_occurrences");
         coverage = database.getCollection("device_source_coverage");
         fences = database.getCollection("device_scope_fences");
-        tombstones = database.getCollection("device_erasure_tombstones");
+        revocationTombstones = database.getCollection("device_operational_revocation_tombstones");
         try {
             ensureIndexes();
-            reconcileLegacyPendingCounters();
         } catch (MongoException exception) {
             throw unavailable("INDEXES", exception);
         }
     }
 
     private void ensureIndexes() {
-        removeLegacyCandidateTtlIndex();
-        candidates.createIndex(ascending("institution", "source", "sourceEvent"), new IndexOptions().unique(true));
-        candidates.createIndex(ascending("institution", "source", "transaction"), new IndexOptions().unique(true));
-        candidates.createIndex(ascending("institution", "source", "sequence"), new IndexOptions().unique(true));
-        candidates.createIndex(ascending("institution", "source", "customer", "eventTime", "status", "sequence"));
-        candidates.createIndex(ascending("institution", "source", "status", "eventTime", "sourceEvent"));
-        candidates.createIndex(ascending("institution", "source", "keyVersion", "device", "status"));
-        migrateCandidateExpiryFields();
-        candidates.createIndex(ascending("terminalExpireAt"), new IndexOptions()
-                .expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS).name("candidate_terminal_expiry_ttl"));
-        observations.createIndex(ascending("institution", "source", "keyVersion", "device", "eventTime", "sourceEvent"));
-        observations.createIndex(ascending("institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"));
-        observations.createIndex(ascending("expireAt"), new IndexOptions().expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS));
-        occurrences.createIndex(ascending("institution", "source", "transaction"), new IndexOptions().unique(true));
-        occurrences.createIndex(ascending("institution", "source", "keyVersion", "device"));
-        occurrences.createIndex(ascending("expireAt"), new IndexOptions().expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS));
-        tombstones.createIndex(ascending("expireAt"), new IndexOptions().expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS));
+        Set<String> existingCollections = new HashSet<>(database.listCollectionNames().into(new ArrayList<>()));
+        validateExistingSchema(existingCollections);
+        createIndexes(candidates, CANDIDATE_INDEXES);
+        createIndexes(observations, OBSERVATION_INDEXES);
+        createIndexes(occurrences, OCCURRENCE_INDEXES);
+        createIndexes(revocationTombstones, TOMBSTONE_INDEXES);
     }
 
-    private void removeLegacyCandidateTtlIndex() {
-        boolean collectionExists = database.listCollectionNames().into(new ArrayList<>())
-                .contains("device_observation_candidates");
-        if (!collectionExists) {
+    private void validateExistingSchema(Set<String> existingCollections) {
+        validateCollection(existingCollections, "device_observation_candidates", candidates, CANDIDATE_INDEXES, "expireAt");
+        validateCollection(existingCollections, "device_observations", observations, OBSERVATION_INDEXES);
+        validateCollection(existingCollections, "device_occurrences", occurrences, OCCURRENCE_INDEXES);
+        validateCollection(existingCollections, "device_source_coverage", coverage, List.of(), "pendingCounterVersion");
+        validateCollection(existingCollections, "device_scope_fences", fences, List.of());
+        if (existingCollections.contains("device_erasure_tombstones")) {
+            throw terminal("SCHEMA_INCOMPATIBLE");
+        }
+        validateCollection(existingCollections, "device_operational_revocation_tombstones", revocationTombstones,
+                TOMBSTONE_INDEXES);
+    }
+
+    private static void createIndexes(MongoCollection<Document> collection, List<IndexSpec> indexes) {
+        for (IndexSpec index : indexes) {
+            collection.createIndex(index.keys(), index.options());
+        }
+    }
+
+    private static void validateCollection(Set<String> existingCollections, String collectionName,
+                                           MongoCollection<Document> collection, List<IndexSpec> expectedIndexes,
+                                           String... forbiddenFields) {
+        if (!existingCollections.contains(collectionName)) {
             return;
         }
-        boolean legacyTtlExists = candidates.listIndexes().into(new ArrayList<>()).stream()
-                .anyMatch(index -> "expireAt_1".equals(index.getString("name"))
-                        && index.containsKey("expireAfterSeconds"));
-        if (legacyTtlExists) {
-            candidates.dropIndex("expireAt_1");
+        List<Document> actualIndexes = collection.listIndexes().into(new ArrayList<>());
+        Set<String> expectedNames = new HashSet<>();
+        expectedNames.add("_id_");
+        for (IndexSpec expected : expectedIndexes) {
+            expectedNames.add(expected.name());
         }
-    }
-
-    private void migrateCandidateExpiryFields() {
-        candidates.updateMany(and(eq("status", "STAGED"), exists("expireAt", true)),
-                List.of(new Document("$unset", List.of("expireAt", "terminalExpireAt"))));
-        candidates.updateMany(and(in("status", "COMMITTED", "QUARANTINED"), exists("expireAt", true)),
-                List.of(new Document("$set", new Document("terminalExpireAt", "$expireAt")),
-                        new Document("$unset", List.of("expireAt"))));
-    }
-
-    private void reconcileLegacyPendingCounters() {
-        List<String> legacyScopes = new ArrayList<>();
-        for (Document progress : coverage.find(exists("pendingCounterVersion", false))
-                .projection(new Document("_id", 1))) {
-            legacyScopes.add(progress.getString("_id"));
+        Set<String> actualNames = new HashSet<>();
+        for (Document actual : actualIndexes) {
+            String name = actual.getString("name");
+            if (name == null || !actualNames.add(name)) {
+                throw terminal("SCHEMA_INCOMPATIBLE");
+            }
         }
-        for (String id : legacyScopes) {
-            transaction(session -> {
-                Document progress = coverage.find(session, eq("_id", id)).first();
-                if (progress == null || progress.getInteger("pendingCounterVersion") != null) {
-                    return null;
-                }
-                String[] scope = id.split(":", 2);
-                if (scope.length != 2) {
-                    throw terminal("COUNTER_SCOPE_ID");
-                }
-                int actualPending = Math.toIntExact(candidates.countDocuments(session, and(eq("institution", scope[0]),
-                        eq("source", scope[1]), eq("status", "STAGED"))));
-                Long revisionValue = progress.getLong("revision");
-                long revision = revisionValue == null ? 0L : revisionValue;
-                Bson revisionFilter = progress.containsKey("revision")
-                        ? eq("revision", revision) : exists("revision", false);
-                long changed = coverage.updateOne(session,
-                        and(eq("_id", id), revisionFilter, exists("pendingCounterVersion", false)),
-                        combine(set("pendingCount", actualPending), set("pendingCounterVersion", PENDING_COUNTER_VERSION),
-                                set("invalidated", true), inc("revision", 1L))).getModifiedCount();
-                if (changed != 1) {
-                    throw retryable("COUNTER_RECONCILIATION_RACE");
-                }
-                return null;
-            });
+        if (!actualNames.equals(expectedNames)) {
+            throw terminal("SCHEMA_INCOMPATIBLE");
+        }
+        for (IndexSpec expected : expectedIndexes) {
+            Document actual = actualIndexes.stream()
+                    .filter(index -> expected.name().equals(index.getString("name")))
+                    .findFirst()
+                    .orElseThrow(() -> terminal("SCHEMA_INCOMPATIBLE"));
+            if (!expected.matches(actual)) {
+                throw terminal("SCHEMA_INCOMPATIBLE");
+            }
+        }
+        for (String forbiddenField : forbiddenFields) {
+            if (collection.find(exists(forbiddenField, true)).limit(1).first() != null) {
+                throw terminal("SCHEMA_INCOMPATIBLE");
+            }
         }
     }
 
@@ -185,8 +193,8 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                     || input.sourceObservedAt().isAfter(now.plus(MAX_FUTURE_EVENT_SKEW))) {
                 throw terminal("FUTURE_EVENT");
             }
-            if (hasActiveTombstone(tombstoneId(input), now)) {
-                throw terminal("ERASED_DEVICE");
+            if (hasActiveOperationalRevocation(revocationId(input), now)) {
+                throw terminal("DEVICE_OPERATIONALLY_REVOKED");
             }
             if (!input.eventTime().isAfter(now.minus(RECEIPT_RETENTION))) {
                 throw terminal("REPLAY_HORIZON_EXCEEDED");
@@ -213,17 +221,15 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                     invalidateSource(session, scope);
                     return StageOutcome.rejected(StageRejection.POST_SEAL);
                 }
-                if (hasActiveTombstone(session, tombstoneId(input), clock.instant())) {
-                    throw terminal("ERASED_DEVICE");
+                if (hasActiveOperationalRevocation(session, revocationId(input), clock.instant())) {
+                    throw terminal("DEVICE_OPERATIONALLY_REVOKED");
                 }
                 if (progress != null && progress.getInteger("pendingCount", 0) >= MAX_PENDING_CANDIDATES) {
                     invalidateSource(session, scope);
                     return StageOutcome.rejected(StageRejection.PENDING_CAPACITY);
                 }
                 coverage.updateOne(session, eq("_id", scope),
-                        combine(inc("revision", 1L), inc("pendingCount", 1),
-                                set("pendingCounterVersion", PENDING_COUNTER_VERSION),
-                                setOnInsert("sealedSequence", 0L)),
+                        combine(inc("revision", 1L), inc("pendingCount", 1), setOnInsert("sealedSequence", 0L)),
                         new com.mongodb.client.model.UpdateOptions().upsert(true));
                 candidates.insertOne(session, candidate(input));
                 return StageOutcome.created();
@@ -313,8 +319,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                         and(eq("_id", id), eq("revision", progress.getLong("revision"))),
                         combine(set("sealedSequence", seal.throughSequence()), set("watermark", Date.from(seal.watermark())),
                                 set("coverageStart", Date.from(effectiveStart)), set("continuousSince", Date.from(continuity)),
-                                set("keyVersion", seal.keyVersion()),
-                                set("pendingCounterVersion", PENDING_COUNTER_VERSION), inc("revision", 1L))).getModifiedCount();
+                                set("keyVersion", seal.keyVersion()), inc("revision", 1L))).getModifiedCount();
                 if (changed != 1) {
                     throw retryable("SEAL_RACE");
                 }
@@ -347,8 +352,8 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             if (terminalCandidateExpired(candidate, clock.instant())) {
                 throw terminal("CANDIDATE_EXPIRED");
             }
-            if (hasActiveTombstone(tombstoneId(candidate), clock.instant())) {
-                throw terminal("ERASED_DEVICE");
+            if (hasActiveOperationalRevocation(revocationId(candidate), clock.instant())) {
+                throw terminal("DEVICE_OPERATIONALLY_REVOKED");
             }
             if ("COMMITTED".equals(candidate.getString("status"))) {
                 return existing(id);
@@ -389,8 +394,8 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (!"STAGED".equals(candidate.getString("status"))) {
             throw terminal("CANDIDATE_STATE");
         }
-        if (hasActiveTombstone(session, tombstoneId(candidate), clock.instant())) {
-            throw terminal("ERASED_DEVICE");
+        if (hasActiveOperationalRevocation(session, revocationId(candidate), clock.instant())) {
+            throw terminal("DEVICE_OPERATIONALLY_REVOKED");
         }
         Document progress = coverage.find(session, eq("_id", scopeId(candidate))).first();
         Instant time = candidate.getDate("eventTime").toInstant();
@@ -516,7 +521,8 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     }
 
     @Override
-    public void eraseDevice(String institutionToken, String sourceCode, int keyVersion, String deviceToken) {
+    public void revokeDeviceFromOperationalHistory(String institutionToken, String sourceCode, int keyVersion,
+                                                    String deviceToken) {
         requireToken(institutionToken);
         requireCode(sourceCode);
         requireToken(deviceToken);
@@ -529,24 +535,23 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 eq("keyVersion", keyVersion), eq("device", deviceToken));
         try {
             transaction(session -> {
-                tombstones.updateOne(session, eq("_id", id),
-                        set("expireAt", Date.from(clock.instant().plus(TOMBSTONE_RETENTION))),
+                revocationTombstones.updateOne(session, eq("_id", id),
+                        set("expireAt", Date.from(clock.instant().plus(REVOCATION_TOMBSTONE_RETENTION))),
                         new com.mongodb.client.model.UpdateOptions().upsert(true));
 
                 Bson stagedDevice = and(scopedDevice, eq("status", "STAGED"));
                 long stagedBefore = candidates.countDocuments(session, stagedDevice);
                 long quarantined = candidates.updateMany(session, stagedDevice,
-                        combine(set("status", "QUARANTINED"), set("terminalReason", "ERASURE_REQUESTED"),
+                        combine(set("status", "QUARANTINED"), set("terminalReason", "OPERATIONAL_REVOCATION_REQUESTED"),
                                 set("terminalExpireAt", Date.from(clock.instant().plus(RECEIPT_RETENTION))))).getModifiedCount();
                 if (quarantined != stagedBefore) {
-                    throw retryable("ERASURE_CANDIDATE_RACE");
+                    throw retryable("OPERATIONAL_REVOCATION_CANDIDATE_RACE");
                 }
                 observations.deleteMany(session, scopedDevice);
                 int remainingPending = Math.toIntExact(candidates.countDocuments(session,
                         and(eq("institution", institutionToken), eq("source", sourceCode), eq("status", "STAGED"))));
                 var progress = coverage.updateOne(session, eq("_id", sourceScope),
                         combine(set("invalidated", true), set("pendingCount", remainingPending), inc("revision", 1L),
-                                set("pendingCounterVersion", PENDING_COUNTER_VERSION),
                                 setOnInsert("sealedSequence", 0L)),
                         new com.mongodb.client.model.UpdateOptions().upsert(true));
                 if (progress.getModifiedCount() != 1 && progress.getUpsertedId() == null) {
@@ -555,7 +560,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 return null;
             });
         } catch (MongoException exception) {
-            throw unavailable("ERASE", exception);
+            throw unavailable("OPERATIONAL_REVOCATION", exception);
         }
     }
 
@@ -613,15 +618,15 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         return StageResult.DUPLICATE;
     }
 
-    private boolean hasActiveTombstone(String id, Instant now) {
-        Document tombstone = tombstones.find(eq("_id", id)).first();
+    private boolean hasActiveOperationalRevocation(String id, Instant now) {
+        Document tombstone = revocationTombstones.find(eq("_id", id)).first();
         return tombstone != null && !isExpired(tombstone, "expireAt", now);
     }
 
-    private boolean hasActiveTombstone(ClientSession session, String id, Instant now) {
+    private boolean hasActiveOperationalRevocation(ClientSession session, String id, Instant now) {
         Document tombstone = session == null
-                ? tombstones.find(eq("_id", id)).first()
-                : tombstones.find(session, eq("_id", id)).first();
+                ? revocationTombstones.find(eq("_id", id)).first()
+                : revocationTombstones.find(session, eq("_id", id)).first();
         return tombstone != null && !isExpired(tombstone, "expireAt", now);
     }
 
@@ -672,10 +677,10 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 || !Objects.equals(persisted.getString("transaction"), evidence.occurrenceKey())) {
             throw terminal("OCCURRENCE_IDENTITY_CONFLICT");
         }
-        if (evidence.deviceToken() != null && hasActiveTombstone(session,
+        if (evidence.deviceToken() != null && hasActiveOperationalRevocation(session,
                 scopeId(evidence.institutionToken(), evidence.source().authorityCode()) + ':'
                         + evidence.keyVersion() + ':' + evidence.deviceToken(), now)) {
-            throw terminal("ERASED_DEVICE");
+            throw terminal("DEVICE_OPERATIONALLY_REVOKED");
         }
         if (candidate != null && (!"COMMITTED".equals(candidate.getString("status"))
                 || !Objects.equals(candidate.getString("institution"), persisted.getString("institution"))
@@ -736,9 +741,8 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         Bson coverageFilter = and(eq("_id", scopeId(candidate)), gt("pendingCount", 0));
         Bson coverageUpdate = invalidateSource
                 ? combine(set("invalidated", true), inc("pendingCount", -1),
-                        set("pendingCounterVersion", PENDING_COUNTER_VERSION), inc("revision", 1L))
-                : combine(inc("pendingCount", -1), set("pendingCounterVersion", PENDING_COUNTER_VERSION),
-                        inc("revision", 1L));
+                        inc("revision", 1L))
+                : combine(inc("pendingCount", -1), inc("revision", 1L));
         if (coverage.updateOne(session, coverageFilter, coverageUpdate).getModifiedCount() != 1) {
             throw terminal("PENDING_COUNT_INVARIANT");
         }
@@ -759,8 +763,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
 
     private void invalidateSource(ClientSession session, String scope) {
         long changed = coverage.updateOne(session, eq("_id", scope),
-                combine(set("invalidated", true), set("pendingCounterVersion", PENDING_COUNTER_VERSION),
-                        inc("revision", 1L))).getModifiedCount();
+                combine(set("invalidated", true), inc("revision", 1L))).getModifiedCount();
         if (changed != 1) {
             throw terminal("SOURCE_COVERAGE_MISSING");
         }
@@ -862,11 +865,11 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         return institution + ':' + source;
     }
 
-    private static String tombstoneId(Observation input) {
+    private static String revocationId(Observation input) {
         return scopeId(input.institutionToken(), input.sourceCode()) + ':' + input.keyVersion() + ':' + input.deviceToken();
     }
 
-    private static String tombstoneId(Document candidate) {
+    private static String revocationId(Document candidate) {
         return scopeId(candidate) + ':' + candidate.getInteger("keyVersion") + ':' + candidate.getString("device");
     }
 
@@ -905,6 +908,42 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
 
         private static StageOutcome rejected(StageRejection rejection) {
             return new StageOutcome(null, rejection);
+        }
+    }
+
+    private static IndexSpec index(String name, boolean unique, boolean ttl, String... fields) {
+        Document keys = new Document();
+        for (String field : fields) {
+            keys.append(field, 1);
+        }
+        return new IndexSpec(name, keys, unique, ttl);
+    }
+
+    private record IndexSpec(String name, Document keys, boolean unique, boolean ttl) {
+        private IndexOptions options() {
+            IndexOptions options = new IndexOptions().name(name);
+            if (unique) {
+                options.unique(true);
+            }
+            if (ttl) {
+                options.expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS);
+            }
+            return options;
+        }
+
+        private boolean matches(Document actual) {
+            if (!keys.equals(actual.get("key", Document.class))
+                    || unique != Boolean.TRUE.equals(actual.get("unique"))) {
+                return false;
+            }
+            if (!unique && actual.containsKey("unique")) {
+                return false;
+            }
+            if (!ttl) {
+                return !actual.containsKey("expireAfterSeconds");
+            }
+            Object expiry = actual.get("expireAfterSeconds");
+            return expiry instanceof Number number && number.longValue() == 0L;
         }
     }
 
