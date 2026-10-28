@@ -70,6 +70,11 @@ class FraudEngineRiskMismatchCalculatorTest {
     }
 
     private NormalizedFraudEngineResult result(String engineId, FraudEngineStatus status, RiskLevel risk) {
-        return AggregationTestSupport.normalized(engineId, status, risk == null ? null : 0.5d, risk, "MODEL_HIGH_RISK");
+        String reasonCode = switch (engineId) {
+            case "rules.primary" -> "HIGH_RISK_FLAGS_PRESENT";
+            case "ml.python.primary" -> "MODEL_HIGH_RISK";
+            default -> throw new IllegalArgumentException("Unsupported test engine");
+        };
+        return AggregationTestSupport.normalized(engineId, status, risk == null ? null : 0.5d, risk, reasonCode);
     }
 }

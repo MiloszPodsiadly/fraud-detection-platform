@@ -131,6 +131,16 @@ class NormalizedFraudEngineResultTest {
         )).hasMessage("AGGREGATION_UNNORMALIZED_REASON_CODE");
     }
 
+    @Test
+    void rejectsMlOnlyReasonCodeForRulesEngine() {
+        assertThatThrownBy(() -> result(
+                "rules.primary",
+                FraudEngineStatus.AVAILABLE,
+                0.8d,
+                List.of("MODEL_HIGH_RISK")
+        )).hasMessage("AGGREGATION_UNNORMALIZED_REASON_CODE");
+    }
+
     private NormalizedFraudEngineResult result(
             String engineId,
             FraudEngineStatus status,
