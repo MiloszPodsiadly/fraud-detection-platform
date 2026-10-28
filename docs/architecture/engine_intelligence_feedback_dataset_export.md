@@ -114,6 +114,21 @@ contain colon-delimited raw identifiers such as `deviceId:abc` or raw-id pattern
 Forbidden-term and forbidden-pattern checks are contract safeguards, not data-loss-prevention controls. Source
 mappers and producers remain responsible for sanitizing data before export.
 
+## Engine reason-code completeness
+
+The current EI v2 projection contains two to four engines in canonical `FraudEngineIdentityContract` order, with Rules
+and ML required. Each engine contributes at most five reason-code occurrences, so the complete export can contain up
+to 20 occurrences. `reasonCodesByEngine` preserves each engine ID and its original code order. `reasonCodes` is the
+same complete sequence flattened in canonical engine order for consumers that need a single list. The exporter keeps
+repeated codes and does not truncate or deduplicate them; the record rejects any mismatch between the grouped and
+flattened forms.
+
+Diagnostic signals have their own global limit of five and are never included in the 20 engine reason-code count. A
+missing projection emits empty engine-code groups, flattened reason codes, and diagnostic signals. The internal record
+shape is defined in `docs/schemas/engine_intelligence_feedback_dataset_record.schema.json`. It is separate from
+`docs/schemas/feedback_dataset_record.schema.json`, which belongs to the `feedback-dataset-v3` exact-occurrence
+evaluation context and its ML evidence lineage.
+
 ## JSONL Semantics
 
 `export()` returns `EngineIntelligenceFeedbackDatasetExportResult`, a wrapper containing metadata and records.

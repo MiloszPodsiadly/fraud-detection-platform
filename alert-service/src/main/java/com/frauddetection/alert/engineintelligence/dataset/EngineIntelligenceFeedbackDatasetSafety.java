@@ -1,13 +1,21 @@
 package com.frauddetection.alert.engineintelligence.dataset;
 
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionPolicy;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceReasonCodePolicy;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 final class EngineIntelligenceFeedbackDatasetSafety {
@@ -15,13 +23,6 @@ final class EngineIntelligenceFeedbackDatasetSafety {
     private static final Pattern EVALUATION_RECORD_ID = Pattern.compile("eval-[a-f0-9]{32}");
     private static final Pattern TRANSACTION_REFERENCE = Pattern.compile("txnref-[a-f0-9]{32}");
     private static final Pattern MACHINE_CODE = Pattern.compile("[A-Z0-9_]{1,64}");
-    static final Set<String> DEVICE_EVIDENCE_REASON_CODES = Set.of(
-            "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE", "DEVICE_EVIDENCE_PARTIAL",
-            "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED");
-    static final Set<String> DEVICE_ALLOWED_REASON_CODES = Set.of(
-            "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE", "DEVICE_EVIDENCE_PARTIAL",
-            "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED", "ORCHESTRATOR_ENGINE_EXCEPTION",
-            "ORCHESTRATOR_ENGINE_NULL_RESULT", "ORCHESTRATOR_ENGINE_REJECTED", "ORCHESTRATOR_ENGINE_TIMEOUT");
     private static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
     private static final Pattern IBAN = Pattern.compile("[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}");
     private static final Pattern PAN = Pattern.compile("\\b(?:\\d[ -]*?){13,19}\\b");
@@ -96,14 +97,14 @@ final class EngineIntelligenceFeedbackDatasetSafety {
     }
 
     static List<String> copyMachineCodes(List<String> source, String fieldName, int maxSize) {
-        return copyMachineCodes(source, fieldName, maxSize, Set.of());
+        return copyMachineCodes(source, fieldName, maxSize, ignored -> false);
     }
 
     static List<String> copyMachineCodes(
             List<String> source,
             String fieldName,
             int maxSize,
-            Set<String> exactAdditionalSafeCodes
+            Predicate<String> exactAdditionalSafeCode
     ) {
         if (source == null) {
             return List.of();
@@ -112,10 +113,48 @@ final class EngineIntelligenceFeedbackDatasetSafety {
             throw new IllegalArgumentException(fieldName + " exceeds max size");
         }
         return source.stream()
-                .map(value -> value != null && exactAdditionalSafeCodes.contains(value)
-                        ? value
+                .map(value -> value != null && exactAdditionalSafeCode.test(value)
+                        ? requireCanonicalReasonCode(value, fieldName)
                         : requireMachineCode(value, fieldName))
                 .toList();
+    }
+
+    static String requireCanonicalReasonCode(String value, String fieldName) {
+        if (value == null
+                || !MACHINE_CODE.matcher(value).matches()
+                || !EngineIntelligenceReasonCodePolicy.isKnownReasonCode(value)) {
+            throw new IllegalArgumentException(fieldName + " must use a known bounded reason code");
+        }
+        return value;
+    }
+
+    static Map<String, List<String>> copyEngineReasonCodesByEngine(Map<String, List<String>> source) {
+        if (source == null || source.size() > EngineIntelligenceProjectionPolicy.MAX_ENGINES) {
+            throw new IllegalArgumentException("reasonCodesByEngine exceeds supported engine count");
+        }
+        Map<String, List<String>> copy = new LinkedHashMap<>();
+        int previousEngineOrder = -1;
+        for (Map.Entry<String, List<String>> entry : source.entrySet()) {
+            String engineId = entry.getKey();
+            int engineOrder = FraudEngineIdentityContract.orderOf(engineId);
+            List<String> engineReasonCodes = entry.getValue();
+            if (engineOrder == Integer.MAX_VALUE
+                    || engineOrder <= previousEngineOrder
+                    || engineReasonCodes == null
+                    || engineReasonCodes.size() > EngineIntelligenceProjectionPolicy.MAX_REASON_CODES_PER_ENGINE) {
+                throw new IllegalArgumentException("reasonCodesByEngine has invalid identity or bounds");
+            }
+            for (String reasonCode : engineReasonCodes) {
+                if (reasonCode == null
+                        || !EngineIntelligenceReasonCodePolicy.isAllowedForEngine(engineId, reasonCode)) {
+                    throw new IllegalArgumentException("reasonCodesByEngine contains an unowned reason code");
+                }
+                requireCanonicalReasonCode(reasonCode, "reasonCodesByEngine");
+            }
+            copy.put(engineId, List.copyOf(engineReasonCodes));
+            previousEngineOrder = engineOrder;
+        }
+        return Collections.unmodifiableMap(copy);
     }
 
     static String requireMachineCode(String value, String fieldName) {

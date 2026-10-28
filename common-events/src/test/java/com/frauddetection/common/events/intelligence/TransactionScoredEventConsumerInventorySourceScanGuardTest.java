@@ -10,6 +10,8 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
 
     private static final String MESSAGE = "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED";
 
+    // This is a reference inventory, not a listener inventory. Shared wire adapters and test-support
+    // sources also contain typed TransactionScoredEvent references and must be reviewed by role.
     private static final List<String> REVIEWED_PRODUCTION_REFERENCES = List.of(
             "alert-service/src/main/java/com/frauddetection/alert/config/KafkaRecoveryConfiguration.java",
             "alert-service/src/main/java/com/frauddetection/alert/config/TransactionScoredKafkaConfiguration.java",
@@ -36,6 +38,8 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
             "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringUseCase.java",
             "alert-service/src/main/java/com/frauddetection/alert/suspicious/SuspiciousTransactionProjectionService.java",
             "common-events/src/main/java/com/frauddetection/common/events/contract/TransactionScoredEvent.java",
+            "common-events/src/main/java/com/frauddetection/common/events/kafka/JacksonKafkaDeserializer.java",
+            "common-events/src/main/java/com/frauddetection/common/events/kafka/JacksonKafkaSerializer.java",
             "common-test-support/src/main/java/com/frauddetection/common/testsupport/fixture/TransactionFixtures.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/config/FraudScoringKafkaConfig.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/mapper/TransactionScoredEventMapper.java",
@@ -68,13 +72,16 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
     }
 
     @Test
-    void docsMentionKnownConsumerPathsAndFixtureReaders() throws Exception {
+    void docsDescribeCurrentWireBoundariesConsumersAndFixtureSupport() throws Exception {
         assertThat(EngineIntelligenceSourceScanSupport.read(
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         )).contains(
-                "KafkaRecoveryConfiguration",
-                "TransactionScoredKafkaConfiguration",
-                "JacksonKafkaDeserializer",
+                "Current producer and consumer matrix",
+                "JacksonKafkaSerializer<TransactionScoredEvent>",
+                "JacksonKafkaDeserializer<TransactionScoredEvent>",
+                "not additional consumer registrations",
+                "common-test-support",
+                "test scope only",
                 "TransactionScoredEventListener",
                 "TransactionScoredRedriveListener",
                 "EngineIntelligenceProjectionEventListener",
@@ -83,25 +90,12 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
                 "MlPredictionEvidenceEventListener",
                 "MlPredictionEvidenceRedriveListener",
                 "MlPredictionEvidenceProjectionService",
-                "TransactionMonitoringService",
-                "ScoredTransactionDocumentMapper",
                 "ScoringOccurrenceFingerprint",
-                "AlertManagementService",
-                "FraudCaseManagementService",
-                "FraudCaseIngestionService",
-                "FraudCaseTransactionAssembler",
-                "SuspiciousTransactionProjectionService",
-                "EvidenceProjectionService",
-                "AlertEvidenceSnapshotProjectionService",
                 "TransactionFraudScoringService",
-                "TransactionScoredEventMapper",
                 "KafkaTransactionScoredEventPublisher",
                 "TransactionFixtures",
-                "AlertServiceIntegrationTest",
-                "FraudDetectionPlatformEndToEndIntegrationTest",
-                "FraudScoringIntegrationTest",
                 "no direct `TransactionScoredEvent` deserializer in API or analyst console UI",
-                "no scored-event fixture reader was found"
+                "Compatibility is unknown until every external consumer is identified and verified"
         );
     }
 }

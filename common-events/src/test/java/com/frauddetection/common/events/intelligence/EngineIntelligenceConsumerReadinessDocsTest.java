@@ -7,73 +7,41 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceConsumerReadinessDocsTest {
 
     @Test
-    void docsStateConsumerFirstBoundaryAndFutureProducerGate() throws Exception {
+    void docsStateCurrentConsumerMatrixAndStrictCurrentVersionGate() throws Exception {
         String docs = EngineIntelligenceSourceScanSupport.read(
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         );
 
         assertThat(docs).contains(
-                "Consumer-first Engine Intelligence Rollout Readiness",
-                "Do not emit what consumers have not proven they can safely tolerate",
-                "FDP-93 proved consumers could safely tolerate engineIntelligence before any producer emitted it",
-                "FDP-93 was consumer-readiness, not product exposure",
-                "Current Engine Intelligence exposure exists through later scoped",
-                "did not emit engineIntelligence in production runtime",
-                "did not add alert-service projection or persist engineIntelligence",
-                "did not expose engineIntelligence through API/UI",
-                "does not add final decisioning",
-                "Current alert-service tests exercise every configured `TransactionScoredEvent` deserialization path",
-                "exact canonical evidence outcome and occurrence identity",
-                "baseline decision fields",
-                "producer emission remained a separate reviewed",
-                "Producer emission must be disabled by default",
-                "guarded by an explicit feature flag",
-                "required consumer-readiness proof",
-                "future projection behavior change still requires separate review",
-                "Producer emission requires an explicit rollout flag",
-                "Producer emission was not allowed until FDP-93 consumer-readiness tests were green",
-                "Before producer rollout, omission of the optional `engineIntelligence` summary remained the default",
-                "Producer tests in later branches had to cover enabled and disabled modes",
-                "Producer emission must preserve FDP-92 public contract semantics",
-                "Producer emission must not introduce final decisioning",
-                "Producer emission must not hide projection/API/UI changes unless they are explicitly scoped and reviewed",
-                "FDP-92 proves the DTO is bounded",
-                "FDP-93 proves consumers tolerate the bounded DTO",
-                "FDP-93 intentionally requires alert-service tolerance for unknown top-level TransactionScoredEvent",
-                "fields as a forward-compatibility guardrail, not only for engineIntelligence nested fields",
-                "Unknown top-level tolerance does not authorize producers to emit arbitrary fields",
-                "Producer branches must still",
-                "define exact public payload shape",
-                "Consumer tolerance is not producer looseness",
-                "Source-scan guards are intentionally strict",
-                "consumer inventory review is required",
-                "Source-scan guards are not a substitute for architectural review",
-                "New TransactionScoredEvent",
-                "consumers must be added to the inventory intentionally",
-                "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED",
-                "JacksonKafkaDeserializer",
-                "never removes or repairs canonical evidence",
+                "Current Engine Intelligence consumer readiness",
+                "outer `eventContractVersion=2`",
+                "exactly `contractVersion=2`",
+                "16 KiB of serialized UTF-8",
+                "`rules.primary` (required)",
+                "`device.primary` (optional and not an admitted runtime)",
+                "Current producer and consumer matrix",
+                "EngineIntelligenceKafkaPayloadBoundary",
+                "JacksonKafkaSerializer<TransactionScoredEvent>",
+                "JacksonKafkaDeserializer<TransactionScoredEvent>",
+                "TransactionScoredEventListener",
                 "EngineIntelligenceProjectionEventListener",
-                "MlPredictionEvidenceEventListener",
-                "MlPredictionEvidenceRedriveListener",
                 "MlPredictionEvidenceProjectionService",
-                "ScoringOccurrenceFingerprint",
-                "separate Kafka consumer group",
+                "TransactionFixtures",
+                "test scope only",
+                "REST / OpenAPI",
+                "React",
+                "External consumers",
+                "Compatibility is unknown until every external consumer is identified and verified",
+                "Byte-oriented boundaries enforce the 16 KiB nested limit and duplicate-field rejection",
+                "duplicate-field rejection",
+                "exact-ML XOR",
                 "strict full-event deserialization",
-                "bounded retry",
-                "dead-letter handling",
-                "Fixture names describe the current `TransactionScoredEvent` shape",
-                "`v2_without_engine_intelligence` proves legitimate optional absence",
-                "current scored-event shape with optional engineIntelligence present",
-                "Identity-free historical comparison payloads are not fixtures and are rejected rather than normalized during replay",
-                "does not change `EngineIntelligenceSummary.contractVersion`",
-                "historical nested public engine-intelligence producer contract used `contractVersion = 1`",
-                "FDP-93 fixtures cover valid and forward-compatible event shapes",
-                "current shared contract, projection, API, and UI accept only nested version 2",
-                "External consumers remain unknown until identified and verified",
-                "code and deployment compatibility matrix",
-                "nested versions fail safely and boundedly",
-                "invalid-version handling is not consumer tolerance"
+                "neither repairs nor fabricates diagnostic evidence",
+                "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED",
+                "There is no parallel v1 runtime, compatibility parser, automatic conversion, or automatic deletion path",
+                "Current-version acceptance and cutover",
+                "rollback to a v1-only reader is not a compatibility strategy",
+                "Device Risk remains a declared optional identity only"
         );
     }
 
@@ -84,12 +52,11 @@ class EngineIntelligenceConsumerReadinessDocsTest {
         )).doesNotContainIgnoringCase(
                 "production emission enabled",
                 "alert projection ready",
-                "UI ready",
+                "ui ready",
                 "analyst console ready",
                 "final decision source",
                 "automatic decline",
-                "automatic approve",
-                "payment authorization"
+                "automatic approve"
         );
     }
 }

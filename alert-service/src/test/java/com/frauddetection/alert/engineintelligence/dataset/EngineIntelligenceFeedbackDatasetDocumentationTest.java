@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -12,6 +14,8 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
 
     private static final Path ROOT = repositoryRoot();
     private static final Path DOC = ROOT.resolve("docs/architecture/engine_intelligence_feedback_dataset_export.md");
+    private static final Path RECORD_SCHEMA = ROOT.resolve(
+            "docs/schemas/engine_intelligence_feedback_dataset_record.schema.json");
 
     @Test
     void docsMentionSingleTimeBasis() throws IOException {
@@ -156,6 +160,30 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
                 .contains("future public/operator/scheduled export")
                 .contains("performance review")
                 .contains("batch lookup");
+    }
+
+    @Test
+    void docsDefineCompleteGroupedReasonCodeAndIndependentSignalLimits() throws IOException {
+        assertThat(normalizedDoc())
+                .contains("up to 20 occurrences")
+                .contains("reasonCodesByEngine")
+                .contains("does not truncate or deduplicate")
+                .contains("global limit of five")
+                .contains("feedback_dataset_record.schema.json")
+                .contains("feedback-dataset-v3");
+
+        JsonNode schema = JsonMapper.builder().findAndAddModules().build().readTree(RECORD_SCHEMA.toFile());
+        assertThat(schema.at("/properties/reasonCodes/maxItems").intValue()).isEqualTo(20);
+        assertThat(schema.at("/properties/reasonCodesByEngine/additionalProperties/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/properties/diagnosticSignals/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/allOf/0/if/properties/projectionStatus/const").textValue()).isEqualTo("AVAILABLE");
+        assertThat(schema.at("/allOf/0/then/properties/reasonCodesByEngine/minProperties").intValue()).isEqualTo(2);
+        assertThat(schema.at("/allOf/0/then/properties/reasonCodesByEngine/required").toString())
+                .isEqualTo("[\"rules.primary\",\"ml.python.primary\"]");
+        assertThat(schema.at("/allOf/1/if/properties/projectionStatus/const").textValue()).isEqualTo("MISSING");
+        assertThat(schema.at("/allOf/1/then/properties/reasonCodes/maxItems").intValue()).isZero();
+        assertThat(schema.at("/allOf/1/then/properties/reasonCodesByEngine/maxProperties").intValue()).isZero();
+        assertThat(schema.at("/allOf/1/then/properties/diagnosticSignals/maxItems").intValue()).isZero();
     }
 
     @Test

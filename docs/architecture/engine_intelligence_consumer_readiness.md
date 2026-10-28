@@ -1,154 +1,100 @@
-# Consumer-first Engine Intelligence Rollout Readiness
+# Current Engine Intelligence consumer readiness
 
-Status: historical FDP-93 consumer-readiness gate; superseded for current projection/API/UI exposure.
+Status: active current-contract inventory. This is not a rollout history and does not authorize final
+decisioning, payment authorization, automatic approval, decline, or block.
 
-## Purpose
+## Current contract
 
-FDP-93 proved consumers could safely tolerate engineIntelligence before any producer emitted it.
-Do not emit what consumers have not proven they can safely tolerate.
-FDP-93 was consumer-readiness, not product exposure. Current Engine Intelligence exposure exists through later scoped
-producer, projection, API/OpenAPI, and Analyst Console work; this document remains as historical rollout evidence and
-compatibility guidance.
+Every current `TransactionScoredEvent` has outer `eventContractVersion=2`. Its optional nested
+`EngineIntelligenceSummary` has exactly `contractVersion=2` when present, is limited to 16 KiB of serialized UTF-8,
+and uses one canonical ordered ID set:
 
-## Consumer Inventory
+1. `rules.primary` (required)
+2. `ml.python.primary` (required)
+3. `velocity.primary` (optional)
+4. `device.primary` (optional and not an admitted runtime)
 
-| Area | Known consumer or usage path | FDP-93 treatment |
+The comparison remains `RULES_VS_ML` over Rules and ML only. The exact ML evidence XOR remains independent of the
+nested summary. There is no active v1 reader: missing, v1, and unknown nested versions are rejected safely and
+boundedly. Unknown additive fields are tolerated only where the current contract explicitly allows them; that
+tolerance never authorizes producer-side arbitrary fields or semantic reinterpretation.
+
+## Current producer and consumer matrix
+
+| Boundary | Current owner and behavior | Recovery / limitation |
 | --- | --- | --- |
-| Shared contract | `common-events` `TransactionScoredEvent` and contract tests | Shared current-absent, minimal, full-bounded, unknown-nested, and unknown-top-level fixtures |
-| Authoritative alert Kafka consumer | `TransactionScoredKafkaConfiguration` / `KafkaRecoveryConfiguration` -> `JacksonKafkaDeserializer<TransactionScoredEvent>` -> `TransactionScoredEventListener` | Uses the same strict full-event contract as every current scored-event consumer; baseline decisioning does not depend on diagnostic projection storage, but the consumer never removes or repairs canonical evidence |
-| Authoritative alert redrive | `KafkaRecoveryConfiguration` -> `TransactionScoredRedriveListener` -> `TransactionScoredEventListener` | Disabled by default and isolated in its own consumer group; accepts only the dedicated redrive topic with the original authoritative topic, consumer group, partition, and offset provenance, then delegates to the sole baseline consumer instead of implementing parallel scoring or persistence |
-| Current Engine Intelligence projection consumer | `KafkaRecoveryConfiguration` -> `EngineIntelligenceProjectionEventListener` -> `EngineIntelligenceProjectionService` / `EngineIntelligencePendingProjectionService` | Uses an independent consumer group and error handler, projects diagnostics only when the event owns the current scoring occurrence, and durably defers a valid projection while baseline persistence is pending |
-| Engine Intelligence projection-only redrive | `KafkaRecoveryConfiguration` -> `EngineIntelligenceRedriveListener` -> `EngineIntelligencePendingProjectionService` -> `EngineIntelligenceProjectionService` | Disabled by default; accepts only dedicated-topic records with complete EI source provenance, uses the existing durable inbox and worker, and cannot invoke baseline business processing |
-| ML prediction evidence consumer | `KafkaRecoveryConfiguration` -> `MlPredictionEvidenceEventListener` -> `MlPredictionEvidenceProjectionService` | Uses strict full-event deserialization in a separate Kafka consumer group, record acknowledgement, bounded retry, and dead-letter handling |
-| ML prediction evidence redrive | `KafkaRecoveryConfiguration` -> `MlPredictionEvidenceRedriveListener` -> `MlPredictionEvidenceProjectionService` | Disabled by default; the dedicated redrive topic and group recover only immutable private evidence, require original source coordinates, and route invalid input to terminal quarantine without replaying baseline business processing |
-| Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Persists baseline business fields, exact scoring-occurrence ownership, and the canonical ML evidence omission outcome without persisting raw Engine Intelligence |
-| Scoring occurrence identity | `ScoredTransactionDocumentMapper` and `EngineIntelligenceProjectionService` -> `ScoringOccurrenceFingerprint` | One canonical fingerprint binds current-state admission and optional diagnostic projection to the same exact scored-event payload |
-| Alert creation path | `AlertManagementService` -> `AlertCaseFactory` -> `AlertDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
-| Fraud-case path | `FraudCaseManagementService` -> `FraudCaseIngestionService` -> `FraudCaseTransactionAssembler` -> `FraudCaseDocument` and `FraudCaseTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
-| Suspicious transaction path | `SuspiciousTransactionProjectionService` -> `SuspiciousTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
-| Evidence paths | `EvidenceProjectionService` and `AlertEvidenceSnapshotProjectionService` | Historical inventory only; no FDP-93 engine-intelligence projection |
-| Producer boundary | `TransactionFraudScoringService` -> `TransactionScoredEventMapper` -> `KafkaTransactionScoredEventPublisher` | Disabled diagnostics omit diagnostic payloads but emit the current canonical `DIAGNOSTIC_EMISSION_DISABLED` evidence outcome |
-| Test fixture helper | `common-test-support` `TransactionFixtures` | Existing test-only builder remains documented separately |
-| Integration tests | `AlertServiceIntegrationTest`, `FraudDetectionPlatformEndToEndIntegrationTest`, and `FraudScoringIntegrationTest` | Existing scored-event integration coverage remains in place |
-| Replay and smoke scripts | Repository search found raw-transaction replay input only; no scored-event fixture reader was found | Shared FDP-93 fixtures are the scored-event compatibility source |
-| API/UI | Repository search found no direct `TransactionScoredEvent` deserializer in API or analyst console UI | Guarded against product exposure |
+| Producer | `TransactionFraudScoringService` -> `TransactionScoredEventMapper` -> `KafkaTransactionScoredEventPublisher` | Diagnostic emission is disabled by default. When enabled through the reviewed flag, it publishes the bounded current summary without changing baseline Rules/ML decisions. |
+| Wire boundaries | `JacksonKafkaSerializer<TransactionScoredEvent>` / `JacksonKafkaDeserializer<TransactionScoredEvent>` use `EngineIntelligenceKafkaPayloadBoundary` | Byte-oriented boundaries enforce the 16 KiB nested limit and duplicate-field rejection. Deserialization then validates outer event v2 and nested v2; shared contract validators enforce canonical IDs/order, reason ownership and exact-ML XOR. |
+| Authoritative scored Kafka consumer | `TransactionScoredEventListener` | Strict full-event deserialization and baseline persistence remain the authoritative path; it neither repairs nor fabricates diagnostic evidence. |
+| Baseline redrive | `TransactionScoredRedriveListener` on `transactions.redrive` | Disabled by default, requires original source coordinates, delegates to the sole baseline listener, and sends invalid recovery input to `transactions.quarantine`; it never replays to `transactions.scored`. |
+| Engine Intelligence Kafka / redrive | `EngineIntelligenceProjectionEventListener`, `EngineIntelligencePendingProjectionService`, and `EngineIntelligenceRedriveListener` | Projection has its own consumer group, bounded retry and `engine-intelligence.dead-letter`; a valid deferred projection waits for its exact baseline occurrence. Projection-only redrive is disabled by default and cannot invoke baseline processing. |
+| Alert projection / Mongo | `EngineIntelligenceProjectionService`, `EngineIntelligenceProjectionPolicy`, and `ScoringOccurrenceFingerprint` | Mongo stores bounded public projection data only when it belongs to the exact scored occurrence. Conflict, stale, malformed, or unavailable data fails closed without rewriting baseline alert state. |
+| ML evidence / feedback / export | `MlPredictionEvidenceEventListener`, `MlPredictionEvidenceRedriveListener`, `MlPredictionEvidenceProjectionService`, and Engine Intelligence feedback-dataset export | Exact private ML evidence has its own consumer/recovery path. Export is bounded, authorized separately, and is not a scoring, training, or decisioning command. |
+| REST / OpenAPI | alert-service Engine Intelligence read model and `docs/openapi/alert_service.openapi.yaml` | Read DTOs expose bounded v2 diagnostics only; absent/unavailable projections stay explicit and do not mean low risk. |
+| React | Analyst Console validators and Engine Intelligence panels | The UI validates current v2 IDs, order, reason-code ownership and safe status semantics. It renders diagnostics, never raw evidence or a Device Risk fraud score. |
+| External consumers | Not fully inventoried | Compatibility is unknown until every external consumer is identified and verified. No repository test is proof of deployed reader versions. |
+| Fixture support | `TransactionFixtures` in `common-test-support` | This module is used in test scope only; the builder is not a runtime producer, listener, or consumer. |
 
-The current topology gives authoritative alert processing, current Engine Intelligence projection, and immutable ML
-prediction evidence projection independent offsets and failure domains. Every current consumer strictly deserializes the
-same complete canonical event without removing, repairing, or fabricating evidence fields. After successful deserialization,
-diagnostic consumers persist their projections independently; transient storage failures use bounded retry and permanent
-evidence failures use dead-letter handling. A successfully consumed base event therefore cannot be replayed merely because
-a diagnostic store is unavailable. Approved evidence recovery copies records from `ml.prediction-evidence.dead-letter` to
-`ml.prediction-evidence.redrive`; its separate, disabled-by-default listener writes only immutable evidence and sends
-malformed, conflicting, or coordinate-free records to `ml.prediction-evidence.quarantine`.
+## Source-scan review
 
-Approved baseline recovery copies retained records to `transactions.redrive`, never back to `transactions.scored`.
-`TransactionScoredRedriveListener` is disabled by default, uses a dedicated consumer group, requires the original
-authoritative topic/group/partition/offset headers and transaction key, and delegates to `TransactionScoredEventListener`.
-Invalid recovery records terminate in `transactions.quarantine`; the redrive path owns no alternative scoring logic.
+The repository scan currently finds 33 Java files that reference `TransactionScoredEvent`. It scans `src/main` Java
+sources, excludes test and generated-output paths, and therefore also sees the separately scoped `common-test-support`
+module. It is a reference inventory rather than a count of Kafka consumers.
 
-The current Engine Intelligence consumer acknowledges an ordering-gap record only after its bounded projection envelope
-is durable in `engine_intelligence_pending_projections`. A lease-fenced worker retries after the authoritative baseline
-occurrence appears; stale records are completed as no-ops, payload conflicts fail closed, and bounded retry/age exhaustion
-becomes an observable `UNRESOLVED` state. EI failures use `engine-intelligence.dead-letter`, never the baseline DLT.
-Approved recovery copies retained records to `engine-intelligence.redrive`, never `transactions.scored`; a disabled-by-default
-listener validates source coordinates and admits them to the same inbox. Dedicated Kafka ACLs authorize that operation,
-while headers provide provenance consistency only. Invalid recovery records terminate in `engine-intelligence.quarantine`.
+The two additions to the reviewed reference set are
+`common-events/src/main/java/com/frauddetection/common/events/kafka/JacksonKafkaSerializer.java` and
+`common-events/src/main/java/com/frauddetection/common/events/kafka/JacksonKafkaDeserializer.java`. The serializer
+applies the shared bounded-wire check before publishing a typed scored event. The deserializer applies that check
+before constructing the event and handing failures to the configured Kafka recovery handler. Neither class declares
+a listener, consumer group, topic, retry policy, deduplication rule, projection, or API path; they are shared wire
+adapters, not additional consumer registrations. The package-private
+`EngineIntelligenceKafkaPayloadBoundary` is called by both adapters and validates raw nested JSON size and duplicate
+properties; it is not itself a typed scored-event consumer.
 
-The source-scan discovery test fails with `TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED`
-when a production reference is added without inventory review.
-Source-scan guards are intentionally strict and may require updates when production references move
-or new consumers are added. A source-scan failure means consumer inventory review is required.
-Source-scan guards are not a substitute for architectural review. New TransactionScoredEvent
-consumers must be added to the inventory intentionally. The bounded failure message is
-`TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED`.
+Runtime consumer coordinates remain owned by the alert-service listener configuration: the baseline listener
+consumes `transactions.scored`; Engine Intelligence and ML evidence use separate consumer groups on that topic. Their
+redrive paths use `transactions.redrive`, `engine-intelligence.redrive`, and `ml.prediction-evidence.redrive`, with
+separate dead-letter/quarantine handling and redrive disabled by default. Baseline occurrence admission is
+idempotent/stale/conflict-aware; Engine Intelligence binds projection to the exact scoring occurrence and defers an
+ordering gap; exact ML evidence has a separate projection and recovery path. None of those paths makes an external
+consumer or deployed v2 compatibility attestable from this repository.
 
-## Fixture Strategy
+There is no direct `TransactionScoredEvent` deserializer in API or analyst console UI; those paths consume bounded
+read DTOs and their own contract validators.
 
-Shared fixtures live under `common-events/src/test/resources/fixtures/transaction-scored-event/`.
-They cover a current event with the optional summary absent, a minimal bounded summary, the full bounded summary, unknown nested
-summary fields, and an unknown top-level event field.
-Fixture names describe the current `TransactionScoredEvent` shape used for contract tests.
-`v2_without_engine_intelligence` proves legitimate optional absence.
-`v2_*_engine_intelligence` means the current scored-event shape with optional engineIntelligence present.
-This does not change `EngineIntelligenceSummary.contractVersion`.
-The historical nested public engine-intelligence producer contract used `contractVersion = 1`. The current in-repository
-producer, common contract, alert projection/API, and Analyst Console use nested `contractVersion = 2`, with Device Risk
-optional and uncalibrated. Current readers reject nested v1 and unknown versions; deployments must confirm that all
-reader instances are upgraded before enabling the current producer wire shape.
-Identity-free historical comparison payloads are not fixtures and are rejected rather than normalized during replay.
+## Failure isolation and recovery
 
-## Alert-service Readiness
+All current scored-event consumers use strict full-event deserialization. Diagnostic persistence is isolated from
+baseline processing: a successfully consumed base event is not replayed solely because a diagnostic store is
+unavailable. The Engine Intelligence consumer persists an ordering-gap envelope before acknowledging it; a fenced
+worker retries once the authoritative occurrence exists. Conflicts fail closed and bounded retry/age exhaustion is
+observable as `UNRESOLVED`.
 
-Current alert-service tests exercise every configured `TransactionScoredEvent` deserialization path. They prove exact
-evidence and explicit omission outcomes survive unchanged, malformed outcomes fail closed, baseline decision fields are
-unchanged by diagnostics, and occurrence identity remains bound to the exact consumed event.
+The immutable ML evidence consumer and Engine Intelligence projection consumer each have separate consumer groups,
+bounded retry, dead-letter handling, and dedicated redrive topics. Redrive records require original topic, group,
+partition, offset, and transaction-key provenance. Headers provide consistency checks, not authorization or a second
+source of business truth.
 
-## Unknown-field Tolerance
+The source-scan guard fails with `TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED` whenever a new
+production-source reference is added without review. The reviewer must classify its role before updating the
+inventory; a new typed reference does not by itself prove a new Kafka consumer. The guard is a review trigger, not a
+substitute for design review.
 
-The shared event contract and public engine-intelligence DTOs ignore unknown fields. Alert-service
-tests prove tolerance for both unknown nested engine-intelligence fields and an unknown top-level
-event field.
-FDP-93 intentionally requires alert-service tolerance for unknown top-level TransactionScoredEvent
-fields as a forward-compatibility guardrail, not only for engineIntelligence nested fields.
-Unknown top-level tolerance helps future additive event evolution.
-Unknown top-level tolerance does not authorize producers to emit arbitrary fields without contract review.
-Producer branches must still define exact public payload shape.
-Future producer emission must keep strict producer-side contract tests.
-Consumer tolerance is not producer looseness.
+## Current-version acceptance and cutover
 
-## Payload Tolerance
+There is no parallel v1 runtime, compatibility parser, automatic conversion, or automatic deletion path. A current
+reader accepts only a valid current outer event and, when present, a valid nested v2 summary. Historical or malformed
+records are rejected or quarantined according to the owning recovery/retention procedure; consumers must not invent
+identity, model lineage, evidence, or a lower-risk status.
 
-FDP-92 proves the DTO is bounded.
-FDP-93 proves consumers tolerate the bounded DTO.
-Alert-service deserializes the full bounded fixture without expanding its projection.
+Before enabling producer emission or deploying a reader change, the operator must verify the bounded retained-topic
+and projection scope, confirm all known deployed readers understand nested v2, and identify external consumers. A
+rollback to a v1-only reader is not a compatibility strategy: it requires proof that no v2 event can reach that
+reader. This is a controlled deployment decision, not an application startup migration.
 
-## Historical No Projection / No Persistence Boundary
+## Non-claims
 
-FDP-93 did not add alert-service projection or persist engineIntelligence. That historical boundary is superseded by
-later scoped projection work. Any future projection behavior change still requires separate review.
-
-## Historical No Producer Emission Boundary
-
-FDP-93 did not emit engineIntelligence in production runtime. Later producer emission remained a separate reviewed
-branch and required consumer-readiness proof.
-
-## Producer-emission Feature Flag Requirement
-
-Producer emission must be disabled by default and guarded by an explicit feature flag. FDP-93 did not implement that
-flag.
-
-FDP-94 adds the separately reviewed disabled-by-default runtime producer emission documented in
-[Controlled engine intelligence producer emission rollout](engine_intelligence_producer_emission_rollout.md).
-It does not migrate baseline scoring decisions to the orchestrator and does not enable production
-runtime emission by default. Explicit `true` enables separate diagnostic enrichment only.
-
-## Historical Producer Emission Gate
-
-Producer emission requires an explicit rollout flag.
-Producer emission was not allowed until FDP-93 consumer-readiness tests were green.
-Before producer rollout, omission of the optional `engineIntelligence` summary remained the default.
-Producer tests in later branches had to cover enabled and disabled modes.
-Producer emission must preserve FDP-92 public contract semantics.
-Producer emission must not introduce final decisioning.
-Producer emission must not hide projection/API/UI changes unless they are explicitly scoped and reviewed.
-
-## Merge Gates
-
-- Shared fixtures deserialize in `common-events`.
-- Alert-service deserializes current summary-absent and summary-present fixtures through every current Kafka boundary.
-- Alert-service preserves the exact canonical evidence outcome and occurrence identity while baseline decision fields
-  remain unchanged by diagnostics.
-- Source scans remain green for consumer inventory, producer isolation, persistence isolation, and API/UI isolation.
-- FDP-93 did not expose engineIntelligence through API/UI.
-- FDP-93 does not add final decisioning.
-
-## Historical Roadmap
-
-A separate reviewed branch could add producer emission behind a disabled-by-default rollout flag after
-consumer-readiness proof. Later projection, persistence, and API/UI work required separate scope and review.
-FDP-93 fixtures cover valid and forward-compatible event shapes.
-The current shared contract, projection, API, and UI accept only nested version 2. A v1-only deployed reader is
-incompatible with the current producer. External consumers remain unknown until identified and verified. Unsupported
-nested versions fail safely and boundedly; invalid-version handling is not consumer tolerance. See the explicit
-[code and deployment compatibility matrix](engine_intelligence_contract_version_adr.md).
+Engine Intelligence is diagnostic. Its current producer, Kafka, projection, API, and UI paths do not alter final
+fraud decisions, payment authorization, alert severity, rules, model thresholds, feedback ownership, or Device Risk
+admission. Device Risk remains a declared optional identity only; its runtime activation is separately blocked until
+independently authenticated, occurrence-bound evidence exists.

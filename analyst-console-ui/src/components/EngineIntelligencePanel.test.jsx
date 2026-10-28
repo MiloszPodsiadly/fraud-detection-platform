@@ -55,7 +55,7 @@ describe("EngineIntelligencePanel", () => {
     expect(screen.getByText("Diagnostic engine output for this transaction.")).toBeInTheDocument();
     expect(screen.getByText("Diagnostic only. Operational statuses and disagreement are investigation context.")).toBeInTheDocument();
     expect(screen.getByText("Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must not be interpreted as model confidence.")).toBeInTheDocument();
-    expect(screen.getByText("Device Risk is not production-ready: authenticated evidence admission and score calibration are unavailable. It does not change Rules/ML decisions.")).toBeInTheDocument();
+    expect(screen.getByText("Device Risk is not production-ready: evidence admission is not independently authenticated, and score calibration is unavailable. History coverage is not fraud confidence. It does not change Rules/ML decisions.")).toBeInTheDocument();
     expect(screen.getByText("Rules")).toBeInTheDocument();
     expect(panelText()).toContain("rules.primary / RULES");
     expect(screen.getAllByText("HIGH_VELOCITY").length).toBeGreaterThan(0);

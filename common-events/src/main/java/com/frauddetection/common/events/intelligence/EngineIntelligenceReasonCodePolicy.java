@@ -74,11 +74,11 @@ public final class EngineIntelligenceReasonCodePolicy {
         }
     }
 
-    static Set<String> deviceReasonCodes() {
+    public static Set<String> deviceReasonCodes() {
         return DEVICE_REASON_CODES;
     }
 
-    static Set<String> sharedOrchestratorReasonCodes() {
+    public static Set<String> sharedOrchestratorReasonCodes() {
         return SHARED_ORCHESTRATOR_REASON_CODES;
     }
 

@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frauddetection.local/schemas/engine_intelligence_feedback_dataset_record.schema.json",
+  "title": "Engine Intelligence feedback dataset record",
+  "description": "Internal-only record schema. Engine reason codes are complete, grouped by canonical engine identity, and flattened in that same order for convenience.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evaluationRecordId",
+    "transactionReference",
+    "feedbackSubmittedAt",
+    "evaluationLabel",
+    "labelSource",
+    "feedbackType",
+    "usefulness",
+    "accuracyAssessment",
+    "projectionStatus",
+    "agreementStatus",
+    "riskMismatchStatus",
+    "scoreDeltaBucket",
+    "mlEngineStatus",
+    "mlScoreBucket",
+    "mlRiskLevel",
+    "rulesEngineStatus",
+    "rulesScoreBucket",
+    "rulesRiskLevel",
+    "reasonCodes",
+    "reasonCodesByEngine",
+    "diagnosticSignals",
+    "engineIntelligenceContractVersion",
+    "deviceEngineStatus",
+    "deviceScoreBucket",
+    "deviceRiskLevel"
+  ],
+  "properties": {
+    "evaluationRecordId": {
+      "type": "string",
+      "pattern": "^eval-[a-f0-9]{32}$"
+    },
+    "transactionReference": {
+      "type": "string",
+      "pattern": "^txnref-[a-f0-9]{32}$"
+    },
+    "feedbackSubmittedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "evaluationLabel": {
+      "enum": ["ANALYST_CONFIRMED_FRAUD", "ANALYST_MARKED_LEGITIMATE", "NOT_EVALUATION_ELIGIBLE"]
+    },
+    "labelSource": {
+      "enum": ["ALERT_ANALYST_DECISION", "MISSING_ALERT_DECISION", "UNKNOWN_ALERT_DECISION"]
+    },
+    "feedbackType": {
+      "enum": [
+        "ENGINE_INTELLIGENCE_USEFULNESS",
+        "ENGINE_DISAGREEMENT_REVIEW",
+        "OPERATIONAL_STATUS_REVIEW",
+        "MISSING_INTELLIGENCE_REVIEW"
+      ]
+    },
+    "usefulness": {
+      "enum": ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL", "NOT_SURE"]
+    },
+    "accuracyAssessment": {
+      "enum": [
+        "SIGNALS_LOOK_CORRECT",
+        "SIGNALS_LOOK_PARTIALLY_CORRECT",
+        "SIGNALS_LOOK_INCORRECT",
+        "NOT_ENOUGH_INFORMATION",
+        "OPERATIONAL_ISSUE_AFFECTED_REVIEW"
+      ]
+    },
+    "projectionStatus": {
+      "enum": ["AVAILABLE", "MISSING"]
+    },
+    "agreementStatus": {
+      "enum": ["AGREEMENT", "ADJACENT_RISK_VARIANCE", "DISAGREEMENT", "PARTIAL", "INSUFFICIENT_DATA", "REQUIRED_ENGINE_NOT_COMPARABLE", null]
+    },
+    "riskMismatchStatus": {
+      "enum": ["SAME_RISK_LEVEL", "ADJACENT_RISK_LEVEL", "MATERIAL_RISK_MISMATCH", "NOT_COMPARABLE", null]
+    },
+    "scoreDeltaBucket": {
+      "enum": ["NONE", "SMALL", "MEDIUM", "LARGE", "UNAVAILABLE", null]
+    },
+    "mlEngineStatus": {
+      "$ref": "#/$defs/nullableEngineStatus"
+    },
+    "mlScoreBucket": {
+      "$ref": "#/$defs/nullableScoreBucket"
+    },
+    "mlRiskLevel": {
+      "$ref": "#/$defs/nullableRiskLevel"
+    },
+    "rulesEngineStatus": {
+      "$ref": "#/$defs/nullableEngineStatus"
+    },
+    "rulesScoreBucket": {
+      "$ref": "#/$defs/nullableScoreBucket"
+    },
+    "rulesRiskLevel": {
+      "$ref": "#/$defs/nullableRiskLevel"
+    },
+    "reasonCodes": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z0-9_]{1,64}$"
+      }
+    },
+    "reasonCodesByEngine": {
+      "type": "object",
+      "maxProperties": 4,
+      "propertyNames": {
+        "enum": ["rules.primary", "ml.python.primary", "velocity.primary", "device.primary"]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "maxItems": 5,
+        "items": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{1,64}$"
+        }
+      }
+    },
+    "diagnosticSignals": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z0-9_]{1,64}$"
+      }
+    },
+    "engineIntelligenceContractVersion": {
+      "enum": [2, null]
+    },
+    "deviceEngineStatus": {
+      "$ref": "#/$defs/nullableEngineStatus"
+    },
+    "deviceScoreBucket": {
+      "$ref": "#/$defs/nullableScoreBucket"
+    },
+    "deviceRiskLevel": {
+      "$ref": "#/$defs/nullableRiskLevel"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "projectionStatus": { "const": "AVAILABLE" }
+        }
+      },
+      "then": {
+        "properties": {
+          "reasonCodesByEngine": {
+            "minProperties": 2,
+            "required": ["rules.primary", "ml.python.primary"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "projectionStatus": { "const": "MISSING" }
+        }
+      },
+      "then": {
+        "properties": {
+          "reasonCodes": { "maxItems": 0 },
+          "reasonCodesByEngine": { "maxProperties": 0 },
+          "diagnosticSignals": { "maxItems": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nullableEngineStatus": {
+      "enum": ["AVAILABLE", "UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED", null]
+    },
+    "nullableScoreBucket": {
+      "enum": ["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE", null]
+    },
+    "nullableRiskLevel": {
+      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL", null]
+    }
+  }
+}

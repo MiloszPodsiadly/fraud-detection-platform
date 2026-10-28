@@ -11,12 +11,14 @@ import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFe
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceReasonCodePolicy;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
@@ -29,6 +31,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -381,6 +384,243 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void acceptsEveryCanonicalDeviceReasonCodeForDeviceEngineAndSignal() {
+        EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
+        EngineIntelligenceFeedbackDocument feedback = feedback(
+                "feedback-1", "txn-1", FROM.plusSeconds(1), List.of());
+        AlertDocument alert = alert("txn-1", AnalystDecision.CONFIRMED_FRAUD);
+
+        for (String reasonCode : EngineIntelligenceReasonCodePolicy.deviceReasonCodes()) {
+            EngineIntelligenceFeedbackDatasetRecord record = mapper.map(
+                    feedback, alert, v2DeviceProjection(reasonCode));
+
+            assertThat(record.reasonCodes()).as("device engine reason code %s", reasonCode).contains(reasonCode);
+            assertThat(record.diagnosticSignals()).as("device signal reason code %s", reasonCode).contains(reasonCode);
+        }
+    }
+
+    @Test
+    void rejectsEveryDeviceOwnedReasonCodeForNonDeviceEnginesAndSignals() {
+        EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
+        EngineIntelligenceFeedbackDocument feedback = feedback(
+                "feedback-1", "txn-1", FROM.plusSeconds(1), List.of());
+        AlertDocument alert = alert("txn-1", AnalystDecision.CONFIRMED_FRAUD);
+
+        for (String reasonCode : EngineIntelligenceReasonCodePolicy.deviceReasonCodes()) {
+            for (String engineId : FraudEngineIdentityContract.engineOrder()) {
+                if (FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engineId)) {
+                    continue;
+                }
+                FraudEngineType engineType = FraudEngineIdentityContract.expectedTypeFor(engineId).orElseThrow();
+                String ownedReasonCode = validReasonCodeFor(engineType);
+
+                assertCorruptedProjection(
+                        mapper,
+                        feedback,
+                        alert,
+                        projection(2, "txn-1", engineProfileWithReasonCodes(engineId, List.of(reasonCode)))
+                );
+
+                EngineIntelligenceDiagnosticSignalProjection invalidSignal = new EngineIntelligenceDiagnosticSignalProjection(
+                        engineId,
+                        engineType,
+                        FraudEngineStatus.AVAILABLE,
+                        EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                        RiskLevel.HIGH,
+                        EngineIntelligenceScoreBucket.HIGH,
+                        reasonCode
+                );
+                EngineIntelligenceProjection invalidSignalProjection = projectionWithSignals(
+                        engineProfileWithReasonCodes(engineId, List.of(ownedReasonCode)),
+                        List.of(invalidSignal)
+                );
+                assertCorruptedProjection(mapper, feedback, alert, invalidSignalProjection);
+            }
+        }
+    }
+
+    @Test
+    void retainsRulesMlVelocityAndSharedOrchestratorReasonCodes() {
+        EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
+        EngineIntelligenceFeedbackDocument feedback = feedback(
+                "feedback-1", "txn-1", FROM.plusSeconds(1), List.of());
+        AlertDocument alert = alert("txn-1", AnalystDecision.CONFIRMED_FRAUD);
+        List<EngineIntelligenceEngineProjection> engines = List.of(
+                engine(FraudEngineType.RULES, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        List.of("HIGH_RISK_FLAGS_PRESENT")),
+                engine(FraudEngineType.ML_MODEL, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        List.of("ML_MODEL_SIGNAL")),
+                engine(FraudEngineType.VELOCITY, FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                        List.of("VELOCITY_FEATURES_UNAVAILABLE"))
+        );
+        List<EngineIntelligenceDiagnosticSignalProjection> signals = List.of(
+                diagnosticSignal(FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        FraudEngineType.RULES, "HIGH_RISK_FLAGS_PRESENT"),
+                diagnosticSignal(FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        FraudEngineType.ML_MODEL, "ML_MODEL_SIGNAL"),
+                diagnosticSignal(FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                        FraudEngineType.VELOCITY, "VELOCITY_FEATURES_UNAVAILABLE")
+        );
+        EngineIntelligenceFeedbackDatasetRecord record = mapper.map(
+                feedback, alert, projectionWithSignals(engines, signals));
+
+        assertThat(record.reasonCodes()).contains("HIGH_RISK_FLAGS_PRESENT", "ML_MODEL_SIGNAL",
+                "VELOCITY_FEATURES_UNAVAILABLE");
+        assertThat(record.diagnosticSignals()).contains("HIGH_RISK_FLAGS_PRESENT", "ML_MODEL_SIGNAL",
+                "VELOCITY_FEATURES_UNAVAILABLE");
+
+        for (String engineId : FraudEngineIdentityContract.engineOrder()) {
+            FraudEngineType engineType = FraudEngineIdentityContract.expectedTypeFor(engineId).orElseThrow();
+            for (String sharedReasonCode : EngineIntelligenceReasonCodePolicy.sharedOrchestratorReasonCodes()) {
+                List<EngineIntelligenceEngineProjection> sharedEngineProfile = engineProfileWithReasonCodes(
+                        engineId, List.of(sharedReasonCode));
+                EngineIntelligenceDiagnosticSignalProjection sharedSignal = diagnosticSignalForEngine(
+                        engineId, engineType, sharedReasonCode);
+                EngineIntelligenceFeedbackDatasetRecord sharedRecord = mapper.map(
+                        feedback,
+                        alert,
+                        projectionWithSignals(sharedEngineProfile, List.of(sharedSignal))
+                );
+
+                assertThat(sharedRecord.reasonCodes()).contains(sharedReasonCode);
+                assertThat(sharedRecord.diagnosticSignals()).contains(sharedReasonCode);
+            }
+        }
+    }
+
+    @Test
+    void rejectsUnknownOrMismatchedEngineIdentityForCodesAndSignals() {
+        EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
+        EngineIntelligenceFeedbackDocument feedback = feedback(
+                "feedback-1", "txn-1", FROM.plusSeconds(1), List.of());
+        AlertDocument alert = alert("txn-1", AnalystDecision.CONFIRMED_FRAUD);
+
+        assertCorruptedProjection(mapper, feedback, alert, projection(2, "txn-1", List.of(
+                engine(FraudEngineType.ML_MODEL, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        List.of("ML_MODEL_SIGNAL")),
+                engine(FraudEngineType.ML_MODEL, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        List.of("ML_MODEL_SIGNAL"))
+        )));
+        assertCorruptedProjection(mapper, feedback, alert, projection(2, "txn-1", List.of(
+                engine(FraudEngineType.RULES, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        List.of("HIGH_RISK_FLAGS_PRESENT")),
+                engine(FraudEngineType.ML_MODEL, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        List.of("ML_MODEL_SIGNAL")),
+                engine(FraudEngineType.RULES, "unknown.engine", List.of("HIGH_RISK_FLAGS_PRESENT"))
+        )));
+
+        EngineIntelligenceProjection mismatchedSignal = projectionWithSignals(
+                engineProfileWithReasonCodes(FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        List.of("HIGH_RISK_FLAGS_PRESENT")),
+                List.of(diagnosticSignal(FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        FraudEngineType.ML_MODEL, "ML_MODEL_SIGNAL"))
+        );
+        assertCorruptedProjection(mapper, feedback, alert, mismatchedSignal);
+
+        EngineIntelligenceProjection unknownSignal = projectionWithSignals(
+                engineProfileWithReasonCodes(FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        List.of("HIGH_RISK_FLAGS_PRESENT")),
+                List.of(diagnosticSignal("unknown.engine", FraudEngineType.RULES, "HIGH_RISK_FLAGS_PRESENT"))
+        );
+        assertCorruptedProjection(mapper, feedback, alert, unknownSignal);
+    }
+
+    @Test
+    void exportsTenElevenAndTwentyReasonCodeOccurrencesWithEngineIdentityAndOrder() {
+        EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
+        EngineIntelligenceFeedbackDocument feedback = feedback(
+                "feedback-1", "txn-1", FROM.plusSeconds(1), List.of());
+        AlertDocument alert = alert("txn-1", AnalystDecision.CONFIRMED_FRAUD);
+
+        assertReasonCodeProfile(mapper, feedback, alert, reasonCodeProfile(2, false), 10);
+        assertReasonCodeProfile(mapper, feedback, alert, reasonCodeProfile(3, true), 11);
+        EngineIntelligenceProjection fourEngineProjection = projectionWithSignals(
+                reasonCodeProfile(4, false), List.of());
+        EngineIntelligenceFeedbackDatasetRecord twentyCodeRecord = mapper.map(
+                feedback, alert, fourEngineProjection);
+        assertThat(twentyCodeRecord.reasonCodes()).hasSize(20);
+        assertThat(twentyCodeRecord.reasonCodesByEngine().keySet())
+                .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
+        assertThat(twentyCodeRecord.reasonCodes())
+                .containsExactlyElementsOf(flattenReasonCodes(fourEngineProjection.getEngines()));
+        assertThat(twentyCodeRecord.reasonCodes()).filteredOn("HIGH_RISK_FLAGS_PRESENT"::equals).hasSize(2);
+
+        EngineIntelligenceFeedbackDatasetExportResult exported = exportWithProjection(fourEngineProjection);
+        assertThat(exported.failed()).isFalse();
+        String jsonlRecord = new EngineIntelligenceFeedbackDatasetJsonlExporter()
+                .exportJsonl(exported)
+                .lines()
+                .skip(1)
+                .findFirst()
+                .orElseThrow();
+        assertThat(jsonlRecord)
+                .contains("\"reasonCodesByEngine\":{\"rules.primary\":")
+                .contains("\"device.primary\":[\"DEVICE_EVIDENCE_NOT_ADMITTED\"")
+                .contains("\"reasonCodes\":[\"HIGH_RISK_FLAGS_PRESENT\",\"HIGH_RISK_FLAGS_PRESENT\"");
+    }
+
+    @Test
+    void keepsDiagnosticSignalLimitAtFiveIndependentOfReasonCodeLimit() {
+        EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
+        EngineIntelligenceFeedbackDocument feedback = feedback(
+                "feedback-1", "txn-1", FROM.plusSeconds(1), List.of());
+        AlertDocument alert = alert("txn-1", AnalystDecision.CONFIRMED_FRAUD);
+        List<EngineIntelligenceEngineProjection> engines = reasonCodeProfile(4, false);
+        List<EngineIntelligenceDiagnosticSignalProjection> fiveSignals = java.util.Collections.nCopies(
+                5,
+                diagnosticSignal(FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        FraudEngineType.ML_MODEL, "ML_MODEL_SIGNAL")
+        );
+
+        EngineIntelligenceFeedbackDatasetRecord record = mapper.map(
+                feedback, alert, projectionWithSignals(engines, fiveSignals));
+        assertThat(record.reasonCodes()).hasSize(20);
+        assertThat(record.diagnosticSignals()).hasSize(5);
+
+        List<EngineIntelligenceDiagnosticSignalProjection> sixSignals = java.util.Collections.nCopies(
+                6,
+                diagnosticSignal(FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        FraudEngineType.ML_MODEL, "ML_MODEL_SIGNAL")
+        );
+        assertCorruptedProjection(mapper, feedback, alert, projectionWithSignals(engines, sixSignals));
+    }
+
+    @Test
+    void rejectsDuplicateAndOutOfOrderEngineProfiles() {
+        EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
+        EngineIntelligenceFeedbackDocument feedback = feedback(
+                "feedback-1", "txn-1", FROM.plusSeconds(1), List.of());
+        AlertDocument alert = alert("txn-1", AnalystDecision.CONFIRMED_FRAUD);
+        EngineIntelligenceEngineProjection rules = engine(
+                FraudEngineType.RULES, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID);
+        EngineIntelligenceEngineProjection ml = engine(
+                FraudEngineType.ML_MODEL, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID);
+
+        assertCorruptedProjection(mapper, feedback, alert,
+                projection(2, "txn-1", List.of(ml, rules)));
+        assertCorruptedProjection(mapper, feedback, alert,
+                projection(2, "txn-1", List.of(rules, ml, ml)));
+    }
+
+    @Test
+    void rejectsUnicodeRawAndOverlongReasonCodesWithBoundedFailure() {
+        EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
+        EngineIntelligenceFeedbackDocument feedback = feedback(
+                "feedback-1", "txn-1", FROM.plusSeconds(1), List.of());
+        AlertDocument alert = alert("txn-1", AnalystDecision.CONFIRMED_FRAUD);
+
+        for (String reasonCode : List.of("DEVICE_ÉVIDENCE", "CUSTOMER_123_FLAGGED", "A".repeat(65))) {
+            EngineIntelligenceProjection corrupted = projection(
+                    2,
+                    "txn-1",
+                    engineProfileWithReasonCodes(FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                            List.of(reasonCode))
+            );
+            assertCorruptedProjection(mapper, feedback, alert, corrupted);
+        }
+    }
+
+    @Test
     void version2ProjectionRejectsUnknownDeviceReasonCode() {
         EngineIntelligenceFeedbackDatasetExportResult result = exportWithProjection(
                 v2DeviceProjection("DEVICE_CUSTOMER_123"));
@@ -460,7 +700,8 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
         EngineIntelligenceProjection projection = projection(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 "txn-1",
-                List.of(engine(FraudEngineType.ML_MODEL, "ml.python.primary", List.of("deviceId:abc")))
+                engineProfileWithReasonCodes(FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        List.of("deviceId:abc"))
         );
 
         assertThat(exportWithProjection(projection).failureReason())
@@ -472,9 +713,9 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
         EngineIntelligenceProjection projection = projection(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 "txn-1",
-                List.of(engine(FraudEngineType.ML_MODEL, "ml.python.primary", List.of(
+                engineProfileWithReasonCodes(FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID, List.of(
                         "CODE_A", "CODE_B", "CODE_C", "CODE_D", "CODE_E", "CODE_F"
-                )))
+                ))
         );
 
         assertThat(exportWithProjection(projection).failureReason())
@@ -736,8 +977,13 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                 null,
                 null,
                 null,
-                List.of("ML_MODEL_SIGNAL"),
-                List.of("ML_MODEL_SIGNAL")
+                List.of(),
+                Map.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null
         );
     }
 
@@ -961,12 +1207,198 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
         );
     }
 
+    private EngineIntelligenceProjection projectionWithSignals(
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals
+    ) {
+        return new EngineIntelligenceProjection(
+                "txn-1",
+                occurrence(),
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                FROM,
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of(FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID),
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                EngineIntelligenceScoreDeltaBucket.NONE,
+                engines,
+                diagnosticSignals,
+                List.of(),
+                FROM,
+                FROM
+        );
+    }
+
+    private List<EngineIntelligenceEngineProjection> reasonCodeProfile(int engineCount, boolean elevenCodeProfile) {
+        List<EngineIntelligenceEngineProjection> engines = new java.util.ArrayList<>();
+        List<String> engineOrder = FraudEngineIdentityContract.engineOrder();
+        for (int index = 0; index < engineCount; index++) {
+            String engineId = engineOrder.get(index);
+            List<String> reasonCodes = reasonCodesForEngine(engineId);
+            if (elevenCodeProfile && FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID.equals(engineId)) {
+                reasonCodes = List.of(reasonCodes.getFirst());
+            }
+            engines.add(engineProjectionForProfile(engineId, reasonCodes));
+        }
+        return List.copyOf(engines);
+    }
+
+    private List<EngineIntelligenceEngineProjection> engineProfileWithReasonCodes(
+            String selectedEngineId,
+            List<String> selectedReasonCodes
+    ) {
+        List<EngineIntelligenceEngineProjection> engines = new java.util.ArrayList<>();
+        for (String engineId : FraudEngineIdentityContract.engineOrder()) {
+            boolean required = FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID.equals(engineId)
+                    || FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engineId);
+            if (required || selectedEngineId.equals(engineId)) {
+                List<String> codes = selectedEngineId.equals(engineId)
+                        ? selectedReasonCodes
+                        : List.of(validReasonCodeFor(FraudEngineIdentityContract.expectedTypeFor(engineId).orElseThrow()));
+                engines.add(engineProjectionForProfile(engineId, codes));
+            }
+        }
+        return List.copyOf(engines);
+    }
+
+    private EngineIntelligenceEngineProjection engineProjectionForProfile(String engineId, List<String> reasonCodes) {
+        FraudEngineType engineType = FraudEngineIdentityContract.expectedTypeFor(engineId).orElseThrow();
+        if (FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engineId)) {
+            return new EngineIntelligenceEngineProjection(
+                    engineId,
+                    engineType,
+                    FraudEngineStatus.DEGRADED,
+                    null,
+                    EngineIntelligenceScoreBucket.UNAVAILABLE,
+                    reasonCodes
+            );
+        }
+        return engine(engineType, engineId, reasonCodes);
+    }
+
+    private List<String> reasonCodesForEngine(String engineId) {
+        if (FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID.equals(engineId)) {
+            return List.of(
+                    "HIGH_RISK_FLAGS_PRESENT",
+                    "HIGH_RISK_FLAGS_PRESENT",
+                    "VELOCITY_THRESHOLD_EXCEEDED",
+                    "AMOUNT_ACTIVITY_THRESHOLD_EXCEEDED",
+                    "RAPID_TRANSFER_PATTERN_MATCHED"
+            );
+        }
+        if (FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engineId)) {
+            return List.of(
+                    "ML_MODEL_SIGNAL",
+                    "ML_MODEL_TIMEOUT",
+                    "ML_MODEL_INVALID_RESPONSE",
+                    "ML_SCORE_MISSING",
+                    "ML_SCORE_OUT_OF_RANGE"
+            );
+        }
+        if (FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID.equals(engineId)) {
+            return List.of(
+                    "VELOCITY_FEATURES_UNAVAILABLE",
+                    "VELOCITY_FEATURE_TYPE_INVALID",
+                    "VELOCITY_FEATURE_VALUE_INVALID",
+                    "VELOCITY_FEATURES_INCONSISTENT",
+                    "HIGH_VELOCITY"
+            );
+        }
+        if (FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engineId)) {
+            return List.of(
+                    "DEVICE_EVIDENCE_NOT_ADMITTED",
+                    "DEVICE_EVIDENCE_UNAVAILABLE",
+                    "DEVICE_EVIDENCE_PARTIAL",
+                    "DEVICE_EVIDENCE_UNTRUSTED",
+                    "DEVICE_SCORE_NOT_CALIBRATED"
+            );
+        }
+        throw new IllegalArgumentException("unknown engine fixture id");
+    }
+
+    private List<String> flattenReasonCodes(List<EngineIntelligenceEngineProjection> engines) {
+        return engines.stream().flatMap(engine -> engine.reasonCodes().stream()).toList();
+    }
+
+    private void assertReasonCodeProfile(
+            EngineIntelligenceFeedbackDatasetRecordMapper mapper,
+            EngineIntelligenceFeedbackDocument feedback,
+            AlertDocument alert,
+            List<EngineIntelligenceEngineProjection> engines,
+            int expectedOccurrenceCount
+    ) {
+        EngineIntelligenceFeedbackDatasetRecord record = mapper.map(
+                feedback, alert, projectionWithSignals(engines, List.of()));
+        assertThat(record.reasonCodes()).hasSize(expectedOccurrenceCount)
+                .containsExactlyElementsOf(flattenReasonCodes(engines));
+        assertThat(record.reasonCodesByEngine().keySet())
+                .containsExactlyElementsOf(engines.stream().map(EngineIntelligenceEngineProjection::engineId).toList());
+        for (EngineIntelligenceEngineProjection engine : engines) {
+            assertThat(record.reasonCodesByEngine().get(engine.engineId())).containsExactlyElementsOf(engine.reasonCodes());
+        }
+    }
+
+    private EngineIntelligenceDiagnosticSignalProjection diagnosticSignal(
+            String engineId,
+            FraudEngineType engineType,
+            String reasonCode
+    ) {
+        return new EngineIntelligenceDiagnosticSignalProjection(
+                engineId,
+                engineType,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                reasonCode
+        );
+    }
+
+    private EngineIntelligenceDiagnosticSignalProjection diagnosticSignalForEngine(
+            String engineId,
+            FraudEngineType engineType,
+            String reasonCode
+    ) {
+        boolean device = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engineId);
+        return new EngineIntelligenceDiagnosticSignalProjection(
+                engineId,
+                engineType,
+                device ? FraudEngineStatus.DEGRADED : FraudEngineStatus.AVAILABLE,
+                device ? EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL : EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                device ? null : RiskLevel.HIGH,
+                device ? EngineIntelligenceScoreBucket.UNAVAILABLE : EngineIntelligenceScoreBucket.HIGH,
+                reasonCode
+        );
+    }
+
+    private String validReasonCodeFor(FraudEngineType engineType) {
+        return switch (engineType) {
+            case RULES -> "HIGH_RISK_FLAGS_PRESENT";
+            case ML_MODEL -> "ML_MODEL_SIGNAL";
+            case VELOCITY -> "VELOCITY_FEATURES_UNAVAILABLE";
+            case DEVICE_RISK -> "DEVICE_SCORE_NOT_CALIBRATED";
+            default -> throw new IllegalArgumentException("engine type has no reason-code fixture");
+        };
+    }
+
+    private void assertCorruptedProjection(
+            EngineIntelligenceFeedbackDatasetRecordMapper mapper,
+            EngineIntelligenceFeedbackDocument feedback,
+            AlertDocument alert,
+            EngineIntelligenceProjection projection
+    ) {
+        assertThatThrownBy(() -> mapper.map(feedback, alert, projection))
+                .isInstanceOf(EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException.class)
+                .hasMessage(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION.name());
+    }
+
     private ScoringOccurrenceOwnership occurrence() {
         return new ScoringOccurrenceOwnership("event-dataset", FROM, "a".repeat(64));
     }
 
     private EngineIntelligenceEngineProjection engine(FraudEngineType engineType, String engineId) {
-        return engine(engineType, engineId, List.of("ML_MODEL_SIGNAL"));
+        return engine(engineType, engineId, List.of(validReasonCodeFor(engineType)));
     }
 
     private EngineIntelligenceEngineProjection engine(

@@ -3,14 +3,22 @@ package com.frauddetection.alert.engineintelligence.dataset;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceDiagnosticSignalProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionPolicy;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackDocument;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceReasonCodePolicy;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 class EngineIntelligenceFeedbackDatasetRecordMapper {
 
@@ -44,6 +52,7 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
                 signals.rulesScoreBucket(),
                 signals.rulesRiskLevel(),
                 signals.reasonCodes(),
+                signals.reasonCodesByEngine(),
                 signals.diagnosticSignals(),
                 signals.engineIntelligenceContractVersion(),
                 signals.deviceEngineStatus(),
@@ -101,9 +110,11 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
         EngineValues rules = EngineValues.missing();
         EngineValues device = EngineValues.missing();
         List<String> reasonCodes = new ArrayList<>();
+        Map<String, List<String>> reasonCodesByEngine = new LinkedHashMap<>();
+        validateEngineProfile(projection.getEngines(), projection.getContractVersion());
         for (EngineIntelligenceEngineProjection engine : projection.getEngines()) {
-            validateEngine(engine, projection.getContractVersion());
             reasonCodes.addAll(engine.reasonCodes());
+            reasonCodesByEngine.put(engine.engineId(), engine.reasonCodes());
             if (engine.engineType() == FraudEngineType.ML_MODEL) {
                 ml = new EngineValues(engine.status(), engine.scoreBucket(), engine.riskLevel());
             }
@@ -115,6 +126,11 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
             }
         }
         List<String> diagnosticSignals = new ArrayList<>();
+        if (projection.getDiagnosticSignals().size() > EngineIntelligenceFeedbackDatasetRecord.MAX_DIAGNOSTIC_SIGNALS) {
+            throw new CorruptedDatasetSourceException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
+            );
+        }
         for (EngineIntelligenceDiagnosticSignalProjection signal : projection.getDiagnosticSignals()) {
             validateSignal(signal, projection.getContractVersion());
             diagnosticSignals.add(signal.reasonCode());
@@ -131,12 +147,41 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
                 rules.scoreBucket(),
                 rules.riskLevel(),
                 reasonCodes,
+                reasonCodesByEngine,
                 diagnosticSignals,
                 projection.getContractVersion(),
                 device.status(),
                 device.scoreBucket(),
                 device.riskLevel()
         );
+    }
+
+    private void validateEngineProfile(List<EngineIntelligenceEngineProjection> engines, int contractVersion) {
+        if (engines == null
+                || engines.size() < 2
+                || engines.size() > FraudEngineIdentityContract.maxEngineIntelligenceEngines()) {
+            throw new CorruptedDatasetSourceException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
+            );
+        }
+        Set<String> engineIds = new HashSet<>();
+        int previousEngineOrder = -1;
+        for (EngineIntelligenceEngineProjection engine : engines) {
+            validateEngine(engine, contractVersion);
+            int engineOrder = FraudEngineIdentityContract.orderOf(engine.engineId());
+            if (engineOrder <= previousEngineOrder || !engineIds.add(engine.engineId())) {
+                throw new CorruptedDatasetSourceException(
+                        EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
+                );
+            }
+            previousEngineOrder = engineOrder;
+        }
+        if (!engineIds.contains(FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID)
+                || !engineIds.contains(FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID)) {
+            throw new CorruptedDatasetSourceException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
+            );
+        }
     }
 
     private void validateEngine(EngineIntelligenceEngineProjection engine, int contractVersion) {
@@ -161,7 +206,7 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
             );
         }
         try {
-            validateProjectionReasonCodes(engine.reasonCodes(), device);
+            validateProjectionReasonCodes(engine.reasonCodes(), engine.engineId());
         } catch (IllegalArgumentException exception) {
             throw new CorruptedDatasetSourceException(
                     EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
@@ -169,25 +214,18 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
         }
     }
 
-    private void validateProjectionReasonCodes(List<String> source, boolean device) {
+    private void validateProjectionReasonCodes(List<String> source, String engineId) {
         if (source == null) {
             return;
         }
-        if (source.size() > 5) {
+        if (source.size() > EngineIntelligenceProjectionPolicy.MAX_REASON_CODES_PER_ENGINE) {
             throw new IllegalArgumentException("reasonCodes exceeds max size");
         }
         for (String reasonCode : source) {
-            if (device) {
-                if (reasonCode == null
-                        || !EngineIntelligenceFeedbackDatasetSafety.DEVICE_ALLOWED_REASON_CODES.contains(reasonCode)) {
-                    throw new IllegalArgumentException("DEVICE_REASON_CODE_ENGINE_MISMATCH");
-                }
-                continue;
+            if (reasonCode == null || !EngineIntelligenceReasonCodePolicy.isAllowedForEngine(engineId, reasonCode)) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
             }
-            String safeCode = EngineIntelligenceFeedbackDatasetSafety.requireMachineCode(reasonCode, "reasonCodes");
-            if (EngineIntelligenceFeedbackDatasetSafety.DEVICE_EVIDENCE_REASON_CODES.contains(safeCode)) {
-                throw new IllegalArgumentException("DEVICE_REASON_CODE_ENGINE_MISMATCH");
-            }
+            EngineIntelligenceFeedbackDatasetSafety.requireCanonicalReasonCode(reasonCode, "reasonCodes");
         }
     }
 
@@ -198,20 +236,24 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
             );
         }
         try {
+            if (!FraudEngineIdentityContract.engineOrder().contains(signal.engineId())
+                    || !FraudEngineIdentityContract.hasExpectedType(signal.engineId(), signal.engineType())) {
+                throw new IllegalArgumentException("INVALID_DIAGNOSTIC_SIGNAL_ENGINE_IDENTITY");
+            }
             boolean device = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(signal.engineId());
             if (device) {
                 if (contractVersion != FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
-                        || signal.engineType() != FraudEngineType.DEVICE_RISK
-                        || signal.engineStatus() == com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE
+                        || signal.engineStatus() == FraudEngineStatus.AVAILABLE
                         || signal.riskLevel() != null
                         || signal.scoreBucket()
-                                != com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket.UNAVAILABLE
-                        || !EngineIntelligenceFeedbackDatasetSafety.DEVICE_ALLOWED_REASON_CODES.contains(signal.reasonCode())) {
+                                != EngineIntelligenceScoreBucket.UNAVAILABLE) {
                     throw new IllegalArgumentException("INVALID_DEVICE_DIAGNOSTIC_SIGNAL");
                 }
-            } else {
-                EngineIntelligenceFeedbackDatasetSafety.requireMachineCode(signal.reasonCode(), "diagnosticSignals");
             }
+            if (!EngineIntelligenceReasonCodePolicy.isAllowedForEngine(signal.engineId(), signal.reasonCode())) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+            }
+            EngineIntelligenceFeedbackDatasetSafety.requireCanonicalReasonCode(signal.reasonCode(), "diagnosticSignals");
         } catch (IllegalArgumentException exception) {
             throw new CorruptedDatasetSourceException(
                     EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
@@ -241,6 +283,7 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
             com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket rulesScoreBucket,
             com.frauddetection.common.events.enums.RiskLevel rulesRiskLevel,
             List<String> reasonCodes,
+            Map<String, List<String>> reasonCodesByEngine,
             List<String> diagnosticSignals,
             Integer engineIntelligenceContractVersion,
             com.frauddetection.common.events.engine.FraudEngineStatus deviceEngineStatus,
@@ -260,6 +303,7 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
                     null,
                     null,
                     List.of(),
+                    Map.of(),
                     List.of(),
                     null,
                     null,

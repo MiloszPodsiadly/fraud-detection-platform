@@ -1,5 +1,9 @@
 package com.frauddetection.common.events.intelligence;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -11,14 +15,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class EngineIntelligencePayloadLimitsTest {
 
     @Test
-    void rejectsTooManyEngineResults() {
+    void rejectsFiveEngineResultsBeforeIdentityValidation() {
         assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(
-                Collections.nCopies(4, EngineIntelligenceTestSupport.engine()), List.of(), List.of()
+                Collections.nCopies(5, EngineIntelligenceTestSupport.engine()), List.of(), List.of()
         )).hasMessage("ENGINE_INTELLIGENCE_ENGINES_LIMIT_EXCEEDED");
     }
 
     @Test
-    void acceptsThreeEngineResultsAndLegacyTwoEngineResults() {
+    void acceptsTwoRequiredEnginesWithOptionalVelocityAbsentOrPresent() {
         assertThat(EngineIntelligenceTestSupport.summary(
                 List.of(
                         EngineIntelligenceTestSupport.engine(),
@@ -50,6 +54,107 @@ class EngineIntelligencePayloadLimitsTest {
                 List.of(),
                 List.of()
         ).engines()).hasSize(2);
+    }
+
+    @Test
+    void acceptsExactlyFourValidEngineResultsInCanonicalOrder() {
+        EngineIntelligenceSummary summary = EngineIntelligenceTestSupport.summary(
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                        new EngineIntelligenceEngineResult(
+                                FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                                FraudEngineType.VELOCITY,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("RAPID_PLN_20K_BURST")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID,
+                                FraudEngineType.DEVICE_RISK,
+                                FraudEngineStatus.UNAVAILABLE,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("DEVICE_EVIDENCE_NOT_ADMITTED")
+                        )
+                ),
+                List.of(),
+                List.of()
+        );
+
+        assertThat(summary.engines())
+                .extracting(EngineIntelligenceEngineResult::engineId)
+                .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
+    }
+
+    @Test
+    void rejectsDuplicateEngineIdentityIndependentlyOfEngineCountLimit() {
+        EngineIntelligenceEngineResult velocity = new EngineIntelligenceEngineResult(
+                FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                FraudEngineType.VELOCITY,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("RAPID_PLN_20K_BURST")
+        );
+
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                        velocity,
+                        velocity
+                ),
+                List.of(),
+                List.of()
+        )).hasMessage("ENGINE_INTELLIGENCE_DUPLICATE_ENGINE_ID");
+    }
+
+    @Test
+    void rejectsUnknownEngineIdentityIndependentlyOfEngineCountLimit() {
+        assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
+                "future.primary",
+                FraudEngineType.RULES,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("HIGH_RISK_FLAGS_PRESENT")
+        )).hasMessage("ENGINE_INTELLIGENCE_UNKNOWN_ENGINE_ID");
+    }
+
+    @Test
+    void rejectsProfilesMissingEitherRequiredRulesOrMlEngine() {
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(
+                List.of(
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                        new EngineIntelligenceEngineResult(
+                                FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                                FraudEngineType.VELOCITY,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("RAPID_PLN_20K_BURST")
+                        )
+                ),
+                List.of(),
+                List.of()
+        )).hasMessage("ENGINE_INTELLIGENCE_REQUIRED_ENGINES_MISSING");
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        new EngineIntelligenceEngineResult(
+                                FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                                FraudEngineType.VELOCITY,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("RAPID_PLN_20K_BURST")
+                        )
+                ),
+                List.of(),
+                List.of()
+        )).hasMessage("ENGINE_INTELLIGENCE_REQUIRED_ENGINES_MISSING");
     }
 
     @Test

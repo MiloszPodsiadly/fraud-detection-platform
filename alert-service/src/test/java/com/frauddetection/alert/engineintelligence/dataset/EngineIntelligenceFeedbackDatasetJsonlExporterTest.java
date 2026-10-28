@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -299,8 +300,13 @@ class EngineIntelligenceFeedbackDatasetJsonlExporterTest {
                 null,
                 null,
                 null,
-                List.of("ML_MODEL_SIGNAL"),
-                List.of("ML_MODEL_SIGNAL")
+                List.of(),
+                Map.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null
         );
     }
 }

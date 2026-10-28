@@ -1,6 +1,6 @@
 # Multi-Engine Scoring Contract Boundary
 
-Status: current multi-engine scoring contract boundary with historical FDP-101/FDP-102 notes.
+Status: current multi-engine scoring contract boundary. Historical decision records remain in their own ADRs.
 
 ## Scope
 
@@ -29,7 +29,7 @@ export also requires authorization, sensitive-read audit, rate limits, privacy r
 | Java rules engine | Produces explainable rule-driven risk context. |
 | Python ML engine | Produces model risk context and bounded explanations; it is not a final decision source. |
 | Velocity engine | Current optional Java diagnostic engine for transaction-rate and rapid PLN burst context; disabled by default and not a decision source. |
-| Device risk engine | Declared device-context risk category; not integrated by FDP-101. |
+| Device risk engine | Canonical optional `device.primary` diagnostic identity. Admission and runtime activation are disabled because no independently authenticated, occurrence-bound evidence issuer exists. |
 | Merchant risk engine | Declared merchant-context risk category; not integrated by FDP-101. |
 | Graph risk engine | Declared relationship-context risk category; not integrated by FDP-101. |
 

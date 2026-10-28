@@ -33,13 +33,14 @@ and ML are required; Velocity and Device Risk are optional in canonical order. T
 `RULES_VS_ML` over `[rules.primary, ml.python.primary]`. The outer
 `TransactionScoredEvent.eventContractVersion=2` is independent from this nested version.
 
-## Backward Compatibility Rules
+## Current-version acceptance and controlled cutover
 
 `TransactionScoredEvent.engineIntelligence` is optional. A current producer may omit it, but every current event must
 still carry exactly one canonical ML evidence outcome: exact `mlPredictionEvidence` or an explicit
-`mlPredictionEvidenceOmissionReason`. A missing summary does not mean safe, low risk, or zero score. Historical event
-JSON with neither evidence outcome is not a valid current wire message and must be drained, migrated from authoritative
-evidence, archived, or quarantined before strict consumers read it.
+`mlPredictionEvidenceOmissionReason`. A missing summary does not mean safe, low risk, or zero score. Retained event
+JSON with neither evidence outcome is not a valid current wire message and must be archived or quarantined under the
+owning retention procedure before strict consumers read it. The reader never upgrades it, infers missing evidence, or
+selects a permissive historical parser.
 
 Compatibility is intentionally narrow. A valid current event may omit `engineIntelligence` or carry explicit null,
 which is accepted as absence and does not invent model lineage. When a summary is present, its comparison identity must
@@ -48,16 +49,16 @@ comparison identity, summaries missing Rules or ML, incorrect engine ordering, u
 canonical values are rejected or fail closed; the read boundary does not repair them.
 
 `TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Every current scored event requires
-exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Historical null/null
-messages must be drained, migrated from authoritative evidence, archived, or quarantined before current consumers read
-them, and consumers must not invent or backfill evidence. The outer `eventContractVersion` owns the current event
+exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Retained null/null
+messages must be archived or quarantined before current consumers read them, and consumers must not invent or backfill
+evidence. The outer `eventContractVersion` owns the current event
 version. A nested `mlPredictionEvidence.contractVersion` is a known obsolete marker and is rejected as contradictory;
 other bounded unknown evidence fields remain forward-compatible and do not change the canonical evidence meaning.
 
 All current alert-service listeners and redrive listeners use the same strict full-event deserializer. The repository
 does not provide a historical scored-event runtime parser. Active historical replay remains **NO-GO** until an authorized
-operator attests the retained partition/offset boundary and completes the governed archive, quarantine, or authoritative
-migration described in [Scoring occurrence ownership migration](scoring_occurrence_ownership_migration.md).
+operator attests the retained partition/offset boundary and completes governed archive or quarantine under
+[Scoring occurrence ownership migration](scoring_occurrence_ownership_migration.md). No runtime conversion is provided.
 Pipeline-level reasons (`DIAGNOSTIC_EMISSION_DISABLED` and `DIAGNOSTIC_ENRICHMENT_UNAVAILABLE`) require the summary
 to be absent. ML-engine-derived reasons require an observed `ml.python.primary` result and cannot be used to describe
 an unavailable diagnostic pipeline; `ML_ENGINE_UNAVAILABLE` is reserved for observed operational ML statuses.
@@ -97,14 +98,14 @@ identity-free AVAILABLE ML result is malformed and fails closed; readers do not 
 to another operational status. Dataset v3 likewise rejects `AVAILABLE` prediction evidence unless score, risk,
 execution timestamp, and the complete model identity are all present.
 
-### Deployment Treatment For Historical Projections
+### Rejection policy and manual cutover for retained projections
 
-Before deploying the strict reader, inventory Mongo `engine_intelligence_projections` documents containing an
-`AVAILABLE` `ml.python.primary` engine without complete `modelIdentity`. Such documents do not satisfy the current read
-contract: archive them under the approved retention policy or rebuild the projection only from an authoritative event
-that already contains complete lineage. Do not synthesize identity from the currently loaded model, registry state, or
-deployment configuration. Identity-free historical documents are not valid inputs to the current Dataset v3 or
-exact-model evaluation contracts and must not be normalized merely to make a historical projection displayable.
+Before enabling a strict-reader deployment, inventory the bounded retained scope of Mongo
+`engine_intelligence_projections` documents containing an `AVAILABLE` `ml.python.primary` engine without complete
+`modelIdentity`. They are rejected by the current read contract and must be archived or quarantined under the approved
+retention procedure. Do not synthesize identity from the currently loaded model, registry state, or deployment
+configuration. A cutover needs explicit ownership, a retained-data boundary, verified current readers, and verification
+of known external consumers; it must not delete facts or rewrite projections merely to make them displayable.
 
 ## Field Omission Rules
 
