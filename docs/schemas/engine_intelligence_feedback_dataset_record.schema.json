@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frauddetection.local/schemas/engine_intelligence_feedback_dataset_record.schema.json",
   "title": "Engine Intelligence feedback dataset record",
-  "description": "Internal-only record schema. Engine reason codes are grouped by canonical engine identity. The Java record constructor enforces canonical object-member order and equality between reasonCodes and the concatenated groups; Draft 2020-12 validates field shapes and bounds but cannot express those order and cross-property equality constraints.",
+  "description": "Internal-only record schema. reasonCodesByEngine validates each code against the ownership vocabulary for its canonical engine identity. The flat reasonCodes and diagnosticSignals fields validate only against the aggregate known reason-code vocabulary and do not assert engine ownership. The Java record constructor enforces canonical object-member order and equality between reasonCodes and the concatenated groups; Draft 2020-12 validates field shapes and bounds but cannot express those order and cross-property equality constraints.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -106,31 +106,25 @@
       "type": "array",
       "maxItems": 20,
       "items": {
-        "type": "string",
-        "pattern": "^[A-Z0-9_]{1,64}$"
+        "$ref": "#/$defs/knownReasonCode"
       }
     },
     "reasonCodesByEngine": {
       "type": "object",
       "maxProperties": 4,
-      "propertyNames": {
-        "enum": ["rules.primary", "ml.python.primary", "velocity.primary", "device.primary"]
+      "properties": {
+        "rules.primary": { "$ref": "#/$defs/rulesReasonCodes" },
+        "ml.python.primary": { "$ref": "#/$defs/mlReasonCodes" },
+        "velocity.primary": { "$ref": "#/$defs/velocityReasonCodes" },
+        "device.primary": { "$ref": "#/$defs/deviceReasonCodes" }
       },
-      "additionalProperties": {
-        "type": "array",
-        "maxItems": 5,
-        "items": {
-          "type": "string",
-          "pattern": "^[A-Z0-9_]{1,64}$"
-        }
-      }
+      "additionalProperties": false
     },
     "diagnosticSignals": {
       "type": "array",
       "maxItems": 5,
       "items": {
-        "type": "string",
-        "pattern": "^[A-Z0-9_]{1,64}$"
+        "$ref": "#/$defs/knownReasonCode"
       }
     },
     "engineIntelligenceContractVersion": {
@@ -245,6 +239,136 @@
     }
   ],
   "$defs": {
+    "rulesReasonCodes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "AMOUNT_ACTIVITY_THRESHOLD_EXCEEDED",
+          "COUNTRY_MISMATCH",
+          "COUNTRY_MISMATCH_SIGNAL",
+          "DEVICE_NOVELTY",
+          "DEVICE_NOVELTY_SIGNAL",
+          "FEATURE_STATUS_INVALID",
+          "FEATURE_STATUS_NOT_ALLOWED",
+          "FEATURE_STATUS_WRONG_ACCESSOR",
+          "HIGH_AMOUNT_ACTIVITY",
+          "HIGH_RISK_FLAGS_PRESENT",
+          "HIGH_TRANSACTION_AMOUNT",
+          "HIGH_VELOCITY",
+          "MERCHANT_CONCENTRATION",
+          "ORCHESTRATOR_ENGINE_EXCEPTION",
+          "ORCHESTRATOR_ENGINE_NULL_RESULT",
+          "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+          "ORCHESTRATOR_ENGINE_REJECTED",
+          "ORCHESTRATOR_ENGINE_TIMEOUT",
+          "PROXY_OR_VPN",
+          "PROXY_OR_VPN_SIGNAL",
+          "RAPID_PLN_20K_BURST",
+          "RAPID_TRANSFER_BURST_SIGNAL",
+          "RAPID_TRANSFER_PATTERN_MATCHED",
+          "VELOCITY_THRESHOLD_EXCEEDED"
+        ]
+      }
+    },
+    "mlReasonCodes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "COUNTRY_MISMATCH",
+          "DEVICE_NOVELTY",
+          "LOW_MODEL_RISK",
+          "MERCHANT_CONCENTRATION",
+          "ML_AVAILABILITY_METADATA_INVALID",
+          "ML_AVAILABILITY_METADATA_MISSING",
+          "ML_CLIENT_ERROR",
+          "ML_INFERENCE_TIMESTAMP_MISSING",
+          "ML_MODEL_INVALID_RESPONSE",
+          "ML_MODEL_METADATA_MISSING",
+          "ML_MODEL_SIGNAL",
+          "ML_MODEL_TIMEOUT",
+          "ML_MODEL_UNAVAILABLE",
+          "ML_SCORE_MISSING",
+          "ML_SCORE_OUT_OF_RANGE",
+          "MODEL_HIGH_RISK",
+          "ORCHESTRATOR_ENGINE_EXCEPTION",
+          "ORCHESTRATOR_ENGINE_NULL_RESULT",
+          "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+          "ORCHESTRATOR_ENGINE_REJECTED",
+          "ORCHESTRATOR_ENGINE_TIMEOUT",
+          "PROXY_OR_VPN",
+          "RAPID_PLN_20K_BURST",
+          "RECENT_AMOUNT_ACCUMULATION",
+          "RECENT_TRANSACTION_SPIKE",
+          "TRANSACTION_VELOCITY"
+        ]
+      }
+    },
+    "velocityReasonCodes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "ORCHESTRATOR_ENGINE_EXCEPTION",
+          "ORCHESTRATOR_ENGINE_NULL_RESULT",
+          "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+          "ORCHESTRATOR_ENGINE_REJECTED",
+          "ORCHESTRATOR_ENGINE_TIMEOUT",
+          "RAPID_PLN_20K_BURST",
+          "RECENT_AMOUNT_ACCUMULATION",
+          "TRANSACTION_VELOCITY",
+          "VELOCITY_FEATURE_TYPE_INVALID",
+          "VELOCITY_FEATURE_VALUE_INVALID",
+          "VELOCITY_FEATURES_INCONSISTENT",
+          "VELOCITY_FEATURES_UNAVAILABLE"
+        ]
+      }
+    },
+    "deviceReasonCodes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE",
+          "DEVICE_COUNTRY_MISMATCH_UNTRUSTED_SOURCE",
+          "DEVICE_EVIDENCE_NOT_ADMITTED",
+          "DEVICE_EVIDENCE_UNAVAILABLE",
+          "DEVICE_EVIDENCE_UNTRUSTED",
+          "DEVICE_NOVELTY_HISTORY_INCOMPLETE",
+          "DEVICE_NOVELTY_HISTORY_INVALID",
+          "DEVICE_NOVELTY_HISTORY_UNAVAILABLE",
+          "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW",
+          "DEVICE_NOVELTY_SEEN_IN_WINDOW",
+          "DEVICE_NOVELTY_UNTRUSTED_SOURCE",
+          "DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE",
+          "DEVICE_PROXY_OR_VPN_UNTRUSTED_SOURCE",
+          "DEVICE_SCORE_NOT_CALIBRATED",
+          "DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE",
+          "DEVICE_SHARED_DEVICE_UNTRUSTED_SOURCE",
+          "DEVICE_SIGNALS_UNSUPPORTED",
+          "DEVICE_SWITCH_HISTORY_INCOMPLETE",
+          "DEVICE_SWITCH_HISTORY_INVALID",
+          "DEVICE_SWITCH_HISTORY_UNAVAILABLE",
+          "DEVICE_SWITCH_NOT_OBSERVED",
+          "DEVICE_SWITCH_OBSERVED",
+          "DEVICE_SWITCH_UNTRUSTED_SOURCE",
+          "ORCHESTRATOR_ENGINE_EXCEPTION",
+          "ORCHESTRATOR_ENGINE_NULL_RESULT",
+          "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+          "ORCHESTRATOR_ENGINE_REJECTED",
+          "ORCHESTRATOR_ENGINE_TIMEOUT"
+        ]
+      }
+    },
+    "knownReasonCode": {
+      "anyOf": [
+        { "$ref": "#/$defs/rulesReasonCodes/items" },
+        { "$ref": "#/$defs/mlReasonCodes/items" },
+        { "$ref": "#/$defs/velocityReasonCodes/items" },
+        { "$ref": "#/$defs/deviceReasonCodes/items" }
+      ]
+    },
     "rulesEngineProfile": {
       "if": { "properties": { "rulesEngineStatus": { "const": "AVAILABLE" } } },
       "then": {

@@ -68,6 +68,28 @@ describe("engineIntelligenceContractValidation", () => {
     expect(isValidEngineIntelligence(sharedFixture("engine_intelligence_three_engine_golden.json"))).toBe(true);
   });
 
+  it.each(sharedSemanticMatrixCases())("accepts shared semantic matrix case $caseId", (semanticCase) => {
+    expect(isEngineIntelligenceResponseShape(semanticMatrixResponse(semanticCase))).toBe(true);
+  });
+
+  it.each(sharedSemanticMatrixCases())("rejects comparison drift in shared semantic matrix case $caseId", (semanticCase) => {
+    const value = JSON.parse(JSON.stringify(semanticMatrixResponse(semanticCase)));
+    value.comparison.agreementStatus = semanticCase.invalidAgreementStatus;
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(false);
+  });
+
+  it("rejects a diagnostic signal that refers to an engine absent from the shared matrix case", () => {
+    const semanticCase = sharedSemanticMatrixCases()
+      .find((candidate) => candidate.engineIntelligence.diagnosticSignals.length > 0);
+    const value = JSON.parse(JSON.stringify(semanticMatrixResponse(semanticCase)));
+    value.diagnosticSignals[0].engineId = "velocity.primary";
+    value.diagnosticSignals[0].engineType = "VELOCITY";
+    value.diagnosticSignals[0].reasonCode = "ORCHESTRATOR_ENGINE_TIMEOUT";
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(false);
+  });
+
   it("accepts bounded v2 with operational Device Risk and Rules-vs-ML comparison", () => {
     const value = v2Fixture();
 
@@ -272,6 +294,17 @@ function isValidEngineIntelligence(value) {
 function sharedInvalidEngineIntelligenceCases() {
   return sharedFixture("invalid_semantic_cases.json").cases
     .filter((semanticCase) => semanticCase.category === "engine-intelligence");
+}
+
+function sharedSemanticMatrixCases() {
+  return sharedFixture("engine_intelligence_semantic_matrix.json").cases;
+}
+
+function semanticMatrixResponse(semanticCase) {
+  return {
+    status: semanticCase.responseStatus,
+    ...semanticCase.engineIntelligence
+  };
 }
 
 function sharedInvalidEngineIntelligenceResponseCases() {

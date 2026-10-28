@@ -7,6 +7,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -87,6 +88,26 @@ class EngineIntelligenceGoldenFixtureTest {
                     EngineIntelligenceSummary.class
             ))
                     .as(semanticCase.get("caseId").textValue())
+                    .isInstanceOf(RuntimeException.class);
+        }
+    }
+
+    @Test
+    void sharedSemanticMatrixCasesAndComparisonMutationsMatchCommonContract() throws Exception {
+        JsonNode cases = mapper.readTree(fixturePath("engine_intelligence_semantic_matrix.json").toFile()).get("cases");
+
+        for (JsonNode semanticCase : cases) {
+            String caseId = semanticCase.get("caseId").textValue();
+            JsonNode wireSummary = semanticCase.get("engineIntelligence");
+            EngineIntelligenceSummary summary = mapper.treeToValue(wireSummary, EngineIntelligenceSummary.class);
+
+            assertThat(summary.contractVersion()).as(caseId).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
+
+            ObjectNode invalidSummary = (ObjectNode) mapper.readTree(mapper.writeValueAsString(wireSummary));
+            ((ObjectNode) invalidSummary.get("comparison"))
+                    .put("agreementStatus", semanticCase.get("invalidAgreementStatus").textValue());
+            assertThatThrownBy(() -> mapper.treeToValue(invalidSummary, EngineIntelligenceSummary.class))
+                    .as("%s rejects inconsistent agreement status", caseId)
                     .isInstanceOf(RuntimeException.class);
         }
     }
