@@ -143,6 +143,19 @@ shape is defined in `docs/schemas/engine_intelligence_feedback_dataset_record.sc
 `docs/schemas/feedback_dataset_record.schema.json`, which belongs to the `feedback-dataset-v3` exact-occurrence
 evaluation context and its ML evidence lineage.
 
+`EngineIntelligenceFeedbackDatasetRecord` is a standalone record-shape DTO. Its constructor checks the diagnostic
+reason-code vocabulary and bounds, but the flattened `diagnosticSignals` strings do not retain an `engineId`, status,
+or category, so the constructor cannot prove that a diagnostic belongs to an engine in the record. For example, the
+standalone DTO can contain `DEVICE_SWITCH_OBSERVED` while `reasonCodesByEngine` contains only Rules and ML. A valid
+record shape is not projection-semantic approval and must not be used as a public admission credential.
+
+The supported application export path is `EngineIntelligenceFeedbackDatasetExportService.export`. For each persisted
+projection, its package-private mapper reconstructs the full `EngineIntelligenceSummary` and runs
+`EngineIntelligenceProjectionPolicy` validation before flattening diagnostics. The package-private
+`EngineIntelligenceFeedbackDatasetJsonlExporter` only serializes an export result; it does not validate projection
+semantics and cannot be called as a cross-package admission API. There is no public endpoint or other application
+entry point that admits a standalone record as validated projection data.
+
 ## JSONL Semantics
 
 `export()` returns `EngineIntelligenceFeedbackDatasetExportResult`, a wrapper containing metadata and records.

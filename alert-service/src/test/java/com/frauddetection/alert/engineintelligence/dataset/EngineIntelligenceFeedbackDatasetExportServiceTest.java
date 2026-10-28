@@ -1182,6 +1182,51 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void laterDeviceDiagnosticWithoutDeviceEngineDiscardsEarlierRecordsFromJsonl() {
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(
+                EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10)).thenReturn(List.of(
+                feedback("feedback-valid", "txn-a", FROM.plusSeconds(2)),
+                feedback("feedback-corrupt", "txn-b", FROM.plusSeconds(1))
+        ));
+        AlertRepository alerts = mock(AlertRepository.class);
+        when(alerts.findByTransactionId("txn-a"))
+                .thenReturn(Optional.of(alert("txn-a", AnalystDecision.CONFIRMED_FRAUD)));
+        when(alerts.findByTransactionId("txn-b"))
+                .thenReturn(Optional.of(alert("txn-b", AnalystDecision.MARKED_LEGITIMATE)));
+        EngineIntelligenceProjectionRepository projections = mock(EngineIntelligenceProjectionRepository.class);
+        when(projections.findById("txn-a")).thenReturn(Optional.of(
+                projectionWithSignals("txn-a", projectionEngines(), List.of())
+        ));
+        when(projections.findById("txn-b")).thenReturn(Optional.of(projectionWithSignals(
+                "txn-b",
+                projectionEngines(),
+                List.of(diagnosticSignalForEngine(
+                        FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID,
+                        FraudEngineType.DEVICE_RISK,
+                        "DEVICE_SWITCH_OBSERVED"
+                ))
+        )));
+
+        EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks, alerts, projections)
+                .export(request(10));
+
+        assertThat(result.failureReason())
+                .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION);
+        assertThat(result.records()).isEmpty();
+        assertThat(result.recordsReturned()).isZero();
+        assertThat(result.rawRowsRead()).isZero();
+        assertThat(result.truncated()).isFalse();
+
+        String jsonl = new EngineIntelligenceFeedbackDatasetJsonlExporter().exportJsonl(result);
+        assertThat(jsonl.lines()).hasSize(1);
+        assertThat(jsonl.lines().findFirst().orElseThrow())
+                .contains("\"type\":\"EXPORT_METADATA\"")
+                .contains("\"failureReason\":\"CORRUPTED_PROJECTION\"");
+        assertThat(jsonl).doesNotContain("\"type\":\"DATASET_RECORD\"");
+    }
+
+    @Test
     void corruptedAlertDataFailsClosed() {
         AlertDocument corrupted = new AlertDocument();
         assertThat(exportWithAlert(corrupted).failureReason())
@@ -1638,7 +1683,16 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
             List<EngineIntelligenceEngineProjection> engines,
             List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals
     ) {
+        return projectionWithSignals("txn-1", engines, diagnosticSignals);
+    }
+
+    private EngineIntelligenceProjection projectionWithSignals(
+            String transactionId,
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals
+    ) {
         return projectionWithMetadata(
+                transactionId,
                 engines,
                 diagnosticSignals,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -1660,8 +1714,32 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
             EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
             List<EngineIntelligenceWarningProjection> warnings
     ) {
-        return new EngineIntelligenceProjection(
+        return projectionWithMetadata(
                 "txn-1",
+                engines,
+                diagnosticSignals,
+                comparisonType,
+                comparedEngineIds,
+                agreementStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
+                warnings
+        );
+    }
+
+    private EngineIntelligenceProjection projectionWithMetadata(
+            String transactionId,
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            List<EngineIntelligenceWarningProjection> warnings
+    ) {
+        return new EngineIntelligenceProjection(
+                transactionId,
                 occurrence(),
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 FROM,

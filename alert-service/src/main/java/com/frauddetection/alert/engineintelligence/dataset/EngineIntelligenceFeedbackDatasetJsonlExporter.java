@@ -9,11 +9,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-public class EngineIntelligenceFeedbackDatasetJsonlExporter {
+class EngineIntelligenceFeedbackDatasetJsonlExporter {
 
     private final ObjectMapper objectMapper;
 
-    public EngineIntelligenceFeedbackDatasetJsonlExporter() {
+    EngineIntelligenceFeedbackDatasetJsonlExporter() {
         this(JsonMapper.builder().findAndAddModules().build());
     }
 
@@ -21,7 +21,7 @@ public class EngineIntelligenceFeedbackDatasetJsonlExporter {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper is required");
     }
 
-    public String exportJsonl(EngineIntelligenceFeedbackDatasetExportResult exportResult) {
+    String exportJsonl(EngineIntelligenceFeedbackDatasetExportResult exportResult) {
         Objects.requireNonNull(exportResult, "exportResult is required");
         StringBuilder jsonl = new StringBuilder();
         appendLine(jsonl, metadata(exportResult));

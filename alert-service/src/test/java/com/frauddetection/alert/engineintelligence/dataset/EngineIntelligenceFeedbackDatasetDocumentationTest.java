@@ -55,6 +55,22 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
     }
 
     @Test
+    void docsSeparateStandaloneRecordShapeFromProjectionSemanticApproval() throws IOException {
+        assertThat(normalizedDoc())
+                .contains("standalone record-shape DTO")
+                .contains("cannot prove that a diagnostic belongs to an engine")
+                .contains("standalone DTO can contain DEVICE_SWITCH_OBSERVED")
+                .contains("not projection-semantic approval")
+                .contains("must not be used as a public admission credential")
+                .contains("EngineIntelligenceFeedbackDatasetExportService.export")
+                .contains("reconstructs the full EngineIntelligenceSummary")
+                .contains("EngineIntelligenceProjectionPolicy validation")
+                .contains("package-private EngineIntelligenceFeedbackDatasetJsonlExporter")
+                .contains("only serializes an export result")
+                .contains("does not validate projection semantics");
+    }
+
+    @Test
     void docsStateFutureExportNeedsSeparateScopedPrControls() throws IOException {
         String doc = normalizedDoc();
 
@@ -190,8 +206,14 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
 
         JsonNode schema = JsonMapper.builder().findAndAddModules().build().readTree(RECORD_SCHEMA.toFile());
         assertThat(schema.at("/properties/reasonCodes/maxItems").intValue()).isEqualTo(20);
-        assertThat(schema.at("/properties/reasonCodesByEngine/additionalProperties/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/$defs/rulesReasonCodes/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/$defs/mlReasonCodes/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/$defs/velocityReasonCodes/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/$defs/deviceReasonCodes/maxItems").intValue()).isEqualTo(5);
         assertThat(schema.at("/properties/diagnosticSignals/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/description").textValue())
+                .contains("aggregate known reason-code vocabulary")
+                .contains("do not assert engine ownership");
         assertThat(schema.at("/allOf/0/if/properties/projectionStatus/const").textValue()).isEqualTo("AVAILABLE");
         assertThat(schema.at("/allOf/0/then/properties/reasonCodesByEngine/minProperties").intValue()).isEqualTo(2);
         assertThat(schema.at("/allOf/0/then/properties/reasonCodesByEngine/required").toString())
