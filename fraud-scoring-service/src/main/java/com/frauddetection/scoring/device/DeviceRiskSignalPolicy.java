@@ -1,7 +1,6 @@
 package com.frauddetection.scoring.device;
 
 import com.frauddetection.common.events.device.DeviceRiskEvidence;
-import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 
 import java.time.Duration;
@@ -20,6 +19,13 @@ public final class DeviceRiskSignalPolicy {
 
     public enum EvidenceState { AVAILABLE, UNAVAILABLE, UNTRUSTED, INVALID, UNSUPPORTED }
 
+    /** Coverage of the two supported history predicates; this is not fraud-risk confidence. */
+    public enum EvidenceCoverage {
+        NO_SUPPORTED_HISTORY,
+        PARTIAL_SUPPORTED_HISTORY,
+        COMPLETE_SUPPORTED_HISTORY
+    }
+
     public enum RiskInference { NOT_CALIBRATED }
 
     /** Fixed internal outcomes; they map to bounded public diagnostic codes, never a fraud verdict. */
@@ -29,16 +35,12 @@ public final class DeviceRiskSignalPolicy {
         UNTRUSTED_SOURCE, UNSUPPORTED_SOURCE
     }
 
-    public record SignalOutcome(Signal signal, FraudEngineStatus status, Boolean observed,
-                                Reason reason, FraudEngineConfidence confidence) {
+    public record SignalOutcome(Signal signal, FraudEngineStatus status, Boolean observed, Reason reason) {
         public SignalOutcome {
             Objects.requireNonNull(signal);
             Objects.requireNonNull(status);
             Objects.requireNonNull(reason);
-            Objects.requireNonNull(confidence);
-            if ((status == FraudEngineStatus.AVAILABLE) != (observed != null)
-                    || (status == FraudEngineStatus.AVAILABLE && confidence != FraudEngineConfidence.MEDIUM)
-                    || (status != FraudEngineStatus.AVAILABLE && confidence != FraudEngineConfidence.UNKNOWN)) {
+            if ((status == FraudEngineStatus.AVAILABLE) != (observed != null)) {
                 throw new IllegalArgumentException("DEVICE_POLICY_OUTCOME_STATE");
             }
             boolean historySignal = signal == Signal.DEVICE_NOT_SEEN_RECENTLY || signal == Signal.DEVICE_SWITCH;
@@ -85,10 +87,12 @@ public final class DeviceRiskSignalPolicy {
     }
 
     /** score is deliberately absent until an observed and calibrated scoring policy exists. */
-    public record Evaluation(int policyVersion, FraudEngineStatus status, FraudEngineConfidence confidence,
+    public record Evaluation(int policyVersion, FraudEngineStatus status,
+                             DeviceRiskEvidence.SourceQuality sourceQuality, EvidenceCoverage evidenceCoverage,
                              List<SignalOutcome> signals, Integer score) {
         public Evaluation {
-            if (policyVersion != VERSION || score != null || signals == null || signals.size() != Signal.values().length) {
+            if (policyVersion != VERSION || status == null || sourceQuality == null || evidenceCoverage == null
+                    || score != null || signals == null || signals.size() != Signal.values().length) {
                 throw new IllegalArgumentException("DEVICE_POLICY_EVALUATION");
             }
             signals = List.copyOf(signals);
@@ -103,13 +107,17 @@ public final class DeviceRiskSignalPolicy {
                     && signals.stream().anyMatch(signal -> signal.status() != FraudEngineStatus.SKIPPED)) {
                 throw new IllegalArgumentException("DEVICE_POLICY_MIXED_SOURCE");
             }
+            boolean sourceIsUntrusted = sourceQuality != DeviceRiskEvidence.SourceQuality.AUTHENTICATED_INSTITUTION;
+            if (hasSkippedSignal != sourceIsUntrusted) {
+                throw new IllegalArgumentException("DEVICE_POLICY_SOURCE_TRUST_STATE");
+            }
             long available = signals.stream().filter(signal -> signal.status() == FraudEngineStatus.AVAILABLE).count();
-            FraudEngineStatus expectedStatus = available > 0 ? FraudEngineStatus.DEGRADED
-                    : signals.get(0).status() == FraudEngineStatus.SKIPPED ? FraudEngineStatus.SKIPPED
-                    : FraudEngineStatus.UNAVAILABLE;
-            FraudEngineConfidence expectedConfidence = available == 2 ? FraudEngineConfidence.MEDIUM
-                    : available == 1 ? FraudEngineConfidence.LOW : FraudEngineConfidence.UNKNOWN;
-            if (status != expectedStatus || confidence != expectedConfidence) {
+            FraudEngineStatus expectedStatus = sourceIsUntrusted ? FraudEngineStatus.SKIPPED
+                    : available > 0 ? FraudEngineStatus.DEGRADED : FraudEngineStatus.UNAVAILABLE;
+            EvidenceCoverage expectedCoverage = available == 2 ? EvidenceCoverage.COMPLETE_SUPPORTED_HISTORY
+                    : available == 1 ? EvidenceCoverage.PARTIAL_SUPPORTED_HISTORY
+                    : EvidenceCoverage.NO_SUPPORTED_HISTORY;
+            if (status != expectedStatus || evidenceCoverage != expectedCoverage) {
                 throw new IllegalArgumentException("DEVICE_POLICY_AGGREGATE_STATE");
             }
         }
@@ -125,9 +133,10 @@ public final class DeviceRiskSignalPolicy {
         if (evidence.source().quality() != DeviceRiskEvidence.SourceQuality.AUTHENTICATED_INSTITUTION) {
             for (Signal signal : Signal.values()) {
                 outcomes.add(new SignalOutcome(signal, FraudEngineStatus.SKIPPED, null,
-                        Reason.UNTRUSTED_SOURCE, FraudEngineConfidence.UNKNOWN));
+                        Reason.UNTRUSTED_SOURCE));
             }
-            return new Evaluation(VERSION, FraudEngineStatus.SKIPPED, FraudEngineConfidence.UNKNOWN, outcomes, null);
+            return new Evaluation(VERSION, FraudEngineStatus.SKIPPED, evidence.source().quality(),
+                    EvidenceCoverage.NO_SUPPORTED_HISTORY, outcomes, null);
         }
 
         boolean completeWindow = evidence.windowStart().equals(evidence.asOf().minus(HISTORY_WINDOW))
@@ -140,11 +149,12 @@ public final class DeviceRiskSignalPolicy {
         outcomes.add(unsupported(Signal.PROXY_OR_VPN));
 
         long available = outcomes.stream().filter(outcome -> outcome.status() == FraudEngineStatus.AVAILABLE).count();
+        EvidenceCoverage coverage = available == 2 ? EvidenceCoverage.COMPLETE_SUPPORTED_HISTORY
+                : available == 1 ? EvidenceCoverage.PARTIAL_SUPPORTED_HISTORY
+                : EvidenceCoverage.NO_SUPPORTED_HISTORY;
         return new Evaluation(VERSION,
                 available > 0 ? FraudEngineStatus.DEGRADED : FraudEngineStatus.UNAVAILABLE,
-                available == 2 ? FraudEngineConfidence.MEDIUM : available == 1
-                        ? FraudEngineConfidence.LOW : FraudEngineConfidence.UNKNOWN,
-                outcomes, null);
+                evidence.source().quality(), coverage, outcomes, null);
     }
 
     private static SignalOutcome history(Signal signal, DeviceRiskEvidence.HistoryFact fact,
@@ -157,21 +167,21 @@ public final class DeviceRiskSignalPolicy {
                         ? Reason.HISTORY_INCOMPLETE : Reason.HISTORY_UNAVAILABLE;
                 case AVAILABLE -> throw new IllegalStateException("DEVICE_POLICY_FACT_STATE");
             };
-            return new SignalOutcome(signal, FraudEngineStatus.UNAVAILABLE, null, reason, FraudEngineConfidence.UNKNOWN);
+            return new SignalOutcome(signal, FraudEngineStatus.UNAVAILABLE, null, reason);
         }
         if (!completeWindow) {
             return new SignalOutcome(signal, FraudEngineStatus.UNAVAILABLE, null,
-                    Reason.HISTORY_INCOMPLETE, FraudEngineConfidence.UNKNOWN);
+                    Reason.HISTORY_INCOMPLETE);
         }
         boolean observed = absencePredicate ? fact.count() == 0 : fact.count() > 0;
         Reason reason = absencePredicate
                 ? observed ? Reason.NOT_SEEN_IN_WINDOW : Reason.SEEN_IN_WINDOW
                 : observed ? Reason.SWITCH_OBSERVED : Reason.NO_SWITCH_OBSERVED;
-        return new SignalOutcome(signal, FraudEngineStatus.AVAILABLE, observed, reason, FraudEngineConfidence.MEDIUM);
+        return new SignalOutcome(signal, FraudEngineStatus.AVAILABLE, observed, reason);
     }
 
     private static SignalOutcome unsupported(Signal signal) {
         return new SignalOutcome(signal, FraudEngineStatus.UNAVAILABLE, null,
-                Reason.UNSUPPORTED_SOURCE, FraudEngineConfidence.UNKNOWN);
+                Reason.UNSUPPORTED_SOURCE);
     }
 }

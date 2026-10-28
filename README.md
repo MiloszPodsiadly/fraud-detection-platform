@@ -76,6 +76,10 @@ Device Risk remains a disabled diagnostic candidate. Its current policy can desc
 but has no authenticated production evidence path or calibrated risk score; any future diagnostic status must not
 change Rules/ML scores, alert decisions, or payment outcomes.
 
+Current binary outcome: `CODE-FOUNDATION-MERGE-READY`; `DEVICE-RUNTIME-ACTIVATION-NO-GO`. The simulator and canonical
+replay generators label device provenance `SYNTHETIC_UNTRUSTED`; their device IDs, flags, fingerprints, and replay
+metadata are never institutional credentials or admission evidence.
+
 | Status | Device Risk state |
 | --- | --- |
 | IMPLEMENTED | Bounded Mongo adapter foundation and diagnostic-only policy; neither is wired into the running scoring path. |

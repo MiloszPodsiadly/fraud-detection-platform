@@ -1,14 +1,15 @@
 package com.frauddetection.enricher.config;
 
-import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.model.DeviceInfo;
+import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.device.DisabledDeviceRiskAdmissionAdapter;
-import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.env.PropertySource;
+import org.springframework.core.io.ClassPathResource;
 
 import java.io.IOException;
 import java.util.List;
@@ -16,6 +17,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@Tag("UNTRUSTED_TEST_ONLY")
 class DeviceRiskAdmissionConfigurationTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withUserConfiguration(DeviceRiskAdmissionConfiguration.class);

@@ -17,15 +17,16 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
+import org.bson.BsonType;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
@@ -42,7 +43,9 @@ import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.gt;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.lte;
+import static com.mongodb.client.model.Filters.not;
 import static com.mongodb.client.model.Filters.or;
+import static com.mongodb.client.model.Filters.type;
 import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.inc;
 import static com.mongodb.client.model.Updates.set;
@@ -69,6 +72,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             index("candidate_sequence_unique", true, false, "institution", "source", "sequence"),
             index("candidate_customer_event_status_sequence", false, false,
                     "institution", "source", "customer", "eventTime", "status", "sequence"),
+            index("candidate_status_staged_at", false, false, "status", "stagedAt"),
             index("candidate_status_event_source_event", false, false,
                     "institution", "source", "status", "eventTime", "sourceEvent"),
             index("candidate_device_status", false, false, "institution", "source", "keyVersion", "device", "status"),
@@ -137,6 +141,10 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         }
         validateCollection(existingCollections, "device_operational_revocation_tombstones", revocationTombstones,
                 TOMBSTONE_INDEXES);
+        if (candidates.find(and(eq("status", "STAGED"), not(type("stagedAt", BsonType.DATE_TIME))))
+                .limit(1).first() != null) {
+            throw terminal("SCHEMA_INCOMPATIBLE");
+        }
     }
 
     private static void createIndexes(MongoCollection<Document> collection, List<IndexSpec> indexes) {
@@ -231,7 +239,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 coverage.updateOne(session, eq("_id", scope),
                         combine(inc("revision", 1L), inc("pendingCount", 1), setOnInsert("sealedSequence", 0L)),
                         new com.mongodb.client.model.UpdateOptions().upsert(true));
-                candidates.insertOne(session, candidate(input));
+                candidates.insertOne(session, candidate(input, clock.instant()));
                 return StageOutcome.created();
             });
             if (outcome.rejection() == StageRejection.POST_SEAL) {
@@ -374,6 +382,28 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 return quarantined();
             }
             throw unavailable("COMMIT", exception);
+        }
+    }
+
+    @Override
+    public DeviceObservationStore.PendingMetrics pendingMetrics() {
+        List<Document> pipeline = List.of(
+                new Document("$match", new Document("status", "STAGED")),
+                new Document("$group", new Document("_id", null)
+                        .append("stagedCandidates", new Document("$sum", 1))
+                        .append("oldestStagedAt", new Document("$min", "$stagedAt")))
+        );
+        try {
+            Document aggregate = candidates.aggregate(pipeline).first();
+            if (aggregate == null) {
+                return new DeviceObservationStore.PendingMetrics(0, null);
+            }
+            long stagedCandidates = ((Number) aggregate.get("stagedCandidates")).longValue();
+            Instant oldestStagedAt = aggregate.getDate("oldestStagedAt").toInstant();
+            return new DeviceObservationStore.PendingMetrics(stagedCandidates,
+                    Duration.between(oldestStagedAt, clock.instant()));
+        } catch (MongoException exception) {
+            throw unavailable("PENDING_METRICS", exception);
         }
     }
 
@@ -564,7 +594,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         }
     }
 
-    private Document candidate(Observation input) {
+    private Document candidate(Observation input, Instant stagedAt) {
         return new Document("_id", eventId(input.institutionToken(), input.sourceCode(), input.sourceEventKey()))
                 .append("institution", input.institutionToken()).append("source", input.sourceCode())
                 .append("sourceEvent", input.sourceEventKey()).append("transaction", input.transactionKey())
@@ -572,7 +602,8 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 .append("keyVersion", input.keyVersion()).append("sequence", input.sourceSequence())
                 .append("eventTime", Date.from(input.eventTime()))
                 .append("sourceObservedAt", Date.from(input.sourceObservedAt()))
-                .append("payloadCommitment", input.payloadCommitment()).append("status", "STAGED");
+                .append("payloadCommitment", input.payloadCommitment()).append("status", "STAGED")
+                .append("stagedAt", Date.from(stagedAt));
     }
 
     private StageResult duplicateOrConflict(Document existing, Observation input) {
@@ -674,7 +705,17 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         DeviceRiskEvidence evidence = decode(persisted);
         if (!Objects.equals(persisted.getString("institution"), evidence.institutionToken())
                 || !Objects.equals(persisted.getString("source"), evidence.source().authorityCode())
-                || !Objects.equals(persisted.getString("transaction"), evidence.occurrenceKey())) {
+                || !Objects.equals(persisted.getString("transaction"), evidence.occurrenceKey())
+                || persisted.containsKey("sourceEvent")
+                    && !Objects.equals(persisted.getString("sourceEvent"), evidence.source().sourceEventKey())
+                || persisted.containsKey("customer")
+                    && !Objects.equals(persisted.getString("customer"), evidence.customerToken())
+                || persisted.containsKey("device")
+                    && !Objects.equals(persisted.getString("device"), evidence.deviceToken())
+                || persisted.containsKey("keyVersion")
+                    && !Objects.equals(persisted.getInteger("keyVersion"), evidence.keyVersion())
+                || persisted.containsKey("eventTime")
+                    && !Objects.equals(dateInstant(persisted, "eventTime"), evidence.eventTime())) {
             throw terminal("OCCURRENCE_IDENTITY_CONFLICT");
         }
         if (evidence.deviceToken() != null && hasActiveOperationalRevocation(session,
@@ -688,8 +729,13 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 || !Objects.equals(candidate.getString("transaction"), persisted.getString("transaction"))
                 || !Objects.equals(candidate.getString("payloadCommitment"), persisted.getString("payloadCommitment"))
                 || !Objects.equals(candidate.getString("sourceEvent"), evidence.source().sourceEventKey())
-                || candidate.getInteger("keyVersion") != evidence.keyVersion()
-                || !candidate.getDate("eventTime").toInstant().equals(evidence.eventTime()))) {
+                || !Objects.equals(candidate.getString("customer"), evidence.customerToken())
+                || !Objects.equals(candidate.getString("device"), evidence.deviceToken())
+                || !Objects.equals(candidate.getInteger("keyVersion"), evidence.keyVersion())
+                || !Objects.equals(dateInstant(candidate, "eventTime"), evidence.eventTime())
+                || !Objects.equals(dateInstant(candidate, "sourceObservedAt"), evidence.source().observedAt())
+                || persisted.containsKey("sequence")
+                    && !Objects.equals(candidate.getLong("sequence"), persisted.getLong("sequence")))) {
             throw terminal("OCCURRENCE_IDENTITY_CONFLICT");
         }
         return new CommitResult(CommitStatus.EXISTING, evidence);
@@ -933,7 +979,11 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
 
         private boolean matches(Document actual) {
             if (!keys.equals(actual.get("key", Document.class))
-                    || unique != Boolean.TRUE.equals(actual.get("unique"))) {
+                    || unique != Boolean.TRUE.equals(actual.get("unique"))
+                    || actual.containsKey("partialFilterExpression")
+                    || Boolean.TRUE.equals(actual.getBoolean("sparse"))
+                    || Boolean.TRUE.equals(actual.getBoolean("hidden"))
+                    || !hasSimpleCollation(actual)) {
                 return false;
             }
             if (!unique && actual.containsKey("unique")) {
@@ -944,6 +994,11 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             }
             Object expiry = actual.get("expireAfterSeconds");
             return expiry instanceof Number number && number.longValue() == 0L;
+        }
+
+        private static boolean hasSimpleCollation(Document actual) {
+            Document collation = actual.get("collation", Document.class);
+            return collation == null || "simple".equals(collation.getString("locale"));
         }
     }
 

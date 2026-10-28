@@ -42,6 +42,7 @@ class FeatureEnricherIntegrationTest extends AbstractIntegrationTest {
     static void registerProperties(DynamicPropertyRegistry registry) {
         FraudPlatformContainers.startAll();
         registry.add("spring.kafka.bootstrap-servers", () -> FraudPlatformContainers.kafka().getBootstrapServers());
+        registry.add("spring.kafka.producer.compression-type", () -> "snappy");
         registry.add("spring.data.redis.host", () -> FraudPlatformContainers.redis().getHost());
         registry.add("spring.data.redis.port", () -> FraudPlatformContainers.redis().getMappedPort(6379));
         registry.add("app.kafka.topics.transaction-raw", () -> "transactions.raw.test");

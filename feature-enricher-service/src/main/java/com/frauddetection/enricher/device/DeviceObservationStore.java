@@ -2,6 +2,7 @@ package com.frauddetection.enricher.device;
 
 import com.frauddetection.common.events.device.DeviceRiskEvidence;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -13,6 +14,8 @@ interface DeviceObservationStore {
     void seal(CoverageSeal seal);
 
     CommitResult commit(String institutionToken, String sourceCode, String sourceEventKey);
+
+    PendingMetrics pendingMetrics();
 
     /**
      * Revokes one device/key-version from operational history for the bounded tombstone lifetime.
@@ -26,6 +29,17 @@ interface DeviceObservationStore {
 
     enum StageResult { CREATED, DUPLICATE }
     enum CommitStatus { COMMITTED, EXISTING, WAITING_FOR_SEAL, WAITING_FOR_EARLIER_EVENT, QUARANTINED }
+
+    /** Aggregate only: deliberately contains no institution, source, event, customer, or device identity. */
+    record PendingMetrics(long stagedCandidates, Duration oldestPendingAge) {
+        public PendingMetrics {
+            if (stagedCandidates < 0
+                    || (stagedCandidates == 0) != (oldestPendingAge == null)
+                    || oldestPendingAge != null && oldestPendingAge.isNegative()) {
+                throw new IllegalArgumentException("DEVICE_STORE_PENDING_METRICS");
+            }
+        }
+    }
 
     record CommitResult(CommitStatus status, DeviceRiskEvidence evidence) {
         public CommitResult {

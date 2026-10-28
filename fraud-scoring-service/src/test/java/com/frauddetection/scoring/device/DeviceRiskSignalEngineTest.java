@@ -1,15 +1,17 @@
 package com.frauddetection.scoring.device;
 
+import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
-import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.context.ScoringContext;
-import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
 import com.frauddetection.scoring.engine.FraudSignalEvaluation;
+import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -65,6 +67,8 @@ class DeviceRiskSignalEngineTest {
 
         var result = engine.evaluate(context());
         assertThat(result.status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
+        assertThat(result.confidence()).isEqualTo(
+                com.frauddetection.common.events.engine.FraudEngineConfidence.UNKNOWN);
         assertThat(result.score()).isNull();
         assertThat(result.riskLevel()).isNull();
         assertThat(result.reasonCodes()).containsExactly("DEVICE_EVIDENCE_NOT_ADMITTED");
@@ -79,8 +83,26 @@ class DeviceRiskSignalEngineTest {
 
     private static ScoringContext context() {
         var transaction = TransactionFixtures.enrichedTransaction().build();
-        return new ScoringContext(transaction, Map.of(), ScoringMode.RULE_BASED,
-                transaction.correlationId(), TIME);
+        DeviceInfo callerClaimedDevice = new DeviceInfo(
+                transaction.deviceInfo().deviceId(),
+                transaction.deviceInfo().fingerprint(),
+                transaction.deviceInfo().ipAddress(),
+                transaction.deviceInfo().userAgent(),
+                transaction.deviceInfo().platform(),
+                transaction.deviceInfo().browser(),
+                true,
+                true,
+                true,
+                Map.of("issuer", "BANK", "signature", "self-signed", "sourceQuality", "AUTHENTICATED_INSTITUTION")
+        );
+        TransactionEnrichedEvent callerClaimedTransaction = new TransactionEnrichedEvent(
+                transaction.eventId(), transaction.transactionId(), transaction.correlationId(),
+                transaction.customerId(), transaction.accountId(), transaction.createdAt(),
+                transaction.transactionTimestamp(), transaction.transactionAmount(), transaction.merchantInfo(),
+                callerClaimedDevice, transaction.locationInfo(), transaction.customerContext(),
+                transaction.featureSnapshot());
+        return new ScoringContext(callerClaimedTransaction, Map.of(), ScoringMode.RULE_BASED,
+                callerClaimedTransaction.correlationId(), TIME);
     }
 
     private static FraudSignalEngine stub(String engineId, FraudEngineType type, boolean required) {

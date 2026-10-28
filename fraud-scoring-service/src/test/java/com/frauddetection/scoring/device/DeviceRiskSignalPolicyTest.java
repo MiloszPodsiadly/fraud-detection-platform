@@ -6,7 +6,6 @@ import com.frauddetection.common.events.device.DeviceRiskEvidence.Reason;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.Source;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.SourceQuality;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.State;
-import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +28,9 @@ class DeviceRiskSignalPolicyTest {
                 var result = policy.evaluate(evidence(available(prior), available(switches),
                         Duration.ofDays(30), TIME, TIME, SourceQuality.AUTHENTICATED_INSTITUTION));
                 assertThat(result.status()).isEqualTo(FraudEngineStatus.DEGRADED);
-                assertThat(result.confidence()).isEqualTo(FraudEngineConfidence.MEDIUM);
+                assertThat(result.sourceQuality()).isEqualTo(SourceQuality.AUTHENTICATED_INSTITUTION);
+                assertThat(result.evidenceCoverage())
+                        .isEqualTo(DeviceRiskSignalPolicy.EvidenceCoverage.COMPLETE_SUPPORTED_HISTORY);
                 assertThat(result.score()).isNull();
                 assertThat(result.riskInference()).isEqualTo(DeviceRiskSignalPolicy.RiskInference.NOT_CALIBRATED);
                 assertThat(result.signals().get(0).observed()).isEqualTo(prior == 0);
@@ -59,12 +60,12 @@ class DeviceRiskSignalPolicyTest {
                         + (switches.state() == State.AVAILABLE ? 1 : 0);
                 assertThat(result.status()).isEqualTo(count > 0 ? FraudEngineStatus.DEGRADED
                         : FraudEngineStatus.UNAVAILABLE);
-                assertThat(result.confidence()).isEqualTo(count == 2 ? FraudEngineConfidence.MEDIUM
-                        : count == 1 ? FraudEngineConfidence.LOW : FraudEngineConfidence.UNKNOWN);
+                assertThat(result.evidenceCoverage()).isEqualTo(count == 2
+                        ? DeviceRiskSignalPolicy.EvidenceCoverage.COMPLETE_SUPPORTED_HISTORY
+                        : count == 1 ? DeviceRiskSignalPolicy.EvidenceCoverage.PARTIAL_SUPPORTED_HISTORY
+                        : DeviceRiskSignalPolicy.EvidenceCoverage.NO_SUPPORTED_HISTORY);
                 assertThat(result.signals().subList(0, 2)).allSatisfy(signal -> {
                     assertThat(signal.observed() == null).isEqualTo(signal.status() != FraudEngineStatus.AVAILABLE);
-                    assertThat(signal.confidence()).isEqualTo(signal.status() == FraudEngineStatus.AVAILABLE
-                            ? FraudEngineConfidence.MEDIUM : FraudEngineConfidence.UNKNOWN);
                 });
                 assertThat(result.score()).isNull();
             }
@@ -92,6 +93,9 @@ class DeviceRiskSignalPolicyTest {
             var result = policy.evaluate(evidence(untrusted(quality), untrusted(quality),
                     Duration.ofDays(30), TIME, TIME, quality));
             assertThat(result.status()).isEqualTo(FraudEngineStatus.SKIPPED);
+            assertThat(result.sourceQuality()).isEqualTo(quality);
+            assertThat(result.evidenceCoverage())
+                    .isEqualTo(DeviceRiskSignalPolicy.EvidenceCoverage.NO_SUPPORTED_HISTORY);
             assertThat(result.signals()).allSatisfy(signal -> {
                 assertThat(signal.status()).isEqualTo(FraudEngineStatus.SKIPPED);
                 assertThat(signal.observed()).isNull();
@@ -139,6 +143,8 @@ class DeviceRiskSignalPolicyTest {
             assertThat(signal.observed()).isNull();
         });
         assertThat(complete.status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(complete.evidenceCoverage())
+                .isEqualTo(DeviceRiskSignalPolicy.EvidenceCoverage.COMPLETE_SUPPORTED_HISTORY);
         assertThat(complete.riskInference()).isEqualTo(DeviceRiskSignalPolicy.RiskInference.NOT_CALIBRATED);
         assertThat(complete.score()).isNull();
 
@@ -197,37 +203,38 @@ class DeviceRiskSignalPolicyTest {
                 .allSatisfy(code -> assertThat(code).hasSizeLessThanOrEqualTo(32));
         assertThatThrownBy(() -> new DeviceRiskSignalPolicy.SignalOutcome(
                 DeviceRiskSignalPolicy.Signal.DEVICE_SWITCH, FraudEngineStatus.UNAVAILABLE, false,
-                DeviceRiskSignalPolicy.Reason.HISTORY_UNAVAILABLE, FraudEngineConfidence.UNKNOWN))
+                DeviceRiskSignalPolicy.Reason.HISTORY_UNAVAILABLE))
                 .hasMessage("DEVICE_POLICY_OUTCOME_STATE");
         assertThatThrownBy(() -> new DeviceRiskSignalPolicy.SignalOutcome(
                 DeviceRiskSignalPolicy.Signal.PROXY_OR_VPN, FraudEngineStatus.AVAILABLE, true,
-                DeviceRiskSignalPolicy.Reason.SWITCH_OBSERVED, FraudEngineConfidence.MEDIUM))
+                DeviceRiskSignalPolicy.Reason.SWITCH_OBSERVED))
                 .hasMessage("DEVICE_POLICY_OUTCOME_REASON");
         assertThatThrownBy(() -> new DeviceRiskSignalPolicy.Evaluation(
                 DeviceRiskSignalPolicy.VERSION,
                 FraudEngineStatus.DEGRADED,
-                FraudEngineConfidence.LOW,
+                SourceQuality.AUTHENTICATED_INSTITUTION,
+                DeviceRiskSignalPolicy.EvidenceCoverage.PARTIAL_SUPPORTED_HISTORY,
                 List.of(
                         new DeviceRiskSignalPolicy.SignalOutcome(
                                 DeviceRiskSignalPolicy.Signal.DEVICE_NOT_SEEN_RECENTLY,
                                 FraudEngineStatus.AVAILABLE, true,
-                                DeviceRiskSignalPolicy.Reason.NOT_SEEN_IN_WINDOW, FraudEngineConfidence.MEDIUM),
+                                DeviceRiskSignalPolicy.Reason.NOT_SEEN_IN_WINDOW),
                         new DeviceRiskSignalPolicy.SignalOutcome(
                                 DeviceRiskSignalPolicy.Signal.DEVICE_SWITCH,
                                 FraudEngineStatus.SKIPPED, null,
-                                DeviceRiskSignalPolicy.Reason.UNTRUSTED_SOURCE, FraudEngineConfidence.UNKNOWN),
+                                DeviceRiskSignalPolicy.Reason.UNTRUSTED_SOURCE),
                         new DeviceRiskSignalPolicy.SignalOutcome(
                                 DeviceRiskSignalPolicy.Signal.OTHER_CUSTOMERS,
                                 FraudEngineStatus.UNAVAILABLE, null,
-                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE, FraudEngineConfidence.UNKNOWN),
+                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE),
                         new DeviceRiskSignalPolicy.SignalOutcome(
                                 DeviceRiskSignalPolicy.Signal.COUNTRY_MISMATCH,
                                 FraudEngineStatus.UNAVAILABLE, null,
-                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE, FraudEngineConfidence.UNKNOWN),
+                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE),
                         new DeviceRiskSignalPolicy.SignalOutcome(
                                 DeviceRiskSignalPolicy.Signal.PROXY_OR_VPN,
                                 FraudEngineStatus.UNAVAILABLE, null,
-                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE, FraudEngineConfidence.UNKNOWN)),
+                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE)),
                 null)).hasMessage("DEVICE_POLICY_MIXED_SOURCE");
     }
 

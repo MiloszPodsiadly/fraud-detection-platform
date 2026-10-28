@@ -2,6 +2,7 @@ package com.frauddetection.enricher.device;
 
 import com.mongodb.MongoException;
 import com.mongodb.client.ClientSession;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+@Tag("UNTRUSTED_TEST_ONLY")
 class MongoDeviceObservationTransactionCommitTest {
     @Test
     void unknownCommitAcknowledgementRetriesOnlyTheCommitCall() {

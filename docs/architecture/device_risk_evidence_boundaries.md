@@ -67,6 +67,25 @@ make completeness unknown until a documented recovery rule proves otherwise.
 | Device switching | Verified, stable customer/device bindings and distinct event-time ordered transitions from the authoritative history. | Bounded complete window, explicit equal-time tie rule and late-event disposition; replay cannot rewrite a committed snapshot. | **UNAVAILABLE.** Arrival order and changing client IDs are not proof. Test reordered, equal-time, duplicate, late and evicted observations. |
 | Device plus VPN/proxy | Verified device binding and a detector-backed network result with provider identity, source IP provenance, confidence, timestamp and scope. | Detector result must be fresh for this occurrence; missing detector or partial history is unknown. | **NOT_EVALUATED.** Caller booleans have no detector provenance. Test forged flags, stale detector result, missing peer IP and provider failure. |
 
+## Activation owners and evidence required
+
+The accountable owners below are organizational roles; this repository does not identify named approvers or record
+any of these approvals. Every signal also depends on the shared issuer, occurrence-binding, retention, and delivery
+gates. Issuer authentication proves which institution sent a statement; it does not prove that a device or provider
+assertion is physically true.
+
+| Signal | Accountable owner(s) | Evidence required to close the gate |
+| --- | --- | --- |
+| New device | Institution source-integration owner; device identity/enrollment provider owner; platform identity/security owner | Verified issuer and institution/source scope; provider-backed customer/device binding; immutable binding to the scoring occurrence; complete, contiguous pre-event history and approved pseudonym-key lifecycle. |
+| Same device across customers | Institution source-integration owner; independent device identity provider owner; data controller/privacy owner | The same independently verifiable device binding for two separately authenticated customers inside one institution; documented authorization, purpose, and retention for cross-customer linkage; negative proof of cross-institution isolation. |
+| Device country mismatch | Institution source owner; device-location provider owner; data controller/privacy owner | Provider-authenticated location bound to the device and exact occurrence, with provider identity, observed time, country, and approved freshness/accuracy policy; an independently authorized reference country. A caller IP, transaction country, or home-country field is insufficient. |
+| Device switching | Institution event-ledger/source owner; platform recovery/SRE owner; data controller/privacy owner | Authenticated event identity and signed contiguous sequence/coverage seals; approved source-liveness and late-event rules; deterministic equal-time ordering; immutable occurrence snapshots and approved history retention. |
+| Device plus VPN/proxy | Trusted ingress/network owner; independent network-intelligence provider owner; device identity provider owner | Trusted provenance for the evaluated network address; provider-authenticated proxy/VPN result and provider code/time bound to the exact occurrence and device binding; freshness and outage behavior. Caller booleans are inadmissible. |
+
+Shared evidence still missing includes issuer registration and key lifecycle, institution-scoped authorization,
+replay protection, signed coverage and liveness semantics, exact-payload delivery/recovery, consumer deduplication,
+and approved privacy/retention controls. Closing one signal's provider gate does not close these shared gates.
+
 ## One authority for each question
 
 - The existing [feature calculator](../../feature-enricher-service/src/main/java/com/frauddetection/enricher/service/TransactionFeatureCalculator.java)
@@ -122,6 +141,10 @@ and the [EDPB pseudonymization summary](https://www.edpb.europa.eu/system/files/
 | New history, event-time policy, retention, key rotation and Kafka/database recovery have one explicit owner. | Deferred to the storage/delivery ADR; cold, late, duplicate, conflict, crash and erasure tests are mandatory before admission. |
 | The current nested contract permits the optional Device Risk identity, but does not admit evidence or activate the engine. | The shared registry defines the four-ID allowlist. Runtime registration and emission remain disabled until independently bound evidence, retention, recovery, and deployment handling are approved and verified. |
 
-No new executable trust policy exists yet, so adding a test that claims an admitted Device Risk signal here would
-assert future behavior. The existing negative public-contract tests reject unknown engine identities; typed evidence
-admission, scope and source-poisoning negatives belong with the later contract and persistence implementation.
+The executable admission safeguard intentionally only denies: `DisabledDeviceRiskAdmissionAdapter` rejects every raw
+event, and startup fails if admission is enabled. Its tagged negative test injects caller-controlled source labels,
+device trust/proxy/VPN booleans, synthetic labels, and self-asserted issuer/seal fields; none changes the denial. The
+scoring runtime also fails startup when the Device Risk engine flag is enabled, does not register that engine, and the
+candidate engine has no evidence reader and always returns `UNAVAILABLE`. These are fail-closed safeguards, not
+issuer authentication or proof that an admitted signal works. Pure policy fixtures containing the structural
+`AUTHENTICATED_INSTITUTION` enum claim do not establish authenticity. No test claims production admission.

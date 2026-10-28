@@ -2,12 +2,14 @@ package com.frauddetection.enricher.device;
 
 import com.frauddetection.common.events.device.DeviceRiskEvidence;
 import com.frauddetection.enricher.device.DeviceObservationStore.Observation;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@Tag("UNTRUSTED_TEST_ONLY")
 class DeviceObservationStoreBoundaryTest {
     private static final Instant TIME = Instant.parse("2026-10-26T10:00:00Z");
     private static final String TOKEN = "a".repeat(64);

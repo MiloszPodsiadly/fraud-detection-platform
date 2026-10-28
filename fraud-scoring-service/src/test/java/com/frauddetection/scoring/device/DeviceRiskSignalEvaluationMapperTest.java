@@ -29,7 +29,7 @@ class DeviceRiskSignalEvaluationMapperTest {
         FraudSignalEvaluation result = new DeviceRiskSignalEvaluationMapper().map(policyResult);
 
         assertThat(result.status()).isEqualTo(FraudEngineStatus.DEGRADED);
-        assertThat(result.confidence()).isEqualTo(FraudEngineConfidence.MEDIUM);
+        assertThat(result.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
         assertThat(result.score()).isNull();
         assertThat(result.riskLevel()).isNull();
         assertThat(result.statusReason()).isEqualTo("DEVICE_SCORE_NOT_CALIBRATED");

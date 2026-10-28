@@ -8,7 +8,7 @@ bind that claim before any result may be used.
 Policy version `1` interprets **only** a complete, sealed, pre-occurrence 30-day history within one institution,
 source, customer and versioned-device scope. The observation's `asOf` is the occurrence event time; `windowStart`
 must equal `asOf - 30 days`, coverage must reach `asOf`, and the source observation time must not be in the future
-relative to `asOf`. A count of zero means only “not observed in this complete bounded window.” Equal-time, late,
+relative to `asOf`. A count of zero means only a bounded absence in the complete history window. Equal-time, late,
 missing, evicted, key-rotation, and capacity-limited histories cannot be silently counted as zero.
 `DeviceRiskEvidence` validates structure but does not establish the missing producer trust boundary.
 
@@ -33,10 +33,15 @@ Switch-count temporal semantics are recorded in the [Device Risk switch semantic
 
 The operating status is `DEGRADED` whenever one or both supported history predicates are available, because there is
 no calibrated Device Risk score; it is `UNAVAILABLE` when no supported predicate can be evaluated, and `SKIPPED`
-for client/synthetic top-level input. Confidence (`MEDIUM` for both history predicates, `LOW` for one, otherwise
-`UNKNOWN`) describes evidence coverage only, **not** probability of fraud. `riskInference` is explicitly
-`NOT_CALIBRATED`; `score` and risk level remain null. A future calibration gate requires measured false-positive
-rates, source reliability, population sensitivity, a reviewed threshold, and a separate model-risk approval.
+for client/synthetic top-level input. Source quality (`AUTHENTICATED_INSTITUTION`, `CLIENT_ASSERTED`, or `SYNTHETIC`)
+is carried separately; `AUTHENTICATED_INSTITUTION` remains a claim until an independent admission boundary verifies
+it. The internal `EvidenceCoverage` value describes only the two supported history predicates:
+`NO_SUPPORTED_HISTORY`, `PARTIAL_SUPPORTED_HISTORY`, or `COMPLETE_SUPPORTED_HISTORY`. The three unsupported
+signals remain `UNAVAILABLE`, including when both history predicates are available. This coverage value is not a
+fraud-risk confidence. The mapped `FraudSignalEvaluation.confidence` stays `UNKNOWN`, while `riskInference` is
+explicitly `NOT_CALIBRATED` and `score` and risk level remain null. A future calibration gate requires measured
+false-positive rates, source reliability, population sensitivity, a reviewed threshold, and a separate model-risk
+approval.
 Repeated client values, shared workstations, device resets, travel, and incomplete recovery can all make a pattern
 misleading. No isolated signal changes Rules/ML score, alert decision, or payment outcome.
 

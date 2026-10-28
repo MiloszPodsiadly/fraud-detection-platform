@@ -1,5 +1,6 @@
 package com.frauddetection.scoring.device;
 
+import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.engine.FraudEngineEvidence;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceStatus;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
@@ -29,7 +30,7 @@ public final class DeviceRiskSignalEvaluationMapper {
                     : DeviceRiskSignalReasonCode.DEVICE_EVIDENCE_UNAVAILABLE.wireValue();
             default -> throw new IllegalArgumentException("DEVICE_POLICY_OPERATING_STATUS_INVALID");
         };
-        return new FraudSignalEvaluation(evaluation.status(), null, null, evaluation.confidence(),
+        return new FraudSignalEvaluation(evaluation.status(), null, null, FraudEngineConfidence.UNKNOWN,
                 reasonCodes, List.of(), evidence, null, null, null, statusReason);
     }
 
