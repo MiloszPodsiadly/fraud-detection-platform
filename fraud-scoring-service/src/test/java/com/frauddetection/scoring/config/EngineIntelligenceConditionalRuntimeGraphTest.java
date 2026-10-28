@@ -1,5 +1,6 @@
 package com.frauddetection.scoring.config;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalEngine;
@@ -169,6 +170,14 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
 
     @Test
     void disabledDeviceFlagNeverCreatesAnEngineOrFourthRegistryEntry() {
+        assertThat(FraudEngineIdentityContract.engineOrder()).containsExactly(
+                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID
+        );
+        assertThat(new DeviceRiskSignalEngine().descriptor().required()).isFalse();
+
         enabledContextRunner()
                 .withPropertyValues(DeviceRiskEngineProperties.PROPERTY_NAME + "=false",
                         VelocityEngineProperties.PROPERTY_NAME + "=true")

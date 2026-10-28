@@ -82,9 +82,49 @@ assertion is physically true.
 | Device switching | Institution event-ledger/source owner; platform recovery/SRE owner; data controller/privacy owner | Authenticated event identity and signed contiguous sequence/coverage seals; approved source-liveness and late-event rules; deterministic equal-time ordering; immutable occurrence snapshots and approved history retention. |
 | Device plus VPN/proxy | Trusted ingress/network owner; independent network-intelligence provider owner; device identity provider owner | Trusted provenance for the evaluated network address; provider-authenticated proxy/VPN result and provider code/time bound to the exact occurrence and device binding; freshness and outage behavior. Caller booleans are inadmissible. |
 
-Shared evidence still missing includes issuer registration and key lifecycle, institution-scoped authorization,
-replay protection, signed coverage and liveness semantics, exact-payload delivery/recovery, consumer deduplication,
-and approved privacy/retention controls. Closing one signal's provider gate does not close these shared gates.
+The following shared activation gates remain open. Owners are accountable organizational roles; this ledger records
+no named approvers or external approvals:
+
+- **Authenticated issuer and signer/key custody.** Owners: institution source-integration owner; platform
+  identity/security and key-management owners. Evidence: independently registered issuer trust roots; signature,
+  audience, institution/source scope, expiry, revocation and rotation verification; controlled signer provisioning,
+  rotation and revocation.
+- **Verified institution/source/epoch seal.** Owners: institution event-ledger/source owner; institution
+  source-integration owner; platform identity/security owner. Evidence: a signed, replay-resistant seal bound to the
+  verified institution, source and epoch, with contiguous sequence, event-time watermark and coverage interval;
+  negative proof for gaps, duplicate seals, replay and cross-scope substitution.
+- **Occurrence key and sequence binding.** Owners: institution source-integration owner; platform scoring-contract
+  and persistence owners. Evidence: authenticated binding of event, transaction, customer, device/key version,
+  source sequence and payload commitment to one immutable scoring occurrence; the reader verifies every binding
+  before evidence is consumed.
+- **Payload retention, erasure and replay approval.** Owners: data controller/privacy and legal owners; platform
+  security/key-custody owner. Evidence: approved purpose, minimization, access, encryption, retention periods,
+  erasure disposition, tombstone lifetime and replay horizon, with tests that expiry or erasure cannot recreate live
+  history.
+- **Durable source closure and recovery worker.** Owners: institution source-liveness owner; platform recovery/SRE,
+  operations and audit owners. Evidence: an authorized closure assertion bound to source epoch; durable audit;
+  bounded worker lease with owner/token/generation fencing; transactional terminal compare-and-set, one counter
+  decrement, restart/race proof, rollback ownership and an operator repair path. No worker or closure path exists now.
+- **Exact-payload outbox and Kafka/Redis crash windows.** Owners: feature-enricher owner; Kafka/messaging and Redis
+  platform owners; source-offset and consumer owners. Evidence: approved exact serialized payload retention; atomic
+  occurrence/outbox intent; stable event identity and identical-byte retries after unknown acknowledgments; fault
+  injection across Mongo commit, Kafka publish/ack, source offset, Redis partial write and restart. The current
+  Kafka-then-Redis sequence remains at least once and has no cross-system exactly-once guarantee.
+- **Consumer compatibility.** Owners: scored-event contract owner and each deployed consumer owner. Evidence:
+  inventory of deployed readers, compatibility and payload-size tests, consumer-first rollout and explicit handling of
+  the optional nested diagnostic contract.
+- **Provider assertions for unsupported signals.** Owners: independent device-identity provider and privacy owners
+  for cross-customer linkage; device-location provider and reference-country policy owner for country mismatch;
+  trusted-ingress/network and network-intelligence provider owners for proxy/VPN. Evidence: provider-authenticated,
+  fresh assertions bound to the exact device and occurrence, with scope, timestamp, accuracy/confidence and outage
+  behavior; negative tests for caller and synthetic claims. All three signals remain unsupported.
+- **Traffic SLO and measurement.** Owners: platform SRE/service owner and product/model-risk owner. Evidence:
+  representative traffic and backlog distributions, p95/p99 latency, throughput, contention/retry and storage
+  measurements, explicit acceptance budgets, dashboards and operational response. Local Testcontainers timings are
+  not a production SLO; production Device Risk telemetry is not wired.
+
+Activation status remains **ACTIVATION NO-GO** until every applicable shared gate and signal-specific provider gate
+has approved evidence. Closing one signal's provider gate does not close these shared gates.
 
 ## One authority for each question
 
@@ -137,7 +177,7 @@ and the [EDPB pseudonymization summary](https://www.edpb.europa.eu/system/files/
 | --- | --- |
 | Caller device/location/network claims do not become verified evidence through validation, Kafka, or HMAC. | Accepted boundary; negative contract tests must reject forged provenance and raw-data exposure when typed evidence is introduced. |
 | No cross-customer or institution-wide Device Risk join without authenticated institutional and customer scope. | Blocked by the current ingress path; negative tests must cover mismatched top-level/context IDs and cross-scope replay. |
-| Baseline Rules/ML outputs and historical `deviceNovelty` meaning remain unchanged. | Required regression: identical score, risk, alert and reason output with Device Risk disabled and enabled; future diagnostic failure must not rewrite baseline facts. |
+| Baseline Rules/ML outputs and historical `deviceNovelty` meaning remain unchanged. | `TransactionFraudScoringServiceEngineIntelligenceEmissionTest.enabledEmissionDoesNotChangeBaseScoringFields` compares scored events with diagnostic emission off/on; `ProducerEngineIntelligenceEnabledDiagnosticDisagreementTest` proves a high diagnostic cannot override a low baseline. Device Risk enabled mode intentionally fails startup, so no event is produced with that mode. Any future activation proposal must repeat baseline parity before the gate changes. |
 | New history, event-time policy, retention, key rotation and Kafka/database recovery have one explicit owner. | Deferred to the storage/delivery ADR; cold, late, duplicate, conflict, crash and erasure tests are mandatory before admission. |
 | The current nested contract permits the optional Device Risk identity, but does not admit evidence or activate the engine. | The shared registry defines the four-ID allowlist. Runtime registration and emission remain disabled until independently bound evidence, retention, recovery, and deployment handling are approved and verified. |
 

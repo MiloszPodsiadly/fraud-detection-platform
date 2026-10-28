@@ -343,18 +343,24 @@ class MongoDeviceObservationStoreIntegrationTest {
         assertThat(store.pendingMetrics().oldestPendingAge()).isNull();
 
         Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        Observation otherScopePending = observation(OTHER_INSTITUTION, CUSTOMER, DEVICE, '3', '4', 1, 1, B_TIME);
         store.stage(pending);
+        store.stage(otherScopePending);
         MongoDeviceObservationStore restarted = new MongoDeviceObservationStore(client, databaseName,
                 Clock.fixed(NOW.plus(Duration.ofHours(2)), ZoneOffset.UTC));
 
         DeviceObservationStore.PendingMetrics metrics = restarted.pendingMetrics();
-        assertThat(metrics.stagedCandidates()).isEqualTo(1);
+        assertThat(metrics.stagedCandidates()).isEqualTo(2);
         assertThat(metrics.oldestPendingAge()).isEqualTo(Duration.ofHours(2));
         assertThat(metrics.toString()).doesNotContain(INSTITUTION, SOURCE, CUSTOMER, DEVICE, pending.sourceEventKey(),
                 pending.transactionKey());
+        restarted.seal(seal(INSTITUTION, 1, B_TIME, 1));
         assertThat(restarted.commit(INSTITUTION, SOURCE, pending.sourceEventKey()).status())
-                .isEqualTo(CommitStatus.WAITING_FOR_SEAL);
+                .isEqualTo(CommitStatus.COMMITTED);
         assertThat(restarted.pendingMetrics().stagedCandidates()).isEqualTo(1);
+        assertThat(restarted.pendingMetrics().oldestPendingAge()).isEqualTo(Duration.ofHours(2));
+        assertThat(restarted.commit(INSTITUTION, SOURCE, pending.sourceEventKey()).status())
+                .isEqualTo(CommitStatus.EXISTING);
     }
 
     @Test
@@ -688,6 +694,31 @@ class MongoDeviceObservationStoreIntegrationTest {
                 .filter(index -> "candidate_transaction_unique".equals(index.getString("name")))
                 .findFirst().orElseThrow().get("partialFilterExpression"))
                 .isEqualTo(new Document("status", "COMMITTED"));
+    }
+
+    @Test
+    void startupRejectsCompoundIndexWithReorderedKeys() {
+        var candidates = client.getDatabase(databaseName).getCollection("device_observation_candidates");
+        candidates.dropIndex("candidate_customer_event_status_sequence");
+        candidates.createIndex(new Document("institution", 1)
+                        .append("source", 1)
+                        .append("customer", 1)
+                        .append("status", 1)
+                        .append("eventTime", 1)
+                        .append("sequence", 1),
+                new IndexOptions().name("candidate_customer_event_status_sequence"));
+
+        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName,
+                Clock.fixed(NOW, ZoneOffset.UTC)))
+                .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
+        assertThat(index("device_observation_candidates", "candidate_customer_event_status_sequence")
+                .get("key", Document.class))
+                .isEqualTo(new Document("institution", 1)
+                        .append("source", 1)
+                        .append("customer", 1)
+                        .append("status", 1)
+                        .append("eventTime", 1)
+                        .append("sequence", 1));
     }
 
     @Test

@@ -43,6 +43,11 @@ import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorT
 import static org.assertj.core.api.Assertions.assertThat;
 
 class FraudScoringOrchestratorRealAdapterCompositionTest {
+    private static final List<String> ACTIVE_RULES_ML_VELOCITY_ENGINE_IDS = List.of(
+            FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+            FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+            FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID
+    );
 
     @Test
     void realRuleAndPythonMlAdaptersExecuteTogether() {
@@ -87,7 +92,7 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 .evaluate(context);
 
         assertThat(result.engineResults()).hasSize(3);
-        assertThat(engineIds(result)).containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
+        assertThat(engineIds(result)).containsExactlyElementsOf(ACTIVE_RULES_ML_VELOCITY_ENGINE_IDS);
         assertThat(result.engineResults()).extracting(FraudEngineResult::status)
                 .containsExactly(FraudEngineStatus.AVAILABLE, FraudEngineStatus.AVAILABLE, FraudEngineStatus.AVAILABLE);
         assertThat(result.engineResults()).allSatisfy(engineResult -> {
@@ -105,7 +110,7 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
 
         assertThat(summary.contractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
         assertThat(summary.engines()).extracting(engine -> engine.engineId())
-                .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
+                .containsExactlyElementsOf(ACTIVE_RULES_ML_VELOCITY_ENGINE_IDS);
         assertThat(summary.comparison()).isEqualTo(twoEngineSummary.comparison());
         assertThat(summary.diagnosticSignals()).extracting(signal -> signal.engineId())
                 .contains(FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID);

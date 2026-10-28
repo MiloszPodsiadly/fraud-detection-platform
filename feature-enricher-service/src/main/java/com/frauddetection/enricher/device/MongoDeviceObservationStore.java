@@ -16,8 +16,6 @@ import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.IndexOptions;
-import org.bson.BsonType;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import tools.jackson.databind.json.JsonMapper;
@@ -38,14 +36,11 @@ import java.util.function.Function;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
-import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.gt;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.lte;
-import static com.mongodb.client.model.Filters.not;
 import static com.mongodb.client.model.Filters.or;
-import static com.mongodb.client.model.Filters.type;
 import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.inc;
 import static com.mongodb.client.model.Updates.set;
@@ -66,30 +61,6 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private static final int MAX_CUSTOMER_ROWS = 25_000;
     private static final TransactionOptions TRANSACTION_OPTIONS = TransactionOptions.builder()
             .readConcern(ReadConcern.SNAPSHOT).writeConcern(WriteConcern.MAJORITY).build();
-    private static final List<IndexSpec> CANDIDATE_INDEXES = List.of(
-            index("candidate_source_event_unique", true, false, "institution", "source", "sourceEvent"),
-            index("candidate_transaction_unique", true, false, "institution", "source", "transaction"),
-            index("candidate_sequence_unique", true, false, "institution", "source", "sequence"),
-            index("candidate_customer_event_status_sequence", false, false,
-                    "institution", "source", "customer", "eventTime", "status", "sequence"),
-            index("candidate_status_staged_at", false, false, "status", "stagedAt"),
-            index("candidate_status_event_source_event", false, false,
-                    "institution", "source", "status", "eventTime", "sourceEvent"),
-            index("candidate_device_status", false, false, "institution", "source", "keyVersion", "device", "status"),
-            index("candidate_terminal_expiry_ttl", false, true, "terminalExpireAt"));
-    private static final List<IndexSpec> OBSERVATION_INDEXES = List.of(
-            index("observation_device_window", false, false,
-                    "institution", "source", "keyVersion", "device", "eventTime", "sourceEvent"),
-            index("observation_customer_window", false, false,
-                    "institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"),
-            index("observation_expiry_ttl", false, true, "expireAt"));
-    private static final List<IndexSpec> OCCURRENCE_INDEXES = List.of(
-            index("occurrence_transaction_unique", true, false, "institution", "source", "transaction"),
-            index("occurrence_device", false, false, "institution", "source", "keyVersion", "device"),
-            index("occurrence_expiry_ttl", false, true, "expireAt"));
-    private static final List<IndexSpec> TOMBSTONE_INDEXES = List.of(
-            index("tombstone_expiry_ttl", false, true, "expireAt"));
-
     private final MongoClient client;
     private final MongoDatabase database;
     private final MongoCollection<Document> candidates;
@@ -115,79 +86,9 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         fences = database.getCollection("device_scope_fences");
         revocationTombstones = database.getCollection("device_operational_revocation_tombstones");
         try {
-            ensureIndexes();
+            new MongoDeviceObservationSchema(database).ensureIndexes();
         } catch (MongoException exception) {
             throw unavailable("INDEXES", exception);
-        }
-    }
-
-    private void ensureIndexes() {
-        Set<String> existingCollections = new HashSet<>(database.listCollectionNames().into(new ArrayList<>()));
-        validateExistingSchema(existingCollections);
-        createIndexes(candidates, CANDIDATE_INDEXES);
-        createIndexes(observations, OBSERVATION_INDEXES);
-        createIndexes(occurrences, OCCURRENCE_INDEXES);
-        createIndexes(revocationTombstones, TOMBSTONE_INDEXES);
-    }
-
-    private void validateExistingSchema(Set<String> existingCollections) {
-        validateCollection(existingCollections, "device_observation_candidates", candidates, CANDIDATE_INDEXES, "expireAt");
-        validateCollection(existingCollections, "device_observations", observations, OBSERVATION_INDEXES);
-        validateCollection(existingCollections, "device_occurrences", occurrences, OCCURRENCE_INDEXES);
-        validateCollection(existingCollections, "device_source_coverage", coverage, List.of(), "pendingCounterVersion");
-        validateCollection(existingCollections, "device_scope_fences", fences, List.of());
-        if (existingCollections.contains("device_erasure_tombstones")) {
-            throw terminal("SCHEMA_INCOMPATIBLE");
-        }
-        validateCollection(existingCollections, "device_operational_revocation_tombstones", revocationTombstones,
-                TOMBSTONE_INDEXES);
-        if (candidates.find(and(eq("status", "STAGED"), not(type("stagedAt", BsonType.DATE_TIME))))
-                .limit(1).first() != null) {
-            throw terminal("SCHEMA_INCOMPATIBLE");
-        }
-    }
-
-    private static void createIndexes(MongoCollection<Document> collection, List<IndexSpec> indexes) {
-        for (IndexSpec index : indexes) {
-            collection.createIndex(index.keys(), index.options());
-        }
-    }
-
-    private static void validateCollection(Set<String> existingCollections, String collectionName,
-                                           MongoCollection<Document> collection, List<IndexSpec> expectedIndexes,
-                                           String... forbiddenFields) {
-        if (!existingCollections.contains(collectionName)) {
-            return;
-        }
-        List<Document> actualIndexes = collection.listIndexes().into(new ArrayList<>());
-        Set<String> expectedNames = new HashSet<>();
-        expectedNames.add("_id_");
-        for (IndexSpec expected : expectedIndexes) {
-            expectedNames.add(expected.name());
-        }
-        Set<String> actualNames = new HashSet<>();
-        for (Document actual : actualIndexes) {
-            String name = actual.getString("name");
-            if (name == null || !actualNames.add(name)) {
-                throw terminal("SCHEMA_INCOMPATIBLE");
-            }
-        }
-        if (!actualNames.equals(expectedNames)) {
-            throw terminal("SCHEMA_INCOMPATIBLE");
-        }
-        for (IndexSpec expected : expectedIndexes) {
-            Document actual = actualIndexes.stream()
-                    .filter(index -> expected.name().equals(index.getString("name")))
-                    .findFirst()
-                    .orElseThrow(() -> terminal("SCHEMA_INCOMPATIBLE"));
-            if (!expected.matches(actual)) {
-                throw terminal("SCHEMA_INCOMPATIBLE");
-            }
-        }
-        for (String forbiddenField : forbiddenFields) {
-            if (collection.find(exists(forbiddenField, true)).limit(1).first() != null) {
-                throw terminal("SCHEMA_INCOMPATIBLE");
-            }
         }
     }
 
@@ -387,19 +288,38 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
 
     @Override
     public DeviceObservationStore.PendingMetrics pendingMetrics() {
-        List<Document> pipeline = List.of(
+        List<Document> oldestCandidatePipeline = List.of(
                 new Document("$match", new Document("status", "STAGED")),
+                new Document("$sort", new Document("stagedAt", 1)),
+                new Document("$limit", 1),
+                new Document("$project", new Document("_id", 0).append("stagedAt", 1))
+        );
+        List<Document> pipeline = List.of(
                 new Document("$group", new Document("_id", null)
-                        .append("stagedCandidates", new Document("$sum", 1))
-                        .append("oldestStagedAt", new Document("$min", "$stagedAt")))
+                        .append("stagedCandidates", new Document("$sum",
+                                new Document("$ifNull", List.of("$pendingCount", 0))))),
+                new Document("$lookup", new Document("from", "device_observation_candidates")
+                        .append("pipeline", oldestCandidatePipeline)
+                        .append("as", "oldestCandidate")),
+                new Document("$project", new Document("_id", 0)
+                        .append("stagedCandidates", 1)
+                        .append("oldestStagedAt", new Document("$arrayElemAt",
+                                List.of("$oldestCandidate.stagedAt", 0))))
         );
         try {
-            Document aggregate = candidates.aggregate(pipeline).first();
+            Document aggregate = coverage.withReadConcern(ReadConcern.SNAPSHOT).aggregate(pipeline).first();
             if (aggregate == null) {
                 return new DeviceObservationStore.PendingMetrics(0, null);
             }
             long stagedCandidates = ((Number) aggregate.get("stagedCandidates")).longValue();
-            Instant oldestStagedAt = aggregate.getDate("oldestStagedAt").toInstant();
+            Date oldestDate = aggregate.getDate("oldestStagedAt");
+            if (stagedCandidates < 0 || (stagedCandidates == 0) != (oldestDate == null)) {
+                throw terminal("PENDING_METRICS_INVARIANT");
+            }
+            if (oldestDate == null) {
+                return new DeviceObservationStore.PendingMetrics(0, null);
+            }
+            Instant oldestStagedAt = oldestDate.toInstant();
             return new DeviceObservationStore.PendingMetrics(stagedCandidates,
                     Duration.between(oldestStagedAt, clock.instant()));
         } catch (MongoException exception) {
@@ -954,51 +874,6 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
 
         private static StageOutcome rejected(StageRejection rejection) {
             return new StageOutcome(null, rejection);
-        }
-    }
-
-    private static IndexSpec index(String name, boolean unique, boolean ttl, String... fields) {
-        Document keys = new Document();
-        for (String field : fields) {
-            keys.append(field, 1);
-        }
-        return new IndexSpec(name, keys, unique, ttl);
-    }
-
-    private record IndexSpec(String name, Document keys, boolean unique, boolean ttl) {
-        private IndexOptions options() {
-            IndexOptions options = new IndexOptions().name(name);
-            if (unique) {
-                options.unique(true);
-            }
-            if (ttl) {
-                options.expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS);
-            }
-            return options;
-        }
-
-        private boolean matches(Document actual) {
-            if (!keys.equals(actual.get("key", Document.class))
-                    || unique != Boolean.TRUE.equals(actual.get("unique"))
-                    || actual.containsKey("partialFilterExpression")
-                    || Boolean.TRUE.equals(actual.getBoolean("sparse"))
-                    || Boolean.TRUE.equals(actual.getBoolean("hidden"))
-                    || !hasSimpleCollation(actual)) {
-                return false;
-            }
-            if (!unique && actual.containsKey("unique")) {
-                return false;
-            }
-            if (!ttl) {
-                return !actual.containsKey("expireAfterSeconds");
-            }
-            Object expiry = actual.get("expireAfterSeconds");
-            return expiry instanceof Number number && number.longValue() == 0L;
-        }
-
-        private static boolean hasSimpleCollation(Document actual) {
-            Document collation = actual.get("collation", Document.class);
-            return collation == null || "simple".equals(collation.getString("locale"));
         }
     }
 
