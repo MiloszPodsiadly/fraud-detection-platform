@@ -9,6 +9,7 @@ public final class EngineIntelligenceResponseStatusPolicy {
     private static final String RULES = FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID;
     private static final String ML = FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID;
     private static final String VELOCITY = FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID;
+    private static final String DEVICE = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID;
 
     private EngineIntelligenceResponseStatusPolicy() {
     }
@@ -29,12 +30,16 @@ public final class EngineIntelligenceResponseStatusPolicy {
             return EngineIntelligenceResponseStatus.DEGRADED;
         }
         EngineIntelligenceEngineStatusResponse velocity = statusFor(safeEngines, VELOCITY);
-        if (velocity == null
-                || velocity == EngineIntelligenceEngineStatusResponse.AVAILABLE
-                || velocity == EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE) {
+        if (isOptionalDiagnosticAvailable(velocity)
+                && isOptionalDiagnosticAvailable(statusFor(safeEngines, DEVICE))) {
             return EngineIntelligenceResponseStatus.AVAILABLE;
         }
         return EngineIntelligenceResponseStatus.DEGRADED;
+    }
+
+    private static boolean isOptionalDiagnosticAvailable(EngineIntelligenceEngineStatusResponse status) {
+        return status == null || status == EngineIntelligenceEngineStatusResponse.AVAILABLE
+                || status == EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE;
     }
 
     private static EngineIntelligenceEngineStatusResponse statusFor(

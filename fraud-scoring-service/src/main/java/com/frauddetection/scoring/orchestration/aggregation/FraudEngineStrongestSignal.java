@@ -35,7 +35,7 @@ public record FraudEngineStrongestSignal(
         if (!FraudEngineAggregationSafety.isSafe(reasonCode)) {
             throw new IllegalArgumentException("AGGREGATION_SIGNAL_UNSAFE_REASON_CODE");
         }
-        if (!new FraudEngineReasonCodeNormalizer().isAllowed(reasonCode)) {
+        if (!new FraudEngineReasonCodeNormalizer().isAllowedForEngine(engineId, reasonCode)) {
             throw new IllegalArgumentException("AGGREGATION_SIGNAL_UNNORMALIZED_REASON_CODE");
         }
     }

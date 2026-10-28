@@ -3,6 +3,9 @@ package com.frauddetection.common.events.intelligence;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -18,7 +21,7 @@ public record EngineIntelligenceSummary(
         List<EngineIntelligenceDiagnosticSignal> diagnosticSignals,
         List<EngineIntelligenceWarningSummary> warnings
 ) {
-    public static final int CONTRACT_VERSION = 1;
+    public static final int CONTRACT_VERSION = FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION;
 
     @JsonCreator
     public static EngineIntelligenceSummary fromJson(
@@ -40,17 +43,16 @@ public record EngineIntelligenceSummary(
     }
 
     public EngineIntelligenceSummary {
-        if (contractVersion != CONTRACT_VERSION) {
-            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
-        }
+        FraudEngineIdentityContract.requireSupportedEngineIntelligenceVersion(contractVersion);
         Objects.requireNonNull(generatedAt, "generatedAt is required");
         engines = EngineIntelligenceValuePolicy.copyBounded(
                 engines,
-                EngineIntelligenceValuePolicy.MAX_ENGINES,
+                FraudEngineIdentityContract.maxEngineIntelligenceEngines(),
                 "engines"
         );
         requireUniqueEngineIds(engines);
         requireCanonicalEngineOrder(engines);
+        requireEngineSemantics(engines);
         Objects.requireNonNull(comparison, "comparison is required");
         diagnosticSignals = EngineIntelligenceValuePolicy.copyBounded(
                 diagnosticSignals,
@@ -75,13 +77,26 @@ public record EngineIntelligenceSummary(
     }
 
     private static void requireCanonicalEngineOrder(List<EngineIntelligenceEngineResult> engines) {
+        List<String> order = FraudEngineIdentityContract.engineOrder();
         int previousOrder = -1;
         for (EngineIntelligenceEngineResult engine : engines) {
-            int currentOrder = com.frauddetection.common.events.engine.FraudEngineIdentityContract.orderOf(engine.engineId());
+            int currentOrder = order.indexOf(engine.engineId());
+            if (currentOrder < 0) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_UNKNOWN_ENGINE_ID");
+            }
             if (currentOrder <= previousOrder) {
                 throw new IllegalArgumentException("ENGINE_INTELLIGENCE_ENGINE_ORDER_INVALID");
             }
             previousOrder = currentOrder;
+        }
+    }
+
+    private static void requireEngineSemantics(List<EngineIntelligenceEngineResult> engines) {
+        for (EngineIntelligenceEngineResult engine : engines) {
+            boolean device = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engine.engineId());
+            if (device && engine.status() == FraudEngineStatus.AVAILABLE) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_DEVICE_SCORE_UNCALIBRATED");
+            }
         }
     }
 }

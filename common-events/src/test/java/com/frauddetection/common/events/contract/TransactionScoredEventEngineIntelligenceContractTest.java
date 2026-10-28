@@ -78,8 +78,8 @@ class TransactionScoredEventEngineIntelligenceContractTest {
                 eventJson.toString().getBytes(StandardCharsets.UTF_8)
         ))
                 .isInstanceOf(org.apache.kafka.common.errors.SerializationException.class)
-                .hasRootCauseInstanceOf(NullPointerException.class)
-                .hasRootCauseMessage("comparisonType is required");
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("ENGINE_INTELLIGENCE_JSON_INVALID");
     }
 
     @Test

@@ -111,12 +111,14 @@ final class AggregationTestSupport {
             case "rules.primary" -> FraudEngineType.RULES;
             case "ml.python.primary" -> FraudEngineType.ML_MODEL;
             case "velocity.primary" -> FraudEngineType.VELOCITY;
+            case "device.primary" -> FraudEngineType.DEVICE_RISK;
             default -> FraudEngineType.ML_MODEL;
         };
     }
 
     private static FraudEngineConfidence confidenceFor(FraudEngineType engineType, FraudEngineStatus status) {
-        if (status != FraudEngineStatus.AVAILABLE || engineType == FraudEngineType.VELOCITY) {
+        if (status != FraudEngineStatus.AVAILABLE
+                || engineType == FraudEngineType.VELOCITY || engineType == FraudEngineType.DEVICE_RISK) {
             return FraudEngineConfidence.UNKNOWN;
         }
         return FraudEngineConfidence.MEDIUM;

@@ -34,6 +34,22 @@ evaluation tooling. Inconclusive and missing decisions must never be treated as 
 decision fields such as `alertAnalystDecision`, submitted-by values, analyst IDs, or other actor identity fields are
 not exported.
 
+## Current Engine Intelligence contract
+
+Active nested Engine Intelligence contract version: 2.
+
+The dataset mapper accepts only nested `contractVersion=2`. The outer
+`TransactionScoredEvent.eventContractVersion=2` is a separate versioned contract. Missing, nested v1, and unknown
+versions are rejected as `CORRUPTED_PROJECTION`; there is no active v1 reader or compatibility path.
+
+`rules.primary` and `ml.python.primary` are required. `velocity.primary` and `device.primary` are optional and follow
+the canonical engine order. The only comparison is `RULES_VS_ML` over Rules and ML. Device Risk remains diagnostic-only
+and its runtime is disabled; this export does not infer a Device Risk score or risk level.
+
+Versioned exact ML prediction evidence remains separate from Engine Intelligence. The event carries exactly one of
+`mlPredictionEvidence` or `mlPredictionEvidenceOmissionReason`; this analyst-feedback dataset does not contain or
+replace either exact-evidence outcome.
+
 ## Sources And Missing Data
 
 Records are assembled from:
@@ -43,10 +59,9 @@ Records are assembled from:
 - the engine-intelligence projection for comparison, engine status, score buckets, risk levels, and diagnostic codes.
 
 Labels are not derived from model output, risk level, alert severity, or projection agreement. Feedback, alert, and
-projection transaction IDs must match before any dataset record is emitted. FDP-102 exports only supported projection
-contract version `1`; unsupported projection versions fail closed as `CORRUPTED_PROJECTION`. Unsupported projection
-does not mean no fraud or low risk. Missing ML score does not mean zero. Missing ML risk does not mean `LOW`. Missing
-rules score does not mean zero. Missing rules risk does not mean `LOW`. Missing projection is exported explicitly as
+projection transaction IDs must match before any dataset record is emitted. Unsupported projection data fails closed
+as `CORRUPTED_PROJECTION`. It does not mean no fraud or low risk. Missing ML score does not mean zero. Missing ML risk
+does not mean `LOW`. Missing rules score does not mean zero. Missing rules risk does not mean `LOW`. Missing projection is exported explicitly as
 `projectionStatus = MISSING`; it does not mean no fraud. Old transactions without engine intelligence do not crash the
 export.
 
@@ -112,6 +127,34 @@ Reason codes and diagnostic signals are bounded machine-readable values. They ar
 contain colon-delimited raw identifiers such as `deviceId:abc` or raw-id patterns such as `customer_123_flagged`.
 Forbidden-term and forbidden-pattern checks are contract safeguards, not data-loss-prevention controls. Source
 mappers and producers remain responsible for sanitizing data before export.
+
+## Engine reason-code completeness
+
+The current EI v2 projection contains two to four engines in canonical `FraudEngineIdentityContract` order, with Rules
+and ML required. Each engine contributes at most five reason-code occurrences, so the complete export can contain up
+to 20 occurrences. `reasonCodesByEngine` preserves each engine ID and its original code order. `reasonCodes` is the
+same complete sequence flattened in canonical engine order for consumers that need a single list. The exporter keeps
+repeated codes and does not truncate or deduplicate them; the record rejects any mismatch between the grouped and
+flattened forms.
+
+Diagnostic signals have their own global limit of five and are never included in the 20 engine reason-code count. A
+missing projection emits empty engine-code groups, flattened reason codes, and diagnostic signals. The internal record
+shape is defined in `docs/schemas/engine_intelligence_feedback_dataset_record.schema.json`. It is separate from
+`docs/schemas/feedback_dataset_record.schema.json`, which belongs to the `feedback-dataset-v3` exact-occurrence
+evaluation context and its ML evidence lineage.
+
+`EngineIntelligenceFeedbackDatasetRecord` is a standalone record-shape DTO. Its constructor checks the diagnostic
+reason-code vocabulary and bounds, but the flattened `diagnosticSignals` strings do not retain an `engineId`, status,
+or category, so the constructor cannot prove that a diagnostic belongs to an engine in the record. For example, the
+standalone DTO can contain `DEVICE_SWITCH_OBSERVED` while `reasonCodesByEngine` contains only Rules and ML. A valid
+record shape is not projection-semantic approval and must not be used as a public admission credential.
+
+The supported application export path is `EngineIntelligenceFeedbackDatasetExportService.export`. For each persisted
+projection, its package-private mapper reconstructs the full `EngineIntelligenceSummary` and runs
+`EngineIntelligenceProjectionPolicy` validation before flattening diagnostics. The package-private
+`EngineIntelligenceFeedbackDatasetJsonlExporter` only serializes an export result; it does not validate projection
+semantics and cannot be called as a cross-package admission API. There is no public endpoint or other application
+entry point that admits a standalone record as validated projection data.
 
 ## JSONL Semantics
 

@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModelMapper;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
+import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
@@ -12,6 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -44,11 +46,33 @@ class EngineIntelligenceReadModelMapperTest {
 
         assertThat(response.transactionId()).isEqualTo("txn-fdp96-001");
         assertThat(response.available()).isTrue();
-        assertThat(response.contractVersion()).isEqualTo(1);
+        assertThat(response.contractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
         assertThat(response.generatedAt()).isEqualTo(EngineIntelligenceProjectionTestFixtures.GENERATED_AT);
         assertThat(response.engineCount()).isEqualTo(2);
         assertThat(response.diagnosticSignalCount()).isEqualTo(2);
         assertThat(response.warningCount()).isEqualTo(2);
+    }
+
+    @Test
+    void mapsVersion2DeviceProjectionThroughReadModelAndRestResponseWithoutTruncation() {
+        EngineIntelligenceProjection projection = new EngineIntelligenceProjectionMapper(
+                new EngineIntelligenceProjectionPolicy()
+        ).map(
+                "txn-device-v2",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
+                EngineIntelligenceProjectionTestFixtures.v2DeviceSummary(),
+                null
+        ).projection().orElseThrow();
+
+        var readModel = mapper.map(projection);
+        var response = new EngineIntelligenceResponseMapper().toResponse(readModel);
+
+        assertThat(response.contractVersion()).isEqualTo(2);
+        assertThat(response.engines()).hasSize(4);
+        assertThat(response.engines().getLast().engineId()).isEqualTo("device.primary");
+        assertThat(response.engines().getLast().riskLevel()).isNull();
+        assertThat(response.engines().getLast().scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
+        assertThat(response.status()).isEqualTo(com.frauddetection.alert.api.EngineIntelligenceResponseStatus.DEGRADED);
     }
 
     @Test
@@ -195,7 +219,7 @@ class EngineIntelligenceReadModelMapperTest {
         EngineIntelligenceProjection oversized = new EngineIntelligenceProjection(
                 "txn-oversized",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 List.of("rules.primary", "ml.python.primary"),
@@ -320,7 +344,7 @@ class EngineIntelligenceReadModelMapperTest {
         return new EngineIntelligenceProjection(
                 "txn-fdp96-operational",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 List.of("rules.primary", "ml.python.primary"),
@@ -383,7 +407,7 @@ class EngineIntelligenceReadModelMapperTest {
         return new EngineIntelligenceProjection(
                 "txn-corrupted",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 null,
                 null,
@@ -406,7 +430,7 @@ class EngineIntelligenceReadModelMapperTest {
         return new EngineIntelligenceProjection(
                 "txn-corrupted-comparison",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 comparisonType,
                 comparedEngineIds,
@@ -433,7 +457,7 @@ class EngineIntelligenceReadModelMapperTest {
         return new EngineIntelligenceProjection(
                 "txn-corrupted-available-bucket",
                 EngineIntelligenceProjectionTestFixtures.occurrence(),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 List.of("rules.primary", "ml.python.primary"),

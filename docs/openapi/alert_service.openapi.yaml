@@ -5122,7 +5122,7 @@ components:
         - $ref: "#/components/schemas/EngineIntelligenceDegradedResponse"
         - $ref: "#/components/schemas/EngineIntelligenceAbsentResponse"
         - $ref: "#/components/schemas/EngineIntelligenceUnavailableResponse"
-      description: Bounded analyst diagnostic response assembled from the existing alert-service engine intelligence projection. AVAILABLE and DEGRADED responses include exact contractVersion 1, canonical UTC generatedAt, Rules and ML engine results, coherent Rules-vs-ML comparison, bounded arrays, and optional Velocity. ABSENT and UNAVAILABLE responses include explicit null contractVersion, generatedAt, and comparison fields plus empty arrays. It is not a final decision, payment authorization, automatic approve, automatic decline, automatic block, model promotion, threshold recommendation, recommendation layer, workflow action, or bank authorization.
+      description: Bounded analyst diagnostic response assembled from the alert-service engine intelligence projection. AVAILABLE and DEGRADED responses use only nested contractVersion 2, canonical UTC generatedAt, Rules and ML engine results, coherent Rules-vs-ML-only comparison, and bounded arrays. Velocity and non-AVAILABLE Device Risk are optional after the required engines in canonical order. The nested Engine Intelligence summary is capped at 16,384 serialized bytes. Runtime validators enforce identity, order, reason-code, and status semantics. ABSENT and UNAVAILABLE responses include explicit null contractVersion, generatedAt, and comparison fields plus empty arrays. It is not a final decision, payment authorization, automatic approve, automatic decline, automatic block, model promotion, threshold recommendation, recommendation layer, workflow action, or bank authorization.
     EngineIntelligenceAvailableResponse:
       allOf:
         - $ref: "#/components/schemas/EngineIntelligenceProjectedResponse"
@@ -5210,8 +5210,8 @@ components:
           description: AVAILABLE and DEGRADED responses must include a complete public engine-intelligence contract. DEGRADED marks bounded public exposure with warning or operational engine state; it does not authorize payment, workflow, scoring, model promotion, or threshold changes.
         contractVersion:
           type: integer
-          enum: [1]
-          minimum: 1
+          enum: [2]
+          minimum: 2
         generatedAt:
           type: string
           format: date-time
@@ -5222,8 +5222,8 @@ components:
         engines:
           type: array
           minItems: 2
-          maxItems: 3
-          description: AVAILABLE and DEGRADED contractVersion 1 responses expose exactly Rules and ML, and may include Velocity. Engine order is rules.primary, ml.python.primary, velocity.primary. OpenAPI cannot prove uniqueness by object property or required Rules+ML membership; runtime validators enforce those relations.
+          maxItems: 4
+          description: Nested contractVersion 2 requires Rules and ML and allows optional Velocity and optional Device Risk in canonical order. Device Risk is not AVAILABLE and carries no risk level or calibrated score bucket. Comparison remains Rules-vs-ML only. OpenAPI cannot prove uniqueness by object property, array order, or required Rules+ML membership; runtime validators enforce those relations.
           items:
             $ref: "#/components/schemas/EngineIntelligenceEngineResponse"
         diagnosticSignals:
@@ -5275,6 +5275,7 @@ components:
             - $ref: "#/components/schemas/RulesEngineIdentity"
             - $ref: "#/components/schemas/MlEngineIdentity"
             - $ref: "#/components/schemas/VelocityEngineIdentity"
+            - $ref: "#/components/schemas/DeviceEngineIdentity"
         - oneOf:
             - type: object
               additionalProperties: true
@@ -5323,6 +5324,21 @@ components:
                     - $ref: "#/components/schemas/RulesEngineIdentity"
                     - $ref: "#/components/schemas/VelocityEngineIdentity"
                     - allOf:
+                        - $ref: "#/components/schemas/DeviceEngineIdentity"
+                        - type: object
+                          required: [status, riskLevel, scoreBucket]
+                          properties:
+                            status:
+                              type: string
+                              enum: [UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
+                            riskLevel:
+                              type: string
+                              nullable: true
+                              enum: [null]
+                            scoreBucket:
+                              type: string
+                              enum: [UNAVAILABLE]
+                    - allOf:
                         - $ref: "#/components/schemas/MlEngineIdentity"
                         - type: object
                           required: [status]
@@ -5338,7 +5354,7 @@ components:
           pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         engineType:
           type: string
-          enum: [RULES, ML_MODEL, VELOCITY]
+          enum: [RULES, ML_MODEL, VELOCITY, DEVICE_RISK]
         status:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
@@ -5352,6 +5368,7 @@ components:
         reasonCodes:
           type: array
           maxItems: 5
+          description: Bounded public reason-code allowlists are engine-specific. Device Risk accepts only its diagnostic allowlist; runtime validation rejects raw or unknown values.
           items:
             type: string
             minLength: 1
@@ -5398,6 +5415,7 @@ components:
             - $ref: "#/components/schemas/RulesEngineIdentity"
             - $ref: "#/components/schemas/MlEngineIdentity"
             - $ref: "#/components/schemas/VelocityEngineIdentity"
+            - $ref: "#/components/schemas/DeviceEngineIdentity"
         - oneOf:
             - type: object
               additionalProperties: true
@@ -5439,7 +5457,7 @@ components:
           pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         engineType:
           type: string
-          enum: [RULES, ML_MODEL, VELOCITY]
+          enum: [RULES, ML_MODEL, VELOCITY, DEVICE_RISK]
         engineStatus:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
@@ -5457,6 +5475,7 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          description: Bounded public machine code. Device Risk accepts only its diagnostic allowlist; runtime validation rejects raw or unknown values.
     EngineIntelligenceWarningResponse:
       type: object
       additionalProperties: false
@@ -5488,7 +5507,7 @@ components:
           enum: [NOT_PROJECTED]
         contractVersion:
           type: integer
-          minimum: 1
+          enum: [1, 2]
         generatedAt:
           type: string
           format: date-time
@@ -5498,7 +5517,7 @@ components:
         engineCount:
           type: integer
           minimum: 0
-          maximum: 3
+          maximum: 4
         diagnosticSignalCount:
           type: integer
           minimum: 0
@@ -5509,7 +5528,7 @@ components:
           maximum: 10
         engines:
           type: array
-          maxItems: 3
+          maxItems: 4
           items:
             $ref: "#/components/schemas/EngineIntelligenceEngineReadModel"
         diagnosticSignals:
@@ -5560,6 +5579,7 @@ components:
         - $ref: "#/components/schemas/RulesEngineIdentity"
         - $ref: "#/components/schemas/MlEngineIdentity"
         - $ref: "#/components/schemas/VelocityEngineIdentity"
+        - $ref: "#/components/schemas/DeviceEngineIdentity"
       properties:
         engineId:
           type: string
@@ -5567,7 +5587,7 @@ components:
           maxLength: 128
         engineType:
           type: string
-          enum: [RULES, ML_MODEL, VELOCITY]
+          enum: [RULES, ML_MODEL, VELOCITY, DEVICE_RISK]
         status:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, DEGRADED, TIMEOUT, FALLBACK_USED, SKIPPED]
@@ -5593,6 +5613,7 @@ components:
         - $ref: "#/components/schemas/RulesEngineIdentity"
         - $ref: "#/components/schemas/MlEngineIdentity"
         - $ref: "#/components/schemas/VelocityEngineIdentity"
+        - $ref: "#/components/schemas/DeviceEngineIdentity"
       properties:
         engineId:
           type: string
@@ -5600,7 +5621,7 @@ components:
           maxLength: 128
         engineType:
           type: string
-          enum: [RULES, ML_MODEL, VELOCITY]
+          enum: [RULES, ML_MODEL, VELOCITY, DEVICE_RISK]
         engineStatus:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, DEGRADED, TIMEOUT, FALLBACK_USED, SKIPPED]
@@ -5649,6 +5670,17 @@ components:
         engineType:
           type: string
           enum: [VELOCITY]
+    DeviceEngineIdentity:
+      type: object
+      required: [engineId, engineType]
+      description: Version 2 diagnostic identity only. Runtime validation requires a non-AVAILABLE status, null risk level, and UNAVAILABLE score bucket until Device Risk is calibrated.
+      properties:
+        engineId:
+          type: string
+          enum: [device.primary]
+        engineType:
+          type: string
+          enum: [DEVICE_RISK]
     EngineIntelligenceWarningReadModel:
       type: object
       additionalProperties: false

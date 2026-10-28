@@ -48,11 +48,13 @@ for (const file of changedFiles) {
     const sourceLine = line.replace(/^\+\s*/, "");
     if (!allowedEndpointFiles.has(normalized)
         && !isOwnedApiClientContractTest(normalized)
+        && !isWorkspaceDetailScopeGuardTest(normalized)
         && !isGovernanceFile(normalized)
         && containsEndpointString(sourceLine)) {
       violations.push(`${normalized}: new endpoint strings must stay behind the API client boundary.`);
     }
     if (!isScopeGuardScript(normalized)
+        && !isWorkspaceDetailScopeGuardTest(normalized)
         && !isAllowedOutOfScopeFeatureTest(normalized)
         && !normalized.startsWith("docs/")
         && !isGovernanceFile(normalized)
@@ -86,6 +88,10 @@ function isAllowedOutOfScopeFeatureTest(file) {
   // These tests cover separate feature areas with their own claim/ownership semantics.
   return file === "analyst-console-ui/src/workspace/ShadowPerformanceScopeGuard.test.jsx"
     || file === "analyst-console-ui/src/pages/PolicySecurityPage.test.jsx";
+}
+
+function isWorkspaceDetailScopeGuardTest(file) {
+  return file === "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js";
 }
 
 function isGovernanceFile(file) {

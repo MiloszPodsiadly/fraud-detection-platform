@@ -1,6 +1,6 @@
 # Multi-Engine Scoring Contract Boundary
 
-Status: current multi-engine scoring contract boundary with historical FDP-101/FDP-102 notes.
+Status: current multi-engine scoring contract boundary. Historical decision records remain in their own ADRs.
 
 ## Scope
 
@@ -29,7 +29,7 @@ export also requires authorization, sensitive-read audit, rate limits, privacy r
 | Java rules engine | Produces explainable rule-driven risk context. |
 | Python ML engine | Produces model risk context and bounded explanations; it is not a final decision source. |
 | Velocity engine | Current optional Java diagnostic engine for transaction-rate and rapid PLN burst context; disabled by default and not a decision source. |
-| Device risk engine | Declared device-context risk category; not integrated by FDP-101. |
+| Device risk engine | Canonical optional `device.primary` diagnostic identity. Admission and runtime activation are disabled because no independently authenticated, occurrence-bound evidence issuer exists. |
 | Merchant risk engine | Declared merchant-context risk category; not integrated by FDP-101. |
 | Graph risk engine | Declared relationship-context risk category; not integrated by FDP-101. |
 
@@ -63,9 +63,10 @@ The reachable Velocity v1 score table is: rapid burst plus high rate -> `0.95`, 
 `0.75`, high amount activity -> `0.50`, and valid baseline -> `0.10`. `RECENT_TRANSACTION_SPIKE` is not emitted by
 Velocity v1 because the PT1M count threshold is the same official fact as the per-minute rate threshold.
 
-The current public engine-intelligence contract allows three known engine identities: `rules.primary`,
-`ml.python.primary`, and `velocity.primary`. Rules and ML are required. Velocity is an optional third diagnostic
-engine. Device, Merchant, Graph, or any fourth engine requires an intentional versioned contract update. Velocity
+The current public Engine Intelligence contract allows four known engine identities in canonical order:
+`rules.primary`, `ml.python.primary`, `velocity.primary`, and `device.primary`. Rules and ML are required; Velocity and
+Device Risk are optional diagnostic engines. Merchant, Graph, or any fifth engine requires an intentional contract
+update. Velocity
 cannot authorize, block, create cases, alter final decision source, change thresholds, or change analyst recommended
 actions.
 

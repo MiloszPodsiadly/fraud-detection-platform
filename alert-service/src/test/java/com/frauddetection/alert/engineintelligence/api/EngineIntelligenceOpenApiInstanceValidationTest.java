@@ -25,6 +25,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
@@ -73,7 +74,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                         Instant.parse("2026-06-18T10:00:01Z"),
                         "a".repeat(64)
                 ),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 null,
                 null,
@@ -113,6 +114,11 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     }
 
     @Test
+    void instanceValidationAcceptsCurrentFourEngineDeviceResponse() {
+        assertValid("EngineIntelligenceResponse", v2DeviceResponse());
+    }
+
+    @Test
     void instanceValidationAcceptsFullPathCompositionFixture() throws Exception {
         assertValid("EngineIntelligenceResponse", publicApiFixtureMap("engine-intelligence-full-path-composition-response.json"));
     }
@@ -137,6 +143,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     @Test
     void instanceValidationRejectsNegativeInstances() {
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("extra", "x")));
+        assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("contractVersion", 1)));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.remove("status")));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("generatedAt", "2026-06-11T10:15:30+00:00")));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("reasonCodes", List.of("A".repeat(129)))));
@@ -249,7 +256,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     private EngineIntelligenceResponse canonicalResponse() {
         return new EngineIntelligenceResponse(
                 EngineIntelligenceResponseStatus.AVAILABLE,
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 comparisonResponse(
                         EngineIntelligenceAgreementStatus.DISAGREEMENT,
@@ -290,7 +297,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     private EngineIntelligenceResponse threeEngineResponse() {
         return new EngineIntelligenceResponse(
                 EngineIntelligenceResponseStatus.AVAILABLE,
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 comparisonResponse(
                         EngineIntelligenceAgreementStatus.AGREEMENT,
@@ -300,9 +307,36 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 List.of(
                         engineResponse("rules.primary", FraudEngineType.RULES, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW, List.of("HIGH_VELOCITY")),
                         engineResponse("ml.python.primary", FraudEngineType.ML_MODEL, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW, List.of("ML_MODEL_SIGNAL")),
-                        engineResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, List.of("RAPID_TRANSFER_BURST_SIGNAL"))
+                        engineResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, List.of("RAPID_PLN_20K_BURST"))
                 ),
-                List.of(signalResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.AVAILABLE, EngineIntelligenceSignalCategory.FRAUD_SIGNAL, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, "RAPID_TRANSFER_BURST_SIGNAL")),
+                List.of(signalResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.AVAILABLE, EngineIntelligenceSignalCategory.FRAUD_SIGNAL, RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, "RAPID_PLN_20K_BURST")),
+                List.of()
+        );
+    }
+
+    private EngineIntelligenceResponse v2DeviceResponse() {
+        return new EngineIntelligenceResponse(
+                EngineIntelligenceResponseStatus.DEGRADED,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                Instant.parse("2026-06-18T10:00:02Z"),
+                comparisonResponse(
+                        EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                        EngineIntelligenceScoreDeltaBucket.LARGE
+                ),
+                List.of(
+                        engineResponse("rules.primary", FraudEngineType.RULES, EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                                RiskLevel.CRITICAL, EngineIntelligenceScoreBucket.HIGH, List.of("HIGH_VELOCITY")),
+                        engineResponse("ml.python.primary", FraudEngineType.ML_MODEL, EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                                RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW, List.of("LOW_MODEL_RISK")),
+                        engineResponse("velocity.primary", FraudEngineType.VELOCITY, EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE,
+                                null, EngineIntelligenceScoreBucket.UNAVAILABLE, List.of("VELOCITY_FEATURES_UNAVAILABLE")),
+                        engineResponse("device.primary", FraudEngineType.DEVICE_RISK, EngineIntelligenceEngineStatusResponse.DEGRADED,
+                                null, EngineIntelligenceScoreBucket.UNAVAILABLE, List.of("DEVICE_SCORE_NOT_CALIBRATED"))
+                ),
+                List.of(signalResponse("device.primary", FraudEngineType.DEVICE_RISK,
+                        EngineIntelligenceEngineStatusResponse.DEGRADED, EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL,
+                        null, EngineIntelligenceScoreBucket.UNAVAILABLE, "DEVICE_SCORE_NOT_CALIBRATED")),
                 List.of()
         );
     }
@@ -310,7 +344,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     private EngineIntelligenceResponse degradedResponse() {
         return new EngineIntelligenceResponse(
                 EngineIntelligenceResponseStatus.DEGRADED,
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 comparisonResponse(
                         EngineIntelligenceAgreementStatus.PARTIAL,
@@ -491,6 +525,12 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             }
             return errors;
         }
+        Object versionValue = instance.get("contractVersion");
+        int version = versionValue instanceof Number number ? number.intValue() : 0;
+        if (version != EngineIntelligenceSummary.CONTRACT_VERSION) {
+            errors.add("unsupported engine-intelligence contract version");
+            return errors;
+        }
         if (!FraudEngineIdentityContract.rulesVsMlComparisonEngineIds().equals(list(comparison(instance).get("comparedEngineIds")))) {
             errors.add("comparison ids must be exact and ordered");
         }
@@ -498,10 +538,11 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         int previousOrder = -1;
         for (Map<String, Object> engine : engines(instance)) {
             String engineId = engine.get("engineId").toString();
-            if (!FraudEngineIdentityContract.hasExpectedType(engineId, FraudEngineType.valueOf(engine.get("engineType").toString()))) {
+            if (!FraudEngineIdentityContract.hasExpectedType(
+                    engineId, FraudEngineType.valueOf(engine.get("engineType").toString()))) {
                 errors.add("unknown or mismatched engine identity");
             }
-            int currentOrder = FraudEngineIdentityContract.orderOf(engineId);
+            int currentOrder = FraudEngineIdentityContract.engineOrder().indexOf(engineId);
             if (enginesById.put(engineId, engine) != null || currentOrder <= previousOrder) {
                 errors.add("engine ids must be unique and canonical ordered");
             }
@@ -516,14 +557,17 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 errors.add("non-available engine must not expose risk");
             }
         }
-        if (enginesById.size() != 2 && enginesById.size() != 3) {
-            errors.add("engine set must contain Rules and ML with optional Velocity");
+        if (enginesById.size() < 2 || enginesById.size() > FraudEngineIdentityContract.maxEngineIntelligenceEngines()) {
+            errors.add("engine set must remain within the current contract bound");
         }
         if (!enginesById.containsKey("rules.primary") || !enginesById.containsKey("ml.python.primary")) {
             errors.add("required Rules and ML engines missing");
         }
-        if (enginesById.size() == 3 && !enginesById.containsKey("velocity.primary")) {
-            errors.add("third engine must be Velocity");
+        Map<String, Object> device = enginesById.get("device.primary");
+        if (device != null && ("AVAILABLE".equals(device.get("status"))
+                || device.get("riskLevel") != null
+                || !"UNAVAILABLE".equals(device.get("scoreBucket")))) {
+            errors.add("Device Risk must remain uncalibrated");
         }
         if (enginesById.containsKey("rules.primary") && enginesById.containsKey("ml.python.primary")) {
             errors.addAll(validateComparisonCoherence(comparison(instance), enginesById.get("rules.primary"), enginesById.get("ml.python.primary")));
@@ -568,10 +612,15 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             return "DEGRADED";
         }
         Object velocityStatus = statusFor(enginesById, FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID);
-        if (velocityStatus == null || "AVAILABLE".equals(velocityStatus) || "NOT_APPLICABLE".equals(velocityStatus)) {
+        Object deviceStatus = statusFor(enginesById, FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID);
+        if (isOptionalDiagnosticAvailable(velocityStatus) && isOptionalDiagnosticAvailable(deviceStatus)) {
             return "AVAILABLE";
         }
         return "DEGRADED";
+    }
+
+    private boolean isOptionalDiagnosticAvailable(Object status) {
+        return status == null || "AVAILABLE".equals(status) || "NOT_APPLICABLE".equals(status);
     }
 
     private Object statusFor(Map<String, Map<String, Object>> enginesById, String engineId) {

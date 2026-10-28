@@ -82,7 +82,7 @@ class AnalystRecommendationServiceTest {
     @Test
     void mlHighRiskWithRulesLowerRiskProducesRiskMismatchReview() {
         var result = service.recommend(scoreResult(RiskLevel.MEDIUM), Optional.of(summary(
-                rules(RiskLevel.MEDIUM, "LOW_MODEL_RISK"),
+                rules(RiskLevel.MEDIUM, "COUNTRY_MISMATCH"),
                 ml(RiskLevel.HIGH, "MODEL_HIGH_RISK")
         )));
 
@@ -95,7 +95,7 @@ class AnalystRecommendationServiceTest {
     @Test
     void bothLowRiskProducesNoActionOnlyWhenEngineIntelligenceIsPresent() {
         var result = service.recommend(scoreResult(RiskLevel.LOW), Optional.of(summary(
-                rules(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                rules(RiskLevel.LOW, "COUNTRY_MISMATCH"),
                 ml(RiskLevel.LOW, "LOW_MODEL_RISK")
         )));
 
@@ -107,7 +107,7 @@ class AnalystRecommendationServiceTest {
     @Test
     void recommendNoActionKeepsNonDecisioningBoundary() {
         var result = service.recommend(scoreResult(RiskLevel.LOW), Optional.of(summary(
-                rules(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                rules(RiskLevel.LOW, "COUNTRY_MISMATCH"),
                 ml(RiskLevel.LOW, "LOW_MODEL_RISK")
         )));
 
@@ -141,7 +141,7 @@ class AnalystRecommendationServiceTest {
     @Test
     void velocityUnavailableDoesNotChangeRulesMlRecommendation() {
         var result = service.recommend(scoreResult(RiskLevel.LOW), Optional.of(summary(
-                rules(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                rules(RiskLevel.LOW, "COUNTRY_MISMATCH"),
                 ml(RiskLevel.LOW, "LOW_MODEL_RISK"),
                 velocity(FraudEngineStatus.UNAVAILABLE, null, "VELOCITY_FEATURES_UNAVAILABLE")
         )));
@@ -270,7 +270,7 @@ class AnalystRecommendationServiceTest {
     private List<EngineIntelligenceEngineResult> completedRequiredEngines(List<EngineIntelligenceEngineResult> engines) {
         List<EngineIntelligenceEngineResult> completed = new ArrayList<>(engines);
         if (engine(completed, "rules.primary") == null) {
-            completed.add(0, rules(RiskLevel.LOW, "LOW_MODEL_RISK"));
+            completed.add(0, rules(RiskLevel.LOW, "COUNTRY_MISMATCH"));
         }
         if (engine(completed, "ml.python.primary") == null) {
             RiskLevel rulesRisk = Optional.ofNullable(engine(completed, "rules.primary"))

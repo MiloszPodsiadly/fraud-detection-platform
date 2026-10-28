@@ -10,6 +10,8 @@ import org.springframework.data.annotation.PersistenceCreator;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Document(collection = "engine_intelligence_projections")
@@ -75,16 +77,16 @@ public class EngineIntelligenceProjection {
         this.contractVersion = contractVersion;
         this.generatedAt = generatedAt;
         this.comparisonType = comparisonType;
-        this.comparedEngineIds = comparedEngineIds == null ? null : List.copyOf(comparedEngineIds);
+        this.comparedEngineIds = immutableCopy(comparedEngineIds);
         this.comparisonStatus = comparisonStatus;
         this.riskMismatchStatus = riskMismatchStatus;
         this.scoreDeltaBucket = scoreDeltaBucket;
-        this.engines = engines == null ? List.of() : List.copyOf(engines);
-        this.diagnosticSignals = diagnosticSignals == null ? List.of() : List.copyOf(diagnosticSignals);
-        this.warnings = warnings == null ? List.of() : List.copyOf(warnings);
-        this.engineCount = this.engines.size();
-        this.diagnosticSignalCount = this.diagnosticSignals.size();
-        this.warningCount = this.warnings.size();
+        this.engines = immutableCopy(engines);
+        this.diagnosticSignals = immutableCopy(diagnosticSignals);
+        this.warnings = immutableCopy(warnings);
+        this.engineCount = sizeOf(this.engines);
+        this.diagnosticSignalCount = sizeOf(this.diagnosticSignals);
+        this.warningCount = sizeOf(this.warnings);
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -132,6 +134,14 @@ public class EngineIntelligenceProjection {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_PROJECTION_OCCURRENCE_IDENTITY_REQUIRED");
         }
         return ownership;
+    }
+
+    private static <T> List<T> immutableCopy(List<T> source) {
+        return source == null ? null : Collections.unmodifiableList(new ArrayList<>(source));
+    }
+
+    private static int sizeOf(List<?> values) {
+        return values == null ? 0 : values.size();
     }
 
     public String getTransactionId() { return transactionId; }

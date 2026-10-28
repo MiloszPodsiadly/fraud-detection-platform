@@ -1,27 +1,36 @@
 # Engine Intelligence Contract Version Decision
 
-Status: current FDP-129 decision.
+Status: the current nested Engine Intelligence summary uses `contractVersion=2`. The numeric version is fixed and does
+not depend on which optional engines are present.
 
-FDP-129 keeps `EngineIntelligenceSummary.contractVersion=1` while adding optional `velocity.primary` and explicit
-`RULES_VS_ML` comparison identity because the repository-controlled migration is additive for current v1 consumers:
-common-events, fraud-scoring emission, alert-service projection/read/API DTOs, OpenAPI, and Analyst Console validators
-share the same bounded public contract and are migrated atomically inside the repository deployment boundary.
+## Current nested contract
 
-Version 1 requires Rules and ML for comparison semantics. `velocity.primary` is an optional third diagnostic engine.
-When Velocity is present, the canonical engine order is `rules.primary`, `ml.python.primary`, `velocity.primary`.
-Duplicate `engineId`, wrong engineId/type pairs, unknown engine IDs, four-engine payloads, and out-of-order engine
-arrays are invalid. A future fourth engine or changed comparison meaning requires a versioned contract review.
+The single identity registry is `FraudEngineIdentityContract`. It defines four known engine IDs and their canonical
+order: `rules.primary`, `ml.python.primary`, `velocity.primary`, `device.primary`. Rules and ML are required; Velocity
+and Device Risk are optional. The `RULES_VS_ML` comparator remains exactly `[rules.primary, ml.python.primary]` and
+does not include either optional engine. Unknown, duplicated, mis-typed, partial, or out-of-order engine identities are
+rejected. Current readers reject nested version 1, missing versions, and unknown versions.
 
-The v1 comparison object is not all-engine agreement. It is explicitly `comparisonType=RULES_VS_ML` with
-`comparedEngineIds=["rules.primary","ml.python.primary"]`. Velocity remains a separate diagnostic result and signal;
-it must not participate in Rules-vs-ML score delta semantics. New v1 producers must emit explicit comparison identity.
+Device Risk remains diagnostic and uncalibrated. Its result cannot be `AVAILABLE` and cannot carry a risk level or
+score bucket. Its presence does not change the baseline Rules/ML score, risk, recommendation, or comparison.
 
-Every comparison object must carry explicit `comparisonType=RULES_VS_ML` and
-`comparedEngineIds=["rules.primary","ml.python.primary"]`. The read boundary does not infer either field from the
-outer event `modelVersion`. Missing or partial identity, reversed IDs, Velocity-containing comparison IDs, unknown
-IDs, and inconsistent comparison semantics are rejected rather than completed.
+The outer `TransactionScoredEvent.eventContractVersion=2` and the private exact-ML evidence XOR are independent and
+unchanged. Nested version changes do not relax either invariant.
 
-The repository-controlled hard cut deliberately retires historical comparison normalization. This does not prove the
-absence of external consumers; it records the accepted compatibility break for retained payloads that do not satisfy
-the current contract. Consumers must not hide Velocity, map it to Rules or ML, or fabricate a current shape from a
-malformed historical payload.
+## Code and deployment compatibility
+
+| Producer code and wire | Reader deployment | Result |
+| --- | --- | --- |
+| Current producer, nested v2 | Current in-repository v2 readers | Supported when diagnostic emission is enabled. |
+| Historical producer, nested v1 | Current v2 readers | Rejected as unsupported; no automatic reinterpretation or conversion. |
+| Current producer, nested v2 | Older v1-only deployment | Incompatible; deployment must not send v2 to that reader. |
+| Current producer or reader | External consumer | Compatibility is unknown until that consumer is identified and verified. |
+| Retained v1 records in Kafka, DLT, Mongo projections, or exports | Current v2 reader | Not automatically migrated or deleted. Replay requires a separately governed retention and recovery plan. |
+
+This matrix describes code behavior and deployment combinations; repository tests cannot prove deployed versions or
+external consumer readiness. It makes no global backwards-compatibility claim. A rollback to a v1-only reader requires
+confirming that no v2 data can reach it; retained facts must not be deleted as a shortcut.
+
+The nested summary remains bounded to 16 KiB of serialized UTF-8 bytes. Byte-oriented ingress and egress enforce this
+limit in addition to the field and collection bounds. Public APIs and the Analyst Console validate the same current
+version, four-ID allowlist, order, and reason-code ownership.

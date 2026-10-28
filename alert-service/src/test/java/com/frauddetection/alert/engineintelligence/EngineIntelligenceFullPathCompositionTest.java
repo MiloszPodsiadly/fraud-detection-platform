@@ -157,7 +157,7 @@ class EngineIntelligenceFullPathCompositionTest {
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
         assertThat(response.warnings()).isEmpty();
         assertThat(response.engines()).extracting(engine -> engine.engineId())
-                .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
         assertThat(response.engines()).extracting(engine -> engine.status())
                 .containsExactly(
                         EngineIntelligenceEngineStatusResponse.AVAILABLE,
@@ -275,7 +275,7 @@ class EngineIntelligenceFullPathCompositionTest {
 
         assertThat(failedVelocity.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(failedVelocity.engines()).extracting(engine -> engine.engineId())
-                .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
         assertThat(failedVelocity.engines()).extracting(engine -> engine.status())
                 .containsExactly(
                         EngineIntelligenceEngineStatusResponse.AVAILABLE,

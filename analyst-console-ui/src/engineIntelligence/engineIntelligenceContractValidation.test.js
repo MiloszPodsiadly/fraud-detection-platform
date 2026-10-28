@@ -6,18 +6,31 @@ import {
   COMPARISON_TYPE,
   ENGINE_ORDER,
   ENGINE_TYPE_BY_ID,
+  ENGINE_REASON_CODES_BY_ID,
   MAX_ENGINE_INTELLIGENCE_ENGINES,
   isCanonicalUtcTimestamp,
   isComparisonShape,
   isDiagnosticSignalShape,
   isEngineIntelligenceResponseShape,
+  isWithinEngineIntelligenceSerializedByteLimit,
   isEngineShape,
+  hasRequiredRulesMlEngineSet,
   isModelIdentityShape,
   isWarningShape,
   safeString
 } from "./engineIntelligenceContractValidation.js";
 
 describe("engineIntelligenceContractValidation", () => {
+  it("measures the serialized payload limit in UTF-8 bytes", () => {
+    const maximum = 16_384;
+    const exact = { padding: "é".repeat((maximum - 14) / 2) };
+    const oversized = { padding: `${"é".repeat((maximum - 14) / 2)}a` };
+
+    expect(new TextEncoder().encode(JSON.stringify(exact)).byteLength).toBe(maximum);
+    expect(isWithinEngineIntelligenceSerializedByteLimit(exact)).toBe(true);
+    expect(isWithinEngineIntelligenceSerializedByteLimit(oversized)).toBe(false);
+  });
+
   it("matches shared canonical engine registry fixture", () => {
     const registry = sharedFixture("engine_registry_contract.json");
 
@@ -29,8 +42,162 @@ describe("engineIntelligenceContractValidation", () => {
     expect(new Set(registry.engines.map((engine) => engine.engineId)).size).toBe(registry.engines.length);
   });
 
+  it("applies the shared reason-code ownership matrix", () => {
+    const ownership = reasonCodeOwnershipFixture();
+    const allowedByEngine = allowedReasonCodesByEngine(ownership);
+    const expected = Object.fromEntries(Object.entries(allowedByEngine)
+      .map(([engineId, reasonCodes]) => [engineId, [...reasonCodes].sort()]));
+    const actual = Object.fromEntries(Object.entries(ENGINE_REASON_CODES_BY_ID)
+      .map(([engineId, reasonCodes]) => [engineId, [...reasonCodes].sort()]));
+
+    expect(actual).toEqual(expected);
+
+    const candidates = [...new Set(Object.values(allowedByEngine).flat())];
+    for (const engineId of ENGINE_ORDER) {
+      for (const reasonCode of candidates) {
+        expect(isEngineShape(engineWithReasonCode(engineId, reasonCode)))
+          .toBe(allowedByEngine[engineId].includes(reasonCode));
+      }
+    }
+    for (const reasonCode of ownership.nonDeviceSharedReasonCodes) {
+      expect(isEngineShape(engineWithReasonCode("device.primary", reasonCode))).toBe(false);
+    }
+  });
+
   it("accepts shared three-engine golden fixture", () => {
     expect(isValidEngineIntelligence(sharedFixture("engine_intelligence_three_engine_golden.json"))).toBe(true);
+  });
+
+  it.each(sharedSemanticMatrixCases())("accepts shared semantic matrix case $caseId", (semanticCase) => {
+    expect(isEngineIntelligenceResponseShape(semanticMatrixResponse(semanticCase))).toBe(true);
+  });
+
+  it.each(sharedSemanticMatrixCases())("rejects comparison drift in shared semantic matrix case $caseId", (semanticCase) => {
+    const value = JSON.parse(JSON.stringify(semanticMatrixResponse(semanticCase)));
+    value.comparison.agreementStatus = semanticCase.invalidAgreementStatus;
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(false);
+  });
+
+  it("rejects a diagnostic signal that refers to an engine absent from the shared matrix case", () => {
+    const semanticCase = sharedSemanticMatrixCases()
+      .find((candidate) => candidate.engineIntelligence.diagnosticSignals.length > 0);
+    const value = JSON.parse(JSON.stringify(semanticMatrixResponse(semanticCase)));
+    value.diagnosticSignals[0].engineId = "velocity.primary";
+    value.diagnosticSignals[0].engineType = "VELOCITY";
+    value.diagnosticSignals[0].reasonCode = "ORCHESTRATOR_ENGINE_TIMEOUT";
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(false);
+  });
+
+  it("accepts bounded v2 with operational Device Risk and Rules-vs-ML comparison", () => {
+    const value = v2Fixture();
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(true);
+    expect(value.engines.map((engine) => engine.engineId)).toEqual([
+      "rules.primary", "ml.python.primary", "velocity.primary", "device.primary"
+    ]);
+  });
+
+  it("accepts v2 Device Risk when optional Velocity is absent", () => {
+    const value = v2Fixture();
+    value.engines.splice(2, 1);
+    value.diagnosticSignals = value.diagnosticSignals.filter((signal) => signal.engineId !== "velocity.primary");
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(true);
+  });
+
+  it.each(reasonCodeOwnershipFixture().deviceOwnedReasonCodes)(
+    "rejects Device Risk reason %s in every non-Device engine result",
+    (reasonCode) => {
+      for (const engineId of ["rules.primary", "ml.python.primary", "velocity.primary"]) {
+        const value = v2Fixture();
+        engine(value, engineId).reasonCodes = [reasonCode];
+
+        expect(isEngineIntelligenceResponseShape(value)).toBe(false);
+      }
+    }
+  );
+
+  it.each(reasonCodeOwnershipFixture().deviceOwnedReasonCodes)(
+    "rejects Device Risk reason %s in every non-Device diagnostic signal",
+    (reasonCode) => {
+      for (const engineId of ["rules.primary", "ml.python.primary", "velocity.primary"]) {
+        const value = v2Fixture();
+        const sourceEngine = engine(value, engineId);
+        sourceEngine.reasonCodes = [reasonCode];
+        value.diagnosticSignals = [diagnosticSignal(sourceEngine, reasonCode)];
+
+        expect(isEngineIntelligenceResponseShape(value)).toBe(false);
+      }
+    }
+  );
+
+  it.each(reasonCodeOwnershipFixture().deviceOwnedReasonCodes)(
+    "accepts Device Risk reason %s only on device.primary",
+    (reasonCode) => {
+      const value = v2Fixture();
+      const device = engine(value, "device.primary");
+      device.reasonCodes = [reasonCode];
+      value.diagnosticSignals = [diagnosticSignal(device, reasonCode)];
+
+      expect(isEngineIntelligenceResponseShape(value)).toBe(true);
+    }
+  );
+
+  it.each(reasonCodeOwnershipFixture().sharedOrchestratorReasonCodes)(
+    "preserves shared orchestrator reason %s on every canonical engine",
+    (reasonCode) => {
+      for (const engineId of ENGINE_ORDER) {
+        const value = v2Fixture();
+        const sourceEngine = engine(value, engineId);
+        sourceEngine.reasonCodes = [reasonCode];
+        value.diagnosticSignals = [diagnosticSignal(sourceEngine, reasonCode)];
+
+        expect(isEngineIntelligenceResponseShape(value)).toBe(true);
+      }
+    }
+  );
+
+  it("accepts bounded non-sensitive per-signal Device Risk reason codes", () => {
+    const value = v2Fixture();
+    const reasonCodes = [
+      "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW",
+      "DEVICE_SWITCH_OBSERVED",
+      "DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE",
+      "DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE",
+      "DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE"
+    ];
+    value.engines[3].reasonCodes = reasonCodes;
+    value.diagnosticSignals = reasonCodes.map((reasonCode) => ({
+      engineId: "device.primary",
+      engineType: "DEVICE_RISK",
+      engineStatus: "DEGRADED",
+      signalCategory: "OPERATIONAL_SIGNAL",
+      riskLevel: null,
+      scoreBucket: "UNAVAILABLE",
+      reasonCode
+    }));
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(true);
+  });
+
+  it("recognizes required Rules and ML identities independently of the envelope version", () => {
+    expect(hasRequiredRulesMlEngineSet([
+      { engineId: "rules.primary" },
+      { engineId: "ml.python.primary" }
+    ])).toBe(true);
+  });
+
+  it.each([
+    ["available Device Risk", (value) => { value.engines[3] = deviceEngine({ status: "AVAILABLE", riskLevel: "HIGH", scoreBucket: "HIGH" }); }],
+    ["unknown Device Risk reason", (value) => { value.engines[3] = deviceEngine({ reasonCodes: ["device-id:customer-123"] }); }],
+    ["Device Risk under v1", (value) => { value.contractVersion = 1; }]
+  ])("rejects %s", (_name, mutate) => {
+    const value = v2Fixture();
+    mutate(value);
+
+    expect(isEngineIntelligenceResponseShape(value)).toBe(false);
   });
 
   it("accepts full-path public API composition fixture", () => {
@@ -129,6 +296,17 @@ function sharedInvalidEngineIntelligenceCases() {
     .filter((semanticCase) => semanticCase.category === "engine-intelligence");
 }
 
+function sharedSemanticMatrixCases() {
+  return sharedFixture("engine_intelligence_semantic_matrix.json").cases;
+}
+
+function semanticMatrixResponse(semanticCase) {
+  return {
+    status: semanticCase.responseStatus,
+    ...semanticCase.engineIntelligence
+  };
+}
+
 function sharedInvalidEngineIntelligenceResponseCases() {
   return sharedFixture("invalid_semantic_cases.json").cases
     .filter((semanticCase) => semanticCase.category === "engine-intelligence-response");
@@ -154,18 +332,37 @@ function modelIdentityCases() {
   return publicApiFixture("ml-model-identity-cases.json").cases;
 }
 
+function reasonCodeOwnershipFixture() {
+  return sharedFixture("engine_reason_code_ownership_contract.json");
+}
+
+function allowedReasonCodesByEngine(ownership) {
+  const shared = [...ownership.nonDeviceSharedReasonCodes, ...ownership.sharedOrchestratorReasonCodes];
+  const rulesMlShared = ownership.rulesMlSharedReasonCodes;
+  const mlVelocityShared = ownership.mlVelocitySharedReasonCodes;
+  return {
+    "rules.primary": [...shared, ...rulesMlShared, ...ownership.rulesOwnedReasonCodes],
+    "ml.python.primary": [...shared, ...rulesMlShared, ...mlVelocityShared, ...ownership.mlOwnedReasonCodes],
+    "velocity.primary": [...shared, ...mlVelocityShared, ...ownership.velocityOwnedReasonCodes],
+    "device.primary": [...ownership.deviceOwnedReasonCodes, ...ownership.sharedOrchestratorReasonCodes]
+  };
+}
+
 function canonicalModelIdentity() {
   return publicApiFixture("ml-model-identity-cases.json").canonicalIdentity;
 }
 
 function availableEngine(engineId, engineType) {
+  const reasonCode = engineId === "rules.primary"
+    ? "HIGH_VELOCITY"
+    : engineId === "velocity.primary" ? "TRANSACTION_VELOCITY" : "MODEL_HIGH_RISK";
   return {
     engineId,
     engineType,
     status: "AVAILABLE",
     riskLevel: "HIGH",
     scoreBucket: "HIGH",
-    reasonCodes: ["MODEL_HIGH_RISK"]
+    reasonCodes: [reasonCode]
   };
 }
 
@@ -178,6 +375,74 @@ function operationalMlEngine(status) {
     scoreBucket: "UNAVAILABLE",
     reasonCodes: ["ML_MODEL_UNAVAILABLE"]
   };
+}
+
+function v2Fixture() {
+  const engines = [
+    availableEngine("rules.primary", "RULES"),
+    { ...availableEngine("ml.python.primary", "ML_MODEL"), modelIdentity: canonicalModelIdentity() },
+    { ...availableEngine("velocity.primary", "VELOCITY"), status: "NOT_APPLICABLE", riskLevel: null, scoreBucket: "UNAVAILABLE", reasonCodes: ["VELOCITY_FEATURES_UNAVAILABLE"] },
+    deviceEngine()
+  ];
+  return {
+    status: "DEGRADED",
+    contractVersion: 2,
+    generatedAt: "2026-06-02T10:00:00Z",
+    comparison: {
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
+      agreementStatus: "AGREEMENT",
+      riskMismatchStatus: "SAME_RISK_LEVEL",
+      scoreDeltaBucket: "NONE"
+    },
+    engines,
+    diagnosticSignals: [{
+      engineId: "device.primary",
+      engineType: "DEVICE_RISK",
+      engineStatus: "DEGRADED",
+      signalCategory: "OPERATIONAL_SIGNAL",
+      riskLevel: null,
+      scoreBucket: "UNAVAILABLE",
+      reasonCode: "DEVICE_SCORE_NOT_CALIBRATED"
+    }],
+    warnings: []
+  };
+}
+
+function deviceEngine(overrides = {}) {
+  return {
+    engineId: "device.primary",
+    engineType: "DEVICE_RISK",
+    status: "DEGRADED",
+    riskLevel: null,
+    scoreBucket: "UNAVAILABLE",
+    reasonCodes: ["DEVICE_SCORE_NOT_CALIBRATED"],
+    ...overrides
+  };
+}
+
+function engine(value, engineId) {
+  return value.engines.find((candidate) => candidate.engineId === engineId);
+}
+
+function diagnosticSignal(sourceEngine, reasonCode) {
+  const available = sourceEngine.status === "AVAILABLE";
+  return {
+    engineId: sourceEngine.engineId,
+    engineType: sourceEngine.engineType,
+    engineStatus: sourceEngine.status,
+    signalCategory: available ? "FRAUD_SIGNAL" : "OPERATIONAL_SIGNAL",
+    riskLevel: available ? sourceEngine.riskLevel : null,
+    scoreBucket: available ? sourceEngine.scoreBucket : "UNAVAILABLE",
+    reasonCode
+  };
+}
+
+function engineWithReasonCode(engineId, reasonCode) {
+  const value = v2Fixture();
+  const sourceEngine = engine(value, engineId);
+  sourceEngine.reasonCodes = [reasonCode];
+  return sourceEngine;
 }
 
 function publicApiFixture(name) {

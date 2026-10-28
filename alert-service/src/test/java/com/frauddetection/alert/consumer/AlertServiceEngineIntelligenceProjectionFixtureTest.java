@@ -9,6 +9,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionW
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -40,7 +41,7 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
                 AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligence()
         );
 
-        assertThat(projection.getContractVersion()).isEqualTo(1);
+        assertThat(projection.getContractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
         assertThat(projection.getEngineCount()).isEqualTo(2);
     }
 

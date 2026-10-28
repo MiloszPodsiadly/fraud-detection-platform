@@ -88,7 +88,7 @@ class EngineIntelligenceProjectionMapperTest {
     void minimalEngineIntelligenceMapsToProjection() {
         EngineIntelligenceProjection projection = mapped(EngineIntelligenceProjectionTestFixtures.minimalSummary());
 
-        assertThat(projection.getContractVersion()).isEqualTo(1);
+        assertThat(projection.getContractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
         assertThat(projection.getEngineCount()).isEqualTo(2);
         assertThat(projection.getDiagnosticSignalCount()).isZero();
         assertThat(projection.getWarningCount()).isZero();
@@ -121,7 +121,7 @@ class EngineIntelligenceProjectionMapperTest {
     @Test
     void unsupportedContractVersionUsesTypedOmissionReason() {
         EngineIntelligenceSummary summary = summaryMock();
-        when(summary.contractVersion()).thenReturn(2);
+        when(summary.contractVersion()).thenReturn(1);
 
         assertOmitted(
                 mapper.map("txn-1", EngineIntelligenceProjectionTestFixtures.occurrence(), summary, null),
@@ -132,7 +132,14 @@ class EngineIntelligenceProjectionMapperTest {
     @Test
     void oversizedPayloadUsesTypedOmissionReason() {
         EngineIntelligenceSummary summary = summaryMock();
-        when(summary.engines()).thenReturn(Collections.nCopies(4, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
+        EngineIntelligenceEngineResult rules = mock(EngineIntelligenceEngineResult.class);
+        when(rules.engineId()).thenReturn("rules.primary");
+        when(rules.engineType()).thenReturn(FraudEngineType.RULES);
+        when(rules.status()).thenReturn(FraudEngineStatus.AVAILABLE);
+        when(rules.riskLevel()).thenReturn(RiskLevel.HIGH);
+        when(rules.scoreBucket()).thenReturn(EngineIntelligenceScoreBucket.HIGH);
+        when(rules.reasonCodes()).thenReturn(Collections.nCopies(6, "HIGH_VELOCITY"));
+        when(summary.engines()).thenReturn(List.of(rules, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
         assertOmitted(
                 mapper.map("txn-1", EngineIntelligenceProjectionTestFixtures.occurrence(), summary, null),

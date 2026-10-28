@@ -1,6 +1,6 @@
 {
-  "maxEngineCount": 3,
-  "order": ["rules.primary", "ml.python.primary", "velocity.primary"],
+  "maxEngineCount": 4,
+  "order": ["rules.primary", "ml.python.primary", "velocity.primary", "device.primary"],
   "comparison": {
     "comparisonType": "RULES_VS_ML",
     "comparedEngineIds": ["rules.primary", "ml.python.primary"]
@@ -23,6 +23,12 @@
       "engineType": "VELOCITY",
       "requiredForComparison": false,
       "order": 2
+    },
+    {
+      "engineId": "device.primary",
+      "engineType": "DEVICE_RISK",
+      "requiredForComparison": false,
+      "order": 3
     }
   ]
 }

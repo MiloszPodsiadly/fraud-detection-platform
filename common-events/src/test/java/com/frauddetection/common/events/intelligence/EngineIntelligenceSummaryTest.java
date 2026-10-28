@@ -17,8 +17,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class EngineIntelligenceSummaryTest {
 
     @Test
-    void acceptsContractVersionOne() {
-        assertThat(EngineIntelligenceTestSupport.summary().contractVersion()).isEqualTo(1);
+    void acceptsCurrentContractVersion() {
+        assertThat(EngineIntelligenceTestSupport.summary().contractVersion())
+                .isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
     }
 
     @Test
@@ -34,7 +35,7 @@ class EngineIntelligenceSummaryTest {
     @Test
     void contractVersionIsSerialized() throws Exception {
         assertThat(EngineIntelligenceTestSupport.objectMapper().writeValueAsString(EngineIntelligenceTestSupport.summary()))
-                .contains("\"contractVersion\":1");
+                .contains("\"contractVersion\":" + EngineIntelligenceSummary.CONTRACT_VERSION);
     }
 
     @Test

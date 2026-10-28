@@ -2,24 +2,18 @@ package com.frauddetection.common.events.intelligence;
 
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineType;
-import com.frauddetection.common.events.reason.ReasonCode;
-
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 final class EngineIntelligenceValuePolicy {
-    static final int MAX_ENGINES = FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES;
     static final int MAX_DIAGNOSTIC_SIGNALS = 5;
     static final int MAX_WARNINGS = 10;
     static final int MAX_REASON_CODES_PER_ENGINE = 5;
     static final int MAX_STRING_LENGTH = 128;
 
-    private static final Set<String> ALLOWED_REASON_CODES = allowedReasonCodes();
     private static final Set<String> FORBIDDEN_COMPACT_TEXT = Set.of(
             "transactionid",
             "txnid",
@@ -58,10 +52,20 @@ final class EngineIntelligenceValuePolicy {
     }
 
     static String requireReasonCode(String reasonCode) {
-        requireBoundedSafeText(reasonCode, "ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
-        if (!ALLOWED_REASON_CODES.contains(reasonCode)) {
+        if (reasonCode == null
+                || reasonCode.isBlank()
+                || reasonCode.length() > MAX_STRING_LENGTH
+                || reasonCode.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
+        }
+        if (!EngineIntelligenceReasonCodePolicy.isKnownReasonCode(reasonCode)) {
+            if (containsForbiddenText(reasonCode)) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
+            }
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED");
         }
+        // Exact allowlisted machine codes are safe identifiers, even when their enum name contains
+        // a term that is forbidden in arbitrary text (for example ORCHESTRATOR_ENGINE_EXCEPTION).
         return reasonCode;
     }
 
@@ -92,42 +96,4 @@ final class EngineIntelligenceValuePolicy {
                 || value.chars().anyMatch(Character::isISOControl);
     }
 
-    private static Set<String> allowedReasonCodes() {
-        Stream<String> sharedReasonCodes = Stream.of(ReasonCode.values())
-                .filter(reasonCode -> reasonCode != ReasonCode.UNKNOWN)
-                .map(ReasonCode::wireValue);
-        Stream<String> engineReasonCodes = Stream.of(
-                "ML_MODEL_SIGNAL",
-                "ML_MODEL_UNAVAILABLE",
-                "ML_MODEL_TIMEOUT",
-                "ML_MODEL_INVALID_RESPONSE",
-                "ML_SCORE_MISSING",
-                "ML_SCORE_OUT_OF_RANGE",
-                "ML_INFERENCE_TIMESTAMP_MISSING",
-                "ML_MODEL_METADATA_MISSING",
-                "ML_AVAILABILITY_METADATA_MISSING",
-                "ML_AVAILABILITY_METADATA_INVALID",
-                "ML_CLIENT_ERROR",
-                "DEVICE_NOVELTY_SIGNAL",
-                "COUNTRY_MISMATCH_SIGNAL",
-                "PROXY_OR_VPN_SIGNAL",
-                "RAPID_TRANSFER_BURST_SIGNAL",
-                "HIGH_RISK_FLAGS_PRESENT",
-                "VELOCITY_THRESHOLD_EXCEEDED",
-                "AMOUNT_ACTIVITY_THRESHOLD_EXCEEDED",
-                "RAPID_TRANSFER_PATTERN_MATCHED",
-                "FEATURE_STATUS_INVALID",
-                "FEATURE_STATUS_WRONG_ACCESSOR",
-                "FEATURE_STATUS_NOT_ALLOWED",
-                "ORCHESTRATOR_ENGINE_EXCEPTION",
-                "ORCHESTRATOR_ENGINE_NULL_RESULT",
-                "ORCHESTRATOR_ENGINE_REJECTED",
-                "ORCHESTRATOR_ENGINE_TIMEOUT",
-                "VELOCITY_FEATURES_UNAVAILABLE",
-                "VELOCITY_FEATURE_TYPE_INVALID",
-                "VELOCITY_FEATURE_VALUE_INVALID",
-                "VELOCITY_FEATURES_INCONSISTENT"
-        );
-        return Stream.concat(sharedReasonCodes, engineReasonCodes).collect(Collectors.toUnmodifiableSet());
-    }
 }

@@ -8,8 +8,6 @@ import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
-import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
-import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
@@ -31,14 +29,8 @@ import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
+import com.frauddetection.alert.testfixtures.EngineIntelligenceV2TestFixtures;
 import com.frauddetection.common.events.enums.RiskLevel;
-import com.frauddetection.common.events.engine.FraudEngineStatus;
-import com.frauddetection.common.events.engine.FraudEngineType;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -132,7 +124,7 @@ class FraudFeedbackPostFlowIntegrationTest {
         when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
-                .thenReturn(projectedEngineIntelligence());
+                .thenReturn(supportedV2EngineIntelligenceReadModel());
         when(currentAnalystUser.get()).thenReturn(Optional.of(new AnalystPrincipal(
                 "analyst-1",
                 Set.of(),
@@ -351,38 +343,7 @@ class FraudFeedbackPostFlowIntegrationTest {
         );
     }
 
-    private EngineIntelligenceReadModel projectedEngineIntelligence() {
-        return EngineIntelligenceReadModel.projected(
-                "txn-1",
-                1,
-                Instant.parse("2026-06-25T09:00:03Z"),
-                new EngineIntelligenceComparisonReadModel(
-                        EngineIntelligenceComparisonType.RULES_VS_ML,
-                        List.of("rules.primary", "ml.python.primary"),
-                        EngineIntelligenceAgreementStatus.PARTIAL,
-                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
-                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
-                ),
-                List.of(
-                        new EngineIntelligenceEngineReadModel(
-                                "rules.primary",
-                                FraudEngineType.RULES,
-                                FraudEngineStatus.AVAILABLE,
-                                RiskLevel.CRITICAL,
-                                EngineIntelligenceScoreBucket.HIGH,
-                                List.of("HIGH_TRANSACTION_AMOUNT")
-                        ),
-                        new EngineIntelligenceEngineReadModel(
-                                "ml.python.primary",
-                                FraudEngineType.ML_MODEL,
-                                FraudEngineStatus.TIMEOUT,
-                                null,
-                                EngineIntelligenceScoreBucket.UNAVAILABLE,
-                                List.of("ML_MODEL_TIMEOUT")
-                        )
-                ),
-                List.of(),
-                List.of()
-        );
+    private EngineIntelligenceReadModel supportedV2EngineIntelligenceReadModel() {
+        return EngineIntelligenceV2TestFixtures.rulesCriticalMlTimeoutReadModel("txn-1");
     }
 }

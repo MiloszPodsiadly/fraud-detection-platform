@@ -1,5 +1,6 @@
-export const ENGINE_INTELLIGENCE_CONTRACT_VERSION = 1;
-export const MAX_ENGINE_INTELLIGENCE_ENGINES = 3;
+export const ENGINE_INTELLIGENCE_CONTRACT_VERSION = 2;
+export const MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES = 16_384;
+export const MAX_ENGINE_INTELLIGENCE_ENGINES = 4;
 export const MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS = 5;
 export const MAX_ENGINE_INTELLIGENCE_WARNINGS = 10;
 export const MAX_ENGINE_INTELLIGENCE_REASON_CODES = 5;
@@ -27,7 +28,7 @@ export const RISK_MISMATCH_STATUSES = new Set([
   "NOT_COMPARABLE"
 ]);
 export const SCORE_DELTA_BUCKETS = new Set(["NONE", "SMALL", "MEDIUM", "LARGE", "UNAVAILABLE"]);
-export const ENGINE_TYPES = new Set(["RULES", "ML_MODEL", "VELOCITY"]);
+export const ENGINE_TYPES = new Set(["RULES", "ML_MODEL", "VELOCITY", "DEVICE_RISK"]);
 export const ENGINE_STATUSES = new Set(["AVAILABLE", "UNAVAILABLE", "TIMEOUT", "DEGRADED", "NOT_APPLICABLE"]);
 export const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 export const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE"]);
@@ -41,9 +42,72 @@ const ML_MODEL_IDENTITY_PART_PATTERN = /^[A-Za-z0-9._-]+$/;
 export const ENGINE_TYPE_BY_ID = Object.freeze({
   "rules.primary": "RULES",
   "ml.python.primary": "ML_MODEL",
-  "velocity.primary": "VELOCITY"
+  "velocity.primary": "VELOCITY",
+  "device.primary": "DEVICE_RISK"
 });
 export const ENGINE_ORDER = Object.freeze(Object.keys(ENGINE_TYPE_BY_ID));
+
+const DEVICE_SIGNAL_REASON_CODES = new Set([
+  "DEVICE_SIGNALS_UNSUPPORTED", "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW", "DEVICE_NOVELTY_SEEN_IN_WINDOW",
+  "DEVICE_NOVELTY_HISTORY_INCOMPLETE", "DEVICE_NOVELTY_HISTORY_UNAVAILABLE", "DEVICE_NOVELTY_HISTORY_INVALID",
+  "DEVICE_NOVELTY_UNTRUSTED_SOURCE", "DEVICE_SWITCH_OBSERVED", "DEVICE_SWITCH_NOT_OBSERVED",
+  "DEVICE_SWITCH_HISTORY_INCOMPLETE", "DEVICE_SWITCH_HISTORY_UNAVAILABLE", "DEVICE_SWITCH_HISTORY_INVALID",
+  "DEVICE_SWITCH_UNTRUSTED_SOURCE", "DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE",
+  "DEVICE_SHARED_DEVICE_UNTRUSTED_SOURCE", "DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE",
+  "DEVICE_COUNTRY_MISMATCH_UNTRUSTED_SOURCE", "DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE",
+  "DEVICE_PROXY_OR_VPN_UNTRUSTED_SOURCE"
+]);
+
+const NON_DEVICE_SHARED_REASON_CODES = new Set(["RAPID_PLN_20K_BURST"]);
+const RULES_ML_SHARED_REASON_CODES = new Set([
+  "DEVICE_NOVELTY", "COUNTRY_MISMATCH", "PROXY_OR_VPN", "MERCHANT_CONCENTRATION"
+]);
+const ML_VELOCITY_SHARED_REASON_CODES = new Set([
+  "TRANSACTION_VELOCITY", "RECENT_AMOUNT_ACCUMULATION"
+]);
+const RULES_REASON_CODES = new Set([
+  "DEVICE_NOVELTY_SIGNAL", "COUNTRY_MISMATCH_SIGNAL", "PROXY_OR_VPN_SIGNAL", "RAPID_TRANSFER_BURST_SIGNAL",
+  "HIGH_RISK_FLAGS_PRESENT", "VELOCITY_THRESHOLD_EXCEEDED", "AMOUNT_ACTIVITY_THRESHOLD_EXCEEDED",
+  "RAPID_TRANSFER_PATTERN_MATCHED", "FEATURE_STATUS_INVALID", "FEATURE_STATUS_WRONG_ACCESSOR",
+  "FEATURE_STATUS_NOT_ALLOWED", "HIGH_VELOCITY", "HIGH_AMOUNT_ACTIVITY", "HIGH_TRANSACTION_AMOUNT"
+]);
+const ML_REASON_CODES = new Set([
+  "ML_MODEL_SIGNAL", "ML_MODEL_UNAVAILABLE", "ML_MODEL_TIMEOUT", "ML_MODEL_INVALID_RESPONSE", "ML_SCORE_MISSING",
+  "ML_SCORE_OUT_OF_RANGE", "ML_INFERENCE_TIMESTAMP_MISSING", "ML_MODEL_METADATA_MISSING",
+  "ML_AVAILABILITY_METADATA_MISSING", "ML_AVAILABILITY_METADATA_INVALID", "ML_CLIENT_ERROR",
+  "MODEL_HIGH_RISK", "LOW_MODEL_RISK", "RECENT_TRANSACTION_SPIKE"
+]);
+const VELOCITY_REASON_CODES = new Set([
+  "VELOCITY_FEATURES_UNAVAILABLE",
+  "VELOCITY_FEATURE_TYPE_INVALID", "VELOCITY_FEATURE_VALUE_INVALID", "VELOCITY_FEATURES_INCONSISTENT",
+]);
+const DEVICE_EVIDENCE_REASON_CODES = new Set([
+  "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE",
+  "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED"
+]);
+const DEVICE_OWNED_REASON_CODES = new Set([
+  ...DEVICE_EVIDENCE_REASON_CODES,
+  ...DEVICE_SIGNAL_REASON_CODES
+]);
+const SHARED_ORCHESTRATOR_REASON_CODES = new Set([
+  "ORCHESTRATOR_ENGINE_EXCEPTION", "ORCHESTRATOR_ENGINE_NULL_RESULT", "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+  "ORCHESTRATOR_ENGINE_REJECTED", "ORCHESTRATOR_ENGINE_TIMEOUT"
+]);
+export const ENGINE_REASON_CODES_BY_ID = Object.freeze({
+  "rules.primary": new Set([
+    ...NON_DEVICE_SHARED_REASON_CODES, ...RULES_ML_SHARED_REASON_CODES, ...RULES_REASON_CODES,
+    ...SHARED_ORCHESTRATOR_REASON_CODES
+  ]),
+  "ml.python.primary": new Set([
+    ...NON_DEVICE_SHARED_REASON_CODES, ...RULES_ML_SHARED_REASON_CODES, ...ML_VELOCITY_SHARED_REASON_CODES,
+    ...ML_REASON_CODES, ...SHARED_ORCHESTRATOR_REASON_CODES
+  ]),
+  "velocity.primary": new Set([
+    ...NON_DEVICE_SHARED_REASON_CODES, ...ML_VELOCITY_SHARED_REASON_CODES, ...VELOCITY_REASON_CODES,
+    ...SHARED_ORCHESTRATOR_REASON_CODES
+  ]),
+  "device.primary": new Set([...DEVICE_OWNED_REASON_CODES, ...SHARED_ORCHESTRATOR_REASON_CODES])
+});
 
 export const CANONICAL_UTC_TIMESTAMP_PATTERN = "^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$";
 
@@ -122,16 +186,17 @@ export function isEngineIntelligenceResponseShape(value) {
       && Array.isArray(value.warnings)
       && value.warnings.length === 0;
   }
-  return value.contractVersion === ENGINE_INTELLIGENCE_CONTRACT_VERSION
+  const version = value.contractVersion;
+  return isSupportedEngineIntelligenceVersion(version)
     && isCanonicalUtcTimestamp(value.generatedAt)
     && isComparisonShape(value.comparison)
     && isBoundedArray(value.engines, MAX_ENGINE_INTELLIGENCE_ENGINES)
     && value.engines.length >= 2
-    && value.engines.every(isEngineShape)
+    && value.engines.every((engine) => isEngineShape(engine))
     && hasRequiredRulesMlEngineSet(value.engines)
     && isComparisonCoherent(value.comparison, value.engines)
     && isBoundedArray(value.diagnosticSignals, MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS)
-    && value.diagnosticSignals.every(isDiagnosticSignalShape)
+    && value.diagnosticSignals.every((signal) => isDiagnosticSignalShape(signal))
     && areDiagnosticSignalsCoherent(value.diagnosticSignals, value.engines)
     && isBoundedArray(value.warnings, MAX_ENGINE_INTELLIGENCE_WARNINGS)
     && value.warnings.every((warning) => isWarningShape(warning))
@@ -149,8 +214,10 @@ export function isEngineShape(engine) {
     && optionalOneOf(engine.riskLevel, RISK_LEVELS)
     && oneOf(engine.scoreBucket, SCORE_BUCKETS)
     && safeStringArray(engine.reasonCodes, MAX_ENGINE_INTELLIGENCE_REASON_CODES, MAX_PUBLIC_STRING_LENGTH)
+    && engine.reasonCodes.every((reasonCode) => isAllowedReasonCode(engine.engineId, reasonCode))
     && isEngineModelIdentityConsistent(engine)
-    && isEngineResultOperationallyConsistent(engine.status, engine.scoreBucket, engine.riskLevel);
+    && isEngineResultOperationallyConsistent(engine.status, engine.scoreBucket, engine.riskLevel)
+    && isDeviceEngineOperationallyConsistent(engine);
 }
 
 export function isModelIdentityShape(identity) {
@@ -179,7 +246,9 @@ export function isDiagnosticSignalShape(signal) {
     && optionalOneOf(signal.riskLevel, RISK_LEVELS)
     && oneOf(signal.scoreBucket, SCORE_BUCKETS)
     && safeString(signal.reasonCode, MAX_PUBLIC_STRING_LENGTH)
-    && isDiagnosticSignalOperationallyConsistent(signal.signalCategory, signal.engineStatus, signal.scoreBucket, signal.riskLevel);
+    && isAllowedReasonCode(signal.engineId, signal.reasonCode)
+    && isDiagnosticSignalOperationallyConsistent(signal.signalCategory, signal.engineStatus, signal.scoreBucket, signal.riskLevel)
+    && isDeviceSignalOperationallyConsistent(signal);
 }
 
 export function isWarningShape(warning, allowedWarningCodes = null) {
@@ -213,8 +282,7 @@ export function hasRequiredRulesMlEngineSet(values) {
   return hasUniqueCanonicalEngineOrder(values)
     && values.length >= 2
     && values[0]?.engineId === "rules.primary"
-    && values[1]?.engineId === "ml.python.primary"
-    && (values.length === 2 || values[2]?.engineId === "velocity.primary");
+    && values[1]?.engineId === "ml.python.primary";
 }
 
 export function isComparisonCoherent(comparison, engines) {
@@ -271,7 +339,8 @@ export function deriveEngineIntelligenceResponseStatus(engines, warnings) {
     return "DEGRADED";
   }
   const velocity = byEngineId.get("velocity.primary");
-  if (!velocity || velocity.status === "AVAILABLE" || velocity.status === "NOT_APPLICABLE") {
+  const device = byEngineId.get("device.primary");
+  if (isOptionalDiagnosticAvailable(velocity) && isOptionalDiagnosticAvailable(device)) {
     return "AVAILABLE";
   }
   return "DEGRADED";
@@ -324,6 +393,50 @@ export function isPlainObject(value) {
 
 export function isExpectedEngineType(engineId, engineType) {
   return ENGINE_TYPE_BY_ID[engineId] === engineType;
+}
+
+export function isSupportedEngineIntelligenceVersion(version) {
+  return version === ENGINE_INTELLIGENCE_CONTRACT_VERSION;
+}
+
+export function isWithinEngineIntelligenceSerializedByteLimit(value) {
+  if (!isPlainObject(value) || typeof TextEncoder !== "function") {
+    return false;
+  }
+  try {
+    const serialized = JSON.stringify(value);
+    return typeof serialized === "string"
+      && new TextEncoder().encode(serialized).byteLength <= MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedReasonCode(engineId, reasonCode) {
+  return ENGINE_REASON_CODES_BY_ID[engineId]?.has(reasonCode) ?? false;
+}
+
+function isOptionalDiagnosticAvailable(engine) {
+  return !engine || engine.status === "AVAILABLE" || engine.status === "NOT_APPLICABLE";
+}
+
+function isDeviceEngineOperationallyConsistent(engine) {
+  if (engine.engineId !== "device.primary") {
+    return true;
+  }
+  return engine.status !== "AVAILABLE"
+    && (engine.riskLevel === null || engine.riskLevel === undefined)
+    && engine.scoreBucket === "UNAVAILABLE";
+}
+
+function isDeviceSignalOperationallyConsistent(signal) {
+  if (signal.engineId !== "device.primary") {
+    return true;
+  }
+  return signal.engineStatus !== "AVAILABLE"
+    && signal.signalCategory === "OPERATIONAL_SIGNAL"
+    && (signal.riskLevel === null || signal.riskLevel === undefined)
+    && signal.scoreBucket === "UNAVAILABLE";
 }
 
 function hasExactComparedEngineIds(value) {

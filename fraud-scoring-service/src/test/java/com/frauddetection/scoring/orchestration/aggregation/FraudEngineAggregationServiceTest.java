@@ -58,6 +58,34 @@ class FraudEngineAggregationServiceTest {
     }
 
     @Test
+    void optionalDeviceFitsTheFourEngineBoundWithoutChangingRulesMlComparison() {
+        FraudEngineAggregationResult result = service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.unavailable("device.primary", FraudEngineStatus.UNAVAILABLE,
+                        "DEVICE_EVIDENCE_NOT_ADMITTED"),
+                AggregationTestSupport.available("velocity.primary", 0.95d, RiskLevel.CRITICAL,
+                        "RAPID_PLN_20K_BURST"),
+                AggregationTestSupport.available("ml.python.primary", 0.2d, RiskLevel.LOW, "LOW_MODEL_RISK"),
+                AggregationTestSupport.available("rules.primary", 0.9d, RiskLevel.HIGH, "HIGH_VELOCITY")
+        ));
+
+        assertThat(result.normalizedEngineResults())
+                .extracting(NormalizedFraudEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary", "device.primary");
+        NormalizedFraudEngineResult device = result.normalizedEngineResults().getLast();
+        assertThat(device.score()).isNull();
+        assertThat(device.riskLevel()).isNull();
+        assertThat(result.scoreDelta().status()).isEqualTo(FraudEngineScoreDeltaStatus.AVAILABLE);
+    }
+
+    @Test
+    void deviceCannotEnterAggregationWithInventedScoreOrRisk() {
+        assertThatThrownBy(() -> service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.raw("device.primary", FraudEngineStatus.AVAILABLE,
+                        0.4d, RiskLevel.MEDIUM, List.of("DEVICE_SCORE_NOT_CALIBRATED"), List.of(), List.of())
+        ))).hasMessage("AGGREGATION_DEVICE_SCORE_UNCALIBRATED");
+    }
+
+    @Test
     void officialVelocityContributionsDoNotCreateRoutineSanitizerWarnings() {
         FraudScoringOrchestrationResult orchestration = AggregationTestSupport.orchestration(
                 AggregationTestSupport.available("rules.primary", 0.9d, RiskLevel.HIGH, "HIGH_VELOCITY"),

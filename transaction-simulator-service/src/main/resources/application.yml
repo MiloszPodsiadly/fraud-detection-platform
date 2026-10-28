@@ -25,6 +25,7 @@ app:
       merchant-count: 40
       suspicious-every: 25
       seconds-between-events: 45
+      deterministic-test-mode: false
 
 management:
   endpoint:

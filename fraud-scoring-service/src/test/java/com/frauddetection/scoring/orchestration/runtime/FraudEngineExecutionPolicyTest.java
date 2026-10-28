@@ -39,7 +39,7 @@ class FraudEngineExecutionPolicyTest {
 
         entries.clear();
 
-        assertThat(policy.enginePolicies()).hasSize(3);
+        assertThat(policy.enginePolicies()).hasSize(4);
         assertThatThrownBy(() -> policy.enginePolicies().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
     }
@@ -83,13 +83,22 @@ class FraudEngineExecutionPolicyTest {
     }
 
     @Test
+    void devicePolicyMustRemainOptional() {
+        assertThatThrownBy(() -> new FraudScoringOrchestratorExecutionPolicy(List.of(
+                new FraudEngineExecutionPolicy("rules.primary", Duration.ofMillis(250), true),
+                new FraudEngineExecutionPolicy("ml.python.primary", Duration.ofSeconds(1), false),
+                new FraudEngineExecutionPolicy("device.primary", Duration.ofMillis(250), true)
+        ))).hasMessage("ENGINE_EXECUTION_POLICY_OPTIONAL_ENGINE_REQUIRED");
+    }
+
+    @Test
     void orchestratorPolicyAcceptsOnlyKnownEnginePolicies() {
         FraudScoringOrchestratorExecutionPolicy policy =
                 new FraudScoringOrchestratorExecutionPolicy(defaultEntries());
 
         assertThat(policy.enginePolicies())
                 .extracting(FraudEngineExecutionPolicy::engineId)
-                .containsExactlyInAnyOrder("rules.primary", "ml.python.primary", "velocity.primary");
+                .containsExactlyInAnyOrder("rules.primary", "ml.python.primary", "velocity.primary", "device.primary");
     }
 
     @Test
@@ -111,12 +120,15 @@ class FraudEngineExecutionPolicyTest {
         FraudEngineExecutionPolicy rules = policy.policyFor(FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID);
         FraudEngineExecutionPolicy ml = policy.policyFor(FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID);
         FraudEngineExecutionPolicy velocity = policy.policyFor(FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID);
+        FraudEngineExecutionPolicy device = policy.policyFor(FraudSignalEngineRegistry.DEVICE_PRIMARY_ENGINE_ID);
 
         assertThat(rules.required()).isTrue();
         assertThat(ml.required()).isFalse();
         assertThat(velocity.required()).isFalse();
+        assertThat(device.required()).isFalse();
         assertThat(ml.deadline()).isGreaterThan(rules.deadline());
         assertThat(velocity.deadline()).isEqualTo(rules.deadline());
+        assertThat(device.deadline()).isEqualTo(rules.deadline());
     }
 
     private List<FraudEngineExecutionPolicy> defaultEntries() {

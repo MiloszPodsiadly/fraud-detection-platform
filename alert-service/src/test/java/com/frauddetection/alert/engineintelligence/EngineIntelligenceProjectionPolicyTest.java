@@ -33,6 +33,16 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
+    void acceptsVersion2DeviceResultWithoutChangingRulesMlComparison() {
+        var summary = EngineIntelligenceProjectionTestFixtures.v2DeviceSummary();
+
+        assertThat(policy.validatedCopy(summary)).isEqualTo(summary);
+        assertThat(summary.engines()).extracting(EngineIntelligenceEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary", "device.primary");
+        assertThat(summary.comparison().comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
+    }
+
+    @Test
     void evidenceProjectionUsesCanonicalModelIdentityPolicyWithoutFreeTextBlacklist() {
         MlPredictionEvidence source = new MlPredictionEvidence(
                 0.8123d,
@@ -66,9 +76,9 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
-    void alertServiceStorageLimitsStillApplyAfterPublicContractValidation() {
+    void rejectsMoreThanFourEngineResultsAtThePublicContractBoundary() {
         EngineIntelligenceSummary source = summaryMock();
-        when(source.engines()).thenReturn(Collections.nCopies(4, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
+        when(source.engines()).thenReturn(Collections.nCopies(5, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
         assertOversized(source);
     }
@@ -142,6 +152,15 @@ class EngineIntelligenceProjectionPolicyTest {
     void unsupportedReasonCodeRejectedByPublicContract() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("NOT_ALLOWLISTED"));
+        when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
+
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
+    }
+
+    @Test
+    void reasonCodeOwnedByAnotherEngineIsRejectedAtProjectionBoundary() {
+        EngineIntelligenceSummary source = summaryMock();
+        EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("ML_MODEL_TIMEOUT"));
         when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
 
         assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);

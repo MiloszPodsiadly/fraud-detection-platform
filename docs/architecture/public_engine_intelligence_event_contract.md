@@ -27,16 +27,20 @@ to the public DTOs. It is called only for disabled-by-default producer diagnosti
 `transactions.scored` consumer boundary. Missing, malformed, retired, and future versions fail closed. Absence of this
 marker is not evidence that a record is safely historical and never selects a permissive parser.
 
-`EngineIntelligenceSummary.contractVersion` is required and equals `1`. A future incompatible
-shape requires explicit compatibility review and a new contract version.
+`EngineIntelligenceSummary.contractVersion` is required and equals `2` on the current wire. The producer uses this
+version even when optional engines are absent. Current readers reject nested v1, missing, and unknown versions. Rules
+and ML are required; Velocity and Device Risk are optional in canonical order. The comparator remains exactly
+`RULES_VS_ML` over `[rules.primary, ml.python.primary]`. The outer
+`TransactionScoredEvent.eventContractVersion=2` is independent from this nested version.
 
-## Backward Compatibility Rules
+## Current-version acceptance and controlled cutover
 
 `TransactionScoredEvent.engineIntelligence` is optional. A current producer may omit it, but every current event must
 still carry exactly one canonical ML evidence outcome: exact `mlPredictionEvidence` or an explicit
-`mlPredictionEvidenceOmissionReason`. A missing summary does not mean safe, low risk, or zero score. Historical event
-JSON with neither evidence outcome is not a valid current wire message and must be drained, migrated from authoritative
-evidence, archived, or quarantined before strict consumers read it.
+`mlPredictionEvidenceOmissionReason`. A missing summary does not mean safe, low risk, or zero score. Retained event
+JSON with neither evidence outcome is not a valid current wire message and must be archived or quarantined under the
+owning retention procedure before strict consumers read it. The reader never upgrades it, infers missing evidence, or
+selects a permissive historical parser.
 
 Compatibility is intentionally narrow. A valid current event may omit `engineIntelligence` or carry explicit null,
 which is accepted as absence and does not invent model lineage. When a summary is present, its comparison identity must
@@ -45,16 +49,16 @@ comparison identity, summaries missing Rules or ML, incorrect engine ordering, u
 canonical values are rejected or fail closed; the read boundary does not repair them.
 
 `TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Every current scored event requires
-exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Historical null/null
-messages must be drained, migrated from authoritative evidence, archived, or quarantined before current consumers read
-them, and consumers must not invent or backfill evidence. The outer `eventContractVersion` owns the current event
+exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Retained null/null
+messages must be archived or quarantined before current consumers read them, and consumers must not invent or backfill
+evidence. The outer `eventContractVersion` owns the current event
 version. A nested `mlPredictionEvidence.contractVersion` is a known obsolete marker and is rejected as contradictory;
 other bounded unknown evidence fields remain forward-compatible and do not change the canonical evidence meaning.
 
 All current alert-service listeners and redrive listeners use the same strict full-event deserializer. The repository
 does not provide a historical scored-event runtime parser. Active historical replay remains **NO-GO** until an authorized
-operator attests the retained partition/offset boundary and completes the governed archive, quarantine, or authoritative
-migration described in [Scoring occurrence ownership migration](scoring_occurrence_ownership_migration.md).
+operator attests the retained partition/offset boundary and completes governed archive or quarantine under
+[Scoring occurrence ownership migration](scoring_occurrence_ownership_migration.md). No runtime conversion is provided.
 Pipeline-level reasons (`DIAGNOSTIC_EMISSION_DISABLED` and `DIAGNOSTIC_ENRICHMENT_UNAVAILABLE`) require the summary
 to be absent. ML-engine-derived reasons require an observed `ml.python.primary` result and cannot be used to describe
 an unavailable diagnostic pipeline; `ML_ENGINE_UNAVAILABLE` is reserved for observed operational ML statuses.
@@ -66,13 +70,16 @@ bucket or detached from its summary. The exact field is not part of the public E
 
 ## Payload Limits
 
-The public payload allows at most three engines, five diagnostic signals, ten warning summaries, five
-reason codes per engine, and 128 characters per bounded string.
+The current nested contract allows at most four engines, five diagnostic signals, ten warning summaries, five reason
+codes per engine, and 128 characters per bounded string. The summary is also capped at 16 KiB of serialized UTF-8,
+checked at byte-oriented ingress and egress before parsing or publishing.
 
-Version 1 allows three known engine identities: `rules.primary`, `ml.python.primary`, and `velocity.primary`. Rules
-and ML are required. Velocity is an optional third diagnostic engine. Missing Rules or ML in a current
-`contractVersion=1` summary is corruption, not an operational representation. Operational failure is represented by a
-present engine result with a non-AVAILABLE status and bounded reason code, not by omitting the engine.
+The one known identity set is `rules.primary`, `ml.python.primary`, `velocity.primary`, and `device.primary`, in that
+canonical order. Rules and ML are required; Velocity and Device Risk are optional diagnostics. Missing required engines
+or an unsupported nested version is corruption, not an operational representation. Operational failure is represented
+by a present engine result with a non-AVAILABLE status and bounded reason code, not by omitting the engine. Historical
+nested v1 records are not reinterpreted by current readers; see the code/deployment matrix in the
+[contract version decision](engine_intelligence_contract_version_adr.md).
 
 Public timestamps use canonical UTC RFC3339 with uppercase `Z`, valid calendar dates from year `0001` through `9999`,
 hour `00-23`, second `00-59`, and optional fractional seconds from 1 through 9 digits. Offsets, timezone-less strings,
@@ -91,14 +98,14 @@ identity-free AVAILABLE ML result is malformed and fails closed; readers do not 
 to another operational status. Dataset v3 likewise rejects `AVAILABLE` prediction evidence unless score, risk,
 execution timestamp, and the complete model identity are all present.
 
-### Deployment Treatment For Historical Projections
+### Rejection policy and manual cutover for retained projections
 
-Before deploying the strict reader, inventory Mongo `engine_intelligence_projections` documents containing an
-`AVAILABLE` `ml.python.primary` engine without complete `modelIdentity`. Such documents do not satisfy the current read
-contract: archive them under the approved retention policy or rebuild the projection only from an authoritative event
-that already contains complete lineage. Do not synthesize identity from the currently loaded model, registry state, or
-deployment configuration. Identity-free historical documents are not valid inputs to the current Dataset v3 or
-exact-model evaluation contracts and must not be normalized merely to make a historical projection displayable.
+Before enabling a strict-reader deployment, inventory the bounded retained scope of Mongo
+`engine_intelligence_projections` documents containing an `AVAILABLE` `ml.python.primary` engine without complete
+`modelIdentity`. They are rejected by the current read contract and must be archived or quarantined under the approved
+retention procedure. Do not synthesize identity from the currently loaded model, registry state, or deployment
+configuration. A cutover needs explicit ownership, a retained-data boundary, verified current readers, and verification
+of known external consumers; it must not delete facts or rewrite projections merely to make them displayable.
 
 ## Field Omission Rules
 
@@ -109,9 +116,9 @@ text, raw contribution values, internal objects, and decisioning fields.
 
 Score is bucketed or omitted, not raw, unless explicitly approved. A score bucket is diagnostic,
 not a calibrated probability and not a final score. Score delta is also bucketed and is not
-calibration proof. For v1, score delta applies only to `RULES_VS_ML` comparison identity:
+calibration proof. Score delta applies only to `RULES_VS_ML` comparison identity:
 `comparedEngineIds=["rules.primary","ml.python.primary"]`. Velocity is not included in score-delta semantics.
-For v1, available scores map to `LOW` for `0.00-0.25`, `MEDIUM` for
+Available scores map to `LOW` for `0.00-0.25`, `MEDIUM` for
 `>0.25-0.50`, `HIGH` for `>0.50-0.75`, and `VERY_HIGH` for `>0.75-1.00`. `NONE` is reserved for an
 explicitly omitted value and is not a missing-score fallback. Comparable score deltas map to `NONE`
 for exact zero, `SMALL` for `>0.00-0.15`, `MEDIUM` for `>0.15-0.35`, and `LARGE` for `>0.35-1.00`.
@@ -131,8 +138,8 @@ type, or availability status.
 
 ## Evidence Exposure Decision
 
-Evidence free-text descriptions are omitted or templated, not raw. Contract version 1 also omits evidence
-titles and display text.
+Evidence free-text descriptions are omitted or templated, not raw. The current contract also omits evidence titles and
+display text.
 
 ## Diagnostic Signal Exposure Decision
 

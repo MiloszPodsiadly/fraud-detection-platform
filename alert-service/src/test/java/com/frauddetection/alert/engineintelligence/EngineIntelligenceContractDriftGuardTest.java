@@ -30,7 +30,7 @@ class EngineIntelligenceContractDriftGuardTest {
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
     @Test
-    void publicEngineIdentityRegistryHasRulesMlRequiredAndVelocityOptional() throws Exception {
+    void publicEngineIdentityRegistryHasRulesMlRequiredAndVelocityDeviceOptional() throws Exception {
         Map<String, Object> registry = readJson("common-events/src/test/resources/fixtures/engine-intelligence/engine_registry_contract.json");
 
         assertThat(registry.get("maxEngineCount")).isEqualTo(FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES);
@@ -39,7 +39,7 @@ class EngineIntelligenceContractDriftGuardTest {
                 .isEqualTo(FraudEngineIdentityContract.rulesVsMlComparisonEngineIds());
         assertThat((List<Map<String, Object>>) registry.get("engines"))
                 .extracting(engine -> engine.get("requiredForComparison"))
-                .containsExactly(true, true, false);
+                .containsExactly(true, true, false, false);
     }
 
     @Test
@@ -103,22 +103,20 @@ class EngineIntelligenceContractDriftGuardTest {
         assertThat(openApi)
                 .contains("Velocity is not included in score delta semantics")
                 .contains("Rules and ML")
-                .contains("optional Velocity");
+                .contains("allows optional Velocity and optional Device Risk in canonical order");
     }
 
     @Test
-    void contractVersionOneDecisionDocumentsRepositoryControlledAtomicMigration() throws Exception {
+    void currentContractVersionDecisionDocumentsDeploymentCompatibility() throws Exception {
         String adr = sources("docs/architecture/engine_intelligence_contract_version_adr.md");
         String consumerReadiness = sources("docs/architecture/engine_intelligence_consumer_readiness.md");
 
         assertThat(adr)
-                .contains("contractVersion=1")
-                .contains("repository-controlled")
-                .contains("atomically")
-                .contains("does not infer either field")
-                .contains("retires historical comparison normalization")
-                .contains("accepted compatibility break")
-                .contains("external consumers");
+                .contains("contractVersion=2")
+                .contains("Current readers reject nested version 1")
+                .contains("external consumer")
+                .contains("Retained v1 records")
+                .contains("no global backwards-compatibility claim");
         assertThat(consumerReadiness)
                 .contains("no direct `TransactionScoredEvent` deserializer in API or analyst console UI");
     }

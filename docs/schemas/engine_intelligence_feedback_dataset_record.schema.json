@@ -1,0 +1,530 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frauddetection.local/schemas/engine_intelligence_feedback_dataset_record.schema.json",
+  "title": "Engine Intelligence feedback dataset record",
+  "description": "Internal-only record schema. reasonCodesByEngine validates each code against the ownership vocabulary for its canonical engine identity. The flat reasonCodes and diagnosticSignals fields validate only against the aggregate known reason-code vocabulary and do not assert engine ownership. The Java record constructor enforces canonical object-member order and equality between reasonCodes and the concatenated groups; Draft 2020-12 validates field shapes and bounds but cannot express those order and cross-property equality constraints.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evaluationRecordId",
+    "transactionReference",
+    "feedbackSubmittedAt",
+    "evaluationLabel",
+    "labelSource",
+    "feedbackType",
+    "usefulness",
+    "accuracyAssessment",
+    "projectionStatus",
+    "agreementStatus",
+    "riskMismatchStatus",
+    "scoreDeltaBucket",
+    "mlEngineStatus",
+    "mlScoreBucket",
+    "mlRiskLevel",
+    "rulesEngineStatus",
+    "rulesScoreBucket",
+    "rulesRiskLevel",
+    "reasonCodes",
+    "reasonCodesByEngine",
+    "diagnosticSignals",
+    "engineIntelligenceContractVersion",
+    "deviceEngineStatus",
+    "deviceScoreBucket",
+    "deviceRiskLevel"
+  ],
+  "properties": {
+    "evaluationRecordId": {
+      "type": "string",
+      "pattern": "^eval-[a-f0-9]{32}$"
+    },
+    "transactionReference": {
+      "type": "string",
+      "pattern": "^txnref-[a-f0-9]{32}$"
+    },
+    "feedbackSubmittedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "evaluationLabel": {
+      "enum": ["ANALYST_CONFIRMED_FRAUD", "ANALYST_MARKED_LEGITIMATE", "NOT_EVALUATION_ELIGIBLE"]
+    },
+    "labelSource": {
+      "enum": ["ALERT_ANALYST_DECISION", "MISSING_ALERT_DECISION", "UNKNOWN_ALERT_DECISION"]
+    },
+    "feedbackType": {
+      "enum": [
+        "ENGINE_INTELLIGENCE_USEFULNESS",
+        "ENGINE_DISAGREEMENT_REVIEW",
+        "OPERATIONAL_STATUS_REVIEW",
+        "MISSING_INTELLIGENCE_REVIEW"
+      ]
+    },
+    "usefulness": {
+      "enum": ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL", "NOT_SURE"]
+    },
+    "accuracyAssessment": {
+      "enum": [
+        "SIGNALS_LOOK_CORRECT",
+        "SIGNALS_LOOK_PARTIALLY_CORRECT",
+        "SIGNALS_LOOK_INCORRECT",
+        "NOT_ENOUGH_INFORMATION",
+        "OPERATIONAL_ISSUE_AFFECTED_REVIEW"
+      ]
+    },
+    "projectionStatus": {
+      "enum": ["AVAILABLE", "MISSING"]
+    },
+    "agreementStatus": {
+      "enum": ["AGREEMENT", "ADJACENT_RISK_VARIANCE", "DISAGREEMENT", "PARTIAL", "INSUFFICIENT_DATA", "REQUIRED_ENGINE_NOT_COMPARABLE", null]
+    },
+    "riskMismatchStatus": {
+      "enum": ["SAME_RISK_LEVEL", "ADJACENT_RISK_LEVEL", "MATERIAL_RISK_MISMATCH", "NOT_COMPARABLE", null]
+    },
+    "scoreDeltaBucket": {
+      "enum": ["NONE", "SMALL", "MEDIUM", "LARGE", "UNAVAILABLE", null]
+    },
+    "mlEngineStatus": {
+      "$ref": "#/$defs/nullableEngineStatus"
+    },
+    "mlScoreBucket": {
+      "$ref": "#/$defs/nullableScoreBucket"
+    },
+    "mlRiskLevel": {
+      "$ref": "#/$defs/nullableRiskLevel"
+    },
+    "rulesEngineStatus": {
+      "$ref": "#/$defs/nullableEngineStatus"
+    },
+    "rulesScoreBucket": {
+      "$ref": "#/$defs/nullableScoreBucket"
+    },
+    "rulesRiskLevel": {
+      "$ref": "#/$defs/nullableRiskLevel"
+    },
+    "reasonCodes": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/knownReasonCode"
+      }
+    },
+    "reasonCodesByEngine": {
+      "type": "object",
+      "maxProperties": 4,
+      "properties": {
+        "rules.primary": { "$ref": "#/$defs/rulesReasonCodes" },
+        "ml.python.primary": { "$ref": "#/$defs/mlReasonCodes" },
+        "velocity.primary": { "$ref": "#/$defs/velocityReasonCodes" },
+        "device.primary": { "$ref": "#/$defs/deviceReasonCodes" }
+      },
+      "additionalProperties": false
+    },
+    "diagnosticSignals": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/knownReasonCode"
+      }
+    },
+    "engineIntelligenceContractVersion": {
+      "enum": [2, null]
+    },
+    "deviceEngineStatus": {
+      "$ref": "#/$defs/nullableEngineStatus"
+    },
+    "deviceScoreBucket": {
+      "$ref": "#/$defs/nullableScoreBucket"
+    },
+    "deviceRiskLevel": {
+      "type": "null"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "projectionStatus": { "const": "AVAILABLE" }
+        }
+      },
+      "then": {
+        "properties": {
+          "engineIntelligenceContractVersion": { "const": 2 },
+          "reasonCodesByEngine": {
+            "minProperties": 2,
+            "required": ["rules.primary", "ml.python.primary"]
+          }
+        },
+        "allOf": [
+          { "$ref": "#/$defs/rulesEngineProfile" },
+          { "$ref": "#/$defs/mlEngineProfile" },
+          { "$ref": "#/$defs/availableComparisonCoherence" }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "projectionStatus": { "const": "MISSING" }
+        }
+      },
+      "then": {
+        "properties": {
+          "agreementStatus": { "type": "null" },
+          "riskMismatchStatus": { "type": "null" },
+          "scoreDeltaBucket": { "type": "null" },
+          "mlEngineStatus": { "type": "null" },
+          "mlScoreBucket": { "type": "null" },
+          "mlRiskLevel": { "type": "null" },
+          "rulesEngineStatus": { "type": "null" },
+          "rulesScoreBucket": { "type": "null" },
+          "rulesRiskLevel": { "type": "null" },
+          "reasonCodes": { "maxItems": 0 },
+          "reasonCodesByEngine": { "maxProperties": 0 },
+          "diagnosticSignals": { "maxItems": 0 },
+          "engineIntelligenceContractVersion": { "type": "null" },
+          "deviceEngineStatus": { "type": "null" },
+          "deviceScoreBucket": { "type": "null" },
+          "deviceRiskLevel": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "deviceEngineStatus": { "type": "null" }
+        }
+      },
+      "then": {
+        "properties": {
+          "deviceScoreBucket": { "type": "null" }
+        }
+      },
+      "else": {
+        "properties": {
+          "deviceEngineStatus": {
+            "enum": ["UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED"]
+          },
+          "deviceScoreBucket": { "const": "UNAVAILABLE" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "reasonCodesByEngine": { "required": ["device.primary"] }
+        }
+      },
+      "then": {
+        "properties": {
+          "deviceEngineStatus": {
+            "enum": ["UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "deviceEngineStatus": {
+            "enum": ["UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reasonCodesByEngine": { "required": ["device.primary"] }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "rulesReasonCodes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "AMOUNT_ACTIVITY_THRESHOLD_EXCEEDED",
+          "COUNTRY_MISMATCH",
+          "COUNTRY_MISMATCH_SIGNAL",
+          "DEVICE_NOVELTY",
+          "DEVICE_NOVELTY_SIGNAL",
+          "FEATURE_STATUS_INVALID",
+          "FEATURE_STATUS_NOT_ALLOWED",
+          "FEATURE_STATUS_WRONG_ACCESSOR",
+          "HIGH_AMOUNT_ACTIVITY",
+          "HIGH_RISK_FLAGS_PRESENT",
+          "HIGH_TRANSACTION_AMOUNT",
+          "HIGH_VELOCITY",
+          "MERCHANT_CONCENTRATION",
+          "ORCHESTRATOR_ENGINE_EXCEPTION",
+          "ORCHESTRATOR_ENGINE_NULL_RESULT",
+          "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+          "ORCHESTRATOR_ENGINE_REJECTED",
+          "ORCHESTRATOR_ENGINE_TIMEOUT",
+          "PROXY_OR_VPN",
+          "PROXY_OR_VPN_SIGNAL",
+          "RAPID_PLN_20K_BURST",
+          "RAPID_TRANSFER_BURST_SIGNAL",
+          "RAPID_TRANSFER_PATTERN_MATCHED",
+          "VELOCITY_THRESHOLD_EXCEEDED"
+        ]
+      }
+    },
+    "mlReasonCodes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "COUNTRY_MISMATCH",
+          "DEVICE_NOVELTY",
+          "LOW_MODEL_RISK",
+          "MERCHANT_CONCENTRATION",
+          "ML_AVAILABILITY_METADATA_INVALID",
+          "ML_AVAILABILITY_METADATA_MISSING",
+          "ML_CLIENT_ERROR",
+          "ML_INFERENCE_TIMESTAMP_MISSING",
+          "ML_MODEL_INVALID_RESPONSE",
+          "ML_MODEL_METADATA_MISSING",
+          "ML_MODEL_SIGNAL",
+          "ML_MODEL_TIMEOUT",
+          "ML_MODEL_UNAVAILABLE",
+          "ML_SCORE_MISSING",
+          "ML_SCORE_OUT_OF_RANGE",
+          "MODEL_HIGH_RISK",
+          "ORCHESTRATOR_ENGINE_EXCEPTION",
+          "ORCHESTRATOR_ENGINE_NULL_RESULT",
+          "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+          "ORCHESTRATOR_ENGINE_REJECTED",
+          "ORCHESTRATOR_ENGINE_TIMEOUT",
+          "PROXY_OR_VPN",
+          "RAPID_PLN_20K_BURST",
+          "RECENT_AMOUNT_ACCUMULATION",
+          "RECENT_TRANSACTION_SPIKE",
+          "TRANSACTION_VELOCITY"
+        ]
+      }
+    },
+    "velocityReasonCodes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "ORCHESTRATOR_ENGINE_EXCEPTION",
+          "ORCHESTRATOR_ENGINE_NULL_RESULT",
+          "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+          "ORCHESTRATOR_ENGINE_REJECTED",
+          "ORCHESTRATOR_ENGINE_TIMEOUT",
+          "RAPID_PLN_20K_BURST",
+          "RECENT_AMOUNT_ACCUMULATION",
+          "TRANSACTION_VELOCITY",
+          "VELOCITY_FEATURE_TYPE_INVALID",
+          "VELOCITY_FEATURE_VALUE_INVALID",
+          "VELOCITY_FEATURES_INCONSISTENT",
+          "VELOCITY_FEATURES_UNAVAILABLE"
+        ]
+      }
+    },
+    "deviceReasonCodes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "DEVICE_COUNTRY_MISMATCH_UNSUPPORTED_SOURCE",
+          "DEVICE_COUNTRY_MISMATCH_UNTRUSTED_SOURCE",
+          "DEVICE_EVIDENCE_NOT_ADMITTED",
+          "DEVICE_EVIDENCE_UNAVAILABLE",
+          "DEVICE_EVIDENCE_UNTRUSTED",
+          "DEVICE_NOVELTY_HISTORY_INCOMPLETE",
+          "DEVICE_NOVELTY_HISTORY_INVALID",
+          "DEVICE_NOVELTY_HISTORY_UNAVAILABLE",
+          "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW",
+          "DEVICE_NOVELTY_SEEN_IN_WINDOW",
+          "DEVICE_NOVELTY_UNTRUSTED_SOURCE",
+          "DEVICE_PROXY_OR_VPN_UNSUPPORTED_SOURCE",
+          "DEVICE_PROXY_OR_VPN_UNTRUSTED_SOURCE",
+          "DEVICE_SCORE_NOT_CALIBRATED",
+          "DEVICE_SHARED_DEVICE_UNSUPPORTED_SOURCE",
+          "DEVICE_SHARED_DEVICE_UNTRUSTED_SOURCE",
+          "DEVICE_SIGNALS_UNSUPPORTED",
+          "DEVICE_SWITCH_HISTORY_INCOMPLETE",
+          "DEVICE_SWITCH_HISTORY_INVALID",
+          "DEVICE_SWITCH_HISTORY_UNAVAILABLE",
+          "DEVICE_SWITCH_NOT_OBSERVED",
+          "DEVICE_SWITCH_OBSERVED",
+          "DEVICE_SWITCH_UNTRUSTED_SOURCE",
+          "ORCHESTRATOR_ENGINE_EXCEPTION",
+          "ORCHESTRATOR_ENGINE_NULL_RESULT",
+          "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE",
+          "ORCHESTRATOR_ENGINE_REJECTED",
+          "ORCHESTRATOR_ENGINE_TIMEOUT"
+        ]
+      }
+    },
+    "knownReasonCode": {
+      "anyOf": [
+        { "$ref": "#/$defs/rulesReasonCodes/items" },
+        { "$ref": "#/$defs/mlReasonCodes/items" },
+        { "$ref": "#/$defs/velocityReasonCodes/items" },
+        { "$ref": "#/$defs/deviceReasonCodes/items" }
+      ]
+    },
+    "rulesEngineProfile": {
+      "if": { "properties": { "rulesEngineStatus": { "const": "AVAILABLE" } } },
+      "then": {
+        "properties": {
+          "rulesScoreBucket": { "enum": ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"] },
+          "rulesRiskLevel": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] }
+        }
+      },
+      "else": {
+        "properties": {
+          "rulesEngineStatus": { "enum": ["UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED"] },
+          "rulesScoreBucket": { "const": "UNAVAILABLE" },
+          "rulesRiskLevel": { "type": "null" }
+        }
+      }
+    },
+    "mlEngineProfile": {
+      "if": { "properties": { "mlEngineStatus": { "const": "AVAILABLE" } } },
+      "then": {
+        "properties": {
+          "mlScoreBucket": { "enum": ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"] },
+          "mlRiskLevel": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] }
+        }
+      },
+      "else": {
+        "properties": {
+          "mlEngineStatus": { "enum": ["UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED"] },
+          "mlScoreBucket": { "const": "UNAVAILABLE" },
+          "mlRiskLevel": { "type": "null" }
+        }
+      }
+    },
+    "availableComparisonCoherence": {
+      "if": {
+        "properties": {
+          "rulesEngineStatus": { "const": "AVAILABLE" },
+          "mlEngineStatus": { "const": "AVAILABLE" }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "if": { "properties": { "rulesRiskLevel": { "const": "LOW" } } },
+            "then": {
+              "oneOf": [
+                { "properties": { "mlRiskLevel": { "const": "LOW" }, "riskMismatchStatus": { "const": "SAME_RISK_LEVEL" }, "agreementStatus": { "const": "AGREEMENT" } } },
+                { "properties": { "mlRiskLevel": { "const": "MEDIUM" }, "riskMismatchStatus": { "const": "ADJACENT_RISK_LEVEL" }, "agreementStatus": { "const": "ADJACENT_RISK_VARIANCE" } } },
+                { "properties": { "mlRiskLevel": { "enum": ["HIGH", "CRITICAL"] }, "riskMismatchStatus": { "const": "MATERIAL_RISK_MISMATCH" }, "agreementStatus": { "const": "DISAGREEMENT" } } }
+              ]
+            }
+          },
+          {
+            "if": { "properties": { "rulesRiskLevel": { "const": "MEDIUM" } } },
+            "then": {
+              "oneOf": [
+                { "properties": { "mlRiskLevel": { "const": "LOW" }, "riskMismatchStatus": { "const": "ADJACENT_RISK_LEVEL" }, "agreementStatus": { "const": "ADJACENT_RISK_VARIANCE" } } },
+                { "properties": { "mlRiskLevel": { "const": "MEDIUM" }, "riskMismatchStatus": { "const": "SAME_RISK_LEVEL" }, "agreementStatus": { "const": "AGREEMENT" } } },
+                { "properties": { "mlRiskLevel": { "const": "HIGH" }, "riskMismatchStatus": { "const": "ADJACENT_RISK_LEVEL" }, "agreementStatus": { "const": "ADJACENT_RISK_VARIANCE" } } },
+                { "properties": { "mlRiskLevel": { "const": "CRITICAL" }, "riskMismatchStatus": { "const": "MATERIAL_RISK_MISMATCH" }, "agreementStatus": { "const": "DISAGREEMENT" } } }
+              ]
+            }
+          },
+          {
+            "if": { "properties": { "rulesRiskLevel": { "const": "HIGH" } } },
+            "then": {
+              "oneOf": [
+                { "properties": { "mlRiskLevel": { "const": "LOW" }, "riskMismatchStatus": { "const": "MATERIAL_RISK_MISMATCH" }, "agreementStatus": { "const": "DISAGREEMENT" } } },
+                { "properties": { "mlRiskLevel": { "const": "MEDIUM" }, "riskMismatchStatus": { "const": "ADJACENT_RISK_LEVEL" }, "agreementStatus": { "const": "ADJACENT_RISK_VARIANCE" } } },
+                { "properties": { "mlRiskLevel": { "const": "HIGH" }, "riskMismatchStatus": { "const": "SAME_RISK_LEVEL" }, "agreementStatus": { "const": "AGREEMENT" } } },
+                { "properties": { "mlRiskLevel": { "const": "CRITICAL" }, "riskMismatchStatus": { "const": "ADJACENT_RISK_LEVEL" }, "agreementStatus": { "const": "ADJACENT_RISK_VARIANCE" } } }
+              ]
+            }
+          },
+          {
+            "if": { "properties": { "rulesRiskLevel": { "const": "CRITICAL" } } },
+            "then": {
+              "oneOf": [
+                { "properties": { "mlRiskLevel": { "const": "LOW" }, "riskMismatchStatus": { "const": "MATERIAL_RISK_MISMATCH" }, "agreementStatus": { "const": "DISAGREEMENT" } } },
+                { "properties": { "mlRiskLevel": { "const": "MEDIUM" }, "riskMismatchStatus": { "const": "MATERIAL_RISK_MISMATCH" }, "agreementStatus": { "const": "DISAGREEMENT" } } },
+                { "properties": { "mlRiskLevel": { "const": "HIGH" }, "riskMismatchStatus": { "const": "ADJACENT_RISK_LEVEL" }, "agreementStatus": { "const": "ADJACENT_RISK_VARIANCE" } } },
+                { "properties": { "mlRiskLevel": { "const": "CRITICAL" }, "riskMismatchStatus": { "const": "SAME_RISK_LEVEL" }, "agreementStatus": { "const": "AGREEMENT" } } }
+              ]
+            }
+          },
+          {
+            "if": { "properties": { "rulesScoreBucket": { "const": "LOW" } } },
+            "then": {
+              "oneOf": [
+                { "properties": { "mlScoreBucket": { "const": "LOW" }, "scoreDeltaBucket": { "enum": ["NONE", "SMALL", "MEDIUM"] } } },
+                { "properties": { "mlScoreBucket": { "const": "MEDIUM" }, "scoreDeltaBucket": { "enum": ["SMALL", "MEDIUM", "LARGE"] } } },
+                { "properties": { "mlScoreBucket": { "const": "HIGH" }, "scoreDeltaBucket": { "enum": ["MEDIUM", "LARGE"] } } },
+                { "properties": { "mlScoreBucket": { "const": "VERY_HIGH" }, "scoreDeltaBucket": { "const": "LARGE" } } }
+              ]
+            }
+          },
+          {
+            "if": { "properties": { "rulesScoreBucket": { "const": "MEDIUM" } } },
+            "then": {
+              "oneOf": [
+                { "properties": { "mlScoreBucket": { "const": "LOW" }, "scoreDeltaBucket": { "enum": ["SMALL", "MEDIUM", "LARGE"] } } },
+                { "properties": { "mlScoreBucket": { "const": "MEDIUM" }, "scoreDeltaBucket": { "enum": ["NONE", "SMALL", "MEDIUM"] } } },
+                { "properties": { "mlScoreBucket": { "const": "HIGH" }, "scoreDeltaBucket": { "enum": ["SMALL", "MEDIUM", "LARGE"] } } },
+                { "properties": { "mlScoreBucket": { "const": "VERY_HIGH" }, "scoreDeltaBucket": { "enum": ["MEDIUM", "LARGE"] } } }
+              ]
+            }
+          },
+          {
+            "if": { "properties": { "rulesScoreBucket": { "const": "HIGH" } } },
+            "then": {
+              "oneOf": [
+                { "properties": { "mlScoreBucket": { "const": "LOW" }, "scoreDeltaBucket": { "enum": ["MEDIUM", "LARGE"] } } },
+                { "properties": { "mlScoreBucket": { "const": "MEDIUM" }, "scoreDeltaBucket": { "enum": ["SMALL", "MEDIUM", "LARGE"] } } },
+                { "properties": { "mlScoreBucket": { "const": "HIGH" }, "scoreDeltaBucket": { "enum": ["NONE", "SMALL", "MEDIUM"] } } },
+                { "properties": { "mlScoreBucket": { "const": "VERY_HIGH" }, "scoreDeltaBucket": { "enum": ["SMALL", "MEDIUM", "LARGE"] } } }
+              ]
+            }
+          },
+          {
+            "if": { "properties": { "rulesScoreBucket": { "const": "VERY_HIGH" } } },
+            "then": {
+              "oneOf": [
+                { "properties": { "mlScoreBucket": { "const": "LOW" }, "scoreDeltaBucket": { "const": "LARGE" } } },
+                { "properties": { "mlScoreBucket": { "const": "MEDIUM" }, "scoreDeltaBucket": { "enum": ["MEDIUM", "LARGE"] } } },
+                { "properties": { "mlScoreBucket": { "const": "HIGH" }, "scoreDeltaBucket": { "enum": ["SMALL", "MEDIUM", "LARGE"] } } },
+                { "properties": { "mlScoreBucket": { "const": "VERY_HIGH" }, "scoreDeltaBucket": { "enum": ["NONE", "SMALL", "MEDIUM"] } } }
+              ]
+            }
+          }
+        ]
+      },
+      "else": {
+        "if": { "properties": { "rulesEngineStatus": { "const": "AVAILABLE" } } },
+        "then": {
+          "properties": {
+            "agreementStatus": { "const": "PARTIAL" },
+            "riskMismatchStatus": { "const": "NOT_COMPARABLE" },
+            "scoreDeltaBucket": { "const": "UNAVAILABLE" }
+          }
+        },
+        "else": {
+          "properties": {
+            "agreementStatus": { "const": "REQUIRED_ENGINE_NOT_COMPARABLE" },
+            "riskMismatchStatus": { "const": "NOT_COMPARABLE" },
+            "scoreDeltaBucket": { "const": "UNAVAILABLE" }
+          }
+        }
+      }
+    },
+    "nullableEngineStatus": {
+      "enum": ["AVAILABLE", "UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED", null]
+    },
+    "nullableScoreBucket": {
+      "enum": ["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE", null]
+    },
+    "nullableRiskLevel": {
+      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL", null]
+    }
+  }
+}

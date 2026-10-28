@@ -9,7 +9,7 @@ import java.util.Set;
 
 public final class FraudEngineEvidenceSanitizer {
     private static final String DEFAULT_DESCRIPTION = "Bounded engine signal.";
-    private static final Set<String> ALLOWED_SOURCES = Set.of("RULES", "ML_MODEL", "ORCHESTRATOR", "VELOCITY");
+    private static final Set<String> ALLOWED_SOURCES = Set.of("RULES", "ML_MODEL", "ORCHESTRATOR", "VELOCITY", "DEVICE_RISK");
     private final FraudEngineReasonCodeNormalizer reasonCodeNormalizer = new FraudEngineReasonCodeNormalizer();
 
     public List<BoundedFraudEngineEvidenceSummary> sanitize(
@@ -31,7 +31,7 @@ public final class FraudEngineEvidenceSanitizer {
                 warn(warnings, policy, engineId, FraudEngineAggregationWarningCode.EVIDENCE_UNSAFE_DROPPED);
                 continue;
             }
-            if (hasUnsupportedReasonCode(evidence)) {
+            if (hasUnsupportedReasonCode(engineId, evidence)) {
                 warn(warnings, policy, engineId, FraudEngineAggregationWarningCode.EVIDENCE_UNSUPPORTED_REASON_CODE_DROPPED);
                 continue;
             }
@@ -73,8 +73,8 @@ public final class FraudEngineEvidenceSanitizer {
         return evidence.reasonCode() != null && !FraudEngineAggregationSafety.isSafe(evidence.reasonCode());
     }
 
-    private boolean hasUnsupportedReasonCode(FraudEngineEvidence evidence) {
-        return evidence.reasonCode() != null && !reasonCodeNormalizer.isAllowed(evidence.reasonCode());
+    private boolean hasUnsupportedReasonCode(String engineId, FraudEngineEvidence evidence) {
+        return evidence.reasonCode() != null && !reasonCodeNormalizer.isAllowedForEngine(engineId, evidence.reasonCode());
     }
 
     private String truncate(

@@ -6,6 +6,8 @@ import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFe
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.convert.ConversionException;
+import org.springframework.data.mapping.MappingException;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -65,7 +67,20 @@ public class EngineIntelligenceFeedbackDatasetExportService {
                     request.toInclusive(),
                     request.maxRecords()
             );
+        } catch (MappingException | ConversionException exception) {
+            return EngineIntelligenceFeedbackDatasetExportResult.failed(
+                    request,
+                    exportedAt,
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK
+            );
         } catch (RuntimeException exception) {
+            return EngineIntelligenceFeedbackDatasetExportResult.failed(
+                    request,
+                    exportedAt,
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.FEEDBACK_STORE_UNAVAILABLE
+            );
+        }
+        if (rawRows == null || rawRows.size() > request.maxRecords() + 1) {
             return EngineIntelligenceFeedbackDatasetExportResult.failed(
                     request,
                     exportedAt,
@@ -102,19 +117,24 @@ public class EngineIntelligenceFeedbackDatasetExportService {
     }
 
     private EngineIntelligenceFeedbackDatasetRecord mapRecord(EngineIntelligenceFeedbackDocument feedback) {
+        mapper.validateFeedbackSource(feedback);
         AlertDocument alert = alert(feedback)
                 .orElseGet(() -> missingDecisionAlert(feedback));
         EngineIntelligenceProjection projection = projection(feedback).orElse(null);
-        try {
-            return mapper.map(feedback, alert, projection);
-        } catch (EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException exception) {
-            throw exception;
-        }
+        return mapper.mapValidatedFeedback(feedback, alert, projection);
     }
 
     private Optional<AlertDocument> alert(EngineIntelligenceFeedbackDocument feedback) {
         try {
-            return alertRepository.findByTransactionId(feedback.getTransactionId());
+            Optional<AlertDocument> result = alertRepository.findByTransactionId(feedback.getTransactionId());
+            if (result == null) {
+                throw new IllegalStateException("alert repository returned null");
+            }
+            return result;
+        } catch (MappingException | ConversionException exception) {
+            throw new EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_ALERT_DATA
+            );
         } catch (RuntimeException exception) {
             throw new EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException(
                     EngineIntelligenceFeedbackDatasetExportFailureReason.ALERT_STORE_UNAVAILABLE
@@ -124,7 +144,15 @@ public class EngineIntelligenceFeedbackDatasetExportService {
 
     private Optional<EngineIntelligenceProjection> projection(EngineIntelligenceFeedbackDocument feedback) {
         try {
-            return projectionRepository.findById(feedback.getTransactionId());
+            Optional<EngineIntelligenceProjection> result = projectionRepository.findById(feedback.getTransactionId());
+            if (result == null) {
+                throw new IllegalStateException("projection repository returned null");
+            }
+            return result;
+        } catch (MappingException | ConversionException exception) {
+            throw new EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
+            );
         } catch (RuntimeException exception) {
             throw new EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException(
                     EngineIntelligenceFeedbackDatasetExportFailureReason.PROJECTION_STORE_UNAVAILABLE

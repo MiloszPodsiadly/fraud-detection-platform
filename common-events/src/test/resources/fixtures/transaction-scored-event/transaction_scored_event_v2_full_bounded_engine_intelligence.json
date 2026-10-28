@@ -35,7 +35,7 @@
   "alertRecommended": true,
   "scoringEvidence": [],
   "engineIntelligence": {
-    "contractVersion": 1,
+    "contractVersion": 2,
     "generatedAt": "2026-06-01T06:00:01Z",
     "engines": [
       {

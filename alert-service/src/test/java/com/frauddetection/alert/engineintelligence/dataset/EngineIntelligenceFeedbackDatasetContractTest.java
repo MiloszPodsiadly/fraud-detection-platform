@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -133,7 +134,12 @@ class EngineIntelligenceFeedbackDatasetContractTest {
                 null,
                 null,
                 List.of(),
-                List.of()
+                Map.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                null
         )).isInstanceOf(IllegalArgumentException.class);
     }
 

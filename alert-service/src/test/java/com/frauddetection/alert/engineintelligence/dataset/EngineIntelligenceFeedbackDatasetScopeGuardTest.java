@@ -3,6 +3,7 @@ package com.frauddetection.alert.engineintelligence.dataset;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Predicate;
@@ -16,6 +17,14 @@ class EngineIntelligenceFeedbackDatasetScopeGuardTest {
     @Test
     void doesNotAddPublicApiEndpoint() throws IOException {
         assertThat(datasetProductionText()).doesNotContain("@RestController", "@Controller", "@RequestMapping");
+    }
+
+    @Test
+    void jsonlSerializerIsNotExposedOutsideTheDatasetPackage() throws ReflectiveOperationException {
+        assertThat(Modifier.isPublic(EngineIntelligenceFeedbackDatasetJsonlExporter.class.getModifiers())).isFalse();
+        assertThat(Modifier.isPublic(EngineIntelligenceFeedbackDatasetJsonlExporter.class
+                .getDeclaredMethod("exportJsonl", EngineIntelligenceFeedbackDatasetExportResult.class)
+                .getModifiers())).isFalse();
     }
 
     @Test
@@ -73,8 +82,18 @@ class EngineIntelligenceFeedbackDatasetScopeGuardTest {
     }
 
     @Test
-    void doesNotChangeExistingEngineIntelligenceShape() throws IOException {
-        assertThat(datasetProductionText()).doesNotContain("EngineIntelligenceSummary(", "TransactionScoredEvent(");
+    void reconstructsCanonicalSummaryForValidationWithoutChangingEventShape() throws IOException {
+        String mapper = Files.readString(ROOT.resolve(
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset/EngineIntelligenceFeedbackDatasetRecordMapper.java"));
+        String event = Files.readString(ROOT.resolve(
+                "common-events/src/main/java/com/frauddetection/common/events/contract/TransactionScoredEvent.java"));
+
+        assertThat(mapper)
+                .contains("new EngineIntelligenceSummary(", "validatedCopy(summary)")
+                .doesNotContain("new TransactionScoredEvent(");
+        assertThat(event)
+                .contains("EngineIntelligenceSummary engineIntelligence")
+                .doesNotContain("engineResults");
     }
 
     @Test

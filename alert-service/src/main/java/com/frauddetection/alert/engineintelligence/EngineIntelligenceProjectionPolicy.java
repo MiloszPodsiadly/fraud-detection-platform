@@ -7,6 +7,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceDiagnosti
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceReasonCodePolicy;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
@@ -18,6 +19,9 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 import java.util.Locale;
@@ -28,6 +32,8 @@ import java.util.regex.Pattern;
 
 @Component
 public class EngineIntelligenceProjectionPolicy {
+
+    private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().findAndAddModules().build();
 
     public static final int MAX_ENGINES = FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES;
     public static final int MAX_DIAGNOSTIC_SIGNALS = 5;
@@ -78,7 +84,7 @@ public class EngineIntelligenceProjectionPolicy {
         // Alert-service projection revalidates engine intelligence through the shared bounded public event
         // contract. This avoids maintaining a divergent second source of truth for public reason codes and
         // enum semantics while the projection adds storage-specific size and omission safeguards.
-        return publicContract(() -> new EngineIntelligenceSummary(
+        EngineIntelligenceSummary validated = publicContract(() -> new EngineIntelligenceSummary(
                 source.contractVersion(),
                 source.generatedAt(),
                 copyBounded(source.engines(), MAX_ENGINES, this::validatedEngine),
@@ -90,6 +96,12 @@ public class EngineIntelligenceProjectionPolicy {
                 ),
                 copyBounded(source.warnings(), MAX_WARNINGS, this::validatedWarning)
         ));
+        try {
+            FraudEngineIdentityContract.requireEngineIntelligenceSerializedSize(OBJECT_MAPPER.writeValueAsBytes(validated).length);
+        } catch (JacksonException | IllegalArgumentException exception) {
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
+        }
+        return validated;
     }
 
     public MlPredictionEvidence validatedEvidenceCopy(MlPredictionEvidence source) {
@@ -123,7 +135,11 @@ public class EngineIntelligenceProjectionPolicy {
                 boundedEnum(source.status(), FraudEngineStatus.class),
                 boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
                 boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class),
-                copyBounded(source.reasonCodes(), MAX_REASON_CODES_PER_ENGINE, this::boundedPublicReasonCode),
+                copyBounded(
+                        source.reasonCodes(),
+                        MAX_REASON_CODES_PER_ENGINE,
+                        reasonCode -> boundedPublicReasonCode(source.engineId(), reasonCode)
+                ),
                 source.modelIdentity()
         ));
     }
@@ -139,7 +155,9 @@ public class EngineIntelligenceProjectionPolicy {
         ));
     }
 
-    private EngineIntelligenceDiagnosticSignal validatedDiagnosticSignal(EngineIntelligenceDiagnosticSignal source) {
+    private EngineIntelligenceDiagnosticSignal validatedDiagnosticSignal(
+            EngineIntelligenceDiagnosticSignal source
+    ) {
         requireShape(source);
         return publicContract(() -> new EngineIntelligenceDiagnosticSignal(
                 allowedEngineId(source.engineId()),
@@ -148,7 +166,7 @@ public class EngineIntelligenceProjectionPolicy {
                 boundedEnum(source.signalCategory(), EngineIntelligenceSignalCategory.class),
                 boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
                 boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class),
-                boundedPublicReasonCode(source.reasonCode())
+                boundedPublicReasonCode(source.engineId(), source.reasonCode())
         ));
     }
 
@@ -162,23 +180,28 @@ public class EngineIntelligenceProjectionPolicy {
 
     private String allowedEngineId(String engineId) {
         String safe = boundedString(engineId);
-        if (!FraudEngineIdentityContract.isKnownEngineId(safe)) {
+        if (!FraudEngineIdentityContract.engineOrder().contains(safe)) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
         }
         return safe;
     }
 
-    private String boundedPublicReasonCode(String reasonCode) {
+    private String boundedPublicReasonCode(String engineId, String reasonCode) {
+        if (reasonCode != null && EngineIntelligenceReasonCodePolicy.isKnownReasonCode(reasonCode)) {
+            if (reasonCode.length() > MAX_STRING_LENGTH
+                    || reasonCode.chars().anyMatch(Character::isISOControl)) {
+                throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+            }
+            try {
+                EngineIntelligenceReasonCodePolicy.requireOwnedByEngine(engineId, reasonCode);
+            } catch (RuntimeException exception) {
+                throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
+            }
+            return reasonCode;
+        }
         String safe = boundedString(reasonCode);
         try {
-            new EngineIntelligenceEngineResult(
-                    FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
-                    FraudEngineType.RULES,
-                    FraudEngineStatus.AVAILABLE,
-                    RiskLevel.LOW,
-                    EngineIntelligenceScoreBucket.LOW,
-                    List.of(safe)
-            );
+            EngineIntelligenceReasonCodePolicy.requireOwnedByEngine(engineId, safe);
         } catch (RuntimeException exception) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
         }

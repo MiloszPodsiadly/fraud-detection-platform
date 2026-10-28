@@ -9,11 +9,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-public class EngineIntelligenceFeedbackDatasetJsonlExporter {
+class EngineIntelligenceFeedbackDatasetJsonlExporter {
 
     private final ObjectMapper objectMapper;
 
-    public EngineIntelligenceFeedbackDatasetJsonlExporter() {
+    EngineIntelligenceFeedbackDatasetJsonlExporter() {
         this(JsonMapper.builder().findAndAddModules().build());
     }
 
@@ -21,7 +21,7 @@ public class EngineIntelligenceFeedbackDatasetJsonlExporter {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper is required");
     }
 
-    public String exportJsonl(EngineIntelligenceFeedbackDatasetExportResult exportResult) {
+    String exportJsonl(EngineIntelligenceFeedbackDatasetExportResult exportResult) {
         Objects.requireNonNull(exportResult, "exportResult is required");
         StringBuilder jsonl = new StringBuilder();
         appendLine(jsonl, metadata(exportResult));
@@ -29,8 +29,28 @@ public class EngineIntelligenceFeedbackDatasetJsonlExporter {
             return jsonl.toString();
         }
         for (EngineIntelligenceFeedbackDatasetRecord record : exportResult.records()) {
-            appendLine(jsonl, recordLine(record));
+            try {
+                appendLine(jsonl, recordLine(record));
+            } catch (EngineIntelligenceFeedbackDatasetSerializationException exception) {
+                return serializationFailureJsonl(exportResult);
+            }
         }
+        return jsonl.toString();
+    }
+
+    private String serializationFailureJsonl(EngineIntelligenceFeedbackDatasetExportResult exportResult) {
+        EngineIntelligenceFeedbackDatasetExportRequest request = new EngineIntelligenceFeedbackDatasetExportRequest(
+                exportResult.fromInclusive(),
+                exportResult.toInclusive(),
+                exportResult.maxRecords()
+        );
+        EngineIntelligenceFeedbackDatasetExportResult failed = EngineIntelligenceFeedbackDatasetExportResult.failed(
+                request,
+                exportResult.exportedAt(),
+                EngineIntelligenceFeedbackDatasetExportFailureReason.SERIALIZATION_FAILED
+        );
+        StringBuilder jsonl = new StringBuilder();
+        appendLine(jsonl, metadata(failed));
         return jsonl.toString();
     }
 
@@ -61,6 +81,10 @@ public class EngineIntelligenceFeedbackDatasetJsonlExporter {
         try {
             jsonl.append(objectMapper.writeValueAsString(line)).append('\n');
         } catch (JacksonException exception) {
+            throw new EngineIntelligenceFeedbackDatasetSerializationException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.SERIALIZATION_FAILED
+            );
+        } catch (RuntimeException exception) {
             throw new EngineIntelligenceFeedbackDatasetSerializationException(
                     EngineIntelligenceFeedbackDatasetExportFailureReason.SERIALIZATION_FAILED
             );

@@ -18,6 +18,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -78,7 +79,7 @@ class EngineIntelligenceReadControllerSerializationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.available").value(true))
                 .andExpect(jsonPath("$.transactionId").value("txn-full"))
-                .andExpect(jsonPath("$.contractVersion").value(1))
+                .andExpect(jsonPath("$.contractVersion").value(2))
                 .andExpect(jsonPath("$.comparison.agreementStatus").value("PARTIAL"))
                 .andExpect(jsonPath("$.comparison.riskMismatchStatus").value("NOT_COMPARABLE"))
                 .andExpect(jsonPath("$.comparison.scoreDeltaBucket").value("UNAVAILABLE"))
@@ -125,7 +126,7 @@ class EngineIntelligenceReadControllerSerializationTest {
         return new EngineIntelligenceProjection(
                 "txn-full",
                 new ScoringOccurrenceOwnership("event-full", GENERATED_AT, SOURCE_EVENT_FINGERPRINT),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 GENERATED_AT,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 List.of("rules.primary", "ml.python.primary"),
@@ -183,7 +184,7 @@ class EngineIntelligenceReadControllerSerializationTest {
         return new EngineIntelligenceProjection(
                 "txn-corrupted",
                 new ScoringOccurrenceOwnership("event-corrupted", GENERATED_AT, SOURCE_EVENT_FINGERPRINT),
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 GENERATED_AT,
                 null,
                 null,

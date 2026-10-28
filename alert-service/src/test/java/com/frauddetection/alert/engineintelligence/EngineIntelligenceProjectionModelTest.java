@@ -22,12 +22,12 @@ class EngineIntelligenceProjectionModelTest {
     private static final Instant NOW = Instant.parse("2026-06-02T08:00:00Z");
 
     @Test
-    void nullListsBecomeEmptyLists() {
+    void nullListsRemainMissing() {
         EngineIntelligenceProjection projection = projection(null, null, null);
 
-        assertThat(projection.getEngines()).isEmpty();
-        assertThat(projection.getDiagnosticSignals()).isEmpty();
-        assertThat(projection.getWarnings()).isEmpty();
+        assertThat(projection.getEngines()).isNull();
+        assertThat(projection.getDiagnosticSignals()).isNull();
+        assertThat(projection.getWarnings()).isNull();
         assertThat(projection.getEngineCount()).isZero();
         assertThat(projection.getDiagnosticSignalCount()).isZero();
         assertThat(projection.getWarningCount()).isZero();
@@ -65,7 +65,7 @@ class EngineIntelligenceProjectionModelTest {
     }
 
     @Test
-    void nullListProjectionDoesNotThrow() {
+    void nullListProjectionPreservesMissingSemantics() {
         assertThatCode(() -> projection(null, null, null)).doesNotThrowAnyException();
     }
 

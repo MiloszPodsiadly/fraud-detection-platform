@@ -87,16 +87,16 @@ class EngineIntelligenceEngineResultTest {
                 FraudEngineStatus.AVAILABLE,
                 RiskLevel.HIGH,
                 EngineIntelligenceScoreBucket.HIGH,
-                List.of("HIGH_VELOCITY"),
+                List.of("RAPID_TRANSFER_PATTERN_MATCHED"),
                 EngineIntelligenceTestSupport.mlIdentity()
         )).hasMessage("ENGINE_INTELLIGENCE_NON_ML_MODEL_IDENTITY_INVALID");
         assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
                 "velocity.primary",
                 FraudEngineType.VELOCITY,
-                FraudEngineStatus.AVAILABLE,
-                RiskLevel.HIGH,
-                EngineIntelligenceScoreBucket.HIGH,
-                List.of("RAPID_TRANSFER_BURST_SIGNAL"),
+                FraudEngineStatus.UNAVAILABLE,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of("VELOCITY_FEATURES_UNAVAILABLE"),
                 EngineIntelligenceTestSupport.mlIdentity()
         )).hasMessage("ENGINE_INTELLIGENCE_NON_ML_MODEL_IDENTITY_INVALID");
     }

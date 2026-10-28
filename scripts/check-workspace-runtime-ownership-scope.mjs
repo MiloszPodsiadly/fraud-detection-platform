@@ -61,6 +61,7 @@ for (const file of changedFiles) {
     const sourceLine = line.replace(/^\+\s*/, "");
     if (!allowedEndpointFiles.has(normalized)
         && !isOwnedApiClientContractTest(normalized)
+        && !isWorkspaceDetailScopeGuardTest(normalized)
         && !normalized.startsWith("scripts/ci/")
         && !normalized.startsWith(".github/workflows/")
         && /["']\/(?:api|governance|system|bff)\//.test(sourceLine)) {
@@ -145,6 +146,10 @@ function introducesForbiddenScope(sourceLine) {
 function isAllowedFeedbackApiClientScope(file, sourceLine) {
   return file === "analyst-console-ui/src/api/alertsApi.js"
     && /submitEngineIntelligenceFeedback|engine-intelligence\/feedback|idempotencyKey|X-Idempotency-Key/.test(sourceLine);
+}
+
+function isWorkspaceDetailScopeGuardTest(file) {
+  return file === "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js";
 }
 
 function isCheckedTextFile(file) {

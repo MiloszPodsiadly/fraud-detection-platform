@@ -10,6 +10,8 @@ import * as engineIntelligenceContract from "../engineIntelligence/engineIntelli
 export { isAbortError } from "./apiErrors.js";
 
 const API_BASE_URL = import.meta.env.VITE_ALERT_API_BASE_URL ?? "";
+const MAX_ENGINE_INTELLIGENCE_RESPONSE_BYTES =
+  engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_SERIALIZED_BYTES + 2_048;
 
 export function createAlertsApiClient({
   session = null,
@@ -237,6 +239,7 @@ async function requestWithContext(path, options = {}, context = {}) {
   const {
     includeAuth = true,
     headers = {},
+    maxResponseBytes = null,
     ...fetchOptions
   } = options;
   const {
@@ -263,7 +266,9 @@ async function requestWithContext(path, options = {}, context = {}) {
   if (!response.ok) {
     const fallback = `Request failed with status ${response.status}`;
     try {
-      const errorBody = await response.json();
+      const errorBody = maxResponseBytes === null
+        ? await response.json()
+        : await readBoundedJsonResponse(response, maxResponseBytes);
       const details = errorBody.details || errorBody.validationErrors || [];
       const detailText = Array.isArray(details) && details.length > 0 ? ` ${details.join(" ")}` : "";
       throw new ApiError({
@@ -284,7 +289,46 @@ async function requestWithContext(path, options = {}, context = {}) {
     return null;
   }
 
-  return response.json();
+  return maxResponseBytes === null
+    ? response.json()
+    : readBoundedJsonResponse(response, maxResponseBytes);
+}
+
+async function readBoundedJsonResponse(response, maximumBytes) {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    throw new Error("ENGINE_INTELLIGENCE_RESPONSE_BODY_UNAVAILABLE");
+  }
+
+  const chunks = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value.byteLength === 0) {
+      continue;
+    }
+    totalBytes += value.byteLength;
+    if (totalBytes > maximumBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error("ENGINE_INTELLIGENCE_RESPONSE_BYTES_INVALID");
+    }
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+  } catch {
+    throw new Error("ENGINE_INTELLIGENCE_RESPONSE_JSON_INVALID");
+  }
 }
 
 function listAlertsWithRequest(request, { page = 0, size = 10 } = {}, { signal } = {}) {
@@ -687,7 +731,8 @@ function engineIntelligenceFeedbackFailureState(error) {
 
 function engineIntelligenceRequestOptions({ signal } = {}) {
   return {
-    ...(signal ? { signal } : {})
+    ...(signal ? { signal } : {}),
+    maxResponseBytes: MAX_ENGINE_INTELLIGENCE_RESPONSE_BYTES
   };
 }
 
@@ -709,9 +754,20 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     });
   }
 
+  if (!engineIntelligenceContract.isWithinEngineIntelligenceSerializedByteLimit({
+    contractVersion: response.contractVersion,
+    generatedAt: response.generatedAt,
+    engines: response.engines,
+    comparison: response.comparison,
+    diagnosticSignals: response.diagnosticSignals,
+    warnings: response.warnings
+  })) {
+    return unavailableEngineIntelligence(transactionId);
+  }
+
   if (
     response.available !== true
-    || response.contractVersion !== engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
+    || !engineIntelligenceContract.isSupportedEngineIntelligenceVersion(response.contractVersion)
     || !engineIntelligenceContract.isCanonicalUtcTimestamp(response.generatedAt)
   ) {
     return unavailableEngineIntelligence(transactionId);
@@ -729,6 +785,10 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
   }
   if (!engineIntelligenceContract.isComparisonCoherent(response.comparison, response.engines)
     || !engineIntelligenceContract.areDiagnosticSignalsCoherent(response.diagnosticSignals, response.engines)) {
+    return unavailableEngineIntelligence(transactionId);
+  }
+  const derivedStatus = engineIntelligenceContract.deriveEngineIntelligenceResponseStatus(response.engines, response.warnings);
+  if (response.status !== undefined && response.status !== derivedStatus) {
     return unavailableEngineIntelligence(transactionId);
   }
 
@@ -773,7 +833,7 @@ function normalizeEngineResults(values) {
   if (values.length > engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_ENGINES) {
     return null;
   }
-  if (!engineIntelligenceContract.hasUniqueCanonicalEngineOrder(values)) {
+  if (!engineIntelligenceContract.hasRequiredRulesMlEngineSet(values)) {
     return null;
   }
   const normalized = [];

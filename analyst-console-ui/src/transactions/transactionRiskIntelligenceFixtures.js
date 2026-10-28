@@ -379,7 +379,7 @@ export function invalidResponseError() {
 function availableEngineIntelligence(overrides = {}) {
   return {
     status: "AVAILABLE",
-    contractVersion: 1,
+    contractVersion: 2,
     generatedAt: "2026-06-18T10:00:02Z",
     comparison: {
       comparisonType: "RULES_VS_ML",

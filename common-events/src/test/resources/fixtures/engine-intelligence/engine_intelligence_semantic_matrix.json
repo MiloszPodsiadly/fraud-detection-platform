@@ -1,0 +1,104 @@
+{
+  "cases": [
+    {
+      "caseId": "both_available_same_risk",
+      "responseStatus": "AVAILABLE",
+      "invalidAgreementStatus": "DISAGREEMENT",
+      "engineIntelligence": {
+        "contractVersion": 2,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          { "engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"] },
+          { "engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"], "modelIdentity": { "modelName": "python-logistic-fraud-model", "modelVersion": "2026-05-31.v1", "featureContractVersion": "2026-05-31.feature-contract.v1" } }
+        ],
+        "comparison": { "comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "AGREEMENT", "riskMismatchStatus": "SAME_RISK_LEVEL", "scoreDeltaBucket": "NONE" },
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "both_available_adjacent_with_optional_velocity",
+      "responseStatus": "AVAILABLE",
+      "invalidAgreementStatus": "AGREEMENT",
+      "engineIntelligence": {
+        "contractVersion": 2,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          { "engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "LOW", "scoreBucket": "LOW", "reasonCodes": ["HIGH_VELOCITY"] },
+          { "engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "MEDIUM", "scoreBucket": "MEDIUM", "reasonCodes": ["ML_MODEL_SIGNAL"], "modelIdentity": { "modelName": "python-logistic-fraud-model", "modelVersion": "2026-05-31.v1", "featureContractVersion": "2026-05-31.feature-contract.v1" } },
+          { "engineId": "velocity.primary", "engineType": "VELOCITY", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["RAPID_PLN_20K_BURST"] }
+        ],
+        "comparison": { "comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "ADJACENT_RISK_VARIANCE", "riskMismatchStatus": "ADJACENT_RISK_LEVEL", "scoreDeltaBucket": "SMALL" },
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "both_available_material_with_degraded_device",
+      "responseStatus": "DEGRADED",
+      "invalidAgreementStatus": "AGREEMENT",
+      "engineIntelligence": {
+        "contractVersion": 2,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          { "engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "LOW", "scoreBucket": "LOW", "reasonCodes": ["HIGH_VELOCITY"] },
+          { "engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "CRITICAL", "scoreBucket": "VERY_HIGH", "reasonCodes": ["MODEL_HIGH_RISK"], "modelIdentity": { "modelName": "python-logistic-fraud-model", "modelVersion": "2026-05-31.v1", "featureContractVersion": "2026-05-31.feature-contract.v1" } },
+          { "engineId": "device.primary", "engineType": "DEVICE_RISK", "status": "DEGRADED", "riskLevel": null, "scoreBucket": "UNAVAILABLE", "reasonCodes": ["DEVICE_SCORE_NOT_CALIBRATED"] }
+        ],
+        "comparison": { "comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "DISAGREEMENT", "riskMismatchStatus": "MATERIAL_RISK_MISMATCH", "scoreDeltaBucket": "LARGE" },
+        "diagnosticSignals": [
+          { "engineId": "device.primary", "engineType": "DEVICE_RISK", "engineStatus": "DEGRADED", "signalCategory": "OPERATIONAL_SIGNAL", "riskLevel": null, "scoreBucket": "UNAVAILABLE", "reasonCode": "DEVICE_SCORE_NOT_CALIBRATED" }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "rules_available_ml_timeout",
+      "responseStatus": "DEGRADED",
+      "invalidAgreementStatus": "AGREEMENT",
+      "engineIntelligence": {
+        "contractVersion": 2,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          { "engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"] },
+          { "engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "TIMEOUT", "riskLevel": null, "scoreBucket": "UNAVAILABLE", "reasonCodes": ["ML_MODEL_TIMEOUT"] }
+        ],
+        "comparison": { "comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE" },
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "rules_timeout_ml_available",
+      "responseStatus": "DEGRADED",
+      "invalidAgreementStatus": "AGREEMENT",
+      "engineIntelligence": {
+        "contractVersion": 2,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          { "engineId": "rules.primary", "engineType": "RULES", "status": "TIMEOUT", "riskLevel": null, "scoreBucket": "UNAVAILABLE", "reasonCodes": ["ORCHESTRATOR_ENGINE_TIMEOUT"] },
+          { "engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"], "modelIdentity": { "modelName": "python-logistic-fraud-model", "modelVersion": "2026-05-31.v1", "featureContractVersion": "2026-05-31.feature-contract.v1" } }
+        ],
+        "comparison": { "comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "REQUIRED_ENGINE_NOT_COMPARABLE", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE" },
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "both_required_engines_operational",
+      "responseStatus": "DEGRADED",
+      "invalidAgreementStatus": "PARTIAL",
+      "engineIntelligence": {
+        "contractVersion": 2,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          { "engineId": "rules.primary", "engineType": "RULES", "status": "UNAVAILABLE", "riskLevel": null, "scoreBucket": "UNAVAILABLE", "reasonCodes": ["ORCHESTRATOR_ENGINE_TIMEOUT"] },
+          { "engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "TIMEOUT", "riskLevel": null, "scoreBucket": "UNAVAILABLE", "reasonCodes": ["ML_MODEL_TIMEOUT"] }
+        ],
+        "comparison": { "comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "REQUIRED_ENGINE_NOT_COMPARABLE", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE" },
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    }
+  ]
+}

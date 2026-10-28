@@ -116,7 +116,7 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                 "rule-based-engine",
                 "v1",
                 Instant.parse("2026-05-31T10:00:00Z"),
-                List.of("LOW_MODEL_RISK"),
+                List.of("COUNTRY_MISMATCH"),
                 Map.of("finalScore", 0.12d),
                 Map.of("feature", "stable"),
                 Map.of(),
@@ -143,7 +143,7 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                                 FraudEngineStatus.AVAILABLE,
                                 RiskLevel.LOW,
                                 EngineIntelligenceScoreBucket.LOW,
-                                List.of("LOW_MODEL_RISK"),
+                                List.of("COUNTRY_MISMATCH"),
                                 new MlModelIdentity(
                                         "python-logistic-fraud-model",
                                         "model-X",
@@ -174,7 +174,7 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                                 FraudEngineStatus.AVAILABLE,
                                 RiskLevel.LOW,
                                 EngineIntelligenceScoreBucket.LOW,
-                                List.of("LOW_MODEL_RISK")
+                                List.of("COUNTRY_MISMATCH")
                         ),
                         new EngineIntelligenceEngineResult(
                                 "ml.python.primary",

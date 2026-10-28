@@ -1,10 +1,16 @@
 package com.frauddetection.alert.engineintelligence.dataset;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -12,6 +18,8 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
 
     private static final Path ROOT = repositoryRoot();
     private static final Path DOC = ROOT.resolve("docs/architecture/engine_intelligence_feedback_dataset_export.md");
+    private static final Path RECORD_SCHEMA = ROOT.resolve(
+            "docs/schemas/engine_intelligence_feedback_dataset_record.schema.json");
 
     @Test
     void docsMentionSingleTimeBasis() throws IOException {
@@ -47,6 +55,22 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
     }
 
     @Test
+    void docsSeparateStandaloneRecordShapeFromProjectionSemanticApproval() throws IOException {
+        assertThat(normalizedDoc())
+                .contains("standalone record-shape DTO")
+                .contains("cannot prove that a diagnostic belongs to an engine")
+                .contains("standalone DTO can contain DEVICE_SWITCH_OBSERVED")
+                .contains("not projection-semantic approval")
+                .contains("must not be used as a public admission credential")
+                .contains("EngineIntelligenceFeedbackDatasetExportService.export")
+                .contains("reconstructs the full EngineIntelligenceSummary")
+                .contains("EngineIntelligenceProjectionPolicy validation")
+                .contains("package-private EngineIntelligenceFeedbackDatasetJsonlExporter")
+                .contains("only serializes an export result")
+                .contains("does not validate projection semantics");
+    }
+
+    @Test
     void docsStateFutureExportNeedsSeparateScopedPrControls() throws IOException {
         String doc = normalizedDoc();
 
@@ -63,15 +87,27 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
     }
 
     @Test
-    void docsMentionSupportedProjectionContractVersion() throws IOException {
-        String doc = Files.readString(DOC);
+    void docsDeclareOnlyTheCurrentContractVersionAndFailClosedForUnsupportedVersions() throws IOException {
+        String doc = normalizedDoc();
+        Matcher versionMarker = Pattern.compile(
+                "Active nested Engine Intelligence contract version: (\\d+)[.]"
+        ).matcher(doc);
 
+        assertThat(versionMarker.find()).isTrue();
+        int documentedVersion = Integer.parseInt(versionMarker.group(1));
+        assertThat(documentedVersion).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
+        assertThat(documentedVersion).isEqualTo(FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION);
         assertThat(doc)
-                .contains("FDP-102 exports only supported projection")
-                .contains("contract version `1`")
-                .contains("unsupported projection versions fail closed")
-                .contains("Unsupported projection")
-                .contains("does not mean no fraud or low risk");
+                .contains("accepts only nested contractVersion=2")
+                .contains("Missing, nested v1, and unknown versions are rejected as CORRUPTED_PROJECTION")
+                .contains("there is no active v1 reader or compatibility path")
+                .contains("Unsupported projection data fails closed as CORRUPTED_PROJECTION")
+                .contains("It does not mean no fraud or low risk")
+                .doesNotContain("contract versions 1 and 2");
+
+        JsonNode schema = JsonMapper.builder().findAndAddModules().build().readTree(RECORD_SCHEMA.toFile());
+        assertThat(schema.at("/allOf/0/then/properties/engineIntelligenceContractVersion/const").intValue())
+                .isEqualTo(documentedVersion);
     }
 
     @Test
@@ -156,6 +192,36 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
                 .contains("future public/operator/scheduled export")
                 .contains("performance review")
                 .contains("batch lookup");
+    }
+
+    @Test
+    void docsDefineCompleteGroupedReasonCodeAndIndependentSignalLimits() throws IOException {
+        assertThat(normalizedDoc())
+                .contains("up to 20 occurrences")
+                .contains("reasonCodesByEngine")
+                .contains("does not truncate or deduplicate")
+                .contains("global limit of five")
+                .contains("feedback_dataset_record.schema.json")
+                .contains("feedback-dataset-v3");
+
+        JsonNode schema = JsonMapper.builder().findAndAddModules().build().readTree(RECORD_SCHEMA.toFile());
+        assertThat(schema.at("/properties/reasonCodes/maxItems").intValue()).isEqualTo(20);
+        assertThat(schema.at("/$defs/rulesReasonCodes/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/$defs/mlReasonCodes/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/$defs/velocityReasonCodes/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/$defs/deviceReasonCodes/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/properties/diagnosticSignals/maxItems").intValue()).isEqualTo(5);
+        assertThat(schema.at("/description").textValue())
+                .contains("aggregate known reason-code vocabulary")
+                .contains("do not assert engine ownership");
+        assertThat(schema.at("/allOf/0/if/properties/projectionStatus/const").textValue()).isEqualTo("AVAILABLE");
+        assertThat(schema.at("/allOf/0/then/properties/reasonCodesByEngine/minProperties").intValue()).isEqualTo(2);
+        assertThat(schema.at("/allOf/0/then/properties/reasonCodesByEngine/required").toString())
+                .isEqualTo("[\"rules.primary\",\"ml.python.primary\"]");
+        assertThat(schema.at("/allOf/1/if/properties/projectionStatus/const").textValue()).isEqualTo("MISSING");
+        assertThat(schema.at("/allOf/1/then/properties/reasonCodes/maxItems").intValue()).isZero();
+        assertThat(schema.at("/allOf/1/then/properties/reasonCodesByEngine/maxProperties").intValue()).isZero();
+        assertThat(schema.at("/allOf/1/then/properties/diagnosticSignals/maxItems").intValue()).isZero();
     }
 
     @Test

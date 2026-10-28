@@ -36,7 +36,8 @@ import java.util.List;
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({
         EngineIntelligenceEmissionProperties.class,
-        VelocityEngineProperties.class
+        VelocityEngineProperties.class,
+        DeviceRiskEngineProperties.class
 })
 public class EngineIntelligenceRuntimeConfig {
 
@@ -62,9 +63,11 @@ public class EngineIntelligenceRuntimeConfig {
     @Bean
     public EngineIntelligenceRuntimeConfigurationValidator engineIntelligenceRuntimeConfigurationValidator(
             EngineIntelligenceEmissionProperties emissionProperties,
-            VelocityEngineProperties velocityEngineProperties
+            VelocityEngineProperties velocityEngineProperties,
+            DeviceRiskEngineProperties deviceRiskEngineProperties
     ) {
-        return new EngineIntelligenceRuntimeConfigurationValidator(emissionProperties, velocityEngineProperties);
+        return new EngineIntelligenceRuntimeConfigurationValidator(
+                emissionProperties, velocityEngineProperties, deviceRiskEngineProperties);
     }
 
     @Configuration(proxyBeanMethods = false)

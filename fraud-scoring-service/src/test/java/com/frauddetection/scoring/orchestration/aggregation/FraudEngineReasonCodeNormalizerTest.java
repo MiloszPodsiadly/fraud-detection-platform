@@ -17,12 +17,12 @@ class FraudEngineReasonCodeNormalizerTest {
 
         List<String> result = normalizer.normalize(
                 "rules.primary",
-                List.of("MODEL_HIGH_RISK", "MODEL_HIGH_RISK", " ", "raw-token-endpoint"),
+                List.of("HIGH_VELOCITY", "HIGH_VELOCITY", " ", "raw-token-endpoint"),
                 policy,
                 warnings
         );
 
-        assertThat(result).containsExactly("MODEL_HIGH_RISK");
+        assertThat(result).containsExactly("HIGH_VELOCITY");
         assertThat(warnings).extracting(FraudEngineAggregationWarning::code)
                 .contains(
                         FraudEngineAggregationWarningCode.REASON_CODE_BLANK_DROPPED,
@@ -40,6 +40,31 @@ class FraudEngineReasonCodeNormalizerTest {
         assertThat(normalizer.normalize("rules.primary", source, policy, warnings)).isEmpty();
         assertThat(warnings).extracting(FraudEngineAggregationWarning::code)
                 .containsExactly(FraudEngineAggregationWarningCode.REASON_CODE_NULL_DROPPED);
+    }
+
+    @Test
+    void devicePolicyReasonsCannotBeEmittedByAnotherEngine() {
+        List<FraudEngineAggregationWarning> warnings = new ArrayList<>();
+
+        assertThat(normalizer.normalize("rules.primary",
+                List.of("DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW"), policy, warnings)).isEmpty();
+        assertThat(warnings).extracting(FraudEngineAggregationWarning::code)
+                .containsExactly(FraudEngineAggregationWarningCode.REASON_CODE_UNSUPPORTED_DROPPED);
+    }
+
+    @Test
+    void mlAndRulesFeatureReasonsCannotBeMisattributedToOtherEngines() {
+        List<FraudEngineAggregationWarning> warnings = new ArrayList<>();
+
+        assertThat(normalizer.normalize("rules.primary", List.of("MODEL_HIGH_RISK"), policy, warnings)).isEmpty();
+        assertThat(normalizer.normalize("velocity.primary", List.of("DEVICE_NOVELTY"), policy, warnings)).isEmpty();
+        assertThat(normalizer.normalize("velocity.primary", List.of("MERCHANT_CONCENTRATION"), policy, warnings)).isEmpty();
+        assertThat(warnings).extracting(FraudEngineAggregationWarning::code)
+                .containsExactly(
+                        FraudEngineAggregationWarningCode.REASON_CODE_UNSUPPORTED_DROPPED,
+                        FraudEngineAggregationWarningCode.REASON_CODE_UNSUPPORTED_DROPPED,
+                        FraudEngineAggregationWarningCode.REASON_CODE_UNSUPPORTED_DROPPED
+                );
     }
 
     @Test

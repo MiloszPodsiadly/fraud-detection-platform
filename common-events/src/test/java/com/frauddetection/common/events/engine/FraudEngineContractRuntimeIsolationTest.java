@@ -156,8 +156,14 @@ class FraudEngineContractRuntimeIsolationTest {
         String existingScoringRuntime = javaSourcesExcept(
                 scoringRoot,
                 scoringRoot.resolve("engine"),
+                scoringRoot.resolve("device"),
                 scoringRoot.resolve("orchestration"),
                 reviewedProducerWiring
+        );
+        String runtimeConfiguration = Files.readString(reviewedProducerWiring);
+        String deviceProperties = Files.readString(scoringRoot.resolve("config/DeviceRiskEngineProperties.java"));
+        String runtimeValidator = Files.readString(
+                scoringRoot.resolve("config/EngineIntelligenceRuntimeConfigurationValidator.java")
         );
         String compositeRuntime = Files.readString(scoringRoot.resolve("service/CompositeFraudScoringEngine.java"));
 
@@ -166,6 +172,16 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults");
+        assertThat(runtimeConfiguration)
+                .contains("@ConditionalOnProperty(name = EngineIntelligenceEmissionProperties.PROPERTY_NAME, havingValue = \"true\")")
+                .contains("FraudSignalEngineRegistry fraudSignalEngineRegistry(")
+                .contains("List.of(ruleBasedSignalEngine, pythonMlSignalEngine)")
+                .contains("List.of(ruleBasedSignalEngine, pythonMlSignalEngine, velocity)")
+                .doesNotContain("DeviceRiskSignalEngine");
+        assertThat(deviceProperties).contains("@DefaultValue(\"false\") boolean enabled");
+        assertThat(runtimeValidator)
+                .contains("if (deviceRiskEngineProperties.enabled())")
+                .contains("throw new IllegalStateException(DeviceRiskEngineProperties.PROPERTY_NAME");
         assertThat(compositeRuntime)
                 .doesNotContain("FeatureSnapshotReader")
                 .doesNotContain("FeatureSnapshotReaderFactory")

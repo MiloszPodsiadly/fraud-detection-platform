@@ -72,6 +72,26 @@ Risk scoring modes:
 | `COMPARE` | Java rules | Compare rules and ML for operational analysis. |
 | `ML` | Python model | Use ML result with rule fallback when unavailable. |
 
+Device Risk remains a disabled diagnostic candidate. Its current policy can describe bounded history predicates,
+but has no authenticated production evidence path or calibrated risk score; any future diagnostic status must not
+change Rules/ML scores, alert decisions, or payment outcomes.
+
+Current binary outcome: `CODE-FOUNDATION-MERGE-READY`; `DEVICE-RUNTIME-ACTIVATION-NO-GO`. The simulator and canonical
+replay generators label device provenance `SYNTHETIC_UNTRUSTED`; their device IDs, flags, fingerprints, and replay
+metadata are never institutional credentials or admission evidence.
+
+| Status | Device Risk state |
+| --- | --- |
+| IMPLEMENTED | Bounded Mongo adapter foundation and diagnostic-only policy; neither is wired into the running scoring path. |
+| TESTED | Focused contract, persistence-adapter, and synthetic replay cases; these do not prove issuer authenticity. |
+| DISABLED BY DESIGN | Admission defaults off and enabling it fails startup; the candidate engine is not registered. |
+| EXTERNAL DEPENDENCY | Independently authenticated issuer, bound occurrence/device evidence, approved retention/key custody, and durable delivery/recovery. |
+| DEPLOYMENT ATTESTATION REQUIRED | Compatibility rollout, access/retention controls, operational recovery, and measured load/performance. |
+
+See [Device Risk policy](docs/architecture/device_risk_signal_policy.md),
+[observation delivery gates](docs/architecture/device_risk_observation_delivery.md), and the
+[Device Risk admission runbook](docs/runbooks/device_risk_admission.md).
+
 ## Security And Audit Boundaries
 
 ![Security and audit boundaries](docs/assets/readme_security_audit.svg)

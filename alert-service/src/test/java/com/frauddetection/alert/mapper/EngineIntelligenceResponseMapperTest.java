@@ -65,7 +65,7 @@ class EngineIntelligenceResponseMapperTest {
         ));
 
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
-        assertThat(response.contractVersion()).isEqualTo(1);
+        assertThat(response.contractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
         assertThat(response.comparison().agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.AGREEMENT);
         assertThat(response.engines()).extracting("engineId").containsExactly("rules.primary", "ml.python.primary");
         assertThat(response.engines()).extracting("status")
@@ -261,10 +261,10 @@ class EngineIntelligenceResponseMapperTest {
     }
 
     @Test
-    void limitsPublicProjectionArraysToOpenApiBounds() {
+    void mapsMaximumCanonicalProjectionArraysWithinOpenApiBounds() {
         EngineIntelligenceResponse response = mapper.toResponse(readModelWithManyValues());
 
-        assertThat(response.engines()).hasSize(3);
+        assertThat(response.engines()).hasSize(4);
         assertThat(response.engines().getFirst().reasonCodes()).hasSize(5);
         assertThat(response.diagnosticSignals()).hasSize(5);
         assertThat(response.warnings()).hasSize(10);
@@ -303,7 +303,7 @@ class EngineIntelligenceResponseMapperTest {
         ));
         EngineIntelligenceResponse emptyEngines = mapper.toResponse(EngineIntelligenceReadModel.projected(
                 "txn-empty",
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
                         EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -429,7 +429,7 @@ class EngineIntelligenceResponseMapperTest {
     ) {
         return EngineIntelligenceReadModel.projected(
                 "txn-1",
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
                         EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -472,7 +472,11 @@ class EngineIntelligenceResponseMapperTest {
 
     private List<String> reasonCodesFor(FraudEngineType engineType, FraudEngineStatus status) {
         if (status == FraudEngineStatus.AVAILABLE) {
-            return engineType == FraudEngineType.ML_MODEL ? List.of("ML_MODEL_SIGNAL") : List.of("HIGH_VELOCITY");
+            return switch (engineType) {
+                case ML_MODEL -> List.of("ML_MODEL_SIGNAL");
+                case VELOCITY -> List.of("TRANSACTION_VELOCITY");
+                default -> List.of("HIGH_VELOCITY");
+            };
         }
         return engineType == FraudEngineType.ML_MODEL ? List.of("ML_MODEL_TIMEOUT") : List.of("ORCHESTRATOR_ENGINE_TIMEOUT");
     }
@@ -484,11 +488,16 @@ class EngineIntelligenceResponseMapperTest {
         List<EngineIntelligenceEngineReadModel> engines = new java.util.ArrayList<>();
         engines.add(engine("rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, reasonCodes));
         engines.add(engine("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.AVAILABLE, List.of("ML_MODEL_SIGNAL")));
-        engines.add(engine("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE, List.of("RAPID_TRANSFER_BURST_SIGNAL")));
-        java.util.stream.IntStream.range(0, 100)
-                .mapToObj(index -> engine("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE, List.of("RAPID_TRANSFER_BURST_SIGNAL")))
-                .forEach(engines::add);
-        List<EngineIntelligenceDiagnosticSignalReadModel> diagnosticSignals = java.util.stream.IntStream.range(0, 100)
+        engines.add(engine("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE, List.of("TRANSACTION_VELOCITY")));
+        engines.add(new EngineIntelligenceEngineReadModel(
+                "device.primary",
+                FraudEngineType.DEVICE_RISK,
+                FraudEngineStatus.DEGRADED,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of("DEVICE_SCORE_NOT_CALIBRATED")
+        ));
+        List<EngineIntelligenceDiagnosticSignalReadModel> diagnosticSignals = java.util.stream.IntStream.range(0, 5)
                 .mapToObj(index -> new EngineIntelligenceDiagnosticSignalReadModel(
                         "rules.primary",
                         FraudEngineType.RULES,
@@ -499,15 +508,15 @@ class EngineIntelligenceResponseMapperTest {
                         "HIGH_VELOCITY"
                 ))
                 .toList();
-        List<EngineIntelligenceWarningReadModel> warnings = java.util.stream.IntStream.range(0, 100)
+        List<EngineIntelligenceWarningReadModel> warnings = java.util.stream.IntStream.range(0, 10)
                 .mapToObj(index -> new EngineIntelligenceWarningReadModel(
                         EngineIntelligenceWarningCode.ENGINE_RESULT_LIMIT_APPLIED,
-                        index
+                        1
                 ))
                 .toList();
         return EngineIntelligenceReadModel.projected(
                 "txn-many",
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
                         EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -528,7 +537,7 @@ class EngineIntelligenceResponseMapperTest {
     ) {
         return EngineIntelligenceReadModel.projected(
                 "txn-velocity",
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
                         EngineIntelligenceComparisonType.RULES_VS_ML,

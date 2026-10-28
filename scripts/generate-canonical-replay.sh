@@ -7,6 +7,7 @@ dimensions_path="data/generated/dimensions.json"
 output_path="data/generated/canonical-replay.jsonl"
 labels_output_path=""
 reference_instant="2026-01-01T08:00:00Z"
+deterministic_test_mode=false
 
 normal_percentage=93
 rapid_transfer_seed_percentage=2
@@ -24,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --output) output_path="$2"; shift 2 ;;
     --labels-output) labels_output_path="$2"; shift 2 ;;
     --reference-instant) reference_instant="$2"; shift 2 ;;
+    --deterministic-test-mode) deterministic_test_mode=true; shift ;;
     --normal-percentage) normal_percentage="$2"; shift 2 ;;
     --rapid-transfer-seed-percentage) rapid_transfer_seed_percentage="$2"; shift 2 ;;
     --rapid-transfer-percentage) rapid_transfer_percentage="$2"; shift 2 ;;
@@ -50,8 +52,10 @@ fi
 
 "$python_bin" - "$count" "$seed" "$dimensions_path" "$output_path" "$labels_output_path" "$reference_instant" \
   "$normal_percentage" "$rapid_transfer_seed_percentage" "$rapid_transfer_percentage" \
-  "$new_device_percentage" "$high_proxy_percentage" "$country_mismatch_percentage" "$account_takeover_percentage" <<'PY'
+  "$new_device_percentage" "$high_proxy_percentage" "$country_mismatch_percentage" "$account_takeover_percentage" \
+  "$deterministic_test_mode" <<'PY'
 import csv
+import hashlib
 import json
 import random
 import sys
@@ -65,6 +69,7 @@ dimensions_path = Path(sys.argv[3])
 output_path = Path(sys.argv[4])
 labels_output_path = Path(sys.argv[5]) if sys.argv[5] else None
 reference_instant = datetime.fromisoformat(sys.argv[6].replace("Z", "+00:00"))
+deterministic_test_mode = sys.argv[14].lower() == "true"
 weights = {
     "normal": int(sys.argv[7]),
     "rapid_transfer_seed": int(sys.argv[8]),
@@ -81,6 +86,11 @@ rng = random.Random(seed)
 dimensions = json.loads(dimensions_path.read_text(encoding="utf-8"))
 customers = dimensions["customers"]
 merchants = dimensions["merchants"]
+dimension_identity = dict(dimensions)
+dimension_identity.pop("generatedAt", None)
+dimension_fingerprint = hashlib.sha256(
+    json.dumps(dimension_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+).hexdigest()
 high_risk_countries = ["BR", "NG", "RO", "MX"]
 risk_merchants = [merchant for merchant in merchants if merchant["riskTier"] == "HIGH"] or merchants
 
@@ -189,6 +199,22 @@ def amount_for(category, scenario, index):
         amount = max(amount, 1100 + rng.random() * 450)
     return round(amount, 2)
 
+if deterministic_test_mode:
+    run_configuration = json.dumps(weights, sort_keys=True, separators=(",", ":"))
+    run_identity = (
+        f"fdp149-canonical-replay:{seed}:{reference_instant.isoformat()}:{count}:"
+        f"{run_configuration}:{dimension_fingerprint}"
+    )
+    replay_run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, run_identity))
+else:
+    replay_run_id = str(uuid.uuid4())
+
+def replay_uuid(kind, index):
+    if deterministic_test_mode:
+        identity = f"fdp149-canonical-replay:{replay_run_id}:{index}:{kind}"
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, identity))
+    return str(uuid.uuid4())
+
 output_path.parent.mkdir(parents=True, exist_ok=True)
 if labels_output_path:
     labels_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -239,19 +265,20 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
 
         amount = amount_for(merchant["merchantCategory"], scenario, index)
         currency = "PLN" if rapid_transfer else customer["preferredCurrency"]
-        transaction_id = f"syn-txn-{index + 1}"
+        transaction_id = f"syn-txn-{replay_run_id}-{index + 1}"
+        created_at = reference_instant + timedelta(seconds=index) if deterministic_test_mode else datetime.now(timezone.utc)
         if rapid_transfer:
             transaction_timestamp = reference_instant + timedelta(minutes=index // 1000, seconds=max(index % 1000 - 993, 0) * 20)
         else:
             transaction_timestamp = reference_instant + timedelta(seconds=index * 45 + rng.randrange(15))
         event = {
-            "eventId": str(uuid.uuid4()),
+            "eventId": replay_uuid("event", index),
             "transactionId": transaction_id,
-            "correlationId": str(uuid.uuid4()),
+            "correlationId": replay_uuid("correlation", index),
             "customerId": customer["customerId"],
             "accountId": customer["accountId"],
             "paymentInstrumentId": customer["paymentInstrumentId"],
-            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "createdAt": created_at.isoformat(),
             "transactionTimestamp": transaction_timestamp.isoformat(),
             "transactionAmount": {"amount": amount, "currency": currency},
             "merchantInfo": {
@@ -266,7 +293,7 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
             },
             "deviceInfo": {
                 "deviceId": device_id,
-                "fingerprint": f"syn-fp-{customer['customerId']}-{index + 1}",
+                "fingerprint": f"syn-fp-{device_id}",
                 "ipAddress": f"{'198.51.100' if proxy or high_risk_country else '203.0.113'}.{1 + rng.randrange(200)}",
                 "userAgent": "Mozilla/5.0 Synthetic Risk Browser" if scenario != "normal" else "Mozilla/5.0 Synthetic Stable Browser",
                 "platform": rng.choice(["IOS", "ANDROID", "WEB"]),
@@ -274,7 +301,12 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
                 "trustedDevice": trusted_device,
                 "proxyDetected": proxy,
                 "vpnDetected": vpn,
-                "attributes": {"synthetic": True, "scenario": scenario, "deviceAgeDays": 0 if not trusted_device else 180},
+                "attributes": {
+                    "synthetic": True,
+                    "deviceEvidenceProvenance": "SYNTHETIC_UNTRUSTED",
+                    "scenario": scenario,
+                    "deviceAgeDays": 0 if not trusted_device else 180,
+                },
             },
             "locationInfo": {
                 "countryCode": country_code,
@@ -302,9 +334,10 @@ with output_path.open("w", encoding="utf-8", newline="\n") as out:
             "transactionType": "CARD_PURCHASE" if card_present else "CARD_NOT_PRESENT_PURCHASE",
             "authorizationMethod": "3DS" if scenario == "normal" else "STEP_UP_CHALLENGE",
             "sourceSystem": "BASH_JSONL_GENERATOR",
-            "traceId": f"trace-syn-{index + 1}",
+            "traceId": f"trace-syn-{replay_run_id}-{index + 1}",
             "attributes": {
                 "generator": "bash-canonical-replay",
+                "deviceEvidenceProvenance": "SYNTHETIC_UNTRUSTED",
                 "seed": seed,
                 "scenario": scenario,
                 "suspicious": expected_fraud,

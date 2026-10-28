@@ -17,12 +17,12 @@ class NormalizedFraudEngineResultTest {
 
     @Test
     void defensivelyCopiesLists() {
-        List<String> reasons = new ArrayList<>(List.of("MODEL_HIGH_RISK"));
+        List<String> reasons = new ArrayList<>(List.of("HIGH_VELOCITY"));
         NormalizedFraudEngineResult result = result("rules.primary", FraudEngineStatus.AVAILABLE, 0.8d, reasons);
 
         reasons.clear();
 
-        assertThat(result.reasonCodes()).containsExactly("MODEL_HIGH_RISK");
+        assertThat(result.reasonCodes()).containsExactly("HIGH_VELOCITY");
         assertThatThrownBy(() -> result.reasonCodes().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
 
@@ -128,6 +128,16 @@ class NormalizedFraudEngineResultTest {
                 FraudEngineStatus.AVAILABLE,
                 0.8d,
                 List.of("raw-token-endpoint-accountId")
+        )).hasMessage("AGGREGATION_UNNORMALIZED_REASON_CODE");
+    }
+
+    @Test
+    void rejectsMlOnlyReasonCodeForRulesEngine() {
+        assertThatThrownBy(() -> result(
+                "rules.primary",
+                FraudEngineStatus.AVAILABLE,
+                0.8d,
+                List.of("MODEL_HIGH_RISK")
         )).hasMessage("AGGREGATION_UNNORMALIZED_REASON_CODE");
     }
 

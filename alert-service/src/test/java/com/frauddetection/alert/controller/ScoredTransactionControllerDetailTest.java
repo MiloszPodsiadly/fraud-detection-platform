@@ -24,6 +24,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceCompariso
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -97,7 +98,7 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(jsonPath("$.transactionId").value("txn-1"))
                 .andExpect(jsonPath("$.fraudScore").value(0.91d))
                 .andExpect(jsonPath("$.engineIntelligence.status").value("DEGRADED"))
-                .andExpect(jsonPath("$.engineIntelligence.contractVersion").value(1))
+                .andExpect(jsonPath("$.engineIntelligence.contractVersion").value(2))
                 .andExpect(jsonPath("$.engineIntelligence.comparison.agreementStatus").value("PARTIAL"))
                 .andExpect(jsonPath("$.engineIntelligence.engines[0].engineId").value("rules.primary"))
                 .andExpect(jsonPath("$.analystRecommendation.status").value("AVAILABLE"))
@@ -324,7 +325,7 @@ class ScoredTransactionControllerDetailTest {
     private EngineIntelligenceReadModel projectedReadModel(String transactionId) {
         return EngineIntelligenceReadModel.projected(
                 transactionId,
-                1,
+                EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 new EngineIntelligenceComparisonReadModel(
                         EngineIntelligenceComparisonType.RULES_VS_ML,

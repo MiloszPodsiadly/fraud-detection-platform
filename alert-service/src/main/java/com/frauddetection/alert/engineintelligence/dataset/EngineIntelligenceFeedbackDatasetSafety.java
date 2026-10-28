@@ -1,13 +1,21 @@
 package com.frauddetection.alert.engineintelligence.dataset;
 
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionPolicy;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceReasonCodePolicy;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 final class EngineIntelligenceFeedbackDatasetSafety {
@@ -89,6 +97,15 @@ final class EngineIntelligenceFeedbackDatasetSafety {
     }
 
     static List<String> copyMachineCodes(List<String> source, String fieldName, int maxSize) {
+        return copyMachineCodes(source, fieldName, maxSize, ignored -> false);
+    }
+
+    static List<String> copyMachineCodes(
+            List<String> source,
+            String fieldName,
+            int maxSize,
+            Predicate<String> exactAdditionalSafeCode
+    ) {
         if (source == null) {
             return List.of();
         }
@@ -96,8 +113,48 @@ final class EngineIntelligenceFeedbackDatasetSafety {
             throw new IllegalArgumentException(fieldName + " exceeds max size");
         }
         return source.stream()
-                .map(value -> requireMachineCode(value, fieldName))
+                .map(value -> value != null && exactAdditionalSafeCode.test(value)
+                        ? requireCanonicalReasonCode(value, fieldName)
+                        : requireMachineCode(value, fieldName))
                 .toList();
+    }
+
+    static String requireCanonicalReasonCode(String value, String fieldName) {
+        if (value == null
+                || !MACHINE_CODE.matcher(value).matches()
+                || !EngineIntelligenceReasonCodePolicy.isKnownReasonCode(value)) {
+            throw new IllegalArgumentException(fieldName + " must use a known bounded reason code");
+        }
+        return value;
+    }
+
+    static Map<String, List<String>> copyEngineReasonCodesByEngine(Map<String, List<String>> source) {
+        if (source == null || source.size() > EngineIntelligenceProjectionPolicy.MAX_ENGINES) {
+            throw new IllegalArgumentException("reasonCodesByEngine exceeds supported engine count");
+        }
+        Map<String, List<String>> copy = new LinkedHashMap<>();
+        int previousEngineOrder = -1;
+        for (Map.Entry<String, List<String>> entry : source.entrySet()) {
+            String engineId = entry.getKey();
+            int engineOrder = FraudEngineIdentityContract.orderOf(engineId);
+            List<String> engineReasonCodes = entry.getValue();
+            if (engineOrder == Integer.MAX_VALUE
+                    || engineOrder <= previousEngineOrder
+                    || engineReasonCodes == null
+                    || engineReasonCodes.size() > EngineIntelligenceProjectionPolicy.MAX_REASON_CODES_PER_ENGINE) {
+                throw new IllegalArgumentException("reasonCodesByEngine has invalid identity or bounds");
+            }
+            for (String reasonCode : engineReasonCodes) {
+                if (reasonCode == null
+                        || !EngineIntelligenceReasonCodePolicy.isAllowedForEngine(engineId, reasonCode)) {
+                    throw new IllegalArgumentException("reasonCodesByEngine contains an unowned reason code");
+                }
+                requireCanonicalReasonCode(reasonCode, "reasonCodesByEngine");
+            }
+            copy.put(engineId, List.copyOf(engineReasonCodes));
+            previousEngineOrder = engineOrder;
+        }
+        return Collections.unmodifiableMap(copy);
     }
 
     static String requireMachineCode(String value, String fieldName) {
@@ -138,7 +195,8 @@ final class EngineIntelligenceFeedbackDatasetSafety {
     }
 
     private static void requireSourceIdentifier(String value, String fieldName) {
-        if (value == null || value.isBlank() || value.length() > 128 || value.chars().anyMatch(Character::isISOControl)) {
+        if (value == null || value.isBlank() || value.length() > 128
+                || value.chars().anyMatch(character -> Character.isWhitespace(character) || Character.isISOControl(character))) {
             throw new IllegalArgumentException(fieldName + " is invalid");
         }
     }

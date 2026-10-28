@@ -1719,6 +1719,60 @@ describe("alertsApi auth headers", () => {
     });
   });
 
+  it("bounds raw UTF-8 response bytes before parsing engine intelligence", async () => {
+    const body = `${JSON.stringify(engineIntelligenceAvailable())}${" ".repeat(20_000)}`;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+
+    await expect(getEngineIntelligence("txn.valid:001")).resolves.toMatchObject({ state: "unavailable" });
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("maxResponseBytes");
+  });
+
+  it("getEngineIntelligenceAcceptsVersion2DeviceDiagnosticWithoutDroppingIt", async () => {
+    const response = engineIntelligenceAvailable({
+      contractVersion: 2,
+      engines: [
+        engineResult(),
+        mlEngineResult(),
+        engineResult({
+          engineId: "velocity.primary",
+          engineType: "VELOCITY",
+          status: "NOT_APPLICABLE",
+          riskLevel: null,
+          scoreBucket: "UNAVAILABLE",
+          reasonCodes: ["VELOCITY_FEATURES_UNAVAILABLE"]
+        }),
+        deviceEngineResult()
+      ],
+      diagnosticSignals: [deviceDiagnosticSignal()],
+      warnings: []
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(response));
+
+    const result = await getEngineIntelligence("txn.valid:001");
+
+    expect(result).toMatchObject({ state: "available", contractVersion: 2, engineCount: 4 });
+    expect(result.engines[3]).toMatchObject({
+      engineId: "device.primary",
+      engineType: "DEVICE_RISK",
+      status: "DEGRADED",
+      scoreBucket: "UNAVAILABLE",
+      reasonCodes: ["DEVICE_SCORE_NOT_CALIBRATED"]
+    });
+  });
+
+  it("getEngineIntelligenceFailsClosedOnDeviceReasonOutsideAllowlist", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable({
+      contractVersion: 2,
+      engines: [engineResult(), mlEngineResult(), deviceEngineResult({ reasonCodes: ["device-id:customer-123"] })],
+      diagnosticSignals: []
+    })));
+
+    await expect(getEngineIntelligence("txn.valid:001")).resolves.toMatchObject({ state: "unavailable" });
+  });
+
   it("getEngineIntelligenceReturnsNotProjectedState", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       transactionId: "txn-old",
@@ -1912,7 +1966,8 @@ describe("alertsApi auth headers", () => {
     ["getEngineIntelligenceFailsClosedForWrongCanonicalTypePair", { engines: [
       engineResult({ engineId: "velocity.primary", engineType: "RULES" })
     ] }],
-    ["getEngineIntelligenceFailsClosedForUnsupportedContractVersion", { contractVersion: 2 }],
+    ["getEngineIntelligenceFailsClosedForRetiredNestedContractVersion", { contractVersion: 1 }],
+    ["getEngineIntelligenceFailsClosedForUnsupportedContractVersion", { contractVersion: 3 }],
     ["getEngineIntelligenceFailsClosedForUnparseableGeneratedAt", { generatedAt: "not-a-date" }],
     ["getEngineIntelligenceFailsClosedForOffsetGeneratedAt", { generatedAt: "2026-06-02T10:00:00+00:00" }],
     ["getEngineIntelligenceFailsClosedForTwentyFourHourGeneratedAt", { generatedAt: "2026-06-02T24:00:00Z" }],
@@ -2130,7 +2185,7 @@ function engineIntelligenceAvailable(overrides = {}) {
   return {
     transactionId: "txn.valid:001",
     available: true,
-    contractVersion: 1,
+    contractVersion: 2,
     generatedAt: "2026-06-02T10:00:00Z",
     comparison: comparison(),
     engines: [engineResult(), mlEngineResult()],
@@ -2363,7 +2418,7 @@ function scoredTransactionDetail(overrides = {}) {
     reasonCodes: ["HIGH_VELOCITY"],
     engineIntelligence: {
       status: "AVAILABLE",
-      contractVersion: 1,
+      contractVersion: 2,
       generatedAt: "2026-06-18T10:00:02Z",
       comparison: comparison(),
       engines: [{
@@ -2426,6 +2481,31 @@ function diagnosticSignal(overrides = {}) {
     reasonCode: "HIGH_VELOCITY",
     ...overrides
   };
+}
+
+function deviceEngineResult(overrides = {}) {
+  return engineResult({
+    engineId: "device.primary",
+    engineType: "DEVICE_RISK",
+    status: "DEGRADED",
+    riskLevel: null,
+    scoreBucket: "UNAVAILABLE",
+    reasonCodes: ["DEVICE_SCORE_NOT_CALIBRATED"],
+    ...overrides
+  });
+}
+
+function deviceDiagnosticSignal(overrides = {}) {
+  return diagnosticSignal({
+    engineId: "device.primary",
+    engineType: "DEVICE_RISK",
+    engineStatus: "DEGRADED",
+    signalCategory: "OPERATIONAL_SIGNAL",
+    riskLevel: null,
+    scoreBucket: "UNAVAILABLE",
+    reasonCode: "DEVICE_SCORE_NOT_CALIBRATED",
+    ...overrides
+  });
 }
 
 function warning(overrides = {}) {

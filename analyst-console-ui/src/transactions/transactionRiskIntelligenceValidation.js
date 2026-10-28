@@ -123,7 +123,7 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   }
   if (engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED") {
     if (
-      engineIntelligence.contractVersion !== engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
+      !engineIntelligenceContract.isSupportedEngineIntelligenceVersion(engineIntelligence.contractVersion)
       || !parseableDateString(engineIntelligence.generatedAt)
     ) {
       return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
@@ -150,7 +150,7 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!isBoundedArray(engineIntelligence.engines, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_ENGINES)) {
     return invalid("ENGINE_LIMIT_EXCEEDED");
   }
-  if (!engineIntelligence.engines.every(isEngineShape)) {
+  if (!engineIntelligence.engines.every((engine) => isEngineShape(engine))) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE");
   }
   if (!hasUniqueCanonicalEngineOrder(engineIntelligence.engines)) {
@@ -163,7 +163,7 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!isBoundedArray(engineIntelligence.diagnosticSignals, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS)) {
     return invalid("DIAGNOSTIC_SIGNAL_LIMIT_EXCEEDED");
   }
-  if (!engineIntelligence.diagnosticSignals.every(isDiagnosticSignalShape)) {
+  if (!engineIntelligence.diagnosticSignals.every((signal) => isDiagnosticSignalShape(signal))) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNAL");
   }
   if (!isBoundedArray(engineIntelligence.warnings, MAX_WARNINGS)) {

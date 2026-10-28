@@ -1,6 +1,7 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.testfixtures.EngineIntelligenceV2TestFixtures;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
@@ -17,6 +18,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCat
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 
 import java.time.Instant;
@@ -39,21 +41,7 @@ final class EngineIntelligenceProjectionTestFixtures {
     }
 
     static EngineIntelligenceSummary minimalSummary() {
-        return new EngineIntelligenceSummary(
-                EngineIntelligenceSummary.CONTRACT_VERSION,
-                GENERATED_AT,
-                List.of(
-                        availableRules(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
-                        timeoutMl()
-                ),
-                comparison(
-                        EngineIntelligenceAgreementStatus.PARTIAL,
-                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
-                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
-                ),
-                List.of(),
-                List.of()
-        );
+        return EngineIntelligenceV2TestFixtures.rulesHighMlTimeoutSummary();
     }
 
     static EngineIntelligenceSummary fullSummary() {
@@ -88,34 +76,40 @@ final class EngineIntelligenceProjectionTestFixtures {
         );
     }
 
-    static EngineIntelligenceSummary disagreementSummary() {
+    static EngineIntelligenceSummary v2DeviceSummary() {
+        EngineIntelligenceEngineResult rules = new EngineIntelligenceEngineResult(
+                "rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, List.of("HIGH_VELOCITY"));
+        EngineIntelligenceEngineResult ml = new EngineIntelligenceEngineResult(
+                "ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, List.of("MODEL_HIGH_RISK"),
+                new MlModelIdentity("python-logistic-fraud-model", "2026-06-18.v1", "feature-contract-v2"));
+        EngineIntelligenceEngineResult velocity = new EngineIntelligenceEngineResult(
+                "velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.SKIPPED,
+                null, EngineIntelligenceScoreBucket.UNAVAILABLE, List.of("VELOCITY_FEATURES_UNAVAILABLE"));
+        EngineIntelligenceEngineResult device = new EngineIntelligenceEngineResult(
+                "device.primary", FraudEngineType.DEVICE_RISK, FraudEngineStatus.DEGRADED,
+                null, EngineIntelligenceScoreBucket.UNAVAILABLE, List.of("DEVICE_SCORE_NOT_CALIBRATED"));
+        EngineIntelligenceDiagnosticSignal deviceSignal = new EngineIntelligenceDiagnosticSignal(
+                "device.primary", FraudEngineType.DEVICE_RISK, FraudEngineStatus.DEGRADED,
+                EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL, null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE, "DEVICE_SCORE_NOT_CALIBRATED");
         return new EngineIntelligenceSummary(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 GENERATED_AT,
-                List.of(
-                        availableRules(RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW),
-                        new EngineIntelligenceEngineResult(
-                                "ml.python.primary",
-                                FraudEngineType.ML_MODEL,
-                                FraudEngineStatus.AVAILABLE,
-                                RiskLevel.HIGH,
-                                EngineIntelligenceScoreBucket.VERY_HIGH,
-                                List.of("ML_MODEL_SIGNAL"),
-                                new com.frauddetection.common.events.intelligence.MlModelIdentity(
-                                        "python-logistic-fraud-model",
-                                        "2026-05-30.v1",
-                                        "2026-05-30.feature-contract.v1"
-                                )
-                        )
-                ),
+                List.of(rules, ml, velocity, device),
                 comparison(
-                        EngineIntelligenceAgreementStatus.DISAGREEMENT,
-                        EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
-                        EngineIntelligenceScoreDeltaBucket.LARGE
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.NONE
                 ),
-                List.of(),
+                List.of(deviceSignal),
                 List.of()
         );
+    }
+
+    static EngineIntelligenceSummary disagreementSummary() {
+        return EngineIntelligenceV2TestFixtures.rulesLowMlHighAvailableSummary();
     }
 
     static EngineIntelligenceEngineResult availableRules(RiskLevel riskLevel, EngineIntelligenceScoreBucket scoreBucket) {

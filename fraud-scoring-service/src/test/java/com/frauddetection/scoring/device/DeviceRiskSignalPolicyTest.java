@@ -1,0 +1,266 @@
+package com.frauddetection.scoring.device;
+
+import com.frauddetection.common.events.device.DeviceRiskEvidence;
+import com.frauddetection.common.events.device.DeviceRiskEvidence.HistoryFact;
+import com.frauddetection.common.events.device.DeviceRiskEvidence.Reason;
+import com.frauddetection.common.events.device.DeviceRiskEvidence.Source;
+import com.frauddetection.common.events.device.DeviceRiskEvidence.SourceQuality;
+import com.frauddetection.common.events.device.DeviceRiskEvidence.State;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import org.junit.jupiter.api.Test;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class DeviceRiskSignalPolicyTest {
+    private static final Instant TIME = Instant.parse("2026-10-26T10:05:00Z");
+    private final DeviceRiskSignalPolicy policy = new DeviceRiskSignalPolicy();
+
+    @Test
+    void evaluatesAllCountBoundariesWithoutInventingAWeightedScore() {
+        for (int prior : new int[]{0, 1, DeviceRiskEvidence.MAX_OBSERVATIONS}) {
+            for (int switches : new int[]{0, 1, DeviceRiskEvidence.MAX_OBSERVATIONS}) {
+                var result = policy.evaluate(evidence(available(prior), available(switches),
+                        Duration.ofDays(30), TIME, TIME, SourceQuality.AUTHENTICATED_INSTITUTION));
+                assertThat(result.status()).isEqualTo(FraudEngineStatus.DEGRADED);
+                assertThat(result.sourceQuality()).isEqualTo(SourceQuality.AUTHENTICATED_INSTITUTION);
+                assertThat(result.evidenceCoverage())
+                        .isEqualTo(DeviceRiskSignalPolicy.EvidenceCoverage.COMPLETE_SUPPORTED_HISTORY);
+                assertThat(result.score()).isNull();
+                assertThat(result.riskInference()).isEqualTo(DeviceRiskSignalPolicy.RiskInference.NOT_CALIBRATED);
+                assertThat(result.signals().get(0).observed()).isEqualTo(prior == 0);
+                assertThat(result.signals().get(1).observed()).isEqualTo(switches > 0);
+                assertThat(result.signals().get(0).reason()).isEqualTo(prior == 0
+                        ? DeviceRiskSignalPolicy.Reason.NOT_SEEN_IN_WINDOW
+                        : DeviceRiskSignalPolicy.Reason.SEEN_IN_WINDOW);
+                assertThat(result.signals().get(1).reason()).isEqualTo(switches > 0
+                        ? DeviceRiskSignalPolicy.Reason.SWITCH_OBSERVED
+                        : DeviceRiskSignalPolicy.Reason.NO_SWITCH_OBSERVED);
+            }
+        }
+    }
+
+    @Test
+    void allFactStateCombinationsRemainCoherentAndDoNotTurnMissingIntoFalse() {
+        HistoryFact[] facts = {available(0), available(1),
+                new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null),
+                new HistoryFact(State.UNAVAILABLE, Reason.KEY_UNAVAILABLE, null),
+                new HistoryFact(State.UNTRUSTED, Reason.CLIENT_ASSERTION, null),
+                new HistoryFact(State.INVALID, Reason.INVALID_PROVENANCE, null)};
+        for (HistoryFact prior : facts) {
+            for (HistoryFact switches : facts) {
+                var result = policy.evaluate(evidence(prior, switches, Duration.ofDays(30), TIME,
+                        TIME, SourceQuality.AUTHENTICATED_INSTITUTION));
+                int count = (prior.state() == State.AVAILABLE ? 1 : 0)
+                        + (switches.state() == State.AVAILABLE ? 1 : 0);
+                assertThat(result.status()).isEqualTo(count > 0 ? FraudEngineStatus.DEGRADED
+                        : FraudEngineStatus.UNAVAILABLE);
+                assertThat(result.evidenceCoverage()).isEqualTo(count == 2
+                        ? DeviceRiskSignalPolicy.EvidenceCoverage.COMPLETE_SUPPORTED_HISTORY
+                        : count == 1 ? DeviceRiskSignalPolicy.EvidenceCoverage.PARTIAL_SUPPORTED_HISTORY
+                        : DeviceRiskSignalPolicy.EvidenceCoverage.NO_SUPPORTED_HISTORY);
+                assertThat(result.signals().subList(0, 2)).allSatisfy(signal -> {
+                    assertThat(signal.observed() == null).isEqualTo(signal.status() != FraudEngineStatus.AVAILABLE);
+                });
+                assertThat(result.score()).isNull();
+            }
+        }
+    }
+
+    @Test
+    void incompleteOrLateWindowCannotProveAnAbsence() {
+        for (Duration window : new Duration[]{Duration.ofDays(29), Duration.ofDays(30).minusNanos(1)}) {
+            var result = policy.evaluate(evidence(available(0), available(1), window, TIME, TIME,
+                    SourceQuality.AUTHENTICATED_INSTITUTION));
+            assertThat(result.status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
+            assertThat(result.signals().get(0).reason()).isEqualTo(DeviceRiskSignalPolicy.Reason.HISTORY_INCOMPLETE);
+            assertThat(result.signals().get(0).observed()).isNull();
+        }
+        var late = policy.evaluate(evidence(available(0), available(1), Duration.ofDays(30), TIME,
+                TIME.plusSeconds(1), SourceQuality.AUTHENTICATED_INSTITUTION));
+        assertThat(late.status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
+        assertThat(late.signals().get(1).reason()).isEqualTo(DeviceRiskSignalPolicy.Reason.HISTORY_INCOMPLETE);
+    }
+
+    @Test
+    void clientAndSyntheticSourcesAreSkippedAndCannotSmuggleAvailableFacts() {
+        for (SourceQuality quality : new SourceQuality[]{SourceQuality.CLIENT_ASSERTED, SourceQuality.SYNTHETIC}) {
+            var result = policy.evaluate(evidence(untrusted(quality), untrusted(quality),
+                    Duration.ofDays(30), TIME, TIME, quality));
+            assertThat(result.status()).isEqualTo(FraudEngineStatus.SKIPPED);
+            assertThat(result.sourceQuality()).isEqualTo(quality);
+            assertThat(result.evidenceCoverage())
+                    .isEqualTo(DeviceRiskSignalPolicy.EvidenceCoverage.NO_SUPPORTED_HISTORY);
+            assertThat(result.signals()).allSatisfy(signal -> {
+                assertThat(signal.status()).isEqualTo(FraudEngineStatus.SKIPPED);
+                assertThat(signal.observed()).isNull();
+                assertThat(signal.reason()).isEqualTo(DeviceRiskSignalPolicy.Reason.UNTRUSTED_SOURCE);
+            });
+            assertThatThrownBy(() -> evidence(available(0), untrusted(quality), Duration.ofDays(30),
+                    TIME, TIME, quality)).hasMessage("DEVICE_EVIDENCE_UNTRUSTED_AVAILABLE");
+        }
+    }
+
+    @Test
+    void unsupportedSourcesNeverInheritClaimsEvenIfFactsAreStructurallyAvailable() {
+        var basic = evidence(available(0), available(1), Duration.ofDays(30), TIME, TIME,
+                SourceQuality.AUTHENTICATED_INSTITUTION);
+        var evidence = new DeviceRiskEvidence(basic.schemaVersion(), basic.occurrenceKey(),
+                basic.institutionToken(), basic.customerToken(), basic.deviceToken(), basic.keyVersion(),
+                basic.source(), basic.eventTime(), basic.windowStart(), basic.asOf(), basic.coverageThrough(),
+                basic.priorDevice(), available(2), basic.switches(),
+                new DeviceRiskEvidence.CountryFact(State.AVAILABLE, Reason.NONE, "PL", "DE", "GEO", TIME),
+                new DeviceRiskEvidence.NetworkFact(State.AVAILABLE, Reason.NONE, true, true, "DETECTOR", TIME));
+        var result = policy.evaluate(evidence);
+        for (var signal : result.signals().subList(2, 5)) {
+            assertThat(signal.status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
+            assertThat(signal.observed()).isNull();
+            assertThat(signal.reason()).isEqualTo(DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE);
+            assertThat(signal.support()).isEqualTo(DeviceRiskSignalPolicy.Support.UNSUPPORTED);
+            assertThat(signal.evidenceState()).isEqualTo(DeviceRiskSignalPolicy.EvidenceState.UNSUPPORTED);
+        }
+    }
+
+    @Test
+    void truthMatrixSeparatesPredicateEvidenceSupportAndOperatingReadiness() {
+        var complete = policy.evaluate(evidence(available(0), available(0), Duration.ofDays(30), TIME,
+                TIME, SourceQuality.AUTHENTICATED_INSTITUTION));
+
+        assertThat(complete.signals().get(0).support()).isEqualTo(DeviceRiskSignalPolicy.Support.SUPPORTED);
+        assertThat(complete.signals().get(0).evidenceState()).isEqualTo(DeviceRiskSignalPolicy.EvidenceState.AVAILABLE);
+        assertThat(complete.signals().get(0).observed()).isTrue();
+        assertThat(complete.signals().get(0).reasonCode()).isEqualTo("DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW");
+        assertThat(complete.signals().get(1).observed()).isFalse();
+        assertThat(complete.signals().get(1).reasonCode()).isEqualTo("DEVICE_SWITCH_NOT_OBSERVED");
+        assertThat(complete.signals().subList(2, 5)).allSatisfy(signal -> {
+            assertThat(signal.support()).isEqualTo(DeviceRiskSignalPolicy.Support.UNSUPPORTED);
+            assertThat(signal.evidenceState()).isEqualTo(DeviceRiskSignalPolicy.EvidenceState.UNSUPPORTED);
+            assertThat(signal.observed()).isNull();
+        });
+        assertThat(complete.status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(complete.evidenceCoverage())
+                .isEqualTo(DeviceRiskSignalPolicy.EvidenceCoverage.COMPLETE_SUPPORTED_HISTORY);
+        assertThat(complete.riskInference()).isEqualTo(DeviceRiskSignalPolicy.RiskInference.NOT_CALIBRATED);
+        assertThat(complete.score()).isNull();
+
+        HistoryFact invalid = new HistoryFact(State.INVALID, Reason.INVALID_TIME, null);
+        var invalidHistory = policy.evaluate(evidence(invalid, available(0), Duration.ofDays(30), TIME,
+                TIME, SourceQuality.AUTHENTICATED_INSTITUTION));
+        assertThat(invalidHistory.signals().getFirst().evidenceState())
+                .isEqualTo(DeviceRiskSignalPolicy.EvidenceState.INVALID);
+        assertThat(invalidHistory.signals().getFirst().observed()).isNull();
+
+        var untrustedFact = policy.evaluate(evidence(
+                new HistoryFact(State.UNTRUSTED, Reason.CLIENT_ASSERTION, null), available(0),
+                Duration.ofDays(30), TIME, TIME, SourceQuality.AUTHENTICATED_INSTITUTION));
+        assertThat(untrustedFact.signals().getFirst().evidenceState())
+                .isEqualTo(DeviceRiskSignalPolicy.EvidenceState.UNTRUSTED);
+        assertThat(untrustedFact.signals().getFirst().observed()).isNull();
+    }
+
+    @Test
+    void unsupportedProviderFalseAndTrueValuesRemainUnsupported() {
+        for (boolean detectorValue : new boolean[]{false, true}) {
+            var base = evidence(available(0), available(0), Duration.ofDays(30), TIME, TIME,
+                    SourceQuality.AUTHENTICATED_INSTITUTION);
+            var withProviders = new DeviceRiskEvidence(base.schemaVersion(), base.occurrenceKey(),
+                    base.institutionToken(), base.customerToken(), base.deviceToken(), base.keyVersion(),
+                    base.source(), base.eventTime(), base.windowStart(), base.asOf(), base.coverageThrough(),
+                    base.priorDevice(), available(0), base.switches(),
+                    new DeviceRiskEvidence.CountryFact(State.AVAILABLE, Reason.NONE,
+                            detectorValue ? "PL" : "DE", "PL", "GEO", TIME),
+                    new DeviceRiskEvidence.NetworkFact(State.AVAILABLE, Reason.NONE,
+                            detectorValue, detectorValue, "DETECTOR", TIME));
+            var result = policy.evaluate(withProviders);
+            assertThat(result.signals().subList(2, 5)).allSatisfy(signal -> {
+                assertThat(signal.status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
+                assertThat(signal.observed()).isNull();
+                assertThat(signal.reason()).isEqualTo(DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE);
+            });
+            assertThat(result.status()).isEqualTo(FraudEngineStatus.DEGRADED);
+            assertThat(result.score()).isNull();
+        }
+    }
+
+    @Test
+    void replayOrderPrivacyAndOutcomeValidationAreStable() {
+        var evidence = evidence(available(0), available(1), Duration.ofDays(30), TIME, TIME,
+                SourceQuality.AUTHENTICATED_INSTITUTION);
+        var first = policy.evaluate(evidence);
+        assertThat(policy.evaluate(evidence)).isEqualTo(first);
+        assertThat(first.policyVersion()).isEqualTo(1);
+        assertThat(first.signals()).extracting(DeviceRiskSignalPolicy.SignalOutcome::signal)
+                .containsExactly(DeviceRiskSignalPolicy.Signal.values());
+        String diagnostic = first.toString();
+        assertThat(diagnostic).doesNotContain("a".repeat(64), "b".repeat(64), "c".repeat(64),
+                "d".repeat(64), "trustedDevice", "192.0.2.1");
+        assertThat(Arrays.stream(DeviceRiskSignalPolicy.Reason.values()).map(Enum::name))
+                .allSatisfy(code -> assertThat(code).hasSizeLessThanOrEqualTo(32));
+        assertThatThrownBy(() -> new DeviceRiskSignalPolicy.SignalOutcome(
+                DeviceRiskSignalPolicy.Signal.DEVICE_SWITCH, FraudEngineStatus.UNAVAILABLE, false,
+                DeviceRiskSignalPolicy.Reason.HISTORY_UNAVAILABLE))
+                .hasMessage("DEVICE_POLICY_OUTCOME_STATE");
+        assertThatThrownBy(() -> new DeviceRiskSignalPolicy.SignalOutcome(
+                DeviceRiskSignalPolicy.Signal.PROXY_OR_VPN, FraudEngineStatus.AVAILABLE, true,
+                DeviceRiskSignalPolicy.Reason.SWITCH_OBSERVED))
+                .hasMessage("DEVICE_POLICY_OUTCOME_REASON");
+        assertThatThrownBy(() -> new DeviceRiskSignalPolicy.Evaluation(
+                DeviceRiskSignalPolicy.VERSION,
+                FraudEngineStatus.DEGRADED,
+                SourceQuality.AUTHENTICATED_INSTITUTION,
+                DeviceRiskSignalPolicy.EvidenceCoverage.PARTIAL_SUPPORTED_HISTORY,
+                List.of(
+                        new DeviceRiskSignalPolicy.SignalOutcome(
+                                DeviceRiskSignalPolicy.Signal.DEVICE_NOT_SEEN_RECENTLY,
+                                FraudEngineStatus.AVAILABLE, true,
+                                DeviceRiskSignalPolicy.Reason.NOT_SEEN_IN_WINDOW),
+                        new DeviceRiskSignalPolicy.SignalOutcome(
+                                DeviceRiskSignalPolicy.Signal.DEVICE_SWITCH,
+                                FraudEngineStatus.SKIPPED, null,
+                                DeviceRiskSignalPolicy.Reason.UNTRUSTED_SOURCE),
+                        new DeviceRiskSignalPolicy.SignalOutcome(
+                                DeviceRiskSignalPolicy.Signal.OTHER_CUSTOMERS,
+                                FraudEngineStatus.UNAVAILABLE, null,
+                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE),
+                        new DeviceRiskSignalPolicy.SignalOutcome(
+                                DeviceRiskSignalPolicy.Signal.COUNTRY_MISMATCH,
+                                FraudEngineStatus.UNAVAILABLE, null,
+                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE),
+                        new DeviceRiskSignalPolicy.SignalOutcome(
+                                DeviceRiskSignalPolicy.Signal.PROXY_OR_VPN,
+                                FraudEngineStatus.UNAVAILABLE, null,
+                                DeviceRiskSignalPolicy.Reason.UNSUPPORTED_SOURCE)),
+                null)).hasMessage("DEVICE_POLICY_MIXED_SOURCE");
+    }
+
+    private static DeviceRiskEvidence evidence(HistoryFact prior, HistoryFact switches, Duration window,
+                                               Instant coverage, Instant observedAt, SourceQuality quality) {
+        DeviceRiskEvidence.Reason missing = quality == SourceQuality.CLIENT_ASSERTED
+                ? Reason.CLIENT_ASSERTION : quality == SourceQuality.SYNTHETIC
+                ? Reason.SYNTHETIC_INPUT : Reason.NO_SOURCE;
+        State missingState = quality == SourceQuality.AUTHENTICATED_INSTITUTION
+                ? State.UNAVAILABLE : State.UNTRUSTED;
+        return new DeviceRiskEvidence(1, "a".repeat(64), "b".repeat(64),
+                quality == SourceQuality.AUTHENTICATED_INSTITUTION ? "c".repeat(64) : null,
+                quality == SourceQuality.AUTHENTICATED_INSTITUTION ? "d".repeat(64) : null,
+                1, new Source(quality, "BANK", "e".repeat(64), observedAt),
+                TIME, TIME.minus(window), TIME, coverage, prior,
+                new HistoryFact(missingState, missing, null), switches,
+                new DeviceRiskEvidence.CountryFact(missingState, missing, null, null, null, null),
+                new DeviceRiskEvidence.NetworkFact(missingState, missing, null, null, null, null));
+    }
+
+    private static HistoryFact available(int count) {
+        return new HistoryFact(State.AVAILABLE, Reason.NONE, count);
+    }
+
+    private static HistoryFact untrusted(SourceQuality quality) {
+        return new HistoryFact(State.UNTRUSTED, quality == SourceQuality.CLIENT_ASSERTED
+                ? Reason.CLIENT_ASSERTION : Reason.SYNTHETIC_INPUT, null);
+    }
+}
