@@ -6,6 +6,8 @@ import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Document(collection = "engine_intelligence_feedback")
@@ -66,7 +68,9 @@ public class EngineIntelligenceFeedbackDocument {
         this.feedbackType = feedbackType;
         this.usefulness = usefulness;
         this.accuracyAssessment = accuracyAssessment;
-        this.selectedReasonCodes = selectedReasonCodes == null ? List.of() : List.copyOf(selectedReasonCodes);
+        this.selectedReasonCodes = selectedReasonCodes == null
+                ? List.of()
+                : Collections.unmodifiableList(new ArrayList<>(selectedReasonCodes));
         this.submittedBy = submittedBy;
         this.submittedAt = submittedAt;
         this.correlationId = correlationId;

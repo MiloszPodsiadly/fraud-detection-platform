@@ -5,6 +5,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceDiagnosticS
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionRepository;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceWarningProjection;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackAccuracyAssessment;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackDocument;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
@@ -24,12 +25,15 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.mapping.MappingException;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -603,6 +607,321 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void diagnosticSignalsMustMatchTheirEngineInVerifiedSummary() {
+        List<EngineIntelligenceEngineProjection> engines = projectionEngines();
+        assertThat(EngineIntelligenceReasonCodePolicy.isAllowedForEngine(
+                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID, "DEVICE_NOVELTY_SIGNAL"))
+                .isTrue();
+
+        assertSemanticCorruptionsFailClosed(List.of(
+                new SemanticCorruptionCase(
+                        "A: diagnostic engine absent",
+                        "each diagnostic engine ID must exist in summary.engines",
+                        projectionWithSignals(
+                                engines,
+                                List.of(diagnosticSignal(
+                                        FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.VELOCITY,
+                                        "VELOCITY_FEATURES_UNAVAILABLE"))
+                        )
+                ),
+                new SemanticCorruptionCase(
+                        "B: diagnostic status differs from engine status",
+                        "diagnostic engine type and status must equal the matching engine result",
+                        projectionWithSignals(
+                                engines,
+                                List.of(new EngineIntelligenceDiagnosticSignalProjection(
+                                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.RULES,
+                                        FraudEngineStatus.UNAVAILABLE,
+                                        EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                                        RiskLevel.HIGH,
+                                        EngineIntelligenceScoreBucket.HIGH,
+                                        "HIGH_RISK_FLAGS_PRESENT"))
+                        )
+                ),
+                new SemanticCorruptionCase(
+                        "C: diagnostic reason absent from matching engine",
+                        "diagnostic reasonCode must occur in the matching engine reasonCodes",
+                        projectionWithSignals(
+                                engines,
+                                List.of(diagnosticSignal(
+                                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.RULES,
+                                        "DEVICE_NOVELTY_SIGNAL"))
+                        )
+                ),
+                new SemanticCorruptionCase(
+                        "D1: available engine has operational signal category",
+                        "available engine diagnostics must use FRAUD_SIGNAL",
+                        projectionWithSignals(
+                                engines,
+                                List.of(new EngineIntelligenceDiagnosticSignalProjection(
+                                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.RULES,
+                                        FraudEngineStatus.AVAILABLE,
+                                        EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL,
+                                        RiskLevel.HIGH,
+                                        EngineIntelligenceScoreBucket.HIGH,
+                                        "HIGH_RISK_FLAGS_PRESENT"))
+                        )
+                ),
+                new SemanticCorruptionCase(
+                        "D2: diagnostic risk differs from engine risk",
+                        "available fraud-signal riskLevel must equal the matching engine riskLevel",
+                        projectionWithSignals(
+                                engines,
+                                List.of(new EngineIntelligenceDiagnosticSignalProjection(
+                                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.RULES,
+                                        FraudEngineStatus.AVAILABLE,
+                                        EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                                        RiskLevel.MEDIUM,
+                                        EngineIntelligenceScoreBucket.HIGH,
+                                        "HIGH_RISK_FLAGS_PRESENT"))
+                        )
+                ),
+                new SemanticCorruptionCase(
+                        "D3: diagnostic score bucket differs from engine bucket",
+                        "available fraud-signal scoreBucket must equal the matching engine scoreBucket",
+                        projectionWithSignals(
+                                engines,
+                                List.of(new EngineIntelligenceDiagnosticSignalProjection(
+                                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.RULES,
+                                        FraudEngineStatus.AVAILABLE,
+                                        EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                                        RiskLevel.HIGH,
+                                        EngineIntelligenceScoreBucket.MEDIUM,
+                                        "HIGH_RISK_FLAGS_PRESENT"))
+                        )
+                )
+        ));
+    }
+
+    @Test
+    void availableRulesAndMlResultsMustHaveRiskAndUsableScoreBucket() {
+        EngineIntelligenceEngineProjection validRules = engine(
+                FraudEngineType.RULES, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID);
+        EngineIntelligenceEngineProjection validMl = engine(
+                FraudEngineType.ML_MODEL, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID);
+        MlModelIdentity modelIdentity = new MlModelIdentity(
+                "python-logistic-fraud-model", "2026-06-18.v1", "feature-contract-v2");
+
+        assertSemanticCorruptionsFailClosed(List.of(
+                new SemanticCorruptionCase(
+                        "E1: available Rules risk missing",
+                        "AVAILABLE engine result requires a riskLevel",
+                        projectionWithSignals(List.of(
+                                new EngineIntelligenceEngineProjection(
+                                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.RULES,
+                                        FraudEngineStatus.AVAILABLE,
+                                        null,
+                                        EngineIntelligenceScoreBucket.HIGH,
+                                        List.of("HIGH_RISK_FLAGS_PRESENT")),
+                                validMl), List.of())),
+                new SemanticCorruptionCase(
+                        "E2: available ML risk missing",
+                        "AVAILABLE engine result requires a riskLevel",
+                        projectionWithSignals(List.of(
+                                validRules,
+                                new EngineIntelligenceEngineProjection(
+                                        FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.ML_MODEL,
+                                        FraudEngineStatus.AVAILABLE,
+                                        null,
+                                        EngineIntelligenceScoreBucket.HIGH,
+                                        List.of("ML_MODEL_SIGNAL"),
+                                        modelIdentity)), List.of())),
+                new SemanticCorruptionCase(
+                        "E3: available Rules score unavailable",
+                        "AVAILABLE engine result requires a usable score bucket",
+                        projectionWithSignals(List.of(
+                                new EngineIntelligenceEngineProjection(
+                                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.RULES,
+                                        FraudEngineStatus.AVAILABLE,
+                                        RiskLevel.HIGH,
+                                        EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                        List.of("HIGH_RISK_FLAGS_PRESENT")),
+                                validMl), List.of())),
+                new SemanticCorruptionCase(
+                        "E4: available ML score unavailable",
+                        "AVAILABLE engine result requires a usable score bucket",
+                        projectionWithSignals(List.of(
+                                validRules,
+                                new EngineIntelligenceEngineProjection(
+                                        FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                                        FraudEngineType.ML_MODEL,
+                                        FraudEngineStatus.AVAILABLE,
+                                        RiskLevel.HIGH,
+                                        EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                        List.of("ML_MODEL_SIGNAL"),
+                                        modelIdentity)), List.of()))
+        ));
+    }
+
+    @Test
+    void comparisonMustMatchRulesAndMlResultsAndCanonicalIdentity() {
+        List<EngineIntelligenceEngineProjection> engines = projectionEngines();
+        List<String> comparedEngines = FraudEngineIdentityContract.rulesVsMlComparisonEngineIds();
+
+        assertSemanticCorruptionsFailClosed(List.of(
+                new SemanticCorruptionCase(
+                        "F1: agreement inconsistent with equal risk levels",
+                        "agreementStatus must be derived from the Rules/ML risk mismatch",
+                        projectionWithMetadata(engines, List.of(), EngineIntelligenceComparisonType.RULES_VS_ML,
+                                comparedEngines, EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                                EngineIntelligenceScoreDeltaBucket.NONE, List.of())),
+                new SemanticCorruptionCase(
+                        "F2: risk mismatch inconsistent with equal risk levels",
+                        "riskMismatchStatus must be derived from the Rules/ML risk levels",
+                        projectionWithMetadata(engines, List.of(), EngineIntelligenceComparisonType.RULES_VS_ML,
+                                comparedEngines, EngineIntelligenceAgreementStatus.AGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                                EngineIntelligenceScoreDeltaBucket.NONE, List.of())),
+                new SemanticCorruptionCase(
+                        "F3: score delta inconsistent with equal score buckets",
+                        "scoreDeltaBucket must be able to describe the Rules/ML score-bucket distance",
+                        projectionWithMetadata(engines, List.of(), EngineIntelligenceComparisonType.RULES_VS_ML,
+                                comparedEngines, EngineIntelligenceAgreementStatus.AGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                                EngineIntelligenceScoreDeltaBucket.LARGE, List.of())),
+                new SemanticCorruptionCase(
+                        "G1: comparison type missing",
+                        "comparisonType must be RULES_VS_ML",
+                        projectionWithMetadata(engines, List.of(), null, comparedEngines,
+                                EngineIntelligenceAgreementStatus.AGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                                EngineIntelligenceScoreDeltaBucket.NONE, List.of())),
+                new SemanticCorruptionCase(
+                        "G2: compared engine IDs reversed",
+                        "comparedEngineIds must exactly equal canonical Rules/ML order",
+                        projectionWithMetadata(engines, List.of(), EngineIntelligenceComparisonType.RULES_VS_ML,
+                                List.of(FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID),
+                                EngineIntelligenceAgreementStatus.AGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                                EngineIntelligenceScoreDeltaBucket.NONE, List.of()))
+        ));
+    }
+
+    @Test
+    void modelIdentityMustMatchTheEngineResultContract() {
+        MlModelIdentity identity = new MlModelIdentity(
+                "python-logistic-fraud-model", "2026-06-18.v1", "feature-contract-v2");
+        EngineIntelligenceEngineProjection rules = engine(
+                FraudEngineType.RULES, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID);
+        EngineIntelligenceEngineProjection mlWithoutIdentity = new EngineIntelligenceEngineProjection(
+                FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                FraudEngineType.ML_MODEL,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("ML_MODEL_SIGNAL"));
+        EngineIntelligenceEngineProjection rulesWithMlIdentity = new EngineIntelligenceEngineProjection(
+                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                FraudEngineType.RULES,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("HIGH_RISK_FLAGS_PRESENT"),
+                identity);
+
+        assertSemanticCorruptionsFailClosed(List.of(
+                new SemanticCorruptionCase(
+                        "H1: available ML identity missing",
+                        "AVAILABLE ML engine requires modelIdentity",
+                        projectionWithSignals(List.of(rules, mlWithoutIdentity), List.of())),
+                new SemanticCorruptionCase(
+                        "H2: non-ML engine carries model identity",
+                        "modelIdentity is valid only for an AVAILABLE ML engine",
+                        projectionWithSignals(List.of(rulesWithMlIdentity, engine(
+                                FraudEngineType.ML_MODEL, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID)),
+                                List.of()))
+        ));
+    }
+
+    @Test
+    void missingAndOversizedProjectionCollectionsMustNotBecomeValidEmptyData() {
+        EngineIntelligenceEngineProjection rulesWithMissingReasons = new EngineIntelligenceEngineProjection(
+                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                FraudEngineType.RULES,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                null);
+        List<EngineIntelligenceWarningProjection> excessiveWarnings = java.util.Collections.nCopies(
+                11,
+                new EngineIntelligenceWarningProjection(EngineIntelligenceWarningCode.ENGINE_RESULT_LIMIT_APPLIED, 1));
+        List<EngineIntelligenceEngineProjection> engines = projectionEngines();
+        EngineIntelligenceEngineProjection rulesWithMissingStatus = new EngineIntelligenceEngineProjection(
+                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                FraudEngineType.RULES,
+                null,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("HIGH_RISK_FLAGS_PRESENT"));
+
+        assertSemanticCorruptionsFailClosed(List.of(
+                new SemanticCorruptionCase(
+                        "I1: null engine reasonCodes remain missing",
+                        "engine reasonCodes must be a present bounded collection",
+                        projectionWithSignals(List.of(rulesWithMissingReasons, engines.get(1)), List.of())),
+                new SemanticCorruptionCase(
+                        "I2: null diagnosticSignals remain missing",
+                        "diagnosticSignals must be a present bounded collection",
+                        projectionWithMetadata(engines, null, EngineIntelligenceComparisonType.RULES_VS_ML,
+                                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
+                                EngineIntelligenceAgreementStatus.AGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                                EngineIntelligenceScoreDeltaBucket.NONE, List.of())),
+                new SemanticCorruptionCase(
+                        "I3: null warnings remain missing",
+                        "warnings must be a present collection bounded by MAX_WARNINGS",
+                        projectionWithMetadata(engines, List.of(), EngineIntelligenceComparisonType.RULES_VS_ML,
+                                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
+                                EngineIntelligenceAgreementStatus.AGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                                EngineIntelligenceScoreDeltaBucket.NONE, null)),
+                new SemanticCorruptionCase(
+                        "I4: warnings exceed MAX_WARNINGS=10",
+                        "warnings must not exceed EngineIntelligenceValuePolicy.MAX_WARNINGS",
+                        projectionWithMetadata(engines, List.of(), EngineIntelligenceComparisonType.RULES_VS_ML,
+                                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
+                                EngineIntelligenceAgreementStatus.AGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                                EngineIntelligenceScoreDeltaBucket.NONE, excessiveWarnings)),
+                new SemanticCorruptionCase(
+                        "I5: required engine status remains missing",
+                        "nested engine fields must reach and fail canonical validation",
+                        projectionWithSignals(List.of(rulesWithMissingStatus, engines.get(1)), List.of())),
+                new SemanticCorruptionCase(
+                        "I6: required diagnostic category remains missing",
+                        "nested diagnostic fields must reach and fail canonical validation",
+                        projectionWithSignals(engines, List.of(new EngineIntelligenceDiagnosticSignalProjection(
+                                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                null,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                "HIGH_RISK_FLAGS_PRESENT")))),
+                new SemanticCorruptionCase(
+                        "I7: invalid warning remains persisted for validation",
+                        "warning code and count must pass canonical validation",
+                        projectionWithMetadata(engines, List.of(), EngineIntelligenceComparisonType.RULES_VS_ML,
+                                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
+                                EngineIntelligenceAgreementStatus.AGREEMENT,
+                                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                                EngineIntelligenceScoreDeltaBucket.NONE,
+                                List.of(new EngineIntelligenceWarningProjection(null, -1))))
+        ));
+    }
+
+    @Test
     void rejectsUnicodeRawAndOverlongReasonCodesWithBoundedFailure() {
         EngineIntelligenceFeedbackDatasetRecordMapper mapper = new EngineIntelligenceFeedbackDatasetRecordMapper();
         EngineIntelligenceFeedbackDocument feedback = feedback(
@@ -632,8 +951,12 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
 
     @Test
     void unsupportedProjectionContractVersionFailsClosed() {
-        assertThat(exportWithProjection(projection(3, "txn-1", projectionEngines())).failureReason())
+        EngineIntelligenceFeedbackDatasetExportResult result =
+                exportWithProjection(projection(1, "txn-1", projectionEngines()));
+
+        assertThat(result.failureReason())
                 .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION);
+        assertThat(result.records()).isEmpty();
     }
 
     @Test
@@ -795,6 +1118,70 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void invalidFeedbackIdentifiersAndTimestampFailAsCorruptedFeedback() {
+        List<EngineIntelligenceFeedbackDocument> invalidRows = List.of(
+                feedback("f".repeat(129), "txn-1", FROM),
+                feedback("feedback-1", "t".repeat(129), FROM),
+                feedback("feedback id", "txn-1", FROM),
+                feedback("feedback-1", "txn with space", FROM),
+                feedback("feedback-1", "txn-\u0001", FROM),
+                feedback("feedback-\u0001", "txn-1", FROM),
+                feedback("feedback-1", null, FROM),
+                feedback("feedback-1", "txn-1", null)
+        );
+
+        for (EngineIntelligenceFeedbackDocument invalidRow : invalidRows) {
+            EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(
+                    EngineIntelligenceFeedbackDatasetQueryRepository.class);
+            when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10)).thenReturn(List.of(invalidRow));
+
+            EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(10));
+
+            assertThat(result.failureReason())
+                    .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK);
+            assertThat(result.records()).isEmpty();
+        }
+    }
+
+    @Test
+    void nullSelectedReasonCodeIsPreservedUntilBoundedFeedbackValidation() {
+        EngineIntelligenceFeedbackDocument invalid = feedback(
+                "feedback-1",
+                "txn-1",
+                FROM,
+                java.util.Arrays.asList("ML_MODEL_SIGNAL", null)
+        );
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(
+                EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10)).thenReturn(List.of(invalid));
+
+        EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(10));
+
+        assertThat(result.failureReason())
+                .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK);
+        assertThat(result.records()).isEmpty();
+    }
+
+    @Test
+    void laterInvalidRowDiscardsEarlierMappedRecords() {
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(
+                EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10)).thenReturn(List.of(
+                feedback("feedback-first", "txn-a", FROM.plusSeconds(2)),
+                feedback("f".repeat(129), "txn-b", FROM.plusSeconds(1))
+        ));
+
+        EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(10));
+
+        assertThat(result.failureReason())
+                .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK);
+        assertThat(result.records()).isEmpty();
+        assertThat(result.recordsReturned()).isZero();
+        assertThat(result.rawRowsRead()).isZero();
+        assertThat(result.truncated()).isFalse();
+    }
+
+    @Test
     void corruptedAlertDataFailsClosed() {
         AlertDocument corrupted = new AlertDocument();
         assertThat(exportWithAlert(corrupted).failureReason())
@@ -811,6 +1198,20 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void malformedPersistedFeedbackMappingIsCorruptedFeedback() {
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(
+                EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10))
+                .thenThrow(new MappingException("invalid persisted feedback"));
+
+        EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(10));
+
+        assertThat(result.failureReason())
+                .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK);
+        assertThat(result.toString()).doesNotContain("invalid persisted feedback");
+    }
+
+    @Test
     void projectionStoreFailureReturnsBoundedFailureReason() {
         EngineIntelligenceProjectionRepository projections = mock(EngineIntelligenceProjectionRepository.class);
         when(projections.findById("txn-1")).thenThrow(new RuntimeException("projection raw"));
@@ -820,12 +1221,38 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void malformedPersistedProjectionMappingIsCorruptedProjection() {
+        EngineIntelligenceProjectionRepository projections = mock(EngineIntelligenceProjectionRepository.class);
+        when(projections.findById("txn-1")).thenThrow(new MappingException("invalid persisted projection"));
+
+        EngineIntelligenceFeedbackDatasetExportResult result =
+                service(defaultFeedbacks(), defaultAlerts(), projections).export(request(10));
+
+        assertThat(result.failureReason())
+                .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION);
+        assertThat(result.toString()).doesNotContain("invalid persisted projection");
+    }
+
+    @Test
     void alertStoreFailureReturnsBoundedFailureReason() {
         AlertRepository alerts = mock(AlertRepository.class);
         when(alerts.findByTransactionId("txn-1")).thenThrow(new RuntimeException("alert raw"));
 
         assertThat(service(defaultFeedbacks(), alerts, defaultProjections()).export(request(10)).failureReason())
                 .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.ALERT_STORE_UNAVAILABLE);
+    }
+
+    @Test
+    void malformedPersistedAlertMappingIsCorruptedAlertData() {
+        AlertRepository alerts = mock(AlertRepository.class);
+        when(alerts.findByTransactionId("txn-1")).thenThrow(new MappingException("invalid persisted alert"));
+
+        EngineIntelligenceFeedbackDatasetExportResult result =
+                service(defaultFeedbacks(), alerts, defaultProjections()).export(request(10));
+
+        assertThat(result.failureReason())
+                .isEqualTo(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_ALERT_DATA);
+        assertThat(result.toString()).doesNotContain("invalid persisted alert");
     }
 
     @Test
@@ -1119,7 +1546,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                         engine(FraudEngineType.ML_MODEL, "ml.python.primary")
                 ),
                 "ML_MODEL_SIGNAL",
-                EngineIntelligenceAgreementStatus.PARTIAL,
+                EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
         );
@@ -1211,20 +1638,41 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
             List<EngineIntelligenceEngineProjection> engines,
             List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals
     ) {
+        return projectionWithMetadata(
+                engines,
+                diagnosticSignals,
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                EngineIntelligenceScoreDeltaBucket.NONE,
+                List.of()
+        );
+    }
+
+    private EngineIntelligenceProjection projectionWithMetadata(
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            List<EngineIntelligenceWarningProjection> warnings
+    ) {
         return new EngineIntelligenceProjection(
                 "txn-1",
                 occurrence(),
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 FROM,
-                EngineIntelligenceComparisonType.RULES_VS_ML,
-                List.of(FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
-                        FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID),
-                EngineIntelligenceAgreementStatus.AGREEMENT,
-                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
-                EngineIntelligenceScoreDeltaBucket.NONE,
+                comparisonType,
+                comparedEngineIds,
+                agreementStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
                 engines,
                 diagnosticSignals,
-                List.of(),
+                warnings,
                 FROM,
                 FROM
         );
@@ -1302,14 +1750,14 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                     "VELOCITY_FEATURE_TYPE_INVALID",
                     "VELOCITY_FEATURE_VALUE_INVALID",
                     "VELOCITY_FEATURES_INCONSISTENT",
-                    "HIGH_VELOCITY"
+                    "TRANSACTION_VELOCITY"
             );
         }
         if (FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engineId)) {
             return List.of(
                     "DEVICE_EVIDENCE_NOT_ADMITTED",
                     "DEVICE_EVIDENCE_UNAVAILABLE",
-                    "DEVICE_EVIDENCE_PARTIAL",
+                    "DEVICE_SIGNALS_UNSUPPORTED",
                     "DEVICE_EVIDENCE_UNTRUSTED",
                     "DEVICE_SCORE_NOT_CALIBRATED"
             );
@@ -1393,6 +1841,23 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                 .hasMessage(EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION.name());
     }
 
+    private void assertSemanticCorruptionsFailClosed(List<SemanticCorruptionCase> cases) {
+        List<String> exportedCases = new ArrayList<>();
+        for (SemanticCorruptionCase corruptionCase : cases) {
+            EngineIntelligenceFeedbackDatasetExportResult result = exportWithProjection(corruptionCase.projection());
+            if (result.failureReason() != EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
+                    || !result.records().isEmpty()) {
+                exportedCases.add("%s [%s]: failureReason=%s, recordsReturned=%d".formatted(
+                        corruptionCase.name(),
+                        corruptionCase.invariant(),
+                        result.failureReason(),
+                        result.recordsReturned()
+                ));
+            }
+        }
+        assertThat(exportedCases).as("uncanonical persisted projections must fail closed").isEmpty();
+    }
+
     private ScoringOccurrenceOwnership occurrence() {
         return new ScoringOccurrenceOwnership("event-dataset", FROM, "a".repeat(64));
     }
@@ -1406,13 +1871,17 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
             String engineId,
             List<String> reasonCodes
     ) {
+        MlModelIdentity modelIdentity = engineType == FraudEngineType.ML_MODEL
+                ? new MlModelIdentity("python-logistic-fraud-model", "2026-06-18.v1", "feature-contract-v2")
+                : null;
         return new EngineIntelligenceEngineProjection(
                 engineId,
                 engineType,
                 FraudEngineStatus.AVAILABLE,
                 RiskLevel.HIGH,
                 EngineIntelligenceScoreBucket.HIGH,
-                reasonCodes
+                reasonCodes,
+                modelIdentity
         );
     }
 
@@ -1435,6 +1904,13 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
             EngineIntelligenceFeedbackDatasetQueryRepository feedbacks,
             AlertRepository alerts,
             EngineIntelligenceProjectionRepository projections
+    ) {
+    }
+
+    private record SemanticCorruptionCase(
+            String name,
+            String invariant,
+            EngineIntelligenceProjection projection
     ) {
     }
 }

@@ -1,10 +1,14 @@
 package com.frauddetection.alert.engineintelligence.dataset;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -67,15 +71,27 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
     }
 
     @Test
-    void docsMentionSupportedProjectionContractVersion() throws IOException {
-        String doc = Files.readString(DOC);
+    void docsDeclareOnlyTheCurrentContractVersionAndFailClosedForUnsupportedVersions() throws IOException {
+        String doc = normalizedDoc();
+        Matcher versionMarker = Pattern.compile(
+                "Active nested Engine Intelligence contract version: (\\d+)[.]"
+        ).matcher(doc);
 
+        assertThat(versionMarker.find()).isTrue();
+        int documentedVersion = Integer.parseInt(versionMarker.group(1));
+        assertThat(documentedVersion).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
+        assertThat(documentedVersion).isEqualTo(FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION);
         assertThat(doc)
-                .contains("accepts supported projection")
-                .contains("contract versions `1` and `2`")
-                .contains("fails closed for unsupported projection versions")
-                .contains("Unsupported projection")
-                .contains("does not mean no fraud or low risk");
+                .contains("accepts only nested contractVersion=2")
+                .contains("Missing, nested v1, and unknown versions are rejected as CORRUPTED_PROJECTION")
+                .contains("there is no active v1 reader or compatibility path")
+                .contains("Unsupported projection data fails closed as CORRUPTED_PROJECTION")
+                .contains("It does not mean no fraud or low risk")
+                .doesNotContain("contract versions 1 and 2");
+
+        JsonNode schema = JsonMapper.builder().findAndAddModules().build().readTree(RECORD_SCHEMA.toFile());
+        assertThat(schema.at("/allOf/0/then/properties/engineIntelligenceContractVersion/const").intValue())
+                .isEqualTo(documentedVersion);
     }
 
     @Test

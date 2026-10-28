@@ -187,6 +187,18 @@ public class EngineIntelligenceProjectionPolicy {
     }
 
     private String boundedPublicReasonCode(String engineId, String reasonCode) {
+        if (reasonCode != null && EngineIntelligenceReasonCodePolicy.isKnownReasonCode(reasonCode)) {
+            if (reasonCode.length() > MAX_STRING_LENGTH
+                    || reasonCode.chars().anyMatch(Character::isISOControl)) {
+                throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+            }
+            try {
+                EngineIntelligenceReasonCodePolicy.requireOwnedByEngine(engineId, reasonCode);
+            } catch (RuntimeException exception) {
+                throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
+            }
+            return reasonCode;
+        }
         String safe = boundedString(reasonCode);
         try {
             EngineIntelligenceReasonCodePolicy.requireOwnedByEngine(engineId, safe);

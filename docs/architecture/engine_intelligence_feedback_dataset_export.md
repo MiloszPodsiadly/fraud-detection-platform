@@ -34,6 +34,22 @@ evaluation tooling. Inconclusive and missing decisions must never be treated as 
 decision fields such as `alertAnalystDecision`, submitted-by values, analyst IDs, or other actor identity fields are
 not exported.
 
+## Current Engine Intelligence contract
+
+Active nested Engine Intelligence contract version: 2.
+
+The dataset mapper accepts only nested `contractVersion=2`. The outer
+`TransactionScoredEvent.eventContractVersion=2` is a separate versioned contract. Missing, nested v1, and unknown
+versions are rejected as `CORRUPTED_PROJECTION`; there is no active v1 reader or compatibility path.
+
+`rules.primary` and `ml.python.primary` are required. `velocity.primary` and `device.primary` are optional and follow
+the canonical engine order. The only comparison is `RULES_VS_ML` over Rules and ML. Device Risk remains diagnostic-only
+and its runtime is disabled; this export does not infer a Device Risk score or risk level.
+
+Versioned exact ML prediction evidence remains separate from Engine Intelligence. The event carries exactly one of
+`mlPredictionEvidence` or `mlPredictionEvidenceOmissionReason`; this analyst-feedback dataset does not contain or
+replace either exact-evidence outcome.
+
 ## Sources And Missing Data
 
 Records are assembled from:
@@ -43,11 +59,9 @@ Records are assembled from:
 - the engine-intelligence projection for comparison, engine status, score buckets, risk levels, and diagnostic codes.
 
 Labels are not derived from model output, risk level, alert severity, or projection agreement. Feedback, alert, and
-projection transaction IDs must match before any dataset record is emitted. The export accepts supported projection
-contract versions `1` and `2`; version 2 may include bounded Device Risk status and the explicit `UNAVAILABLE` score
-bucket, with no risk level or raw device/customer evidence. The export fails closed for unsupported projection versions
-as `CORRUPTED_PROJECTION`. Unsupported projection data does not mean no fraud or low risk. Missing ML score does not mean zero. Missing ML risk does not mean `LOW`. Missing
-rules score does not mean zero. Missing rules risk does not mean `LOW`. Missing projection is exported explicitly as
+projection transaction IDs must match before any dataset record is emitted. Unsupported projection data fails closed
+as `CORRUPTED_PROJECTION`. It does not mean no fraud or low risk. Missing ML score does not mean zero. Missing ML risk
+does not mean `LOW`. Missing rules score does not mean zero. Missing rules risk does not mean `LOW`. Missing projection is exported explicitly as
 `projectionStatus = MISSING`; it does not mean no fraud. Old transactions without engine intelligence do not crash the
 export.
 

@@ -4,8 +4,6 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -35,47 +33,24 @@ class EngineIntelligenceNestedProjectionModelTest {
     }
 
     @Test
-    void nullReasonCodesBecomeEmptyList() {
-        assertThat(engine(null).reasonCodes()).isEmpty();
+    void nullReasonCodesRemainMissing() {
+        assertThat(engine(null).reasonCodes()).isNull();
     }
 
     @Test
-    void engineProjectionRejectsNullRequiredField() {
-        assertThatThrownBy(() -> new EngineIntelligenceEngineProjection(
-                null,
-                FraudEngineType.RULES,
-                FraudEngineStatus.AVAILABLE,
-                RiskLevel.HIGH,
-                EngineIntelligenceScoreBucket.HIGH,
-                List.of("HIGH_VELOCITY")
-        )).isInstanceOf(NullPointerException.class);
-    }
+    void nestedProjectionModelsPreserveMissingValuesForCanonicalValidation() {
+        EngineIntelligenceEngineProjection engineProjection = new EngineIntelligenceEngineProjection(
+                null, null, null, null, null, null);
+        EngineIntelligenceDiagnosticSignalProjection signalProjection = new EngineIntelligenceDiagnosticSignalProjection(
+                null, null, null, null, null, null, null);
+        EngineIntelligenceWarningProjection warningProjection = new EngineIntelligenceWarningProjection(null, -1);
 
-    @Test
-    void diagnosticProjectionRejectsNullReasonCode() {
-        assertThatThrownBy(() -> new EngineIntelligenceDiagnosticSignalProjection(
-                "rules.primary",
-                FraudEngineType.RULES,
-                FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
-                RiskLevel.HIGH,
-                EngineIntelligenceScoreBucket.HIGH,
-                null
-        )).isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    void warningProjectionRejectsNullCode() {
-        assertThatThrownBy(() -> new EngineIntelligenceWarningProjection(null, 1))
-                .isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    void warningProjectionRejectsNegativeCount() {
-        assertThatThrownBy(() -> new EngineIntelligenceWarningProjection(
-                EngineIntelligenceWarningCode.EVIDENCE_UNSAFE_DROPPED,
-                -1
-        )).isInstanceOf(IllegalArgumentException.class);
+        assertThat(engineProjection.engineId()).isNull();
+        assertThat(engineProjection.reasonCodes()).isNull();
+        assertThat(signalProjection.engineId()).isNull();
+        assertThat(signalProjection.reasonCode()).isNull();
+        assertThat(warningProjection.warningCode()).isNull();
+        assertThat(warningProjection.count()).isEqualTo(-1);
     }
 
     private EngineIntelligenceEngineProjection engine(List<String> reasonCodes) {

@@ -195,7 +195,8 @@ final class EngineIntelligenceFeedbackDatasetSafety {
     }
 
     private static void requireSourceIdentifier(String value, String fieldName) {
-        if (value == null || value.isBlank() || value.length() > 128 || value.chars().anyMatch(Character::isISOControl)) {
+        if (value == null || value.isBlank() || value.length() > 128
+                || value.chars().anyMatch(character -> Character.isWhitespace(character) || Character.isISOControl(character))) {
             throw new IllegalArgumentException(fieldName + " is invalid");
         }
     }

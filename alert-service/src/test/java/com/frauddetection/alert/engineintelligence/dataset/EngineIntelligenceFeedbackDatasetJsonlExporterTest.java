@@ -3,6 +3,7 @@ package com.frauddetection.alert.engineintelligence.dataset;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackAccuracyAssessment;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -10,6 +11,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class EngineIntelligenceFeedbackDatasetJsonlExporterTest {
 
@@ -84,6 +88,32 @@ class EngineIntelligenceFeedbackDatasetJsonlExporterTest {
         assertThat(jsonl)
                 .contains("\"recordsReturned\":0")
                 .contains("\"failureReason\":\"CORRUPTED_FEEDBACK\"");
+    }
+
+    @Test
+    void serializationFailureAfterARecordReturnsOnlyFailureMetadata() throws Exception {
+        ObjectMapper objectMapper = mock(ObjectMapper.class);
+        int[] recordsSerialized = {0};
+        when(objectMapper.writeValueAsString(any())).thenAnswer(invocation -> {
+            Map<?, ?> line = invocation.getArgument(0);
+            if ("DATASET_RECORD".equals(line.get("type"))) {
+                if (++recordsSerialized[0] == 1) {
+                    return "{\"type\":\"DATASET_RECORD\",\"record\":\"sensitive-record-id\"}";
+                }
+                throw new IllegalStateException("raw serialization exception");
+            }
+            return "{\"type\":\"EXPORT_METADATA\",\"failureReason\":\""
+                    + line.get("failureReason") + "\"}";
+        });
+        EngineIntelligenceFeedbackDatasetExportResult result = result(false, List.of(record(), record()));
+
+        String jsonl = new EngineIntelligenceFeedbackDatasetJsonlExporter(objectMapper).exportJsonl(result);
+
+        assertThat(jsonl.lines()).hasSize(1);
+        assertThat(jsonl)
+                .contains("\"type\":\"EXPORT_METADATA\"")
+                .contains("\"failureReason\":\"SERIALIZATION_FAILED\"")
+                .doesNotContain("DATASET_RECORD", "sensitive-record-id", "raw serialization exception");
     }
 
     @Test
