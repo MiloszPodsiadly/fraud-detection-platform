@@ -26,6 +26,8 @@ class EngineIntelligenceReasonCodeOwnershipFixtureTest {
         Set<String> device = fixtureCodes(fixture, "deviceOwnedReasonCodes");
         Set<String> orchestrator = fixtureCodes(fixture, "sharedOrchestratorReasonCodes");
         Set<String> shared = fixtureCodes(fixture, "nonDeviceSharedReasonCodes");
+        Set<String> rulesMlShared = fixtureCodes(fixture, "rulesMlSharedReasonCodes");
+        Set<String> mlVelocityShared = fixtureCodes(fixture, "mlVelocitySharedReasonCodes");
         Set<String> rules = fixtureCodes(fixture, "rulesOwnedReasonCodes");
         Set<String> ml = fixtureCodes(fixture, "mlOwnedReasonCodes");
         Set<String> velocity = fixtureCodes(fixture, "velocityOwnedReasonCodes");
@@ -36,16 +38,29 @@ class EngineIntelligenceReasonCodeOwnershipFixtureTest {
         );
         assertThat(EngineIntelligenceReasonCodePolicy.reasonCodesForEngine(
                 FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID
-        )).containsExactlyInAnyOrderElementsOf(merge(shared, rules, orchestrator));
+        )).containsExactlyInAnyOrderElementsOf(merge(shared, rulesMlShared, rules, orchestrator));
         assertThat(EngineIntelligenceReasonCodePolicy.reasonCodesForEngine(
                 FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID
-        )).containsExactlyInAnyOrderElementsOf(merge(shared, ml, orchestrator));
+        )).containsExactlyInAnyOrderElementsOf(merge(shared, rulesMlShared, mlVelocityShared, ml, orchestrator));
         assertThat(EngineIntelligenceReasonCodePolicy.reasonCodesForEngine(
                 FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID
-        )).containsExactlyInAnyOrderElementsOf(merge(shared, velocity, orchestrator));
+        )).containsExactlyInAnyOrderElementsOf(merge(shared, mlVelocityShared, velocity, orchestrator));
         assertThat(EngineIntelligenceReasonCodePolicy.reasonCodesForEngine(
                 FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID
         )).containsExactlyInAnyOrderElementsOf(merge(device, orchestrator));
+
+        assertThat(EngineIntelligenceReasonCodePolicy.isAllowedForEngine(
+                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID, "MODEL_HIGH_RISK"
+        )).isFalse();
+        assertThat(EngineIntelligenceReasonCodePolicy.isAllowedForEngine(
+                FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID, "DEVICE_NOVELTY"
+        )).isFalse();
+        assertThat(EngineIntelligenceReasonCodePolicy.isAllowedForEngine(
+                FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID, "DEVICE_NOVELTY"
+        )).isTrue();
+        assertThat(EngineIntelligenceReasonCodePolicy.isAllowedForEngine(
+                FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID, "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE"
+        )).isTrue();
     }
 
     private Set<String> fixtureCodes(Map<?, ?> fixture, String field) {

@@ -6,6 +6,7 @@ import {
   COMPARISON_TYPE,
   ENGINE_ORDER,
   ENGINE_TYPE_BY_ID,
+  ENGINE_REASON_CODES_BY_ID,
   MAX_ENGINE_INTELLIGENCE_ENGINES,
   isCanonicalUtcTimestamp,
   isComparisonShape,
@@ -44,17 +45,18 @@ describe("engineIntelligenceContractValidation", () => {
   it("applies the shared reason-code ownership matrix", () => {
     const ownership = reasonCodeOwnershipFixture();
     const allowedByEngine = allowedReasonCodesByEngine(ownership);
+    const expected = Object.fromEntries(Object.entries(allowedByEngine)
+      .map(([engineId, reasonCodes]) => [engineId, [...reasonCodes].sort()]));
+    const actual = Object.fromEntries(Object.entries(ENGINE_REASON_CODES_BY_ID)
+      .map(([engineId, reasonCodes]) => [engineId, [...reasonCodes].sort()]));
 
-    for (const [engineId, allowedReasonCodes] of Object.entries(allowedByEngine)) {
-      for (const reasonCode of allowedReasonCodes) {
-        expect(isEngineShape(engineWithReasonCode(engineId, reasonCode))).toBe(true);
-      }
-    }
-    for (const [ownerEngineId, ownerReasonCodes] of Object.entries(ownedReasonCodesByEngine(ownership))) {
-      for (const engineId of ENGINE_ORDER.filter((candidate) => candidate !== ownerEngineId)) {
-        for (const reasonCode of ownerReasonCodes) {
-          expect(isEngineShape(engineWithReasonCode(engineId, reasonCode))).toBe(false);
-        }
+    expect(actual).toEqual(expected);
+
+    const candidates = [...new Set(Object.values(allowedByEngine).flat())];
+    for (const engineId of ENGINE_ORDER) {
+      for (const reasonCode of candidates) {
+        expect(isEngineShape(engineWithReasonCode(engineId, reasonCode)))
+          .toBe(allowedByEngine[engineId].includes(reasonCode));
       }
     }
     for (const reasonCode of ownership.nonDeviceSharedReasonCodes) {
@@ -303,20 +305,13 @@ function reasonCodeOwnershipFixture() {
 
 function allowedReasonCodesByEngine(ownership) {
   const shared = [...ownership.nonDeviceSharedReasonCodes, ...ownership.sharedOrchestratorReasonCodes];
+  const rulesMlShared = ownership.rulesMlSharedReasonCodes;
+  const mlVelocityShared = ownership.mlVelocitySharedReasonCodes;
   return {
-    "rules.primary": [...shared, ...ownership.rulesOwnedReasonCodes],
-    "ml.python.primary": [...shared, ...ownership.mlOwnedReasonCodes],
-    "velocity.primary": [...shared, ...ownership.velocityOwnedReasonCodes],
+    "rules.primary": [...shared, ...rulesMlShared, ...ownership.rulesOwnedReasonCodes],
+    "ml.python.primary": [...shared, ...rulesMlShared, ...mlVelocityShared, ...ownership.mlOwnedReasonCodes],
+    "velocity.primary": [...shared, ...mlVelocityShared, ...ownership.velocityOwnedReasonCodes],
     "device.primary": [...ownership.deviceOwnedReasonCodes, ...ownership.sharedOrchestratorReasonCodes]
-  };
-}
-
-function ownedReasonCodesByEngine(ownership) {
-  return {
-    "rules.primary": ownership.rulesOwnedReasonCodes,
-    "ml.python.primary": ownership.mlOwnedReasonCodes,
-    "velocity.primary": ownership.velocityOwnedReasonCodes,
-    "device.primary": ownership.deviceOwnedReasonCodes
   };
 }
 
@@ -325,13 +320,16 @@ function canonicalModelIdentity() {
 }
 
 function availableEngine(engineId, engineType) {
+  const reasonCode = engineId === "rules.primary"
+    ? "HIGH_VELOCITY"
+    : engineId === "velocity.primary" ? "TRANSACTION_VELOCITY" : "MODEL_HIGH_RISK";
   return {
     engineId,
     engineType,
     status: "AVAILABLE",
     riskLevel: "HIGH",
     scoreBucket: "HIGH",
-    reasonCodes: ["MODEL_HIGH_RISK"]
+    reasonCodes: [reasonCode]
   };
 }
 

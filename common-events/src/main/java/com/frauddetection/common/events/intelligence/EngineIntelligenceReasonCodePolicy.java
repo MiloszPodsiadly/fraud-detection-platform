@@ -1,35 +1,39 @@
 package com.frauddetection.common.events.intelligence;
 
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
-import com.frauddetection.common.events.reason.ReasonCode;
 
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /** Authoritative ownership policy for bounded public Engine Intelligence reason codes. */
 public final class EngineIntelligenceReasonCodePolicy {
-    private static final Set<String> NON_DEVICE_SHARED_REASON_CODES = Stream.of(ReasonCode.values())
-            .filter(reasonCode -> reasonCode != ReasonCode.UNKNOWN)
-            .map(ReasonCode::wireValue)
-            .collect(Collectors.toUnmodifiableSet());
+    // Same canonical input signal is independently derived by all three non-device producers.
+    private static final Set<String> NON_DEVICE_SHARED_REASON_CODES = Set.of("RAPID_PLN_20K_BURST");
+    // Both Rules and the Python model explain these common feature values; Velocity does not emit them.
+    private static final Set<String> RULES_ML_SHARED_REASON_CODES = Set.of(
+            "DEVICE_NOVELTY", "COUNTRY_MISMATCH", "PROXY_OR_VPN", "MERCHANT_CONCENTRATION");
+    // The Python model and Velocity signal derive these from the same transaction-window features.
+    private static final Set<String> ML_VELOCITY_SHARED_REASON_CODES = Set.of(
+            "TRANSACTION_VELOCITY", "RECENT_AMOUNT_ACCUMULATION");
     private static final Set<String> RULES_REASON_CODES = Set.of(
             "DEVICE_NOVELTY_SIGNAL", "COUNTRY_MISMATCH_SIGNAL", "PROXY_OR_VPN_SIGNAL",
             "RAPID_TRANSFER_BURST_SIGNAL", "HIGH_RISK_FLAGS_PRESENT", "VELOCITY_THRESHOLD_EXCEEDED",
             "AMOUNT_ACTIVITY_THRESHOLD_EXCEEDED", "RAPID_TRANSFER_PATTERN_MATCHED", "FEATURE_STATUS_INVALID",
-            "FEATURE_STATUS_WRONG_ACCESSOR", "FEATURE_STATUS_NOT_ALLOWED");
+            "FEATURE_STATUS_WRONG_ACCESSOR", "FEATURE_STATUS_NOT_ALLOWED", "HIGH_VELOCITY",
+            "HIGH_AMOUNT_ACTIVITY", "HIGH_TRANSACTION_AMOUNT");
     private static final Set<String> ML_REASON_CODES = Set.of(
-            "ML_MODEL_SIGNAL", "ML_MODEL_TIMEOUT", "ML_MODEL_INVALID_RESPONSE",
+            "ML_MODEL_SIGNAL", "ML_MODEL_UNAVAILABLE", "ML_MODEL_TIMEOUT", "ML_MODEL_INVALID_RESPONSE",
             "ML_SCORE_MISSING", "ML_SCORE_OUT_OF_RANGE", "ML_INFERENCE_TIMESTAMP_MISSING",
             "ML_MODEL_METADATA_MISSING", "ML_AVAILABILITY_METADATA_MISSING",
-            "ML_AVAILABILITY_METADATA_INVALID", "ML_CLIENT_ERROR");
+            "ML_AVAILABILITY_METADATA_INVALID", "ML_CLIENT_ERROR", "MODEL_HIGH_RISK", "LOW_MODEL_RISK",
+            "RECENT_TRANSACTION_SPIKE");
     private static final Set<String> VELOCITY_REASON_CODES = Set.of(
             "VELOCITY_FEATURES_UNAVAILABLE", "VELOCITY_FEATURE_TYPE_INVALID",
             "VELOCITY_FEATURE_VALUE_INVALID", "VELOCITY_FEATURES_INCONSISTENT");
     private static final Set<String> DEVICE_REASON_CODES = Set.of(
-            "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE", "DEVICE_EVIDENCE_PARTIAL",
+            "DEVICE_EVIDENCE_NOT_ADMITTED", "DEVICE_EVIDENCE_UNAVAILABLE",
             "DEVICE_EVIDENCE_UNTRUSTED", "DEVICE_SCORE_NOT_CALIBRATED", "DEVICE_SIGNALS_UNSUPPORTED",
             "DEVICE_NOVELTY_NOT_SEEN_IN_WINDOW", "DEVICE_NOVELTY_SEEN_IN_WINDOW",
             "DEVICE_NOVELTY_HISTORY_INCOMPLETE", "DEVICE_NOVELTY_HISTORY_UNAVAILABLE",
@@ -42,14 +46,18 @@ public final class EngineIntelligenceReasonCodePolicy {
             "DEVICE_PROXY_OR_VPN_UNTRUSTED_SOURCE");
     private static final Set<String> SHARED_ORCHESTRATOR_REASON_CODES = Set.of(
             "ORCHESTRATOR_ENGINE_EXCEPTION", "ORCHESTRATOR_ENGINE_NULL_RESULT",
-            "ORCHESTRATOR_ENGINE_REJECTED", "ORCHESTRATOR_ENGINE_TIMEOUT");
+            "ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE", "ORCHESTRATOR_ENGINE_REJECTED",
+            "ORCHESTRATOR_ENGINE_TIMEOUT");
     private static final Map<String, Set<String>> REASON_CODES_BY_ENGINE = Map.of(
             FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
-            merge(NON_DEVICE_SHARED_REASON_CODES, RULES_REASON_CODES, SHARED_ORCHESTRATOR_REASON_CODES),
+            merge(NON_DEVICE_SHARED_REASON_CODES, RULES_ML_SHARED_REASON_CODES,
+                    RULES_REASON_CODES, SHARED_ORCHESTRATOR_REASON_CODES),
             FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
-            merge(NON_DEVICE_SHARED_REASON_CODES, ML_REASON_CODES, SHARED_ORCHESTRATOR_REASON_CODES),
+            merge(NON_DEVICE_SHARED_REASON_CODES, RULES_ML_SHARED_REASON_CODES,
+                    ML_VELOCITY_SHARED_REASON_CODES, ML_REASON_CODES, SHARED_ORCHESTRATOR_REASON_CODES),
             FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
-            merge(NON_DEVICE_SHARED_REASON_CODES, VELOCITY_REASON_CODES, SHARED_ORCHESTRATOR_REASON_CODES),
+            merge(NON_DEVICE_SHARED_REASON_CODES, ML_VELOCITY_SHARED_REASON_CODES,
+                    VELOCITY_REASON_CODES, SHARED_ORCHESTRATOR_REASON_CODES),
             FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID,
             merge(DEVICE_REASON_CODES, SHARED_ORCHESTRATOR_REASON_CODES)
     );

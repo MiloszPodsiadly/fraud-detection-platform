@@ -25,7 +25,7 @@ class FraudEngineAggregationResultTest {
     @Test
     void defensivelyCopiesLists() {
         List<NormalizedFraudEngineResult> normalized = new ArrayList<>(List.of(
-                AggregationTestSupport.normalized("rules.primary", FraudEngineStatus.AVAILABLE, 0.8d, RiskLevel.HIGH, "MODEL_HIGH_RISK")
+                AggregationTestSupport.normalized("rules.primary", FraudEngineStatus.AVAILABLE, 0.8d, RiskLevel.HIGH, "RAPID_PLN_20K_BURST")
         ));
         FraudEngineAggregationResult result = new FraudEngineAggregationResult(
                 normalized,

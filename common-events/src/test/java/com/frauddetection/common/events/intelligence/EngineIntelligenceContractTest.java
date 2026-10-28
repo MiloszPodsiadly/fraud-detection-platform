@@ -115,11 +115,40 @@ class EngineIntelligenceContractTest {
     void rejectsReasonCodesOwnedByAnotherNonDeviceEngineInResultsAndDiagnostics() {
         assertThatThrownBy(() -> EngineIntelligenceTestSupport.rulesEngine(List.of("ML_MODEL_TIMEOUT")))
                 .hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.rulesEngine(List.of("MODEL_HIGH_RISK")))
+                .hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+        assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
+                "velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH, List.of("DEVICE_NOVELTY")
+        )).hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
         assertThatThrownBy(() -> new EngineIntelligenceDiagnosticSignal(
                 "rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE,
                 EngineIntelligenceSignalCategory.FRAUD_SIGNAL, RiskLevel.HIGH,
                 EngineIntelligenceScoreBucket.HIGH, "ML_MODEL_TIMEOUT"
         )).hasMessage("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED_FOR_ENGINE");
+    }
+
+    @Test
+    void acceptsExactAllowlistedSharedOrchestratorReasonCodesForTheirOwners() {
+        for (String engineId : FraudEngineIdentityContract.engineOrder()) {
+            FraudEngineType engineType = FraudEngineIdentityContract.expectedTypeFor(engineId).orElseThrow();
+            boolean device = FraudEngineIdentityContract.DEVICE_PRIMARY_ENGINE_ID.equals(engineId);
+            for (String reasonCode : EngineIntelligenceReasonCodePolicy.sharedOrchestratorReasonCodes()) {
+                EngineIntelligenceEngineResult result = new EngineIntelligenceEngineResult(
+                        engineId,
+                        engineType,
+                        device ? FraudEngineStatus.DEGRADED : FraudEngineStatus.AVAILABLE,
+                        device ? null : RiskLevel.HIGH,
+                        device ? EngineIntelligenceScoreBucket.UNAVAILABLE : EngineIntelligenceScoreBucket.HIGH,
+                        List.of(reasonCode),
+                        engineType == FraudEngineType.ML_MODEL
+                                ? new MlModelIdentity("python-logistic-fraud-model", "2026-06-18.v1", "feature-contract-v2")
+                                : null
+                );
+
+                assertThat(result.reasonCodes()).containsExactly(reasonCode);
+            }
+        }
     }
 
     @Test

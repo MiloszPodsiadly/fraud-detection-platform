@@ -70,6 +70,6 @@ class FraudEngineAgreementAnalyzerTest {
     }
 
     private NormalizedFraudEngineResult result(String engineId, FraudEngineStatus status, RiskLevel risk) {
-        return AggregationTestSupport.normalized(engineId, status, risk == null ? null : 0.5d, risk, "MODEL_HIGH_RISK");
+        return AggregationTestSupport.normalized(engineId, status, risk == null ? null : 0.5d, risk, "RAPID_PLN_20K_BURST");
     }
 }

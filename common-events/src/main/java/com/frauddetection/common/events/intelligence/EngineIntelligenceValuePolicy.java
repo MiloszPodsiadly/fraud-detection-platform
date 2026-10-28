@@ -52,10 +52,20 @@ final class EngineIntelligenceValuePolicy {
     }
 
     static String requireReasonCode(String reasonCode) {
-        requireBoundedSafeText(reasonCode, "ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
+        if (reasonCode == null
+                || reasonCode.isBlank()
+                || reasonCode.length() > MAX_STRING_LENGTH
+                || reasonCode.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
+        }
         if (!EngineIntelligenceReasonCodePolicy.isKnownReasonCode(reasonCode)) {
+            if (containsForbiddenText(reasonCode)) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
+            }
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED");
         }
+        // Exact allowlisted machine codes are safe identifiers, even when their enum name contains
+        // a term that is forbidden in arbitrary text (for example ORCHESTRATOR_ENGINE_EXCEPTION).
         return reasonCode;
     }
 

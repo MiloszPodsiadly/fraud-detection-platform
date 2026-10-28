@@ -286,6 +286,39 @@
       }
     },
     {
+      "caseId": "model_reason_code_owned_by_rules",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 2,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"], "modelIdentity": {"modelName": "python-logistic-fraud-model", "modelVersion": "2026-05-31.v1", "featureContractVersion": "2026-05-31.feature-contract.v1"}}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "AGREEMENT", "riskMismatchStatus": "SAME_RISK_LEVEL", "scoreDeltaBucket": "NONE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "rules_ml_device_novelty_reason_code_owned_by_velocity",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 2,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"], "modelIdentity": {"modelName": "python-logistic-fraud-model", "modelVersion": "2026-05-31.v1", "featureContractVersion": "2026-05-31.feature-contract.v1"}},
+          {"engineId": "velocity.primary", "engineType": "VELOCITY", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["DEVICE_NOVELTY"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "AGREEMENT", "riskMismatchStatus": "SAME_RISK_LEVEL", "scoreDeltaBucket": "NONE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
       "caseId": "response_available_with_degraded_ml",
       "category": "engine-intelligence-response",
       "engineIntelligenceResponse": {

@@ -472,7 +472,11 @@ class EngineIntelligenceResponseMapperTest {
 
     private List<String> reasonCodesFor(FraudEngineType engineType, FraudEngineStatus status) {
         if (status == FraudEngineStatus.AVAILABLE) {
-            return engineType == FraudEngineType.ML_MODEL ? List.of("ML_MODEL_SIGNAL") : List.of("HIGH_VELOCITY");
+            return switch (engineType) {
+                case ML_MODEL -> List.of("ML_MODEL_SIGNAL");
+                case VELOCITY -> List.of("TRANSACTION_VELOCITY");
+                default -> List.of("HIGH_VELOCITY");
+            };
         }
         return engineType == FraudEngineType.ML_MODEL ? List.of("ML_MODEL_TIMEOUT") : List.of("ORCHESTRATOR_ENGINE_TIMEOUT");
     }
@@ -484,7 +488,7 @@ class EngineIntelligenceResponseMapperTest {
         List<EngineIntelligenceEngineReadModel> engines = new java.util.ArrayList<>();
         engines.add(engine("rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, reasonCodes));
         engines.add(engine("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.AVAILABLE, List.of("ML_MODEL_SIGNAL")));
-        engines.add(engine("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE, List.of("RAPID_TRANSFER_BURST_SIGNAL")));
+        engines.add(engine("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE, List.of("TRANSACTION_VELOCITY")));
         engines.add(new EngineIntelligenceEngineReadModel(
                 "device.primary",
                 FraudEngineType.DEVICE_RISK,

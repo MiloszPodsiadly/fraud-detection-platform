@@ -83,6 +83,6 @@ class FraudEngineScoreDeltaCalculatorTest {
     }
 
     private NormalizedFraudEngineResult result(String engineId, FraudEngineStatus status, Double score) {
-        return AggregationTestSupport.normalized(engineId, status, score, score == null ? null : RiskLevel.HIGH, "MODEL_HIGH_RISK");
+        return AggregationTestSupport.normalized(engineId, status, score, score == null ? null : RiskLevel.HIGH, "RAPID_PLN_20K_BURST");
     }
 }
