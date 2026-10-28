@@ -2,6 +2,8 @@
 
 Status: design decision; a Mongo observation adapter exists but is not wired to the running pipeline.
 No trusted producer or Device Risk publication is enabled.
+The current A05 delivery decision is an engineering NO-GO; see the [exact-payload delivery gate ADR](../adr/device_risk_exact_payload_delivery_gate.md).
+The outbox flow below is a gated design candidate, not an implemented or approved delivery path.
 This record depends on [Device Risk evidence boundaries](device_risk_evidence_boundaries.md).
 All durations below are proposed policy limits, not permission to collect data. Activation requires an
 authenticated institutional source, controller-approved purpose and retention, and the real-store proofs below.
@@ -55,12 +57,12 @@ Proposed collections (names are local to a dedicated, access-controlled Device R
 
 | Collection | Minimum persisted fields | Required indexes |
 | --- | --- | --- |
-| `device_observation_candidates` | Identity, commitment, authenticated source reference, pseudonym tokens and versions, event time, ingest time, admission state, bounded failure code. No raw device ID/IP. | Unique `(institutionId, sourceId, sourceEventId)` and `(institutionId, sourceId, transactionId)`; `(institutionId, state, eventTime, sourceEventId)` for bounded drain. |
+| `device_observation_candidates` | Identity, commitment, authenticated source reference, pseudonym tokens and versions, event time, `stagedAt`, admission state, bounded failure code. No raw device ID/IP. | Unique `(institutionId, sourceId, sourceEventId)` and `(institutionId, sourceId, transactionId)`; `(status, stagedAt)` for aggregate pending-age metrics; `(institutionId, state, eventTime, sourceEventId)` for bounded drain. |
 | `device_observations` | Same identity, scoped customer/device pseudonyms, typed source quality, event time, accepted sequence, `expireAt`, erasure generation. | Unique observation key; `(institutionId, deviceTokenVersion, deviceToken, eventTime, sourceEventId)` and analogous customer index; TTL on `expireAt` plus query-time `expireAt > now`. |
 | `device_occurrences` | Unique occurrence key, input commitment, immutable pre-event fact snapshot, window start/end, source watermark/sequence, coverage version, key versions, policy version, cutoff, stable enriched-event ID and exact serialized output commitment, state. No inferred fraud decision in the observation ledger. | Unique occurrence key; unique `(institutionId, sourceId, sourceEventId)` for one scoring occurrence; state/time index for recovery; retention date index. |
 | `device_delivery_outbox` | Deterministic occurrence-linked ID, exact versioned enriched payload or immutable bounded reference, status, attempt count, claim owner/token/generation/expiry, broker result, error code. | Unique occurrence/outbox ID; `(status, nextAttemptAt)` and lease expiry indexes. |
 | `device_source_coverage` and `device_scope_fences` | Authenticated source high-watermark, contiguous sequence/coverage interval, policy/key/erasure generation; per institution/customer and institution/device revision and highest committed event-time order. | Unique source and scope keys; compare-and-set on revision. |
-| `device_erasure_tombstones` | Scoped pseudonym commitment/version, erasure generation, expiry and replay prohibition, without raw identity. | Unique scope/token/version; retention index. |
+| `device_operational_revocation_tombstones` | Scoped pseudonym commitment/version, operational-revocation generation, expiry and replay prohibition, without raw identity. | Unique scope/token/version; retention index. |
 
 Index creation and verification must be a startup gate before admitting data. Unique keys are enforced by
 Mongo, not by read-before-write. All collections have explicit size/cardinality limits and access roles;
@@ -79,6 +81,9 @@ reviewable starting limits for load and privacy approval, not targets to silentl
 breach pauses or quarantines admission and marks dependent signals `UNAVAILABLE`; metrics report
 counts and reason codes without identity labels. A production rollout must validate limits against
 measured traffic and storage capacity.
+An opt-in, local Mongo 7.0 `explain`/latency measurement at the query caps is recorded in the
+[Device Risk admission runbook](../runbooks/device_risk_admission.md#opt-in-local-mongo-measurement); it does not
+validate production SLOs, contention, or worst-case transaction retries.
 The current enriched contract includes raw device fields. Persisting its exact bytes in an outbox would
 create another sensitive copy even if the observation ledger is pseudonymized. That copy requires a
 separate approved purpose, encryption/access controls, bounded retention and deletion plan. If these
@@ -176,30 +181,32 @@ remains disabled. No production baseline behavior is changed by this design docu
 The package-private Mongo adapter currently has these concrete lifecycle rules, for adapter tests and
 future review only:
 
-- `STAGED` candidates have no TTL. A previously deployed `expireAt_1` candidate TTL index is removed,
-  staged `expireAt` values are cleared, and terminal legacy expiries move to `terminalExpireAt`.
-  Terminal candidates expire 45 days after disposition. Startup reconciliation repairs scopes whose
-  `pendingCounterVersion` is absent by recounting actual `STAGED` rows, recording the version, and
-  invalidating that source coverage epoch.
+- `STAGED` candidates have no TTL and record `stagedAt` for aggregate pending-age inspection via the
+  `candidate_status_staged_at` index. Startup rejects a staged candidate without a BSON date `stagedAt`; it never
+  backfills the value. Terminal candidates use `terminalExpireAt` and expire 45 days after disposition.
+  The adapter accepts only this clean current schema. An old candidate TTL/index, old `expireAt` field,
+  `pendingCounterVersion`, an unknown index, or the old `device_erasure_tombstones` collection fails startup with
+  `DEVICE_STORE_SCHEMA_INCOMPATIBLE`; startup never drops indexes, rewrites documents, recounts counters, or
+  silently clears data.
 - Membership history expires at `eventTime + 31 days + 5 minutes`. Occurrence receipts expire 45 days
   after commit. Tombstones expire 45 days and 2 minutes after erasure, covering the accepted two-minute
   future timestamp skew. Reads check expiry themselves because Mongo TTL cleanup is asynchronous.
   Admission rejects events at or beyond the 45-day replay boundary.
-- `eraseDevice` is source scoped: it removes that scope's membership, quarantines its staged candidates,
-  invalidates that source epoch, and writes a scoped pseudonym tombstone. It retains terminal candidate
-  receipts and committed occurrence/evidence documents until their receipt expiry. This is **partial
-  erasure**, not full deletion; there is no approved legal basis or retention schedule for those retained
-  records yet.
+- `revokeDeviceFromOperationalHistory` is source scoped: it removes active membership, quarantines staged
+  candidates, invalidates that source epoch, and writes a scoped operational-revocation tombstone. It retains
+  terminal candidate and committed occurrence/evidence receipts until their receipt expiry. This is **operational
+  revocation**, not legal or complete erasure; retained evidence requires an approved legal/retention disposition.
 - Identity and history are scoped by `(institution, source, keyVersion)`. A key-version change does not
   infer cross-version device identity. The old source history is not joined to the new version; a complete
   fresh window and trusted continuity protocol would be needed before history-dependent signals could be
   available. Erasure of one source does not erase or aggregate other source scopes.
 
-These rules do not implement an operational drain/recovery service. There is no scheduled worker to
-resolve prolonged `STAGED` work, no operator recovery interface, and no low-cardinality metrics for
-blocked, timed-out, quarantined, or unresolved states. The 10,000-candidate per-source cap only bounds
-stored pending work; it does not guarantee progress. Startup reconciliation covers legacy counter drift,
-not ongoing repair or restart recovery of unsealed work. The adapter is not production wired, so none of
+The adapter exposes a read-only aggregate `pendingMetrics()` query with only total staged count and oldest pending
+age; it emits no identity labels and is not wired to a monitoring backend. These rules do not implement an operational
+drain/recovery service. There is no scheduled worker to resolve prolonged `STAGED` work, no operator recovery interface,
+and no metrics exporter for blocked, timed-out, quarantined, or unresolved states. The 10,000-candidate per-source cap
+only bounds stored pending work; it does not guarantee progress. There is no automatic schema migration or counter
+reconciliation, and no ongoing repair or restart recovery of unsealed work. The adapter is not production wired, so none of
 these proposed retention periods is an authorization to collect data. Approved purpose, retention,
 erasure obligations, recovery ownership, and monitoring are activation blockers.
 
@@ -214,18 +221,29 @@ erasure obligations, recovery ownership, and monitoring are activation blockers.
 | Retention expires or erasure occurs | Affected coverage is incomplete; tombstone blocks replayed resurrection. Existing snapshots remain immutable for their approved lifetime. | Future signal `UNAVAILABLE`; expiry is checked in queries even before TTL cleanup. |
 | Device key rotates | Old occurrence retains its version/commitment. Cross-version membership needs proved continuity and authorized key access. | Replay returns old snapshot; missing old key/continuity makes new evaluation unavailable, not a new identity. |
 
-## Migration, rollback and acceptance
+## Activation, rollback and acceptance
 
 1. Add strict typed contracts and an authenticated evidence producer first. Keep Device Risk emission off;
    validate indexes, key custody, retention approval, source watermark/sequence semantics and safe read access.
 2. Deploy the Mongo adapter and outbox dark, prove real-store behavior, then replay a bounded authorized
    window into candidates. Do not backfill verified history from raw client device strings or Redis sets.
    Cold start stays `UNAVAILABLE` until the full window is evidenced.
-3. Enable per approved institution/source only after consumer-first wire migration and the baseline Redis
+3. Enable per approved institution/source only after current-reader compatibility verification and the baseline Redis
    ordering proof. Compare baseline outputs before/after; turn off admission/emission on breach while
    retaining already committed outbox obligations and immutable occurrences for recovery.
 4. Rollback disables new Device Risk observations, not pending exact-payload outbox reconciliation.
    Drain or quarantine obligations under the approved retention policy. Never reinterpret old payloads.
+
+### Manual local/dev schema cutover
+
+The process must never auto-migrate or auto-reset a schema. Only an approved local/dev/test reset may remove the
+dedicated Device Risk collections after all application instances using that database are stopped and any required
+test evidence is discarded or backed up. The bounded scope is `device_observation_candidates`,
+`device_observations`, `device_occurrences`, `device_source_coverage`, `device_scope_fences`,
+`device_operational_revocation_tombstones`, and the rejected historical
+`device_erasure_tombstones` collection. Never reset alert, governance, model, audit, or unrelated application
+collections. In a shared, production, or legally retained environment, `DEVICE_STORE_SCHEMA_INCOMPATIBLE` is an
+escalation signal for the data owner, not permission to delete or modify records.
 
 Required focused acceptance tests: unique duplicate/conflict and uncertain commit; pre-event self
 exclusion; A/B reverse arrival and equal times; source gap, absent seal, future skew and late violation;
@@ -238,24 +256,25 @@ test cannot establish these guarantees. No business risk scoring is authorized b
 ## Typed contract compatibility
 
 `DeviceRiskEvidence` is an internal, versioned, occurrence-bound domain contract in `common-events`.
-It does not add fields to raw, enriched or scored events, `featureSnapshot`, public Engine Intelligence
-v1, API responses or analyst UI. The five typed fact slots keep absent/untrusted/invalid states
-explicit; the existing feature-snapshot normalizer remains the authority for existing wire features.
-No dynamic feature map or fourth public engine is introduced here. A future wire migration must be
-consumer-first and separately versioned. Deserializing an `AUTHENTICATED_INSTITUTION` enum value is
+It does not add fields to raw, enriched or scored events, `featureSnapshot`, the public nested
+`EngineIntelligenceSummary` contractVersion 2, API responses, or analyst UI. The five typed fact slots keep
+absent/untrusted/invalid states explicit; the existing feature-snapshot normalizer remains the authority for existing
+wire features. `device.primary` is already the fourth optional public identity, but that schema readiness does not
+admit evidence or activate runtime. A future Device Risk evidence wire change must be consumer-first and separately
+versioned. Deserializing an `AUTHENTICATED_INSTITUTION` enum value is
 **not** authentication: only a future trusted admission boundary may assign that quality, bind the
 expected occurrence and institution, and verify provider assertions before persistence. Until then
 the contract is inert and cannot produce a verified Device Risk result.
 
 The current `MongoDeviceObservationStore` foundation stages pseudonymous candidates, seals one
 institution/source sequence, commits a scoped pre-event snapshot and observation in one Mongo
-transaction, and retains bounded duplicate and erasure receipts. `STAGED` candidates have no TTL;
+transaction, and retains bounded duplicate and operational-revocation receipts. `STAGED` candidates have no TTL;
 terminal candidates use a 45-day terminal receipt, history membership uses a 31-day-and-5-minute
 event-time horizon, occurrences use a 45-day receipt, and tombstones use 45 days plus the maximum
-accepted two-minute future skew. Reads enforce expiry before Mongo TTL cleanup. Startup migrates the
-old candidate TTL and reconciles legacy pending counters, invalidating those source epochs. These are
-provisional software horizons, not approved retention periods. Erasure removes membership and blocks
-replay but retains candidate/occurrence receipts, so it is partial. No scheduled staged-work drain,
+accepted two-minute future skew. Reads enforce expiry before Mongo TTL cleanup. The clean current schema rejects
+old candidate TTL/index state, `pendingCounterVersion`, and old tombstone collection names without modifying them.
+These are provisional software horizons, not approved retention periods. Operational revocation removes active
+membership and blocks replay but retains candidate/occurrence receipts; it is not legal or complete erasure. No scheduled staged-work drain,
 operator recovery service, or lifecycle metrics exist yet. It uses the synchronous Mongo
 driver without Spring Mongo auto-configuration, so merely adding the dependency does not connect
 the running enricher to Mongo. The adapter is not constructed by production configuration. It caps
@@ -288,7 +307,8 @@ always reports `UNAVAILABLE` until a separately authenticated binding can be ver
 ### Synthetic replay identity
 
 The simulator and canonical replay generators keep `SYNTHETIC_GENERATOR` or `BASH_JSONL_GENERATOR` source labels
-and synthetic markers. A fingerprint is stable for one synthetic device ID and is never an admission credential.
+and explicit `deviceEvidenceProvenance=SYNTHETIC_UNTRUSTED` markers. A fingerprint is stable for one synthetic device
+ID and is never an admission credential, issuer assertion, signed seal, or institutional provenance.
 The simulator property `app.replay.synthetic.deterministic-test-mode` and generator flag
 `--deterministic-test-mode` are disabled by default and exist only for fixed-seed/reference-time test snapshots.
 They intentionally reproduce event, correlation, transaction, and trace IDs for the same seed, reference instant,
