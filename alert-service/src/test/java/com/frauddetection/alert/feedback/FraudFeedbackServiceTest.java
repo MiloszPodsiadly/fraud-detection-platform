@@ -8,8 +8,6 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
-import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
-import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
@@ -24,6 +22,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
+import com.frauddetection.alert.testfixtures.EngineIntelligenceV2TestFixtures;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
@@ -266,9 +265,9 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void missingHistoricalMlEngineDoesNotBackfillLineage() {
+    void rulesOnlyV2ReadModelIsUnavailableAndDoesNotBackfillLineage() {
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
-                .thenReturn(projectedEngineIntelligenceWithoutMl());
+                .thenReturn(EngineIntelligenceV2TestFixtures.negativeRulesOnlyV2ReadModel("txn-1"));
 
         FraudFeedbackResponse response = service.create("txn-1", request());
 
@@ -277,6 +276,7 @@ class FraudFeedbackServiceTest {
             assertThat(record.getMlModelName()).isNull();
             assertThat(record.getMlModelVersion()).isNull();
             assertThat(record.getMlFeatureContractVersion()).isNull();
+            assertThat(record.getMlModelArtifactSha256()).isNull();
         });
     }
 
@@ -901,38 +901,7 @@ class FraudFeedbackServiceTest {
     }
 
     private EngineIntelligenceReadModel projectedEngineIntelligence() {
-        return EngineIntelligenceReadModel.projected(
-                "txn-1",
-                1,
-                Instant.parse("2026-06-25T09:00:03Z"),
-                new EngineIntelligenceComparisonReadModel(
-                        EngineIntelligenceComparisonType.RULES_VS_ML,
-                        List.of("rules.primary", "ml.python.primary"),
-                        EngineIntelligenceAgreementStatus.PARTIAL,
-                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
-                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
-                ),
-                List.of(
-                        new EngineIntelligenceEngineReadModel(
-                                "rules.primary",
-                                FraudEngineType.RULES,
-                                FraudEngineStatus.AVAILABLE,
-                                RiskLevel.CRITICAL,
-                                EngineIntelligenceScoreBucket.HIGH,
-                                List.of("HIGH_TRANSACTION_AMOUNT")
-                        ),
-                        new EngineIntelligenceEngineReadModel(
-                                "ml.python.primary",
-                                FraudEngineType.ML_MODEL,
-                                FraudEngineStatus.TIMEOUT,
-                                null,
-                                EngineIntelligenceScoreBucket.UNAVAILABLE,
-                                List.of("ML_MODEL_TIMEOUT")
-                        )
-                ),
-                List.of(),
-                List.of()
-        );
+        return EngineIntelligenceV2TestFixtures.rulesCriticalMlTimeoutReadModel("txn-1");
     }
 
     private EngineIntelligenceReadModel projectedEngineIntelligenceWithAvailableMl(
@@ -940,58 +909,8 @@ class FraudFeedbackServiceTest {
             String modelVersion,
             String featureContractVersion
     ) {
-        return EngineIntelligenceReadModel.projected(
-                "txn-1",
-                1,
-                Instant.parse("2026-06-25T09:00:03Z"),
-                new EngineIntelligenceComparisonReadModel(
-                        EngineIntelligenceComparisonType.RULES_VS_ML,
-                        List.of("rules.primary", "ml.python.primary"),
-                        EngineIntelligenceAgreementStatus.AGREEMENT,
-                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
-                        EngineIntelligenceScoreDeltaBucket.SMALL
-                ),
-                List.of(
-                        new EngineIntelligenceEngineReadModel(
-                                "rules.primary",
-                                FraudEngineType.RULES,
-                                FraudEngineStatus.AVAILABLE,
-                                RiskLevel.CRITICAL,
-                                EngineIntelligenceScoreBucket.HIGH,
-                                List.of("HIGH_TRANSACTION_AMOUNT")
-                        ),
-                        new EngineIntelligenceEngineReadModel(
-                                "ml.python.primary",
-                                FraudEngineType.ML_MODEL,
-                                FraudEngineStatus.AVAILABLE,
-                                RiskLevel.CRITICAL,
-                                EngineIntelligenceScoreBucket.HIGH,
-                                List.of("MODEL_HIGH_RISK"),
-                                new MlModelIdentity(modelName, modelVersion, featureContractVersion)
-                        )
-                ),
-                List.of(),
-                List.of()
-        );
-    }
-
-    private EngineIntelligenceReadModel projectedEngineIntelligenceWithoutMl() {
-        return EngineIntelligenceReadModel.projected(
-                "txn-1",
-                1,
-                Instant.parse("2026-06-25T09:00:03Z"),
-                null,
-                List.of(new EngineIntelligenceEngineReadModel(
-                        "rules.primary",
-                        FraudEngineType.RULES,
-                        FraudEngineStatus.AVAILABLE,
-                        RiskLevel.CRITICAL,
-                        EngineIntelligenceScoreBucket.HIGH,
-                        List.of("HIGH_TRANSACTION_AMOUNT")
-                )),
-                List.of(),
-                List.of()
-        );
+        return EngineIntelligenceV2TestFixtures.rulesCriticalMlAvailableReadModel(
+                "txn-1", new MlModelIdentity(modelName, modelVersion, featureContractVersion));
     }
 
     private FraudFeedbackRecord record() {

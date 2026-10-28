@@ -32,6 +32,7 @@ import static org.mockito.Mockito.when;
 
 class EngineIntelligenceProjectionServiceTest {
 
+    private static final int UNSUPPORTED_EI_V1 = 1;
     private static final Instant NOW = Instant.parse("2026-06-02T08:00:00Z");
     private static final Instant LATER = Instant.parse("2026-06-02T08:05:00Z");
 
@@ -234,9 +235,15 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
-    void invalidEngineIntelligenceIsOmittedWithoutSave() {
+    void unsupportedV1EngineIntelligenceIsOmittedWithoutSave() {
+        EngineIntelligenceSummary validV2 = EngineIntelligenceProjectionTestFixtures.minimalSummary();
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
-        when(summary.contractVersion()).thenReturn(2);
+        when(summary.contractVersion()).thenReturn(UNSUPPORTED_EI_V1);
+        when(summary.generatedAt()).thenReturn(validV2.generatedAt());
+        when(summary.engines()).thenReturn(validV2.engines());
+        when(summary.comparison()).thenReturn(validV2.comparison());
+        when(summary.diagnosticSignals()).thenReturn(validV2.diagnosticSignals());
+        when(summary.warnings()).thenReturn(validV2.warnings());
         EngineIntelligenceProjectionResult result =
                 service.project(EngineIntelligenceProjectionTestFixtures.event(summary));
 
@@ -252,11 +259,17 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
-    void invalidProjectionShapeRecordsProjectionLatencyExactlyOnce() {
+    void incompleteV2ProjectionIsOmittedWithoutSaveAndRecordsMetrics() {
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
-        when(summary.contractVersion()).thenReturn(2);
-        service.project(EngineIntelligenceProjectionTestFixtures.event(summary));
+        when(summary.contractVersion()).thenReturn(EngineIntelligenceSummary.CONTRACT_VERSION);
+        EngineIntelligenceProjectionResult result =
+                service.project(EngineIntelligenceProjectionTestFixtures.event(summary));
 
+        assertThat(result.projection()).isEmpty();
+        assertThat(result.omissionReason()).contains(
+                EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
+        );
+        verify(writeFence, never()).write(any());
         assertProjectionMetricShape(1.0d, 1L, 0.0d, 1.0d, 0.0d);
         assertThat(counter("engine_intelligence_projection_omitted_total", "INVALID_PROJECTION_SHAPE"))
                 .isEqualTo(1.0d);
