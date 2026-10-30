@@ -331,7 +331,8 @@ class MerchantRiskSignalEngineTest {
         return profile(available(TIME.minus(WINDOW), TIME, recentCount), available(TIME.minus(WINDOW).minus(WINDOW), TIME.minus(WINDOW), 0));
     }
     private static MerchantProfile profile(WindowCount recent, WindowCount baseline) {
-        return new MerchantProfile(1, 1, SCOPE, OCCURRENCE, new MerchantProfile.Provenance(TIME.plusSeconds(60),
+        return new MerchantProfile(MerchantProfile.VERSION, MerchantProfile.COMPUTATION_VERSION,
+                SCOPE, OCCURRENCE, new MerchantProfile.Provenance(TIME.plusSeconds(60),
                 TIME.minusSeconds(10800), TIME.minusSeconds(10800), TIME, 10L, token(10)), recent, baseline);
     }
     private static WindowCount available(Instant from, Instant until, int count) {

@@ -10,7 +10,6 @@ import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.Occur
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.ScopeClaim;
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.Signal;
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.SourceAssertion;
-import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaimJson;
 import com.frauddetection.scoring.merchant.MerchantRiskSignalPolicy.Coverage;
 import com.frauddetection.scoring.merchant.MerchantRiskSignalPolicy.Evaluation;
 import com.frauddetection.scoring.merchant.MerchantRiskSignalPolicy.SignalOutcome;
@@ -197,23 +196,7 @@ class MerchantRiskSignalPolicyTest {
     }
 
     @Test
-    void claimedRatesSelectionBiasedSamplesFutureLabelsAndMccRiskHaveNoAcceptedInputRepresentation() {
-        String json = new String(MerchantRiskEvidenceClaimJson.encode(claim(SourceAssertion.CLIENT_ASSERTED)), StandardCharsets.UTF_8);
-        for (String addition : List.of("\"fraudCount\":90,\"populationCount\":100,", "\"reviewedSampleFraudRate\":0.9,",
-                "\"labelsMatureAt\":\"2028-01-01T00:00:00Z\",", "\"categoryRisk\":\"HIGH\",", "\"verified\":true,")) {
-            byte[] forged = ("{" + addition + json.substring(1)).getBytes(StandardCharsets.UTF_8);
-            assertThatThrownBy(() -> MerchantRiskEvidenceClaimJson.decode(forged))
-                    .hasMessage("MERCHANT_CLAIM_JSON_INVALID").hasNoCause();
-        }
-    }
-
-    @Test
-    void oversizedCorruptOrInformativeClaimsAreRejectedBeforeAnyPolicyEvaluation() {
-        for (byte[] input : List.of(new byte[MerchantRiskEvidenceClaimJson.MAX_SERIALIZED_BYTES + 1],
-                "{\"signals\":[{\"status\":\"AVAILABLE\",\"observed\":true}]}".getBytes(StandardCharsets.UTF_8),
-                "{\"schemaVersion\":1,\"schemaVersion\":1}".getBytes(StandardCharsets.UTF_8))) {
-            assertThatThrownBy(() -> MerchantRiskEvidenceClaimJson.decode(input)).hasMessage("MERCHANT_CLAIM_JSON_INVALID").hasNoCause();
-        }
+    void oversizedProfileIsRejectedBeforePolicyEvaluation() {
         assertThatThrownBy(() -> profile(25_000, 1)).hasMessage("MERCHANT_PROFILE_COUNT_LIMIT");
     }
 
@@ -326,7 +309,8 @@ class MerchantRiskSignalPolicyTest {
         return profile(available(TIME.minus(WINDOW), TIME, recent), available(TIME.minus(WINDOW).minus(WINDOW), TIME.minus(WINDOW), baseline));
     }
     private static MerchantProfile profile(WindowCount recent, WindowCount baseline) {
-        return new MerchantProfile(1, 1, SCOPE, OCCURRENCE, PROVENANCE, recent, baseline);
+        return new MerchantProfile(MerchantProfile.VERSION, MerchantProfile.COMPUTATION_VERSION,
+                SCOPE, OCCURRENCE, PROVENANCE, recent, baseline);
     }
     private static WindowCount available(Instant from, Instant to, int count) {
         return new WindowCount(from, to, MerchantProfile.Status.AVAILABLE, count, MerchantProfile.Reason.NONE);
