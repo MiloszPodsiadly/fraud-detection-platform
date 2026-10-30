@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Updates.set;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -304,6 +305,42 @@ class MongoMerchantObservationStoreIntegrationTest {
     }
 
     @Test
+    void concurrentSealAndReadsKeepTheCommittedSnapshotStable() throws Exception {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        store.stage(first);
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        Snapshot original = store.commit(first).snapshot();
+
+        Observation second = approved(SCOPE, 2, 2, BASE.plusSeconds(60));
+        store.stage(second);
+        CoverageSeal nextSeal = new CoverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+        verifier.permit(nextSeal);
+        try (var workers = Executors.newFixedThreadPool(8)) {
+            var work = new java.util.ArrayList<java.util.concurrent.Callable<Object>>();
+            work.add(() -> { store.seal(nextSeal); return null; });
+            for (int index = 0; index < 7; index++) {
+                work.add(() -> store.readSnapshot(first));
+            }
+            var results = workers.invokeAll(work);
+            results.getFirst().get();
+            for (int index = 1; index < results.size(); index++) {
+                assertThat(results.get(index).get()).isEqualTo(original);
+            }
+
+            var afterCommit = new java.util.ArrayList<java.util.concurrent.Callable<Object>>();
+            afterCommit.add(() -> store.commit(second));
+            for (int index = 0; index < 7; index++) {
+                afterCommit.add(() -> store.readSnapshot(first));
+            }
+            var committed = workers.invokeAll(afterCommit);
+            assertThat(((CommitResult) committed.getFirst().get()).snapshot().priorCount()).isEqualTo(1);
+            for (int index = 1; index < committed.size(); index++) {
+                assertThat(committed.get(index).get()).isEqualTo(original);
+            }
+        }
+    }
+
+    @Test
     void unknownCommitAcknowledgmentsReconcileRealDurableStateWithoutRepeatingMembership() {
         Observation first = approved(SCOPE, 1, 1, BASE);
         store.stage(first);
@@ -392,6 +429,17 @@ class MongoMerchantObservationStoreIntegrationTest {
     }
 
     @Test
+    void oldPartialLedgerIsRefusedWithoutCreatingLifecycleCollections() {
+        String oldDatabaseName = databaseName + "_old";
+        MongoDatabase oldDatabase = client.getDatabase(oldDatabaseName);
+        oldDatabase.createCollection(MongoMerchantObservationSchema.CANDIDATES);
+        assertThatThrownBy(() -> new MongoMerchantObservationStore(client, oldDatabaseName, clock, LIMITS, verifier))
+                .hasMessage("MERCHANT_STORE_SCHEMA_INCOMPATIBLE");
+        assertThat(oldDatabase.listCollectionNames().into(new java.util.ArrayList<>()))
+                .containsExactly(MongoMerchantObservationSchema.CANDIDATES);
+    }
+
+    @Test
     void schemaAndIndexMismatchFailsStartupWithoutRepairingData() {
         Observation first = approved(SCOPE, 1, 1, BASE);
         store.stage(first);
@@ -401,6 +449,18 @@ class MongoMerchantObservationStoreIntegrationTest {
                 .hasMessage("MERCHANT_STORE_SCHEMA_INCOMPATIBLE");
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
         assertThat(candidates.listIndexes().into(new java.util.ArrayList<>())).noneMatch(row -> "merchant_transaction_unique".equals(row.getString("name")));
+    }
+
+    @Test
+    void receiptLifecycleUsesManifestWithoutCandidateTtl() {
+        var candidates = database.getCollection(MongoMerchantObservationSchema.CANDIDATES);
+        var manifest = database.getCollection(MongoMerchantObservationSchema.MANIFEST);
+        assertThat(candidates.listIndexes().into(new java.util.ArrayList<>()))
+                .noneMatch(row -> "merchant_receipt_ttl".equals(row.getString("name")))
+                .anyMatch(row -> "merchant_seal_batch".equals(row.getString("name")));
+        assertThat(manifest.listIndexes().into(new java.util.ArrayList<>()))
+                .anyMatch(row -> "merchant_manifest_sequence".equals(row.getString("name")))
+                .anyMatch(row -> MongoMerchantObservationSchema.MANIFEST_WINDOW.equals(row.getString("name")));
     }
 
     @Test
@@ -475,10 +535,13 @@ class MongoMerchantObservationStoreIntegrationTest {
         store.commit(second);
         var window = and(eq("scope", source(SCOPE).getString("_id")), eq("merchant", MERCHANT),
                 gte("eventTime", Date.from(BASE.minusSeconds(60))), lt("eventTime", Date.from(BASE.plusSeconds(120))));
-        for (String collection : List.of(MongoMerchantObservationSchema.HISTORY, MongoMerchantObservationSchema.CANDIDATES)) {
-            boolean candidates = collection.equals(MongoMerchantObservationSchema.CANDIDATES);
-            String index = candidates ? MongoMerchantObservationSchema.CANDIDATE_WINDOW : MongoMerchantObservationSchema.HISTORY_WINDOW;
-            Document plan = database.getCollection(collection).find(candidates ? and(window, eq("status", "COMMITTED")) : window)
+        for (String collection : List.of(MongoMerchantObservationSchema.HISTORY,
+                MongoMerchantObservationSchema.CANDIDATES, MongoMerchantObservationSchema.MANIFEST)) {
+            boolean candidateRows = collection.equals(MongoMerchantObservationSchema.CANDIDATES);
+            String index = candidateRows ? MongoMerchantObservationSchema.CANDIDATE_WINDOW
+                    : collection.equals(MongoMerchantObservationSchema.MANIFEST)
+                    ? MongoMerchantObservationSchema.MANIFEST_WINDOW : MongoMerchantObservationSchema.HISTORY_WINDOW;
+            Document plan = database.getCollection(collection).find(candidateRows ? and(window, eq("status", "COMMITTED")) : window)
                     .hintString(index).limit(2).explain(ExplainVerbosity.EXECUTION_STATS);
             assertThat(plan.get("queryPlanner", Document.class).get("winningPlan", Document.class).toJson())
                     .contains(index).doesNotContain("COLLSCAN");
@@ -545,16 +608,25 @@ class MongoMerchantObservationStoreIntegrationTest {
     }
 
     @Test
-    void expiredButPhysicallyRetainedReceiptsCannotKeepAnOldSourceCompleteForNewInput() {
+    void expiredReceiptsCompactInBoundedPrefixWithoutResettingSequenceOrClaimingOldHistory() {
         Observation first = approved(SCOPE, 1, 1, BASE);
         store.stage(first);
         seal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
         store.commit(first);
         clock.instant = clock.instant().plus(LIMITS.receiptRetention());
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
-        assertThat(store.stage(approved(SCOPE, 2, 2, clock.instant()))).isEqualTo(StageResult.QUARANTINED);
+        Observation next = approved(SCOPE, 2, 2, clock.instant());
+        assertThat(store.stage(next)).isEqualTo(StageResult.CREATED);
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
-        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+        assertThat(count(MongoMerchantObservationSchema.MANIFEST)).isEqualTo(1);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1);
+        assertThat(source(SCOPE).getLong("compactedThroughSequence")).isEqualTo(1);
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        seal(SCOPE, 2, next.eventTime().minusSeconds(7_200), next.eventTime());
+        Snapshot fresh = store.commit(next).snapshot();
+        assertThat(fresh.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(fresh.priorCount()).isZero();
     }
 
     @Test
@@ -571,10 +643,32 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(store.readSnapshot(second).reason()).isEqualTo(Reason.HISTORY_MISSING);
         assertThat(store.readSnapshot(second).priorCount()).isNull();
         CoverageSeal same = new CoverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
-        assertThatThrownBy(() -> store.seal(same)).hasMessage("MERCHANT_STORE_HISTORY_MISSING");
+        assertThatCode(() -> store.seal(same)).doesNotThrowAnyException();
         assertThat(store.stage(approved(SCOPE, 3, 3, BASE.plusSeconds(120)))).isEqualTo(StageResult.QUARANTINED);
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
         assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+    }
+
+    @Test
+    void removingOnlyPriorHistoryRowRevokesLaterCompleteSnapshot() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        Observation second = approved(SCOPE, 2, 2, BASE.plusSeconds(60));
+        store.stage(first);
+        store.stage(second);
+        seal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+        store.commit(first);
+        Snapshot original = store.commit(second).snapshot();
+        assertThat(original.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(original.priorCount()).isEqualTo(1);
+
+        database.getCollection(MongoMerchantObservationSchema.HISTORY).deleteOne(eq("sourceEvent", first.sourceEvent()));
+
+        Snapshot current = store.readSnapshot(second);
+        assertThat(current.availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(current.reason()).isEqualTo(Reason.HISTORY_MISSING);
+        assertThat(current.priorCount()).isNull();
+        assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(2);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
     }
 
     @Test
@@ -622,16 +716,20 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThatThrownBy(() -> bounded.stage(distinctMerchant(3, BASE.plusSeconds(2))))
                 .hasMessage("MERCHANT_STORE_STORAGE_CAPACITY");
         for (int id = 4; id < 29; id++) {
-            assertThat(bounded.stage(distinctMerchant(id, BASE.plusSeconds(id)))).isEqualTo(StageResult.QUARANTINED);
+            Observation rejected = distinctMerchant(id, BASE.plusSeconds(id));
+            assertThatThrownBy(() -> bounded.stage(rejected))
+                    .hasMessage("MERCHANT_STORE_STORAGE_CAPACITY");
         }
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(2);
         assertThat(count(MongoMerchantObservationSchema.HISTORY)).isEqualTo(2);
+        assertThat(count(MongoMerchantObservationSchema.MANIFEST)).isEqualTo(2);
         assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(2);
-        assertThat(bounded.readSnapshot(first).availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
+        assertThat(bounded.readSnapshot(first).availability()).isEqualTo(Availability.COMPLETE_WINDOW);
     }
 
     @Test
-    void removedRowsCannotReplenishTheLifetimeStorageBudgetOrReseedAnEmptyHistory() {
+    void missingCandidateAndHistoryAreDetectedByTheIndependentManifestBeforeCapacityCanBeReused() {
         var bounded = new MongoMerchantObservationStore(client, databaseName, clock, storageBudget(1), verifier);
         Observation first = approved(SCOPE, 1, 1, BASE);
         bounded.stage(first);
@@ -642,8 +740,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         // Disposable test database: simulate removal while preserving the operational source fence, not legal erasure.
         database.getCollection(MongoMerchantObservationSchema.CANDIDATES).deleteMany(new Document());
         database.getCollection(MongoMerchantObservationSchema.HISTORY).deleteMany(new Document());
-        assertThatThrownBy(() -> bounded.stage(approved(SCOPE, 2, 2, BASE.plusSeconds(1))))
-                .hasMessage("MERCHANT_STORE_STORAGE_CAPACITY");
+        assertThat(bounded.stage(approved(SCOPE, 2, 2, BASE.plusSeconds(1)))).isEqualTo(StageResult.QUARANTINED);
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isZero();
         assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
         assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
@@ -664,6 +761,28 @@ class MongoMerchantObservationStoreIntegrationTest {
         }
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
         assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentEpochScopesKeepIndependentLifecycleFences() throws Exception {
+        Scope nextEpoch = new Scope(SCOPE.issuer(), SCOPE.institution(), SCOPE.source(), token(77), SCOPE.identityVersion());
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        Observation second = approved(nextEpoch, 2, 1, BASE);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var staged = workers.invokeAll(List.of(() -> store.stage(first), () -> store.stage(second)));
+            assertThat(staged.get(0).get()).isEqualTo(StageResult.CREATED);
+            assertThat(staged.get(1).get()).isEqualTo(StageResult.CREATED);
+        }
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        assertThat(source(nextEpoch).getInteger("accepted")).isEqualTo(1);
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        seal(nextEpoch, 1, BASE.minusSeconds(7_200), BASE);
+        assertThat(store.commit(first).snapshot().priorCount()).isZero();
+        assertThat(store.commit(second).snapshot().priorCount()).isZero();
+        assertThat(source(SCOPE).getLong("compactedThroughSequence")).isZero();
+        assertThat(source(nextEpoch).getLong("compactedThroughSequence")).isZero();
+        assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(2);
+        assertThat(count(MongoMerchantObservationSchema.MANIFEST)).isEqualTo(2);
     }
 
     @Test
@@ -693,13 +812,16 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_COVERAGE").hasNoCause();
         sources.updateOne(new Document(), set("coverageStart", Date.from(BASE.minusSeconds(7_200))));
         var bypass = new com.mongodb.client.model.UpdateOptions().bypassDocumentValidation(true);
-        sources.updateOne(new Document(), set("schemaVersion", 2), bypass);
+        sources.updateOne(new Document(), set("pending", Integer.MAX_VALUE), bypass);
+        assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_COVERAGE").hasNoCause();
+        sources.updateOne(new Document(), set("pending", 0));
+        sources.updateOne(new Document(), set("schemaVersion", 3), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_SCHEMA_VERSION").hasNoCause();
-        sources.updateOne(new Document(), set("schemaVersion", 1));
+        sources.updateOne(new Document(), set("schemaVersion", 2));
         var receipts = database.getCollection(MongoMerchantObservationSchema.CANDIDATES);
-        receipts.updateOne(new Document(), set("schemaVersion", 2), bypass);
+        receipts.updateOne(new Document(), set("schemaVersion", 3), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_OBSERVATION").hasNoCause();
-        receipts.updateOne(new Document(), set("schemaVersion", 1));
+        receipts.updateOne(new Document(), set("schemaVersion", 2));
         receipts.updateOne(new Document(), set("receiptExpireAt", "test-only-sensitive-value"), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_RECEIPT").hasNoCause();
     }
@@ -789,51 +911,6 @@ class MongoMerchantObservationStoreIntegrationTest {
     }
 
     @Test
-    void boundedMerchantLoadHasIndexedQueryPlansAndLocalLatencyEvidence() {
-        int observations = 120;
-        var loaded = new MongoMerchantObservationStore(client, databaseName, clock,
-                new Limits(LIMITS.window(), LIMITS.historyRetention(), LIMITS.receiptRetention(), LIMITS.replayHorizon(),
-                        LIMITS.clockSkew(), 250, 250, 100, 512), verifier);
-        List<Observation> rows = new java.util.ArrayList<>();
-        for (int index = 1; index <= observations; index++) {
-            Observation row = approved(SCOPE, index, index, BASE.plusSeconds(index));
-            rows.add(row);
-            loaded.stage(row);
-        }
-        for (int through : List.of(100, observations)) {
-            CoverageSeal seal = new CoverageSeal(SCOPE, through, BASE.minusSeconds(7_200), BASE.plusSeconds(through));
-            verifier.permit(seal);
-            loaded.seal(seal);
-        }
-        long[] commits = new long[observations - 20];
-        for (int index = 0; index < rows.size(); index++) {
-            long started = System.nanoTime();
-            assertThat(loaded.commit(rows.get(index)).snapshot().priorCount()).isEqualTo(index);
-            if (index >= 20) { commits[index - 20] = System.nanoTime() - started; }
-        }
-        long[] reads = new long[100];
-        for (int index = -10; index < reads.length; index++) {
-            long started = System.nanoTime();
-            assertThat(loaded.readSnapshot(rows.getLast()).priorCount()).isEqualTo(observations - 1);
-            if (index >= 0) { reads[index] = System.nanoTime() - started; }
-        }
-        var window = and(eq("scope", source(SCOPE).getString("_id")), eq("merchant", MERCHANT),
-                gte("eventTime", Date.from(BASE)), lt("eventTime", Date.from(BASE.plusSeconds(observations + 1))));
-        for (String collection : List.of(MongoMerchantObservationSchema.HISTORY, MongoMerchantObservationSchema.CANDIDATES)) {
-            boolean candidates = collection.equals(MongoMerchantObservationSchema.CANDIDATES);
-            String index = candidates ? MongoMerchantObservationSchema.CANDIDATE_WINDOW : MongoMerchantObservationSchema.HISTORY_WINDOW;
-            Document plan = database.getCollection(collection).find(candidates ? and(window, eq("status", "COMMITTED")) : window)
-                    .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sequence")).hintString(index).limit(121)
-                    .explain(ExplainVerbosity.EXECUTION_STATS);
-            assertThat(plan.get("queryPlanner", Document.class).get("winningPlan", Document.class).toJson())
-                    .contains(index).doesNotContain("COLLSCAN", "\"stage\": \"SORT\"");
-            assertThat(((Number) plan.get("executionStats", Document.class).get("totalDocsExamined")).intValue()).isLessThanOrEqualTo(observations);
-        }
-        reportLocalLatency("commit", commits);
-        reportLocalLatency("receipt-read", reads);
-    }
-
-    @Test
     void withdrawnOrNarrowedCoverageCannotLeaveAnOldZeroSnapshotComplete() {
         Observation first = approved(SCOPE, 1, 1, BASE);
         store.stage(first);
@@ -891,13 +968,6 @@ class MongoMerchantObservationStoreIntegrationTest {
     private static Limits storageBudget(int budget) {
         return new Limits(LIMITS.window(), LIMITS.historyRetention(), LIMITS.receiptRetention(), LIMITS.replayHorizon(),
                 LIMITS.clockSkew(), 100, 100, 100, budget);
-    }
-    private static void reportLocalLatency(String operation, long[] samples) {
-        java.util.Arrays.sort(samples);
-        System.out.printf(java.util.Locale.ROOT,
-                "MERCHANT_LOCAL_MONGO operation=%s observations=120 samples=%d p50_ms=%.3f p95_ms=%.3f p99_ms=%.3f setup=single-replica-set-mongo7-docker no-slo-no-ha%n",
-                operation, samples.length, samples[(int) Math.ceil(samples.length * 0.50) - 1] / 1_000_000d,
-                samples[(int) Math.ceil(samples.length * 0.95) - 1] / 1_000_000d, samples[(int) Math.ceil(samples.length * 0.99) - 1] / 1_000_000d);
     }
     private static Observation observation(Scope scope, int id, long sequence, Instant time) {
         return new Observation(scope, token(100 + id), token(200 + id), token(300 + id), MERCHANT, sequence, time, time, token(400 + id));

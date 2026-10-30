@@ -116,7 +116,7 @@ interface MerchantObservationStore {
         public PendingCounts { require(pending >= 0 && quarantined >= 0, "PENDING_COUNT"); }
     }
 
-    /** Explicit software limits, never a default or approved production retention policy. Storage budget is lifetime-per-scope; TTL never replenishes it. */
+    /** Explicit software limits, never a default or approved production retention policy. Storage capacity bounds retained receipts; only verified prefix compaction reclaims it. */
     record Limits(Duration window, Duration historyRetention, Duration receiptRetention, Duration replayHorizon,
                   Duration clockSkew, int maxHistoryRows, int maxPending, int maxSealBatch, int maxStoredObservations) {
         public Limits {

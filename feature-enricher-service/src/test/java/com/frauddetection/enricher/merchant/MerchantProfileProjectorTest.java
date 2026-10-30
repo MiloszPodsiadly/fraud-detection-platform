@@ -3,6 +3,7 @@ package com.frauddetection.enricher.merchant;
 import com.frauddetection.common.events.merchant.MerchantProfile;
 import com.frauddetection.common.events.merchant.MerchantProfile.Reason;
 import com.frauddetection.common.events.merchant.MerchantProfile.Status;
+import com.frauddetection.common.events.merchant.MerchantProfileFacts;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.AdmissionVerifier;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageSeal;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.HistoryRead;
@@ -278,11 +279,12 @@ class MerchantProfileProjectorTest {
         HistoryRead correction = new HistoryRead(correctedPayload, COVERAGE, FROM, TIME, EVALUATED, COVERAGE.coverageStart(), 0, List.of(), false);
         // There is no verified category source/version/effective-at field to project, even after a separately admitted payload correction.
         MerchantProfile corrected = project(correction);
-        assertThat(corrected.category()).isEqualTo(MerchantProfile.UnsupportedFact.CATEGORY_NOT_SUPPORTED);
-        assertThat(corrected.volume().status()).isEqualTo(Status.UNSUPPORTED);
-        assertThat(corrected.distinctCustomers().status()).isEqualTo(Status.UNSUPPORTED);
-        assertThat(corrected.labels().status()).isEqualTo(Status.UNSUPPORTED);
-        assertThat(corrected.populationDenominator().status()).isEqualTo(Status.UNSUPPORTED);
+        assertThat(corrected.category().status()).isEqualTo(MerchantProfileFacts.Status.UNSUPPORTED);
+        assertThat(corrected.category().reason()).isEqualTo(MerchantProfileFacts.Reason.TAXONOMY_NOT_VERIFIED);
+        assertThat(corrected.volume().status()).isEqualTo(MerchantProfileFacts.Status.UNTRUSTED);
+        assertThat(corrected.distinctCustomers().status()).isEqualTo(MerchantProfileFacts.Status.UNTRUSTED);
+        assertThat(corrected.labels().status()).isEqualTo(MerchantProfileFacts.Status.UNSUPPORTED);
+        assertThat(corrected.populationDenominator().status()).isEqualTo(MerchantProfileFacts.Status.MISSING);
         assertThat(original.canonicalBytes()).isEqualTo(originalBytes);
         assertThat(corrected.occurrence().payloadCommitmentClaim()).isNotEqualTo(original.occurrence().payloadCommitmentClaim());
     }

@@ -17,25 +17,34 @@ import static com.mongodb.client.model.Filters.eq;
 
 /** Fresh bootstrap only. Existing collections must match; nothing is migrated, dropped, or repaired. */
 final class MongoMerchantObservationSchema {
+    static final int SCHEMA_VERSION = 2;
     static final String CANDIDATES = "merchant_observation_candidates";
     static final String HISTORY = "merchant_observations";
+    static final String MANIFEST = "merchant_observation_manifest";
     static final String COVERAGE = "merchant_source_coverage";
     static final String CANDIDATE_WINDOW = "merchant_candidate_window";
     static final String HISTORY_WINDOW = "merchant_history_window";
+    static final String MANIFEST_WINDOW = "merchant_manifest_window";
     private static final List<IndexSpec> CANDIDATE_INDEXES = List.of(
             index("merchant_event_unique", true, false, "institution", "source", "sourceEvent"),
             index("merchant_transaction_unique", true, false, "institution", "source", "transaction"),
             index("merchant_occurrence_unique", true, false, "institution", "source", "occurrence"),
             index("merchant_sequence_unique", true, false, "institution", "source", "epoch", "sequence"),
             index(CANDIDATE_WINDOW, false, false, "scope", "merchant", "status", "eventTime", "sequence"),
-            index("merchant_seal_batch", false, false, "scope", "sequence"),
-            index("merchant_receipt_ttl", false, true, "receiptExpireAt"));
+            index("merchant_seal_batch", false, false, "scope", "sequence"));
     private static final List<IndexSpec> HISTORY_INDEXES = List.of(
             index(HISTORY_WINDOW, false, false, "scope", "merchant", "eventTime", "sequence"),
             index("merchant_history_ttl", false, true, "expireAt"));
+    private static final List<IndexSpec> MANIFEST_INDEXES = List.of(
+            index("merchant_manifest_event_unique", true, false, "institution", "source", "sourceEvent"),
+            index("merchant_manifest_transaction_unique", true, false, "institution", "source", "transaction"),
+            index("merchant_manifest_occurrence_unique", true, false, "institution", "source", "occurrence"),
+            index("merchant_manifest_sequence_unique", true, false, "institution", "source", "epoch", "sequence"),
+            index(MANIFEST_WINDOW, false, false, "scope", "merchant", "eventTime", "sequence"),
+            index("merchant_manifest_sequence", false, false, "scope", "sequence"));
 
     static void initialize(MongoDatabase database) {
-        Set<String> expected = Set.of(CANDIDATES, HISTORY, COVERAGE);
+        Set<String> expected = Set.of(CANDIDATES, HISTORY, MANIFEST, COVERAGE);
         Set<String> names = new HashSet<>();
         try (var cursor = database.listCollectionNames().batchSize(33).iterator()) {
             while (cursor.hasNext()) {
@@ -56,6 +65,7 @@ final class MongoMerchantObservationSchema {
             }
             createIndexes(database, CANDIDATES, CANDIDATE_INDEXES);
             createIndexes(database, HISTORY, HISTORY_INDEXES);
+            createIndexes(database, MANIFEST, MANIFEST_INDEXES);
         } else {
             for (String name : expected) {
                 Document metadata = database.listCollections().filter(eq("name", name)).first();
@@ -71,24 +81,28 @@ final class MongoMerchantObservationSchema {
             }
             verifyIndexes(database, CANDIDATES, CANDIDATE_INDEXES);
             verifyIndexes(database, HISTORY, HISTORY_INDEXES);
+            verifyIndexes(database, MANIFEST, MANIFEST_INDEXES);
             verifyIndexes(database, COVERAGE, List.of());
         }
     }
 
     private static Document validator(String name) {
-        Document properties = new Document("_id", type("string").append("maxLength", 265)).append("schemaVersion", type("int").append("enum", List.of(1)))
+        Document properties = new Document("_id", type("string").append("maxLength", 265)).append("schemaVersion", type("int").append("enum", List.of(SCHEMA_VERSION)))
                 .append("issuer", token()).append("institution", token()).append("source", token()).append("epoch", token())
                 .append("identityVersion", type("int").append("minimum", 1).append("maximum", 65_535));
         List<String> required = new ArrayList<>(List.of("_id", "schemaVersion", "issuer", "institution", "source", "epoch", "identityVersion"));
         if (COVERAGE.equals(name)) {
             properties.append("revision", type("long").append("minimum", 0))
                     .append("accepted", type("int").append("minimum", 0).append("maximum", 100_000))
-                    .append("pending", type("int").append("minimum", 0))
-                    .append("quarantined", type("int").append("minimum", 0))
+                    .append("pending", type("int").append("minimum", 0).append("maximum", 100_000))
+                    .append("quarantined", type("int").append("minimum", 0).append("maximum", 100_000))
                     .append("sealedSequence", type("long").append("minimum", 0))
+                    .append("compactedThroughSequence", type("long").append("minimum", 0))
+                    .append("retainedFrom", type("date"))
                     .append("invalidated", type("bool")).append("coverageStart", type("date")).append("watermark", type("date"))
                     .append("policyCommitment", token());
-            required.addAll(List.of("revision", "accepted", "pending", "quarantined", "sealedSequence", "invalidated", "policyCommitment"));
+            required.addAll(List.of("revision", "accepted", "pending", "quarantined", "sealedSequence", "compactedThroughSequence",
+                    "retainedFrom", "invalidated", "policyCommitment"));
         } else {
             properties.append("scope", type("string").append("maxLength", 265)).append("sourceEvent", token()).append("transaction", token())
                     .append("occurrence", token()).append("merchant", token()).append("sequence", type("long").append("minimum", 1))
@@ -99,7 +113,7 @@ final class MongoMerchantObservationSchema {
             if (HISTORY.equals(name)) {
                 properties.append("expireAt", type("date"));
                 required.add("expireAt");
-            } else {
+            } else if (CANDIDATES.equals(name)) {
                 properties.append("status", type("string").append("enum", List.of("STAGED", "COMMITTED", "QUARANTINED")))
                         .append("stagedAt", type("date")).append("receiptExpireAt", type("date"))
                         .append("windowStart", type("date")).append("asOf", type("date"))

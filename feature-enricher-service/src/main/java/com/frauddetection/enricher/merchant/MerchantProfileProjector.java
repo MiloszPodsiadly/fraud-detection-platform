@@ -5,23 +5,16 @@ import com.frauddetection.common.events.merchant.MerchantProfile.Provenance;
 import com.frauddetection.common.events.merchant.MerchantProfile.Reason;
 import com.frauddetection.common.events.merchant.MerchantProfile.Status;
 import com.frauddetection.common.events.merchant.MerchantProfile.WindowCount;
+import com.frauddetection.common.events.merchant.MerchantProfileFacts;
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.OccurrenceClaim;
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.ScopeClaim;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.AdmissionVerifier;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.HistoryRead;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Observation;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /** Disconnected admission boundary around a pure, deterministic projection; no database, framework, clock or messaging access. */
@@ -69,59 +62,13 @@ final class MerchantProfileProjector {
         Observation current = read.current();
         Instant recentStart = current.eventTime().minus(windows.recent());
         Instant baselineStart = recentStart.minus(windows.baseline());
-        if (!read.asOf().equals(current.eventTime())) { return unavailable(read, Reason.OCCURRENCE_MISMATCH); }
-        if (!read.from().equals(baselineStart)) { return unavailable(read, Reason.WINDOW_MISMATCH); }
-        if (current.sourceObservedAt().isAfter(read.evaluatedAt())) { return unavailable(read, Reason.INVALID_TIME); }
-        if (read.coverage() == null || read.retainedFrom() == null) { return unavailable(read, Reason.MISSING_COVERAGE); }
-        if (!read.coverage().scope().equals(current.scope())) { return unavailable(read, Reason.SCOPE_MISMATCH); }
-        if (read.sourceInvalidated() || read.coverage().throughSequence() < current.sequence()
-                || read.coverage().watermark().isBefore(current.eventTime())) { return unavailable(read, Reason.SOURCE_GAP); }
-
-        Map<String, Observation> events = new HashMap<>();
-        Map<String, String> transactions = new HashMap<>();
-        Map<String, String> occurrences = new HashMap<>();
-        Map<Long, String> sequences = new HashMap<>();
-        events.put(current.sourceEvent(), current);
-        transactions.put(current.transaction(), current.sourceEvent());
-        occurrences.put(current.occurrence(), current.sourceEvent());
-        sequences.put(current.sequence(), current.sourceEvent());
-        List<Observation> prior = new ArrayList<>();
-        for (Observation observation : read.observations()) {
-            if (!observation.scope().equals(current.scope()) || !observation.merchant().equals(current.merchant())) {
-                return unavailable(read, Reason.SCOPE_MISMATCH);
-            }
-            if (observation.sourceObservedAt().isAfter(read.evaluatedAt())) { return unavailable(read, Reason.INVALID_TIME); }
-            Observation existing = events.putIfAbsent(observation.sourceEvent(), observation);
-            if (existing != null) {
-                if (!existing.equals(observation)) { return unavailable(read, Reason.DATA_CONFLICT); }
-                continue;
-            }
-            if (conflict(transactions, observation.transaction(), observation.sourceEvent())
-                    || conflict(occurrences, observation.occurrence(), observation.sourceEvent())
-                    || conflict(sequences, observation.sequence(), observation.sourceEvent())) {
-                return unavailable(read, Reason.DATA_CONFLICT);
-            }
-            if (!observation.eventTime().isBefore(baselineStart) && observation.eventTime().isBefore(current.eventTime())) {
-                if (observation.sequence() > read.coverage().throughSequence()) { return unavailable(read, Reason.SOURCE_GAP); }
-                prior.add(observation);
-            }
-        }
-        if (prior.size() != read.expectedRows()) { return unavailable(read, Reason.HISTORY_MISSING); }
-        // Equal-time rows are ordered by source sequence, then event reference; rows at the target time never enter prior history.
-        prior.sort(Comparator.comparing(Observation::eventTime).thenComparingLong(Observation::sequence).thenComparing(Observation::sourceEvent));
-        Provenance provenance = provenance(read, historyCommitment(prior));
-        return profile(read, provenance, count(recentStart, current.eventTime(), prior, read),
-                count(baselineStart, recentStart, prior, read));
-    }
-
-    private WindowCount count(Instant start, Instant end, List<Observation> prior, HistoryRead read) {
-        if (read.retainedFrom().isAfter(start)) { return new WindowCount(start, end, Status.UNAVAILABLE, null, Reason.RETENTION_EXPIRED); }
-        if (read.coverage().coverageStart().isAfter(start)) { return new WindowCount(start, end, Status.UNAVAILABLE, null, Reason.MISSING_COVERAGE); }
-        int count = 0;
-        for (Observation observation : prior) {
-            if (!observation.eventTime().isBefore(start) && observation.eventTime().isBefore(end)) { count++; }
-        }
-        return new WindowCount(start, end, Status.AVAILABLE, count, Reason.NONE);
+        var result = MerchantObservationWindowPolicy.derive(read, List.of(
+                new MerchantObservationWindowPolicy.Window(recentStart, current.eventTime()),
+                new MerchantObservationWindowPolicy.Window(baselineStart, recentStart)), windows.maxRows());
+        if (result.reason() != Reason.NONE) { return unavailable(read, result.reason()); }
+        // The canonical policy orders equal-time rows by sequence and event reference before commitment.
+        Provenance provenance = provenance(read, historyCommitment(result.prior()));
+        return profile(read, provenance, result.windows().get(0), result.windows().get(1));
     }
 
     private MerchantProfile unavailable(HistoryRead read, Reason reason) {
@@ -143,32 +90,19 @@ final class MerchantProfileProjector {
         return new MerchantProfile(MerchantProfile.VERSION, MerchantProfile.COMPUTATION_VERSION,
                 new ScopeClaim(scope.issuer(), scope.institution(), scope.source(), scope.epoch(), current.merchant(), scope.identityVersion()),
                 new OccurrenceClaim(current.sourceEvent(), current.transaction(), current.occurrence(), current.sequence(),
-                        current.eventTime(), current.payloadCommitment()), provenance, recent, baseline);
-    }
-
-    private static <K> boolean conflict(Map<K, String> map, K key, String sourceEvent) {
-        String existing = map.putIfAbsent(key, sourceEvent);
-        return existing != null && !existing.equals(sourceEvent);
+                        current.eventTime(), current.payloadCommitment()), provenance, recent, baseline,
+                MerchantProfileFacts.currentPath());
     }
 
     private static String historyCommitment(List<Observation> prior) {
-        final MessageDigest digest;
-        try { digest = MessageDigest.getInstance("SHA-256"); }
-        catch (NoSuchAlgorithmException exception) { throw new IllegalStateException("MERCHANT_PROFILE_DIGEST_UNAVAILABLE"); }
-        append(digest, "merchant-profile-history/v1");
+        MerchantCommitment.Accumulator digest = MerchantCommitment.accumulator("MERCHANT_PROFILE_DIGEST_UNAVAILABLE")
+                .append("merchant-profile-history/v1");
         for (Observation observation : prior) {
             var scope = observation.scope();
-            append(digest, scope.issuer(), scope.institution(), scope.source(), scope.epoch(), scope.identityVersion(),
+            digest.append(scope.issuer(), scope.institution(), scope.source(), scope.epoch(), scope.identityVersion(),
                     observation.sourceEvent(), observation.transaction(), observation.occurrence(), observation.merchant(),
                     observation.sequence(), observation.eventTime(), observation.sourceObservedAt(), observation.payloadCommitment());
         }
-        return HexFormat.of().formatHex(digest.digest());
-    }
-    private static void append(MessageDigest digest, Object... values) {
-        for (Object value : values) {
-            byte[] bytes = value.toString().getBytes(StandardCharsets.UTF_8);
-            digest.update((bytes.length + ":").getBytes(StandardCharsets.UTF_8));
-            digest.update(bytes);
-        }
+        return digest.finish();
     }
 }
