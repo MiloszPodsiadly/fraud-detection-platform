@@ -81,5 +81,7 @@ fraud:
     engines:
       device:
         enabled: ${FRAUD_SCORING_ENGINE_DEVICE_ENABLED:false}
+      merchant:
+        enabled: ${FRAUD_SCORING_ENGINE_MERCHANT_ENABLED:false}
       velocity:
         enabled: ${FRAUD_SCORING_ENGINE_VELOCITY_ENABLED:false}
