@@ -4,8 +4,11 @@ import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.Occur
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.ScopeClaim;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.regex.Pattern;
 
 /** Internal immutable projection value, not an admission proof or public DTO. Readers need independently authorized occurrence access. */
@@ -16,20 +19,23 @@ public record MerchantProfile(
         OccurrenceClaim occurrence,
         Provenance provenance,
         WindowCount recent,
-        WindowCount baseline
+        WindowCount baseline,
+        MerchantProfileFacts facts
 ) {
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     public static final int COMPUTATION_VERSION = 1;
     public static final int MAX_HISTORY_ROWS = 25_000;
-    public static final int MAX_CANONICAL_BYTES = 4_096;
+    public static final int MAX_CANONICAL_BYTES = 8_192;
     public static final Duration MAX_TOTAL_WINDOW = Duration.ofDays(30);
 
     public MerchantProfile {
         require(schemaVersion == VERSION && computationVersion == COMPUTATION_VERSION, "VERSION");
-        require(scope != null && occurrence != null && provenance != null && recent != null && baseline != null, "REQUIRED_FIELD");
+        require(scope != null && occurrence != null && provenance != null && recent != null && baseline != null && facts != null,
+                "REQUIRED_FIELD");
         require(recent.end().equals(occurrence.eventTime()) && baseline.end().equals(recent.start())
                 && Duration.between(baseline.start(), recent.end()).compareTo(MAX_TOTAL_WINDOW) <= 0, "WINDOW_BINDING");
         require(!provenance.evaluatedAt().isBefore(occurrence.eventTime()), "EVALUATION_TIME");
+        validateFacts(scope, occurrence, provenance, recent, baseline, facts);
         if (recent.status() == Status.AVAILABLE || baseline.status() == Status.AVAILABLE) {
             require(provenance.coverageStart() != null && provenance.watermark() != null && provenance.retainedFrom() != null
                     && provenance.throughSequence() != null && provenance.throughSequence() >= occurrence.sourceSequence()
@@ -45,29 +51,33 @@ public record MerchantProfile(
         }
     }
 
+    /** Disabled callers without typed observations receive explicit non-informative fact states. */
+    public MerchantProfile(int schemaVersion, int computationVersion, ScopeClaim scope, OccurrenceClaim occurrence,
+                           Provenance provenance, WindowCount recent, WindowCount baseline) {
+        this(schemaVersion, computationVersion, scope, occurrence, provenance, recent, baseline,
+                MerchantProfileFacts.currentPath());
+    }
+
     public enum Status { AVAILABLE, UNAVAILABLE, UNSUPPORTED }
     public enum Reason { NONE, NOT_ADMITTED, MISSING_COVERAGE, SOURCE_GAP, RETENTION_EXPIRED, HISTORY_MISSING,
         CAPACITY_EXCEEDED, SCOPE_MISMATCH, OCCURRENCE_MISMATCH, WINDOW_MISMATCH, DATA_CONFLICT, INVALID_TIME }
-    public enum UnsupportedFact {
-        AMOUNTS_NOT_SUPPORTED, CUSTOMER_LINKAGE_NOT_SUPPORTED, CATEGORY_NOT_SUPPORTED,
-        FRAUD_LABELS_NOT_SUPPORTED, POPULATION_NOT_SUPPORTED;
-        public Status status() { return Status.UNSUPPORTED; }
-    }
-
-    public UnsupportedFact volume() { return UnsupportedFact.AMOUNTS_NOT_SUPPORTED; }
-    public UnsupportedFact distinctCustomers() { return UnsupportedFact.CUSTOMER_LINKAGE_NOT_SUPPORTED; }
-    public UnsupportedFact category() { return UnsupportedFact.CATEGORY_NOT_SUPPORTED; }
-    public UnsupportedFact labels() { return UnsupportedFact.FRAUD_LABELS_NOT_SUPPORTED; }
-    public UnsupportedFact populationDenominator() { return UnsupportedFact.POPULATION_NOT_SUPPORTED; }
+    public MerchantProfileFacts.Fact<MerchantProfileFacts.ActivityVolume> volume() { return facts.activityVolume(); }
+    public MerchantProfileFacts.Fact<MerchantProfileFacts.CustomerLinkage> distinctCustomers() { return facts.customerLinkage(); }
+    public MerchantProfileFacts.Fact<MerchantProfileFacts.CategoryClassification> category() { return facts.category(); }
+    public MerchantProfileFacts.Fact<MerchantProfileFacts.MatureFraudLabels> labels() { return facts.matureFraudLabels(); }
+    public MerchantProfileFacts.Fact<MerchantProfileFacts.CoveredPopulation> populationDenominator() { return facts.coveredPopulation(); }
 
     /** Diagnostic view excludes all identity references, payload commitments and history commitments. */
     public Diagnostics diagnostics() {
-        return new Diagnostics(computationVersion, recent, baseline, volume(), distinctCustomers(), category(), labels(), populationDenominator());
+        return new Diagnostics(computationVersion, recent, baseline, summary(volume()), summary(distinctCustomers()), summary(category()),
+                summary(labels()), summary(populationDenominator()), summary(facts.institutionMerchantMapping()));
     }
 
     public record Diagnostics(int computationVersion, WindowCount recent, WindowCount baseline,
-                              UnsupportedFact volume, UnsupportedFact distinctCustomers, UnsupportedFact category,
-                              UnsupportedFact labels, UnsupportedFact populationDenominator) { }
+                              FactSummary volume, FactSummary distinctCustomers, FactSummary category,
+                              FactSummary labels, FactSummary populationDenominator, FactSummary institutionIdentityMapping) { }
+
+    public record FactSummary(MerchantProfileFacts.Status status, MerchantProfileFacts.Reason reason) { }
 
     public record WindowCount(Instant start, Instant end, Status status, Integer count, Reason reason) {
         public WindowCount {
@@ -100,25 +110,81 @@ public record MerchantProfile(
     /** Versioned deterministic bytes for internal identity only; never an authentication mechanism. */
     public byte[] canonicalBytes() {
         StringBuilder out = new StringBuilder(1_536);
-        append(out, "merchant-profile/v1", schemaVersion, computationVersion, scope.issuerRef(), scope.institutionRef(),
+        MerchantCanonicalEncoding.append(out, "merchant-profile/v2", schemaVersion, computationVersion, scope.issuerRef(), scope.institutionRef(),
                 scope.sourceRef(), scope.sourceEpochRef(), scope.merchantRef(), scope.identityVersion(), occurrence.sourceEventRef(),
                 occurrence.transactionRef(), occurrence.scoringOccurrenceRef(), occurrence.sourceSequence(), occurrence.eventTime(),
-                occurrence.payloadCommitmentClaim(), provenance.evaluatedAt(), provenance.retainedFrom(), provenance.coverageStart(),
+                occurrence.payloadCommitmentClaim(), factDigest(facts.canonicalBytes()),
+                provenance.evaluatedAt(), provenance.retainedFrom(), provenance.coverageStart(),
                 provenance.watermark(), provenance.throughSequence(), provenance.historyCommitment());
         for (WindowCount window : new WindowCount[] {recent, baseline}) {
-            append(out, window.start(), window.end(), window.status(), window.count(), window.reason());
+            MerchantCanonicalEncoding.append(out, window.start(), window.end(), window.status(), window.count(), window.reason());
         }
-        append(out, volume(), distinctCustomers(), category(), labels(), populationDenominator());
         byte[] bytes = out.toString().getBytes(StandardCharsets.UTF_8);
         require(bytes.length <= MAX_CANONICAL_BYTES, "OUTPUT_LIMIT");
         return bytes;
     }
 
-    private static void append(StringBuilder out, Object... values) {
-        for (Object value : values) {
-            String text = value == null ? null : value.toString();
-            out.append(text == null ? -1 : text.getBytes(StandardCharsets.UTF_8).length).append(':');
-            if (text != null) { out.append(text); }
+    private static void validateFacts(ScopeClaim scope, OccurrenceClaim occurrence, Provenance provenance,
+                                      WindowCount recent, WindowCount baseline, MerchantProfileFacts facts) {
+        for (MerchantProfileFacts.Fact<?> fact : new MerchantProfileFacts.Fact<?>[] {facts.activityVolume(), facts.category(),
+                facts.customerLinkage(), facts.matureFraudLabels(), facts.coveredPopulation(), facts.institutionMerchantMapping()}) {
+            if (fact.status() == MerchantProfileFacts.Status.AVAILABLE) {
+                require(!fact.provenance().observedAt().isAfter(provenance.evaluatedAt()), "FACT_PROVENANCE_TIME");
+            }
+        }
+        if (facts.activityVolume().status() == MerchantProfileFacts.Status.AVAILABLE) {
+            var volume = facts.activityVolume().value();
+            require(recent.status() == Status.AVAILABLE && baseline.status() == Status.AVAILABLE
+                    && volume.recent().from().equals(recent.start()) && volume.recent().until().equals(recent.end())
+                    && volume.baseline().from().equals(baseline.start()) && volume.baseline().until().equals(baseline.end())
+                    && volume.recent().transactionCount() == recent.count()
+                    && volume.baseline().transactionCount() == baseline.count(), "ACTIVITY_BINDING");
+            require(facts.activityVolume().provenance().sourceRef().equals(scope.sourceRef()), "ACTIVITY_SOURCE_SCOPE");
+        }
+        if (facts.category().status() == MerchantProfileFacts.Status.AVAILABLE) {
+            require(!facts.category().value().effectiveAt().isAfter(occurrence.eventTime()), "CATEGORY_EFFECTIVE_TIME");
+        }
+        if (facts.customerLinkage().status() == MerchantProfileFacts.Status.AVAILABLE) {
+            var linkage = facts.customerLinkage().value();
+            require(linkage.windowStart().equals(recent.start()) && linkage.windowEnd().equals(recent.end())
+                    && facts.customerLinkage().provenance().sourceRef().equals(scope.sourceRef()), "CUSTOMER_LINKAGE_SCOPE");
+            if (facts.activityVolume().status() == MerchantProfileFacts.Status.AVAILABLE) {
+                require(linkage.distinctCustomers() <= facts.activityVolume().value().recent().transactionCount(),
+                        "CUSTOMER_LINKAGE_COUNT");
+            }
+        }
+        if (facts.matureFraudLabels().status() == MerchantProfileFacts.Status.AVAILABLE) {
+            var labels = facts.matureFraudLabels().value();
+            require(labels.windowStart().equals(recent.start()) && labels.windowEnd().equals(recent.end())
+                    && !labels.matureThrough().isAfter(provenance.evaluatedAt()), "LABELS_WINDOW");
+        }
+        if (facts.coveredPopulation().status() == MerchantProfileFacts.Status.AVAILABLE) {
+            var population = facts.coveredPopulation().value();
+            require(population.windowStart().equals(recent.start()) && population.windowEnd().equals(recent.end()),
+                    "POPULATION_WINDOW");
+            if (facts.matureFraudLabels().status() == MerchantProfileFacts.Status.AVAILABLE) {
+                var labels = facts.matureFraudLabels().value();
+                require((long) labels.confirmedFraud() + labels.confirmedLegitimate() <= population.eligibleTransactions(),
+                        "LABEL_POPULATION");
+            }
+        }
+        if (facts.institutionMerchantMapping().status() == MerchantProfileFacts.Status.AVAILABLE) {
+            var mapping = facts.institutionMerchantMapping().value();
+            require(mapping.sourceIdentityVersion() == scope.identityVersion()
+                    && !occurrence.eventTime().isBefore(mapping.validFrom())
+                    && occurrence.eventTime().isBefore(mapping.validUntil()), "IDENTITY_MAPPING_SCOPE");
+        }
+    }
+
+    private static FactSummary summary(MerchantProfileFacts.Fact<?> fact) {
+        return new FactSummary(fact.status(), fact.reason());
+    }
+
+    private static String factDigest(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("MERCHANT_PROFILE_DIGEST_UNAVAILABLE");
         }
     }
 

@@ -22,15 +22,20 @@ class MerchantProfileContractTest {
     private static final OccurrenceClaim OCCURRENCE = new OccurrenceClaim(token('f'), token('1'), token('2'), 10, TIME, token('3'));
 
     @Test
-    void immutableValueCarriesExactBindingAndSeparateWindowCountsWithoutInventingOptionalData() {
+    void immutableValueCarriesExactBindingAndSeparateWindowCountsWithTypedFactDispositions() {
         MerchantProfile profile = profile(provenance(), available(TIME.minusSeconds(3600), TIME, 2),
                 available(TIME.minusSeconds(7200), TIME.minusSeconds(3600), 5));
         assertThat(profile.scope()).isEqualTo(SCOPE);
         assertThat(profile.occurrence()).isEqualTo(OCCURRENCE);
         assertThat(profile.recent().count()).isEqualTo(2);
         assertThat(profile.baseline().count()).isEqualTo(5);
-        assertThat(List.of(profile.volume(), profile.distinctCustomers(), profile.category(), profile.labels(), profile.populationDenominator()))
-                .allSatisfy(fact -> assertThat(fact.status()).isEqualTo(Status.UNSUPPORTED));
+        assertThat(profile.volume().status()).isEqualTo(MerchantProfileFacts.Status.UNTRUSTED);
+        assertThat(profile.volume().reason()).isEqualTo(MerchantProfileFacts.Reason.CLIENT_ASSERTION);
+        assertThat(profile.distinctCustomers().status()).isEqualTo(MerchantProfileFacts.Status.UNTRUSTED);
+        assertThat(profile.category().status()).isEqualTo(MerchantProfileFacts.Status.UNSUPPORTED);
+        assertThat(profile.labels().status()).isEqualTo(MerchantProfileFacts.Status.UNSUPPORTED);
+        assertThat(profile.populationDenominator().status()).isEqualTo(MerchantProfileFacts.Status.MISSING);
+        assertThat(profile.facts().institutionMerchantMapping().status()).isEqualTo(MerchantProfileFacts.Status.MISSING);
         assertThat(profile.computationVersion()).isEqualTo(MerchantProfile.COMPUTATION_VERSION);
     }
 
@@ -96,10 +101,10 @@ class MerchantProfileContractTest {
         assertThatThrownBy(() -> new Provenance(TIME, null, null, null, null, "raw-history")).hasMessage("MERCHANT_PROFILE_HISTORY_COMMITMENT");
         MerchantProfile valid = profile(provenance(), available(TIME.minusSeconds(3600), TIME, 0),
                 available(TIME.minusSeconds(7200), TIME.minusSeconds(3600), 0));
-        for (int version : new int[] {0, 2}) {
+        for (int version : new int[] {0, 3}) {
             assertThatThrownBy(() -> new MerchantProfile(version, 1, SCOPE, OCCURRENCE, provenance(), valid.recent(), valid.baseline()))
                     .hasMessage("MERCHANT_PROFILE_VERSION");
-            assertThatThrownBy(() -> new MerchantProfile(1, version, SCOPE, OCCURRENCE, provenance(), valid.recent(), valid.baseline()))
+            assertThatThrownBy(() -> new MerchantProfile(MerchantProfile.VERSION, version, SCOPE, OCCURRENCE, provenance(), valid.recent(), valid.baseline()))
                     .hasMessage("MERCHANT_PROFILE_VERSION");
         }
         assertThatThrownBy(() -> profile(new Provenance(TIME.minusSeconds(1), null, null, null, null, null),
@@ -118,7 +123,7 @@ class MerchantProfileContractTest {
             assertThat(profile.toString()).doesNotContain(token(reference));
             assertThat(profile.provenance().toString()).doesNotContain(token(reference));
         }
-        assertThat(diagnostic).contains("AVAILABLE", "count=0", "CATEGORY_NOT_SUPPORTED");
+        assertThat(diagnostic).contains("AVAILABLE", "count=0", "UNSUPPORTED", "TAXONOMY_NOT_VERIFIED");
     }
 
     @Test
@@ -136,7 +141,8 @@ class MerchantProfileContractTest {
     }
 
     private static MerchantProfile profile(Provenance provenance, WindowCount recent, WindowCount baseline) {
-        return new MerchantProfile(1, 1, SCOPE, OCCURRENCE, provenance, recent, baseline);
+        return new MerchantProfile(MerchantProfile.VERSION, MerchantProfile.COMPUTATION_VERSION,
+                SCOPE, OCCURRENCE, provenance, recent, baseline);
     }
     private static Provenance provenance() {
         return new Provenance(TIME, TIME.minusSeconds(7200), TIME.minusSeconds(7200), TIME, 10L, token('4'));

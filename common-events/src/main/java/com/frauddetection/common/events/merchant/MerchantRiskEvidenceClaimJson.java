@@ -15,7 +15,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 
-/** Internal JSON boundary only. It does not register a Kafka serializer, endpoint, or admitted evidence reader. */
+/** Common-events-owned codec for this versioned claim; no application currently binds it to an endpoint or event channel. */
 public final class MerchantRiskEvidenceClaimJson {
     public static final int MAX_SERIALIZED_BYTES = 4_096;
     private static final JsonFactory JSON_FACTORY = JsonFactory.builder()

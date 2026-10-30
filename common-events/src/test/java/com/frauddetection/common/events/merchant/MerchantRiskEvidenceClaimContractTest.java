@@ -219,7 +219,8 @@ class MerchantRiskEvidenceClaimContractTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "\"verified\":true,", "\"admission\":\"VERIFIED\",", "\"keyVersion\":1,",
-            "\"sourceSystem\":\"BANK\",", "\"metadata\":{},"
+            "\"sourceSystem\":\"BANK\",", "\"metadata\":{},", "\"fraudCount\":90,\"populationCount\":100,",
+            "\"reviewedSampleFraudRate\":0.9,", "\"labelsMatureAt\":\"2028-01-01T00:00:00Z\",", "\"categoryRisk\":\"HIGH\","
     })
     void extraTopLevelClaimsCannotDeclareAuthority(String extraField) {
         assertInvalid(json().replaceFirst("\\{", "{" + extraField));

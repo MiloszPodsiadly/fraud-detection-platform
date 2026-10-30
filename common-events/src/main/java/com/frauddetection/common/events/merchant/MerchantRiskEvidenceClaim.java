@@ -65,28 +65,18 @@ public record MerchantRiskEvidenceClaim(
     /** Versioned, UTF-8 byte-length-delimited identity of this claim, not a signature or admission proof. */
     public byte[] canonicalBytes() {
         StringBuilder out = new StringBuilder(1_536);
-        append(out, "merchant-risk/evidence-claim", schemaVersion,
+        MerchantCanonicalEncoding.append(out, "merchant-risk/evidence-claim", schemaVersion,
                 scope.issuerRef(), scope.institutionRef(), scope.sourceRef(), scope.sourceEpochRef(),
                 scope.merchantRef(), scope.identityVersion(), occurrence.sourceEventRef(),
                 occurrence.transactionRef(), occurrence.scoringOccurrenceRef(), occurrence.sourceSequence(),
                 occurrence.eventTime(), occurrence.payloadCommitmentClaim(), source.assertion(), source.observedAt(),
                 history.windowStart(), history.asOf(), history.coveredFrom(), history.coveredThrough(), history.coverage());
         for (SignalFact fact : signals) {
-            append(out, fact.signal(), fact.status(), fact.reason());
+            MerchantCanonicalEncoding.append(out, fact.signal(), fact.status(), fact.reason());
         }
         byte[] bytes = out.toString().getBytes(StandardCharsets.UTF_8);
         require(bytes.length <= MAX_CANONICAL_BYTES, "CANONICAL_SIZE");
         return bytes;
-    }
-
-    private static void append(StringBuilder out, Object... fields) {
-        for (Object field : fields) {
-            String text = field == null ? null : field.toString();
-            out.append(text == null ? -1 : text.getBytes(StandardCharsets.UTF_8).length).append(':');
-            if (text != null) {
-                out.append(text);
-            }
-        }
     }
 
     @JsonAnySetter
