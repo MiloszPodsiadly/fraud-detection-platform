@@ -48,3 +48,6 @@ fraud:
   device-risk:
     admission:
       enabled: false
+  merchant-risk:
+    admission:
+      enabled: false
