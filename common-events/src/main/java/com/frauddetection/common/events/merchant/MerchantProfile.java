@@ -2,6 +2,8 @@ package com.frauddetection.common.events.merchant;
 
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.OccurrenceClaim;
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.ScopeClaim;
+import com.frauddetection.common.events.merchant.MerchantProfileFacts.MerchantPopulationIdentity;
+import com.frauddetection.common.events.merchant.MerchantProfileFacts.PopulationBasis;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -22,7 +24,7 @@ public record MerchantProfile(
         WindowCount baseline,
         MerchantProfileFacts facts
 ) {
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     public static final int COMPUTATION_VERSION = 1;
     public static final int MAX_HISTORY_ROWS = 25_000;
     public static final int MAX_CANONICAL_BYTES = 8_192;
@@ -67,6 +69,14 @@ public record MerchantProfile(
     public MerchantProfileFacts.Fact<MerchantProfileFacts.MatureFraudLabels> labels() { return facts.matureFraudLabels(); }
     public MerchantProfileFacts.Fact<MerchantProfileFacts.CoveredPopulation> populationDenominator() { return facts.coveredPopulation(); }
 
+    /** Structural pairing with a positive denominator only; fact provenance remains an unverified claim. */
+    public boolean hasCompatibleFraudPopulationFacts() {
+        return labels().status() == MerchantProfileFacts.Status.AVAILABLE
+                && populationDenominator().status() == MerchantProfileFacts.Status.AVAILABLE
+                && labels().value().populationIdentity().equals(populationDenominator().value().populationIdentity())
+                && populationDenominator().value().eligibleTransactions() > 0;
+    }
+
     /** Diagnostic view excludes all identity references, payload commitments and history commitments. */
     public Diagnostics diagnostics() {
         return new Diagnostics(computationVersion, recent, baseline, summary(volume()), summary(distinctCustomers()), summary(category()),
@@ -110,7 +120,7 @@ public record MerchantProfile(
     /** Versioned deterministic bytes for internal identity only; never an authentication mechanism. */
     public byte[] canonicalBytes() {
         StringBuilder out = new StringBuilder(1_536);
-        MerchantCanonicalEncoding.append(out, "merchant-profile/v2", schemaVersion, computationVersion, scope.issuerRef(), scope.institutionRef(),
+        MerchantCanonicalEncoding.append(out, "merchant-profile/v3", schemaVersion, computationVersion, scope.issuerRef(), scope.institutionRef(),
                 scope.sourceRef(), scope.sourceEpochRef(), scope.merchantRef(), scope.identityVersion(), occurrence.sourceEventRef(),
                 occurrence.transactionRef(), occurrence.scoringOccurrenceRef(), occurrence.sourceSequence(), occurrence.eventTime(),
                 occurrence.payloadCommitmentClaim(), factDigest(facts.canonicalBytes()),
@@ -155,24 +165,70 @@ public record MerchantProfile(
         }
         if (facts.matureFraudLabels().status() == MerchantProfileFacts.Status.AVAILABLE) {
             var labels = facts.matureFraudLabels().value();
-            require(labels.windowStart().equals(recent.start()) && labels.windowEnd().equals(recent.end())
-                    && !labels.matureThrough().isAfter(provenance.evaluatedAt()), "LABELS_WINDOW");
+            require(!labels.matureThrough().isAfter(provenance.evaluatedAt()), "LABELS_WINDOW");
+            validatePopulationIdentity(labels.populationIdentity(), scope, recent, provenance, facts);
+            if (labels.populationIdentity().basis() == PopulationBasis.SOURCE_OBSERVATION_COHORT) {
+                require(recent.status() == Status.AVAILABLE
+                                && (long) labels.confirmedFraud() + labels.confirmedLegitimate() <= recent.count(),
+                        "LABEL_OBSERVATION_COHORT");
+            } else {
+                require(facts.coveredPopulation().status() == MerchantProfileFacts.Status.AVAILABLE,
+                        "LABEL_POPULATION_REQUIRED");
+            }
         }
         if (facts.coveredPopulation().status() == MerchantProfileFacts.Status.AVAILABLE) {
             var population = facts.coveredPopulation().value();
-            require(population.windowStart().equals(recent.start()) && population.windowEnd().equals(recent.end()),
-                    "POPULATION_WINDOW");
+            validatePopulationIdentity(population.populationIdentity(), scope, recent, provenance, facts);
+            if (population.populationIdentity().basis() == PopulationBasis.SOURCE_OBSERVATION_COHORT) {
+                require(recent.status() == Status.AVAILABLE && population.eligibleTransactions() <= recent.count(),
+                        "POPULATION_OBSERVATION_COHORT");
+            }
             if (facts.matureFraudLabels().status() == MerchantProfileFacts.Status.AVAILABLE) {
                 var labels = facts.matureFraudLabels().value();
+                require(labels.populationIdentity().equals(population.populationIdentity()), "POPULATION_IDENTITY_MISMATCH");
                 require((long) labels.confirmedFraud() + labels.confirmedLegitimate() <= population.eligibleTransactions(),
                         "LABEL_POPULATION");
             }
         }
         if (facts.institutionMerchantMapping().status() == MerchantProfileFacts.Status.AVAILABLE) {
             var mapping = facts.institutionMerchantMapping().value();
-            require(mapping.sourceIdentityVersion() == scope.identityVersion()
+            require(mapping.issuerRef().equals(scope.issuerRef())
+                    && mapping.institutionRef().equals(scope.institutionRef())
+                    && mapping.sourceIdentityVersion() == scope.identityVersion()
+                    && mapping.sourceRef().equals(scope.sourceRef())
+                    && mapping.sourceEpochRef().equals(scope.sourceEpochRef())
+                    && mapping.merchantRef().equals(scope.merchantRef())
+                    && !recent.start().isBefore(mapping.validFrom())
+                    && !recent.end().isAfter(mapping.validUntil())
                     && !occurrence.eventTime().isBefore(mapping.validFrom())
                     && occurrence.eventTime().isBefore(mapping.validUntil()), "IDENTITY_MAPPING_SCOPE");
+        }
+    }
+
+    private static void validatePopulationIdentity(MerchantPopulationIdentity identity, ScopeClaim scope,
+                                                   WindowCount recent, Provenance provenance,
+                                                   MerchantProfileFacts facts) {
+        require(identity.issuerRef().equals(scope.issuerRef())
+                        && identity.institutionRef().equals(scope.institutionRef())
+                        && identity.sourceRef().equals(scope.sourceRef())
+                        && identity.sourceEpochRef().equals(scope.sourceEpochRef())
+                        && identity.merchantRef().equals(scope.merchantRef())
+                        && identity.identityVersion() == scope.identityVersion()
+                        && identity.windowStart().equals(recent.start()) && identity.windowEnd().equals(recent.end())
+                        && !identity.asOf().isAfter(provenance.evaluatedAt()),
+                "POPULATION_IDENTITY_SCOPE");
+        if (identity.basis() == PopulationBasis.SOURCE_OBSERVATION_COHORT) {
+            require(recent.status() == Status.AVAILABLE && provenance.historyCommitment() != null
+                            && identity.cohortCommitment().equals(provenance.historyCommitment()),
+                    "POPULATION_OBSERVATION_COMMITMENT");
+        } else {
+            require(facts.institutionMerchantMapping().status() == MerchantProfileFacts.Status.AVAILABLE,
+                    "POPULATION_MAPPING_REQUIRED");
+            var mapping = facts.institutionMerchantMapping().value();
+            require(identity.institutionMerchantRef().equals(mapping.institutionMerchantRef())
+                            && identity.mappingVersion() == mapping.mappingVersion()
+                            && identity.sourceSetCommitment().equals(mapping.sourceSetCommitment()),
+                    "POPULATION_MAPPING_SCOPE");
         }
     }
 

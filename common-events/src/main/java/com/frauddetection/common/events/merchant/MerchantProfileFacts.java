@@ -19,7 +19,7 @@ public record MerchantProfileFacts(
         Fact<CoveredPopulation> coveredPopulation,
         Fact<InstitutionMerchantMapping> institutionMerchantMapping
 ) {
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     public static final int MAX_CANONICAL_BYTES = 4_096;
     private static final Pattern REFERENCE = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern MCC = Pattern.compile("[0-9]{4}");
@@ -67,7 +67,7 @@ public record MerchantProfileFacts(
 
     public byte[] canonicalBytes() {
         StringBuilder out = new StringBuilder(1_024);
-        MerchantCanonicalEncoding.append(out, "merchant-profile-facts/v1", schemaVersion);
+        MerchantCanonicalEncoding.append(out, "merchant-profile-facts/v2", schemaVersion);
         appendFact(out, activityVolume);
         appendFact(out, category);
         appendFact(out, customerLinkage);
@@ -152,6 +152,45 @@ public record MerchantProfileFacts(
     public sealed interface Value permits ActivityVolume, CategoryClassification, CustomerLinkage,
             MatureFraudLabels, CoveredPopulation, InstitutionMerchantMapping { }
 
+    /** Shared, structural cohort claim; opaque commitments do not authenticate membership or authority. */
+    public record MerchantPopulationIdentity(PopulationBasis basis, String issuerRef, String institutionRef,
+                                             String sourceRef, String sourceEpochRef, String merchantRef,
+                                             int identityVersion, String institutionMerchantRef, int mappingVersion,
+                                             String sourceSetCommitment, Instant windowStart, Instant windowEnd,
+                                             Instant asOf, int populationDefinitionVersion,
+                                             String cohortCommitment) {
+        public MerchantPopulationIdentity {
+            require(basis != null, "POPULATION_BASIS");
+            reference(issuerRef, "POPULATION_ISSUER");
+            reference(institutionRef, "POPULATION_INSTITUTION");
+            reference(sourceRef, "POPULATION_SOURCE");
+            reference(sourceEpochRef, "POPULATION_SOURCE_EPOCH");
+            reference(merchantRef, "POPULATION_MERCHANT");
+            require(identityVersion >= 1 && identityVersion <= 65_535, "POPULATION_IDENTITY_VERSION");
+            time(windowStart, "POPULATION_WINDOW");
+            time(windowEnd, "POPULATION_WINDOW");
+            time(asOf, "POPULATION_AS_OF");
+            require(windowStart.isBefore(windowEnd)
+                    && Duration.between(windowStart, windowEnd).compareTo(MerchantProfile.MAX_TOTAL_WINDOW) <= 0
+                    && !asOf.isBefore(windowEnd), "POPULATION_WINDOW");
+            require(populationDefinitionVersion >= 1 && populationDefinitionVersion <= 65_535,
+                    "POPULATION_VERSION");
+            reference(cohortCommitment, "POPULATION_COHORT_COMMITMENT");
+            if (basis == PopulationBasis.SOURCE_OBSERVATION_COHORT) {
+                require(institutionMerchantRef == null && mappingVersion == 0 && sourceSetCommitment == null,
+                        "POPULATION_BASIS_FIELDS");
+            } else {
+                reference(institutionMerchantRef, "POPULATION_INSTITUTION_MERCHANT");
+                require(mappingVersion >= 1 && mappingVersion <= 65_535, "POPULATION_MAPPING_VERSION");
+                reference(sourceSetCommitment, "POPULATION_SOURCE_SET");
+            }
+        }
+
+        @Override public String toString() { return "MerchantPopulationIdentity[redacted]"; }
+    }
+
+    public enum PopulationBasis { SOURCE_OBSERVATION_COHORT, INSTITUTION_MAPPED_COHORT }
+
     /** Recent and baseline totals must use the same currency and adjacent half-open windows. */
     public record ActivityVolume(ActivityWindow recent, ActivityWindow baseline) implements Value {
         public ActivityVolume {
@@ -206,44 +245,54 @@ public record MerchantProfileFacts(
     }
 
     /** Only mature, resolved analyst outcomes count; unresolved and pending labels are excluded. */
-    public record MatureFraudLabels(Instant windowStart, Instant windowEnd, int confirmedFraud,
+    public record MatureFraudLabels(MerchantPopulationIdentity populationIdentity, int confirmedFraud,
                                     int confirmedLegitimate, Instant matureThrough,
                                     int labelPolicyVersion) implements Value {
         public MatureFraudLabels {
-            time(windowStart, "LABEL_WINDOW");
-            time(windowEnd, "LABEL_WINDOW");
+            require(populationIdentity != null, "LABEL_POPULATION_IDENTITY");
             time(matureThrough, "LABEL_MATURITY");
-            require(windowStart.isBefore(windowEnd)
-                    && Duration.between(windowStart, windowEnd).compareTo(MerchantProfile.MAX_TOTAL_WINDOW) <= 0, "LABEL_WINDOW");
-            require(!matureThrough.isBefore(windowEnd), "LABEL_MATURITY");
+            require(!matureThrough.isBefore(populationIdentity.windowEnd())
+                    && !matureThrough.isAfter(populationIdentity.asOf()), "LABEL_MATURITY");
             require(confirmedFraud >= 0 && confirmedLegitimate >= 0
                     && (long) confirmedFraud + confirmedLegitimate <= MerchantProfile.MAX_HISTORY_ROWS, "LABEL_COUNT");
             require(labelPolicyVersion >= 1 && labelPolicyVersion <= 65_535, "LABEL_POLICY_VERSION");
         }
 
+        public Instant windowStart() { return populationIdentity.windowStart(); }
+        public Instant windowEnd() { return populationIdentity.windowEnd(); }
+
         @Override public String toString() { return "MerchantMatureFraudLabels[redacted]"; }
     }
 
     /** Population counts require a complete, versioned denominator definition for this exact window. */
-    public record CoveredPopulation(Instant windowStart, Instant windowEnd, long eligibleTransactions,
-                                    int populationDefinitionVersion) implements Value {
+    public record CoveredPopulation(MerchantPopulationIdentity populationIdentity,
+                                    long eligibleTransactions) implements Value {
         public CoveredPopulation {
-            time(windowStart, "POPULATION_WINDOW");
-            time(windowEnd, "POPULATION_WINDOW");
-            require(windowStart.isBefore(windowEnd)
-                    && Duration.between(windowStart, windowEnd).compareTo(MerchantProfile.MAX_TOTAL_WINDOW) <= 0, "POPULATION_WINDOW");
+            require(populationIdentity != null, "POPULATION_IDENTITY");
             require(eligibleTransactions >= 0 && eligibleTransactions <= MAX_POPULATION, "POPULATION_COUNT");
-            require(populationDefinitionVersion >= 1 && populationDefinitionVersion <= 65_535, "POPULATION_VERSION");
         }
+
+        public Instant windowStart() { return populationIdentity.windowStart(); }
+        public Instant windowEnd() { return populationIdentity.windowEnd(); }
+        public int populationDefinitionVersion() { return populationIdentity.populationDefinitionVersion(); }
 
         @Override public String toString() { return "MerchantCoveredPopulation[redacted]"; }
     }
 
     /** Cross-source identity is a versioned, effective-dated mapping, never raw-ID or pseudonym equality. */
-    public record InstitutionMerchantMapping(String institutionMerchantRef, int sourceIdentityVersion,
-                                             int mappingVersion, Instant validFrom, Instant validUntil) implements Value {
+    public record InstitutionMerchantMapping(String issuerRef, String institutionRef, String institutionMerchantRef,
+                                             String sourceRef,
+                                             String sourceEpochRef, String merchantRef, int sourceIdentityVersion,
+                                             int mappingVersion, String sourceSetCommitment,
+                                             Instant validFrom, Instant validUntil) implements Value {
         public InstitutionMerchantMapping {
+            reference(issuerRef, "IDENTITY_MAPPING_ISSUER");
+            reference(institutionRef, "IDENTITY_MAPPING_INSTITUTION");
             reference(institutionMerchantRef, "INSTITUTION_MERCHANT_REFERENCE");
+            reference(sourceRef, "IDENTITY_MAPPING_SOURCE");
+            reference(sourceEpochRef, "IDENTITY_MAPPING_SOURCE_EPOCH");
+            reference(merchantRef, "IDENTITY_MAPPING_MERCHANT");
+            reference(sourceSetCommitment, "IDENTITY_MAPPING_SOURCE_SET");
             require(sourceIdentityVersion >= 1 && sourceIdentityVersion <= 65_535
                     && mappingVersion >= 1 && mappingVersion <= 65_535, "IDENTITY_MAPPING_VERSION");
             time(validFrom, "IDENTITY_MAPPING_TIME");
@@ -285,17 +334,28 @@ public record MerchantProfileFacts(
         } else if (fact.value() instanceof CustomerLinkage value) {
             MerchantCanonicalEncoding.append(out, "CUSTOMERS", value.windowStart(), value.windowEnd(), value.distinctCustomers(), value.customerIdentityVersion());
         } else if (fact.value() instanceof MatureFraudLabels value) {
-            MerchantCanonicalEncoding.append(out, "LABELS", value.windowStart(), value.windowEnd(), value.confirmedFraud(), value.confirmedLegitimate(),
+            appendPopulationIdentity(out, value.populationIdentity());
+            MerchantCanonicalEncoding.append(out, "LABELS", value.confirmedFraud(), value.confirmedLegitimate(),
                     value.matureThrough(), value.labelPolicyVersion());
         } else if (fact.value() instanceof CoveredPopulation value) {
-            MerchantCanonicalEncoding.append(out, "POPULATION", value.windowStart(), value.windowEnd(), value.eligibleTransactions(),
-                    value.populationDefinitionVersion());
+            appendPopulationIdentity(out, value.populationIdentity());
+            MerchantCanonicalEncoding.append(out, "POPULATION", value.eligibleTransactions());
         } else if (fact.value() instanceof InstitutionMerchantMapping value) {
-            MerchantCanonicalEncoding.append(out, "IDENTITY_MAPPING", value.institutionMerchantRef(), value.sourceIdentityVersion(), value.mappingVersion(),
-                    value.validFrom(), value.validUntil());
+            MerchantCanonicalEncoding.append(out, "IDENTITY_MAPPING", value.issuerRef(), value.institutionRef(),
+                    value.institutionMerchantRef(), value.sourceRef(),
+                    value.sourceEpochRef(), value.merchantRef(), value.sourceIdentityVersion(), value.mappingVersion(),
+                    value.sourceSetCommitment(), value.validFrom(), value.validUntil());
         } else {
             throw invalid("VALUE_TYPE");
         }
+    }
+
+    private static void appendPopulationIdentity(StringBuilder out, MerchantPopulationIdentity identity) {
+        MerchantCanonicalEncoding.append(out, "POPULATION_IDENTITY", identity.basis(), identity.issuerRef(),
+                identity.institutionRef(), identity.sourceRef(), identity.sourceEpochRef(), identity.merchantRef(),
+                identity.identityVersion(), identity.institutionMerchantRef(), identity.mappingVersion(),
+                identity.sourceSetCommitment(), identity.windowStart(), identity.windowEnd(), identity.asOf(),
+                identity.populationDefinitionVersion(), identity.cohortCommitment());
     }
 
     private static String decimal(BigDecimal value) {

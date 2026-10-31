@@ -101,7 +101,7 @@ class MerchantProfileContractTest {
         assertThatThrownBy(() -> new Provenance(TIME, null, null, null, null, "raw-history")).hasMessage("MERCHANT_PROFILE_HISTORY_COMMITMENT");
         MerchantProfile valid = profile(provenance(), available(TIME.minusSeconds(3600), TIME, 0),
                 available(TIME.minusSeconds(7200), TIME.minusSeconds(3600), 0));
-        for (int version : new int[] {0, 3}) {
+        for (int version : new int[] {0, 2}) {
             assertThatThrownBy(() -> new MerchantProfile(version, 1, SCOPE, OCCURRENCE, provenance(), valid.recent(), valid.baseline()))
                     .hasMessage("MERCHANT_PROFILE_VERSION");
             assertThatThrownBy(() -> new MerchantProfile(MerchantProfile.VERSION, version, SCOPE, OCCURRENCE, provenance(), valid.recent(), valid.baseline()))
