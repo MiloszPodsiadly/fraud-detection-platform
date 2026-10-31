@@ -10,9 +10,13 @@ The internal admission interfaces remain default-deny. Test authorities may gran
 
 ## Typed Facts and Identity Scope
 
-Internal `MerchantProfile` v2 carries versioned `MerchantProfileFacts` v1. Its typed values include same-currency window volume, time-effective MCC classification, source-scoped distinct-customer counts, mature resolved feedback counts, a versioned covered-population denominator, and an effective-dated institution merchant mapping. Fact provenance and opaque commitments are claims; a reader must still independently admit the exact profile and provenance. Current projections carry no values: amount and customer linkage remain client-asserted, category risk lacks a trusted taxonomy, feedback lacks merchant binding and a maturity policy, population coverage is absent, and cross-source identity mapping is absent. These facts are not added to the Mongo observation ledger or Kafka/EI v2 contracts.
+Internal `MerchantProfile` v3 carries versioned `MerchantProfileFacts` v2. Its typed values include same-currency window volume, time-effective MCC classification, source-scoped distinct-customer counts, mature resolved feedback counts, a versioned covered-population denominator, and an effective-dated institution merchant mapping. Label and population claims share a structural `MerchantPopulationIdentity`: either the exact source observation cohort bound to the profile history commitment, or an institution-mapped cohort bound to the current source identity, mapping version, source-set commitment, window, as-of time, and population-definition version. The mapped version must cover the full cohort window. Local-cohort labels and eligible rows cannot exceed the profile's recent count. A broader mapped cohort may exceed that count only when both claims carry the same identity and a matching mapping claim; the profile does not admit that claim or authorize cross-source use. Opaque commitments and `AVAILABLE` fact status are not signatures or authority.
+
+Only mature `CONFIRMED_FRAUD` and `CONFIRMED_LEGITIMATE` outcomes enter the resolved-label counts; `INCONCLUSIVE`, `NEEDS_MORE_INFO`, and any unknown outcome stay excluded and are not counted as legitimate. The feedback store's unique transaction ID constraint is a storage guarantee, not proof that a future aggregate is deduplicated. Aggregate facts do not carry transaction IDs, so duplicate classification must be established by an independently admitted aggregation source. An incomplete or untrusted denominator is not zero; a zero eligible denominator cannot support a fraud-rate basis. The current transaction path still has no merchant-bound feedback, maturity policy, population coverage, or cross-source mapping, and carries no values. These facts are not added to the Mongo observation ledger or Kafka/EI v2 contracts.
 
 Observations remain scoped by issuer, institution, source, source epoch, merchant reference, and identity version. Equal raw merchant IDs or equal source pseudonyms never combine histories. Cross-source aggregation requires a separately authorized, versioned, effective-dated institution mapping. Key rotation starts a new identity scope; “first observed” means absent from the complete explicit recent window for that scoped identity, never “first ever.”
+
+Mongo schema v3 transactionally materializes a per-merchant membership checkpoint chain from each contiguous sealed source batch. Each checkpoint binds the scope, merchant, event-time occurrence, source sequence, input commitment, and same-merchant predecessor; commits and reads compare the bounded half-open history window and current occurrence with that chain. Missing or mismatched membership makes the current read unavailable. Prefix compaction removes checkpoints only with their expired receipts, preserving sequence and replay fences. Existing v2 databases are rejected at startup; local/test databases must be reset explicitly because no in-place migration is provided. These checkpoints establish internal consistency for explicitly admitted test fixtures; their commitments do not authenticate a production source.
 
 The five signals keep separate prerequisites:
 
@@ -46,6 +50,39 @@ mvn -pl feature-enricher-service -Dtest=MongoMerchantObservationStoreWorkloadTes
 It uses four source scopes, 32 merchant pseudonyms, concurrent ingestion across scopes, per-scope ordered commits, concurrent snapshot reads, and one MongoDB replica-set member from `mongo:7.0`. Output records the resolved Mongo version/image, operating system, Java version, processor count, JVM heap cap, Docker memory/CPU limits, p50/p95/p99 ingest/commit/read latency, indexed explain counts, retryable command failures, write conflicts, heap samples, and input-document size distribution. Retryable failures are command-level retry signals, not a count of internal transaction-loop attempts. Docker's default resource limits apply unless the daemon reports explicit container limits; the output records those values. This is host-local diagnostic data, not a production SLO, availability result, or 30k events/s claim.
 
 The prior implementation had a scope-wide membership count on event processing; the current path uses exact identity lookups and bounded, indexed sequence-prefix compaction. A numeric before/after benchmark is unavailable because the old implementation was not retained as a runnable baseline. The comparison is limited to the query shape and work bound visible in code.
+
+### FDP-150 local workload evidence
+
+Runs on 2026-10-31 used `mongo:7.0` / MongoDB 7.0.31, Docker Desktop with one replica-set member, Windows 11, Java 21.0.10, 12 processors, JVM max heap 8,392,802,304 bytes, and no Docker CPU or memory cap reported. These are diagnostic local measurements; they do not establish HA, production throughput, or an SLO.
+
+| Mode and cardinality | Operation (samples) | p50 / p95 / p99 |
+|---|---|---|
+| Ordinary: 1,000 rows, 4 scopes, 32 merchants | stage/ingest (1,000) | 24.622 / 41.576 / 56.740 ms |
+| | commit (1,000) | 20.777 / 27.855 / 31.280 ms |
+| | snapshot read (1,000) | 13.638 / 20.290 / 85.944 ms |
+| | seal (4) | 622.835 / 622.925 / 622.925 ms |
+| Hot: 1,000 rows, 1 scope, 1 merchant (100% share), 2 writers, 2 readers × 100 reads | concurrent stage (900) | 23.883 / 84.702 / 110.552 ms |
+| | concurrent read (200) | 26.963 / 34.950 / 36.221 ms |
+| | commit (902) | 101.796 / 172.210 / 189.519 ms |
+| | exact stage replay (1,000) / exact commit replay (32) | 7.001 / 9.158 / 11.105 ms; 96.269 / 167.772 / 178.055 ms |
+| | bounded read at sequence 1 / 100 / 1,000 (10 each; prior rows 0 / 99 / 999) | p50 10.328 / 22.199 / 133.284 ms; p95=p99 18.703 / 30.064 / 151.444 ms |
+
+The ordinary run examined and returned exactly 7 documents per indexed collection/scope (16 plans across history, candidate, manifest, and membership); it recorded 0 failed/retryable Mongo commands, 0 write conflicts, and 0 duplicate-key conflicts. The hot run examined and returned exactly 999 documents per indexed collection. It recorded 1,198 failed commands (all retryable), 599 write conflicts, and 0 duplicate-key conflicts; bounded contention produced 166 `STAGE_UNRESOLVED` results, all recovered by exact replay, and one unresolved seal was recovered by exact seal replay. The hot test verified 1,000 exact stage replays, 32 exact commit replays, rejection of a source sequence gap without advancing the fence, and quarantine of a post-watermark event. Correlated E1 history/candidate/manifest loss remained unavailable with unknown prior count after duplicate seal. A separate 100-row compaction scope compacted through sequence 100, removed all membership checkpoints, and rejected stale replay; its single trigger-stage sample was 833.697 ms. Median input JSON sizes were 1,461 bytes (ordinary) and 1,469 bytes (hot); peak sampled used heap was 196,292,880 bytes (ordinary) and 388,227,248 bytes (hot), against the reported JVM cap.
+
+Hot writers share one source coverage document and contend on its revision inside Mongo transactions; seals advance only across the contiguous source-sequence fence. Transaction retries are capped at three attempts. The observed conflicts and unresolved acknowledgments are therefore properties of this deliberately serialized single-source path, with exact replay providing recovery.
+
+The ordinary 1k run passed. The hot 1k run passed. The 10k and 25k ordinary scales are `NOT VERIFIED` under the agreed targeted-run budget; reproduce with the same command, changing `merchant.store.workload.scale` to `10000` or `25000`:
+
+```powershell
+mvn -q "-Dmaven.repo.local=$PWD\.m2repo" -pl feature-enricher-service -am "-Dtest=MongoMerchantObservationStoreWorkloadTest#boundedWorkloadReportsLatencyPlansConflictsAndResourceEnvelope" "-Dmerchant.store.workload=true" "-Dmerchant.store.workload.scale=10000" "-Dsurefire.failIfNoSpecifiedTests=false" test
+mvn -q "-Dmaven.repo.local=$PWD\.m2repo" -pl feature-enricher-service -am "-Dtest=MongoMerchantObservationStoreWorkloadTest#boundedWorkloadReportsLatencyPlansConflictsAndResourceEnvelope" "-Dmerchant.store.workload=true" "-Dmerchant.store.workload.scale=25000" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
+
+The exact 1k hot-mode invocation was:
+
+```powershell
+mvn -q "-Dmaven.repo.local=$PWD\.m2repo" -pl feature-enricher-service -am "-Dtest=MongoMerchantObservationStoreWorkloadTest#hotSourceHotMerchantReportsContendedWritesReplayAndCompaction" "-Dmerchant.store.workload=true" "-Dmerchant.store.workload.hot=true" "-Dmerchant.store.workload.hot.rows=1000" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
 
 ## Next Integration Owner
 
