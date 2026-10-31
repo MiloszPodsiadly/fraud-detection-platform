@@ -17,14 +17,16 @@ import static com.mongodb.client.model.Filters.eq;
 
 /** Fresh bootstrap only. Existing collections must match; nothing is migrated, dropped, or repaired. */
 final class MongoMerchantObservationSchema {
-    static final int SCHEMA_VERSION = 2;
+    static final int SCHEMA_VERSION = 3;
     static final String CANDIDATES = "merchant_observation_candidates";
     static final String HISTORY = "merchant_observations";
     static final String MANIFEST = "merchant_observation_manifest";
     static final String COVERAGE = "merchant_source_coverage";
+    static final String MEMBERSHIP = "merchant_observation_membership";
     static final String CANDIDATE_WINDOW = "merchant_candidate_window";
     static final String HISTORY_WINDOW = "merchant_history_window";
     static final String MANIFEST_WINDOW = "merchant_manifest_window";
+    static final String MEMBERSHIP_WINDOW = "merchant_membership_window";
     private static final List<IndexSpec> CANDIDATE_INDEXES = List.of(
             index("merchant_event_unique", true, false, "institution", "source", "sourceEvent"),
             index("merchant_transaction_unique", true, false, "institution", "source", "transaction"),
@@ -42,9 +44,12 @@ final class MongoMerchantObservationSchema {
             index("merchant_manifest_sequence_unique", true, false, "institution", "source", "epoch", "sequence"),
             index(MANIFEST_WINDOW, false, false, "scope", "merchant", "eventTime", "sequence"),
             index("merchant_manifest_sequence", false, false, "scope", "sequence"));
+    private static final List<IndexSpec> MEMBERSHIP_INDEXES = List.of(
+            index(MEMBERSHIP_WINDOW, false, false, "scope", "merchant", "eventTime", "sequence"),
+            index("merchant_membership_sequence_unique", true, false, "institution", "source", "epoch", "sequence"));
 
     static void initialize(MongoDatabase database) {
-        Set<String> expected = Set.of(CANDIDATES, HISTORY, MANIFEST, COVERAGE);
+        Set<String> expected = Set.of(CANDIDATES, HISTORY, MANIFEST, COVERAGE, MEMBERSHIP);
         Set<String> names = new HashSet<>();
         try (var cursor = database.listCollectionNames().batchSize(33).iterator()) {
             while (cursor.hasNext()) {
@@ -66,6 +71,7 @@ final class MongoMerchantObservationSchema {
             createIndexes(database, CANDIDATES, CANDIDATE_INDEXES);
             createIndexes(database, HISTORY, HISTORY_INDEXES);
             createIndexes(database, MANIFEST, MANIFEST_INDEXES);
+            createIndexes(database, MEMBERSHIP, MEMBERSHIP_INDEXES);
         } else {
             for (String name : expected) {
                 Document metadata = database.listCollections().filter(eq("name", name)).first();
@@ -83,6 +89,7 @@ final class MongoMerchantObservationSchema {
             verifyIndexes(database, HISTORY, HISTORY_INDEXES);
             verifyIndexes(database, MANIFEST, MANIFEST_INDEXES);
             verifyIndexes(database, COVERAGE, List.of());
+            verifyIndexes(database, MEMBERSHIP, MEMBERSHIP_INDEXES);
         }
     }
 
@@ -103,6 +110,17 @@ final class MongoMerchantObservationSchema {
                     .append("policyCommitment", token());
             required.addAll(List.of("revision", "accepted", "pending", "quarantined", "sealedSequence", "compactedThroughSequence",
                     "retainedFrom", "invalidated", "policyCommitment"));
+        } else if (MEMBERSHIP.equals(name)) {
+            properties.append("scope", type("string").append("maxLength", 265)).append("sourceEvent", token())
+                    .append("merchant", token()).append("sequence", type("long").append("minimum", 1))
+                    .append("eventTime", type("date")).append("inputCommitment", token())
+                    .append("previousCheckpointId", new Document("bsonType", List.of("string", "null")).append("maxLength", 265))
+                    .append("previousSequence", new Document("bsonType", List.of("long", "null")).append("minimum", 1))
+                    .append("previousEventTime", new Document("bsonType", List.of("date", "null")))
+                    .append("previousCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"))
+                    .append("membershipCommitment", token());
+            required.addAll(List.of("scope", "sourceEvent", "merchant", "sequence", "eventTime", "inputCommitment",
+                    "previousCheckpointId", "previousSequence", "previousEventTime", "previousCommitment", "membershipCommitment"));
         } else {
             properties.append("scope", type("string").append("maxLength", 265)).append("sourceEvent", token()).append("transaction", token())
                     .append("occurrence", token()).append("merchant", token()).append("sequence", type("long").append("minimum", 1))

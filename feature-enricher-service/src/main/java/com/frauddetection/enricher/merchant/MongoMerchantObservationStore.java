@@ -9,26 +9,31 @@ import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.frauddetection.enricher.merchant.MerchantObservationDocumentCodec.MembershipCheckpoint;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Sorts.ascending;
+import static com.mongodb.client.model.Sorts.descending;
 import static com.mongodb.client.model.Updates.*;
 import static com.frauddetection.enricher.merchant.MerchantObservationDocumentCodec.*;
 
 /** Package-internal and not a Spring component. There is no production verifier, factory, connection or importer. */
 final class MongoMerchantObservationStore implements MerchantObservationStore {
-    private static final int ATTEMPTS = 3;
+    static final int ATTEMPTS = 3;
     private static final TransactionOptions TRANSACTION = TransactionOptions.builder()
             .readConcern(ReadConcern.SNAPSHOT).writeConcern(WriteConcern.MAJORITY)
             .readPreference(ReadPreference.primary()).build();
@@ -37,6 +42,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     private final MongoCollection<Document> history;
     private final MongoCollection<Document> manifest;
     private final MongoCollection<Document> coverage;
+    private final MongoCollection<Document> membership;
     private final Clock clock;
     private final Limits limits;
     private final AdmissionVerifier admission;
@@ -49,7 +55,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         this.clock = Objects.requireNonNull(clock, "clock is required");
         this.limits = Objects.requireNonNull(limits, "limits are required");
         if (databaseName == null || !databaseName.matches("[a-z][a-z0-9_]{0,63}")) { throw failure("DATABASE_NAME"); }
-        policyCommitment = MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-store-policy/v2",
+        policyCommitment = MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-store-policy/v3",
                 limits.window(), limits.historyRetention(), limits.receiptRetention(), limits.replayHorizon(),
                 limits.clockSkew(), limits.maxHistoryRows(), limits.maxPending(), limits.maxSealBatch(), limits.maxStoredObservations());
         MongoDatabase database = client.getDatabase(databaseName).withReadConcern(ReadConcern.MAJORITY)
@@ -63,6 +69,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         history = database.getCollection(MongoMerchantObservationSchema.HISTORY);
         manifest = database.getCollection(MongoMerchantObservationSchema.MANIFEST);
         coverage = database.getCollection(MongoMerchantObservationSchema.COVERAGE);
+        membership = database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP);
     }
 
     @Override
@@ -100,6 +107,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 Document existingManifest = manifest.find(session, and(eq("institution", observation.scope().institution()),
                                 eq("source", observation.scope().source()), eq("sourceEvent", observation.sourceEvent())))
                         .hintString("merchant_manifest_event_unique").limit(1).first();
+                Document existingMembership = membership.find(session, eq("_id", eventId(observation))).first();
                 if (existing != null) {
                     requireSource(source, observation.scope());
                     if (!matchesManifest(existing, existingManifest)) {
@@ -113,10 +121,17 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     invalidate(session, observation.scope());
                     return new StageDecision(StageResult.QUARANTINED, Capacity.NONE);
                 }
+                if (existingMembership != null) {
+                    requireSource(source, observation.scope());
+                    invalidate(session, observation.scope());
+                    return new StageDecision(StageResult.QUARANTINED, Capacity.NONE);
+                }
                 if (source == null) {
                     if (candidates.find(session, eq("scope", scopeId(observation.scope()))).hintString("merchant_seal_batch").limit(1).first() != null
                             || manifest.find(session, eq("scope", scopeId(observation.scope())))
                             .hintString("merchant_manifest_sequence").limit(1).first() != null
+                            || membership.find(session, eq("scope", scopeId(observation.scope())))
+                            .hintString(MongoMerchantObservationSchema.MEMBERSHIP_WINDOW).limit(1).first() != null
                             || history.find(session, eq("scope", scopeId(observation.scope())))
                             .hintString(MongoMerchantObservationSchema.HISTORY_WINDOW).limit(1).first() != null) {
                         throw failure("COVERAGE_MISSING");
@@ -201,6 +216,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     if (observation.sequence() != ++expected || observation.eventTime().isAfter(seal.watermark())
                             || "QUARANTINED".equals(row.getString("status"))) { throw failure("SOURCE_SEQUENCE_GAP"); }
                 }
+                recordMembershipBatch(session, seal.scope(), batch);
                 Instant retainedFrom = later(instant(source, "retainedFrom"), now().minus(limits.historyRetention()));
                 if (coverage.updateOne(session, and(eq("_id", source.getString("_id")), eq("revision", source.getLong("revision"))),
                         combine(set("sealedSequence", seal.throughSequence()), set("coverageStart", Date.from(seal.coverageStart())),
@@ -270,11 +286,15 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     List<Document> receipts = manifest.find(session, window).sort(ascending("eventTime", "sequence"))
                             .hintString(MongoMerchantObservationSchema.MANIFEST_WINDOW).limit(limits.maxHistoryRows() + 1)
                             .into(new ArrayList<>());
+                    List<Document> members = membership.find(session, window).sort(ascending("eventTime", "sequence"))
+                            .hintString(MongoMerchantObservationSchema.MEMBERSHIP_WINDOW).limit(limits.maxHistoryRows() + 1)
+                            .into(new ArrayList<>());
+                    Document currentMember = membership.find(session, eq("_id", eventId(observation))).first();
                     if (rows.size() > limits.maxHistoryRows() || expected.size() > limits.maxHistoryRows()
-                            || receipts.size() > limits.maxHistoryRows()) {
+                            || receipts.size() > limits.maxHistoryRows() || members.size() > limits.maxHistoryRows()) {
                         return quarantine(session, candidate, observation.scope(), Reason.CAPACITY_EXCEEDED);
                     }
-                    if (!matchesEvidence(rows, expected, receipts)) {
+                    if (!matchesEvidence(rows, expected, receipts, members, currentMember, observation, start)) {
                         return quarantine(session, candidate, observation.scope(), Reason.HISTORY_MISSING);
                     }
                     MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, now());
@@ -363,21 +383,75 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 .getModifiedCount() != 1) { throw failure("COVERAGE_MISSING"); }
     }
 
-    private boolean matchesEvidence(List<Document> rows, List<Document> expected, List<Document> receipts) {
-        if (rows.size() != expected.size() || rows.size() != receipts.size()) { return false; }
+    /** Sealed source continuity materializes a per-merchant, event-time predecessor chain in the same transaction. */
+    private void recordMembershipBatch(ClientSession session, Scope scope, List<Document> batch) {
+        Map<String, List<Observation>> byMerchant = new HashMap<>();
+        for (Document candidate : batch) {
+            Observation observation = decodeObservation(candidate);
+            byMerchant.computeIfAbsent(observation.merchant(), ignored -> new ArrayList<>()).add(observation);
+        }
+        for (List<Observation> merchantBatch : byMerchant.values()) {
+            merchantBatch.sort(Comparator.comparing(Observation::eventTime).thenComparingLong(Observation::sequence));
+            Observation first = merchantBatch.getFirst();
+            Document previous = latestMembership(session, scope, first.merchant());
+            for (Observation observation : merchantBatch) {
+                Document checkpoint = membershipDocument(observation, previous);
+                membership.insertOne(session, checkpoint);
+                previous = checkpoint;
+            }
+        }
+    }
+
+    private Document latestMembership(ClientSession session, Scope scope, String merchant) {
+        return membership.find(session, and(eq("scope", scopeId(scope)), eq("merchant", merchant)))
+                .sort(descending("eventTime", "sequence"))
+                .hintString(MongoMerchantObservationSchema.MEMBERSHIP_WINDOW).limit(1).first();
+    }
+
+    private boolean matchesEvidence(List<Document> rows, List<Document> expected, List<Document> receipts,
+                                    List<Document> members, Document currentMember, Observation current, Instant windowStart) {
+        if (rows.size() != expected.size() || rows.size() != receipts.size() || rows.size() != members.size()
+                || !membershipMatchesObservation(currentMember, current)) { return false; }
+        Map<String, MembershipCheckpoint> checkpointById = new HashMap<>();
+        MembershipCheckpoint currentCheckpoint;
+        try {
+            currentCheckpoint = decodeMembership(currentMember);
+            for (Document member : members) {
+                MembershipCheckpoint checkpoint = decodeMembership(member);
+                if (checkpointById.put(checkpoint.id(), checkpoint) != null) { return false; }
+            }
+        } catch (RuntimeException corrupt) { return false; }
+        for (MembershipCheckpoint checkpoint : checkpointById.values()) {
+            if (!membershipChainComplete(checkpoint, checkpointById, windowStart, current.eventTime())) { return false; }
+        }
+        if (!membershipChainComplete(currentCheckpoint, checkpointById, windowStart, current.eventTime())) { return false; }
         for (int index = 0; index < rows.size(); index++) {
             Document row = rows.get(index);
             Document candidate = expected.get(index);
             Document receipt = receipts.get(index);
+            Document member = members.get(index);
             if (!Objects.equals(row.getString("_id"), candidate.getString("_id"))
                     || !Objects.equals(row.getString("_id"), receipt.getString("_id"))
+                    || !Objects.equals(row.getString("_id"), member.getString("_id"))
                     || !Objects.equals(row.getString("inputCommitment"), candidate.getString("inputCommitment"))
                     || !Objects.equals(row.getString("inputCommitment"), receipt.getString("inputCommitment"))
+                    || !Objects.equals(row.getString("inputCommitment"), member.getString("inputCommitment"))
                     || row.getDate("expireAt") == null || !instant(row, "expireAt").isAfter(now())
                     || !decodeObservation(row).equals(decodeObservation(candidate))
-                    || !decodeObservation(row).equals(decodeObservation(receipt))) { return false; }
+                    || !decodeObservation(row).equals(decodeObservation(receipt))
+                    || !membershipMatchesObservation(member, decodeObservation(row))) { return false; }
         }
         return true;
+    }
+
+    private static boolean membershipChainComplete(MembershipCheckpoint checkpoint,
+                                                   Map<String, MembershipCheckpoint> windowCheckpoints,
+                                                   Instant windowStart, Instant asOf) {
+        if (checkpoint.previousId() == null) { return true; }
+        if (checkpoint.previousEventTime().isBefore(windowStart)) { return true; }
+        if (!checkpoint.previousEventTime().isBefore(asOf)) { return true; }
+        MembershipCheckpoint predecessor = windowCheckpoints.get(checkpoint.previousId());
+        return membershipMatchesPredecessor(checkpoint, predecessor);
     }
 
     private boolean matchesManifest(Document candidate, Document receipt) {
@@ -422,6 +496,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 invalidate(session, scope);
                 return source(session, scope);
             }
+            Document checkpoint = membership.find(session, eq("_id", receipt.getString("_id"))).first();
+            if (!membershipMatchesObservation(checkpoint, observation)) {
+                invalidate(session, scope);
+                return source(session, scope);
+            }
             String status = candidate.getString("status");
             if (!"COMMITTED".equals(status) && !"QUARANTINED".equals(status)) { break; }
             Date receiptExpiry = candidate.getDate("receiptExpireAt");
@@ -439,7 +518,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         for (Document candidate : compact) {
             String id = candidate.getString("_id");
             if (candidates.deleteOne(session, and(eq("_id", id), ne("status", "STAGED"))).getDeletedCount() != 1
-                    || manifest.deleteOne(session, eq("_id", id)).getDeletedCount() != 1) { throw race(); }
+                    || manifest.deleteOne(session, eq("_id", id)).getDeletedCount() != 1
+                    || membership.deleteOne(session, eq("_id", id)).getDeletedCount() != 1) { throw race(); }
             history.deleteOne(session, eq("_id", id));
         }
         Instant retainedFrom = later(instant(source, "retainedFrom"), now.minus(limits.historyRetention()));
@@ -484,11 +564,17 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             List<Document> receipts = manifest.find(session, window).sort(ascending("eventTime", "sequence"))
                     .hintString(MongoMerchantObservationSchema.MANIFEST_WINDOW).limit(limits.maxHistoryRows() + 1)
                     .into(new ArrayList<>());
+            List<Document> members = membership.find(session, window).sort(ascending("eventTime", "sequence"))
+                    .hintString(MongoMerchantObservationSchema.MEMBERSHIP_WINDOW).limit(limits.maxHistoryRows() + 1)
+                    .into(new ArrayList<>());
+            Document currentMember = membership.find(session, eq("_id", eventId(observation))).first();
             if (rows.size() > limits.maxHistoryRows() || expected.size() > limits.maxHistoryRows()
-                    || receipts.size() > limits.maxHistoryRows()) {
+                    || receipts.size() > limits.maxHistoryRows() || members.size() > limits.maxHistoryRows()) {
                 return unavailable(observation, Reason.CAPACITY_EXCEEDED);
             }
-            if (!matchesEvidence(rows, expected, receipts)) { return unavailable(observation, Reason.HISTORY_MISSING); }
+            if (!matchesEvidence(rows, expected, receipts, members, currentMember, observation, stored.windowStart())) {
+                return unavailable(observation, Reason.HISTORY_MISSING);
+            }
             MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, evaluatedAt);
             Snapshot current = snapshotFromDerived(observation, derived);
             if (current.availability() != Availability.COMPLETE_WINDOW) { return current; }
@@ -540,6 +626,10 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         requireBinding(row, observation);
         requireReceiptFresh(row);
         if (!matchesManifest(row, safeRead(manifest, eventId(observation)))) { throw failure("HISTORY_MISSING"); }
+        if ("COMMITTED".equals(row.getString("status"))
+                && !membershipMatchesObservation(safeRead(membership, eventId(observation)), observation)) {
+            throw failure("HISTORY_MISSING");
+        }
         return "QUARANTINED".equals(row.getString("status")) ? StageResult.QUARANTINED : StageResult.EXISTING;
     }
 
@@ -624,6 +714,10 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 if (query.hintString("merchant_" + identity + "_unique").limit(1).first() != null) { return true; }
                 var manifestQuery = session == null ? manifest.find(key) : manifest.find(session, key);
                 if (manifestQuery.hintString("merchant_manifest_" + identity + "_unique").limit(1).first() != null) { return true; }
+                if ("sequence".equals(identity)) {
+                    var membershipQuery = session == null ? membership.find(key) : membership.find(session, key);
+                    if (membershipQuery.hintString("merchant_membership_sequence_unique").limit(1).first() != null) { return true; }
+                }
             }
             return false;
         } catch (MongoException exception) {
