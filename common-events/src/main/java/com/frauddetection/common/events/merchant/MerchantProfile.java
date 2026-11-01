@@ -151,6 +151,8 @@ public record MerchantProfile(
                     && volume.recent().transactionCount() == recent.count()
                     && volume.baseline().transactionCount() == baseline.count(), "ACTIVITY_BINDING");
             require(facts.activityVolume().provenance().sourceRef().equals(scope.sourceRef()), "ACTIVITY_SOURCE_SCOPE");
+            require(!facts.activityVolume().provenance().observedAt().isBefore(volume.recent().until()),
+                    "ACTIVITY_KNOWLEDGE_TIME");
         }
         if (facts.category().status() == MerchantProfileFacts.Status.AVAILABLE) {
             require(!facts.category().value().effectiveAt().isAfter(occurrence.eventTime()), "CATEGORY_EFFECTIVE_TIME");
@@ -159,6 +161,10 @@ public record MerchantProfile(
             var linkage = facts.customerLinkage().value();
             require(linkage.windowStart().equals(recent.start()) && linkage.windowEnd().equals(recent.end())
                     && facts.customerLinkage().provenance().sourceRef().equals(scope.sourceRef()), "CUSTOMER_LINKAGE_SCOPE");
+            require(recent.status() == Status.AVAILABLE && linkage.distinctCustomers() <= recent.count(),
+                    "CUSTOMER_LINKAGE_COUNT");
+            require(!facts.customerLinkage().provenance().observedAt().isBefore(linkage.windowEnd()),
+                    "CUSTOMER_LINKAGE_KNOWLEDGE_TIME");
             if (facts.activityVolume().status() == MerchantProfileFacts.Status.AVAILABLE) {
                 require(linkage.distinctCustomers() <= facts.activityVolume().value().recent().transactionCount(),
                         "CUSTOMER_LINKAGE_COUNT");

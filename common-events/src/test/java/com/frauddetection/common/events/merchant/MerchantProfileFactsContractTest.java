@@ -32,6 +32,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("UNTRUSTED_TEST_ONLY")
@@ -126,6 +127,96 @@ class MerchantProfileFactsContractTest {
         MerchantProfileFacts futureKnowledge = withActivity(valid, Fact.available(volume(2, "12.00", 5, "20.00"),
                 provenance(Origin.TRANSACTION_HISTORY, SCOPE.sourceRef(), 1, EVALUATED.plusMillis(1))));
         assertThatThrownBy(() -> profile(futureKnowledge, 2, 5)).hasMessage("MERCHANT_PROFILE_FACT_PROVENANCE_TIME");
+    }
+
+    @Test
+    void customerLinkageCannotExceedRecentCountWhenActivityVolumeIsMissingOrUntrusted() {
+        MerchantProfileFacts current = MerchantProfileFacts.currentPath();
+        Fact<CustomerLinkage> impossibleLinkage = customerLinkage(50);
+        MerchantProfileFacts missingActivity = withCustomerLinkage(
+                withActivity(current, Fact.missing(MerchantProfileFacts.Reason.SOURCE_MISSING)), impossibleLinkage);
+        MerchantProfileFacts untrustedActivity = withCustomerLinkage(
+                withActivity(current, Fact.untrusted(MerchantProfileFacts.Reason.CLIENT_ASSERTION)), impossibleLinkage);
+
+        assertThatThrownBy(() -> profile(missingActivity, 2, 0))
+                .hasMessage("MERCHANT_PROFILE_CUSTOMER_LINKAGE_COUNT");
+        assertThatThrownBy(() -> profile(untrustedActivity, 2, 0))
+                .hasMessage("MERCHANT_PROFILE_CUSTOMER_LINKAGE_COUNT");
+    }
+
+    @Test
+    void customerLinkageRequiresAvailableRecentCountAndAcceptsValidBoundaries() {
+        MerchantProfile zero = profile(withCustomerLinkage(MerchantProfileFacts.currentPath(), customerLinkage(0)), 0, 0);
+        MerchantProfile full = profile(withCustomerLinkage(MerchantProfileFacts.currentPath(), customerLinkage(2)), 2, 0);
+        MerchantProfile partial = profile(withCustomerLinkage(MerchantProfileFacts.currentPath(), customerLinkage(1)), 2, 0);
+        assertThat(zero.distinctCustomers().value().distinctCustomers()).isZero();
+        assertThat(full.distinctCustomers().value().distinctCustomers()).isEqualTo(2);
+        assertThat(partial.distinctCustomers().value().distinctCustomers()).isEqualTo(1);
+
+        MerchantProfileFacts availableLinkage = withCustomerLinkage(
+                MerchantProfileFacts.currentPath(), customerLinkage(0));
+        assertThatThrownBy(() -> profileWithUnavailableWindows(availableLinkage))
+                .hasMessage("MERCHANT_PROFILE_CUSTOMER_LINKAGE_COUNT");
+
+        MerchantProfileFacts untrustedLinkage = MerchantProfileFacts.currentPath();
+        MerchantProfile untrusted = profile(untrustedLinkage, 2, 0);
+        assertThat(untrusted.distinctCustomers().status()).isEqualTo(MerchantProfileFacts.Status.UNTRUSTED);
+        assertThat(untrusted.distinctCustomers().value()).isNull();
+        MerchantProfileFacts missingLinkage = withCustomerLinkage(untrustedLinkage,
+                Fact.missing(MerchantProfileFacts.Reason.SOURCE_MISSING));
+        MerchantProfile missing = profile(missingLinkage, 2, 0);
+        assertThat(missing.distinctCustomers().status()).isEqualTo(MerchantProfileFacts.Status.MISSING);
+        assertThat(missing.distinctCustomers().value()).isNull();
+    }
+
+    @Test
+    void activityVolumeCannotBeKnownBeforeItsFullWindowEnds() {
+        MerchantProfileFacts facts = withActivity(availableFacts(), Fact.available(
+                volume(2, "12.00", 5, "20.00"),
+                provenance(Origin.TRANSACTION_HISTORY, SCOPE.sourceRef(), 1, TIME.minusMillis(1))));
+
+        assertThatThrownBy(() -> profile(facts, 2, 5))
+                .hasMessage("MERCHANT_PROFILE_ACTIVITY_KNOWLEDGE_TIME");
+    }
+
+    @Test
+    void customerLinkageCannotBeKnownBeforeItsWindowEnds() {
+        MerchantProfileFacts facts = withCustomerLinkage(availableFacts(), Fact.available(
+                new CustomerLinkage(TIME.minusSeconds(3600), TIME, 1, 2),
+                provenance(Origin.TRANSACTION_HISTORY, SCOPE.sourceRef(), 2, TIME.minusMillis(1))));
+
+        assertThatThrownBy(() -> profile(facts, 2, 5))
+                .hasMessage("MERCHANT_PROFILE_CUSTOMER_LINKAGE_KNOWLEDGE_TIME");
+    }
+
+    @Test
+    void aggregateKnowledgeWindowsAllowInclusiveEndAndLeaveUnavailableFactsUntimed() {
+        MerchantProfileFacts current = availableFacts();
+        for (Instant observedAt : new Instant[] {TIME, TIME.plusMillis(1)}) {
+            MerchantProfileFacts activityAtBoundary = withActivity(current, Fact.available(
+                    volume(2, "12.00", 5, "20.00"),
+                    provenance(Origin.TRANSACTION_HISTORY, SCOPE.sourceRef(), 1, observedAt)));
+            assertThatCode(() -> profile(activityAtBoundary, 2, 5)).doesNotThrowAnyException();
+
+            MerchantProfileFacts linkageAtBoundary = withCustomerLinkage(current, Fact.available(
+                    new CustomerLinkage(TIME.minusSeconds(3600), TIME, 1, 2),
+                    provenance(Origin.TRANSACTION_HISTORY, SCOPE.sourceRef(), 2, observedAt)));
+            assertThatCode(() -> profile(linkageAtBoundary, 2, 5)).doesNotThrowAnyException();
+        }
+
+        MerchantProfileFacts futureLinkage = withCustomerLinkage(current, Fact.available(
+                new CustomerLinkage(TIME.minusSeconds(3600), TIME, 1, 2),
+                provenance(Origin.TRANSACTION_HISTORY, SCOPE.sourceRef(), 2, EVALUATED.plusMillis(1))));
+        assertThatThrownBy(() -> profile(futureLinkage, 2, 5))
+                .hasMessage("MERCHANT_PROFILE_FACT_PROVENANCE_TIME");
+
+        assertThatCode(() -> profile(MerchantProfileFacts.currentPath(), 2, 0)).doesNotThrowAnyException();
+        MerchantProfileFacts missing = withCustomerLinkage(
+                withActivity(MerchantProfileFacts.currentPath(), Fact.missing(MerchantProfileFacts.Reason.SOURCE_MISSING)),
+                Fact.missing(MerchantProfileFacts.Reason.SOURCE_MISSING));
+        MerchantProfile unavailable = profile(missing, 2, 0);
+        assertThat(unavailable.volume().value()).isNull();
+        assertThat(unavailable.distinctCustomers().value()).isNull();
     }
 
     @Test
@@ -483,6 +574,23 @@ class MerchantProfileFactsContractTest {
     private static MerchantProfileFacts withActivity(MerchantProfileFacts facts, Fact<ActivityVolume> activity) {
         return new MerchantProfileFacts(MerchantProfileFacts.VERSION, activity, facts.category(), facts.customerLinkage(),
                 facts.matureFraudLabels(), facts.coveredPopulation(), facts.institutionMerchantMapping());
+    }
+
+    private static MerchantProfileFacts withCustomerLinkage(MerchantProfileFacts facts, Fact<CustomerLinkage> linkage) {
+        return new MerchantProfileFacts(MerchantProfileFacts.VERSION, facts.activityVolume(), facts.category(), linkage,
+                facts.matureFraudLabels(), facts.coveredPopulation(), facts.institutionMerchantMapping());
+    }
+
+    private static Fact<CustomerLinkage> customerLinkage(int count) {
+        return Fact.available(new CustomerLinkage(TIME.minusSeconds(3600), TIME, count, 2),
+                provenance(Origin.TRANSACTION_HISTORY, SCOPE.sourceRef(), 2));
+    }
+
+    private static MerchantProfile profileWithUnavailableWindows(MerchantProfileFacts facts) {
+        return new MerchantProfile(MerchantProfile.VERSION, MerchantProfile.COMPUTATION_VERSION, SCOPE, OCCURRENCE,
+                provenance(), new WindowCount(TIME.minusSeconds(3600), TIME, Status.UNAVAILABLE, null, Reason.MISSING_COVERAGE),
+                new WindowCount(TIME.minusSeconds(7200), TIME.minusSeconds(3600), Status.UNAVAILABLE, null, Reason.MISSING_COVERAGE),
+                facts);
     }
 
     private static MerchantProfileFacts withCategory(MerchantProfileFacts facts, Fact<CategoryClassification> category) {
