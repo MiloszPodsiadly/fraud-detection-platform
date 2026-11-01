@@ -163,6 +163,47 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(store.commit(isolated).snapshot().priorCount()).isZero();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"issuer", "institution", "source", "epoch", "identityVersion"})
+    void reusedIdentifiersRemainIndependentAcrossEverySingleScopeRotation(String changedField) {
+        Observation original = approved(SCOPE, 1, 1, BASE);
+        Scope rotatedScope = changeScope(SCOPE, changedField);
+        Observation rotated = new Observation(rotatedScope, original.sourceEvent(), original.transaction(), original.occurrence(),
+                original.merchant(), original.sequence(), original.eventTime(), original.sourceObservedAt(), original.payloadCommitment());
+        verifier.permit(rotated);
+
+        assertThat(MerchantObservationDocumentCodec.eventId(original)).hasSize(64)
+                .isNotEqualTo(MerchantObservationDocumentCodec.eventId(rotated));
+        assertThat(MerchantObservationDocumentCodec.eventId(SCOPE, original.sourceEvent()))
+                .isEqualTo(MerchantObservationDocumentCodec.eventId(original));
+        assertThat(store.stage(original)).isEqualTo(StageResult.CREATED);
+        assertThat(store.stage(rotated)).isEqualTo(StageResult.CREATED);
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, rotatedScope)).isEqualTo(1);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
+        assertThat(source(rotatedScope).getBoolean("invalidated")).isFalse();
+
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        seal(rotatedScope, 1, BASE.minusSeconds(7_200), BASE);
+        Snapshot originalSnapshot = store.commit(original).snapshot();
+        Snapshot rotatedSnapshot = store.commit(rotated).snapshot();
+
+        assertThat(originalSnapshot.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(originalSnapshot.priorCount()).isZero();
+        assertThat(rotatedSnapshot.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(rotatedSnapshot.priorCount()).isZero();
+        assertThat(store.readSnapshot(original)).isEqualTo(originalSnapshot);
+        assertThat(store.readSnapshot(rotated)).isEqualTo(rotatedSnapshot);
+        for (String collection : List.of(MongoMerchantObservationSchema.CANDIDATES,
+                MongoMerchantObservationSchema.MANIFEST, MongoMerchantObservationSchema.HISTORY,
+                MongoMerchantObservationSchema.MEMBERSHIP)) {
+            assertThat(countForScope(collection, SCOPE)).isEqualTo(1);
+            assertThat(countForScope(collection, rotatedScope)).isEqualTo(1);
+        }
+        assertThat(store.pending(SCOPE)).isEqualTo(new PendingCounts(0, 0));
+        assertThat(store.pending(rotatedScope)).isEqualTo(new PendingCounts(0, 0));
+    }
+
     @Test
     void lowerBoundaryIsInclusiveAndCurrentEqualAndFutureTimesAreExcluded() {
         Observation outside = approved(SCOPE, 1, 1, BASE.minusSeconds(3_600).minusMillis(1));
@@ -284,7 +325,54 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(store.readSnapshot(old)).isEqualTo(original);
         Scope badVersionJoin = new Scope(SCOPE.issuer(), SCOPE.institution(), SCOPE.source(), SCOPE.epoch(), 2);
         Observation reusedSequence = approved(badVersionJoin, 3, 1, BASE.plusSeconds(60));
-        assertThatThrownBy(() -> store.stage(reusedSequence)).hasMessage("MERCHANT_STORE_IDENTITY_CONFLICT");
+        assertThat(store.stage(reusedSequence)).isEqualTo(StageResult.CREATED);
+        seal(badVersionJoin, 1, BASE.minusSeconds(7_200), reusedSequence.eventTime());
+        Snapshot independent = store.commit(reusedSequence).snapshot();
+        assertThat(independent.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(independent.priorCount()).isZero();
+    }
+
+    @Test
+    void invalidatedOldScopeDoesNotBlockAnIndependentRotatedScope() {
+        Observation old = approved(SCOPE, 1, 1, BASE);
+        store.stage(old);
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        store.commit(old);
+
+        Observation oldScopeConflict = new Observation(SCOPE, token(610), old.transaction(), token(611), MERCHANT,
+                2, BASE.plusSeconds(60), BASE.plusSeconds(60), token(612));
+        verifier.permit(oldScopeConflict);
+        assertThatThrownBy(() -> store.stage(oldScopeConflict)).hasMessage("MERCHANT_STORE_IDENTITY_CONFLICT");
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+
+        Scope rotatedScope = changeScope(SCOPE, "identityVersion");
+        Observation rotated = new Observation(rotatedScope, old.sourceEvent(), old.transaction(), old.occurrence(),
+                old.merchant(), old.sequence(), old.eventTime(), old.sourceObservedAt(), old.payloadCommitment());
+        verifier.permit(rotated);
+        assertThat(store.stage(rotated)).isEqualTo(StageResult.CREATED);
+        seal(rotatedScope, 1, BASE.minusSeconds(7_200), BASE);
+        Snapshot snapshot = store.commit(rotated).snapshot();
+
+        assertThat(snapshot.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(snapshot.priorCount()).isZero();
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+        assertThat(source(rotatedScope).getBoolean("invalidated")).isFalse();
+        assertThat(store.readSnapshot(rotated)).isEqualTo(snapshot);
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, rotatedScope)).isEqualTo(1);
+    }
+
+    @Test
+    void uniqueIdentityIndexesIncludeAllFiveScopeComponents() {
+        List<String> scopeFields = List.of("issuer", "institution", "source", "epoch", "identityVersion");
+        for (String identity : List.of("event", "transaction", "occurrence", "sequence")) {
+            assertUniqueIndex(MongoMerchantObservationSchema.CANDIDATES, "merchant_" + identity + "_unique",
+                    scopeFields, "event".equals(identity) ? "sourceEvent" : identity);
+            assertUniqueIndex(MongoMerchantObservationSchema.MANIFEST, "merchant_manifest_" + identity + "_unique",
+                    scopeFields, "event".equals(identity) ? "sourceEvent" : identity);
+        }
+        assertUniqueIndex(MongoMerchantObservationSchema.MEMBERSHIP, "merchant_membership_sequence_unique",
+                scopeFields, "sequence");
     }
 
     @Test
@@ -370,15 +458,24 @@ class MongoMerchantObservationStoreIntegrationTest {
     void mongoRestartPreservesStagedAndCommittedStateWithoutRecalculation() {
         Observation first = approved(SCOPE, 1, 1, BASE);
         Observation second = approved(SCOPE, 2, 2, BASE.plusSeconds(60));
+        Scope rotatedScope = changeScope(SCOPE, "identityVersion");
+        Observation rotated = new Observation(rotatedScope, first.sourceEvent(), first.transaction(), first.occurrence(),
+                first.merchant(), first.sequence(), first.eventTime(), first.sourceObservedAt(), first.payloadCommitment());
+        verifier.permit(rotated);
         store.stage(first);
         store.stage(second);
+        store.stage(rotated);
         seal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+        seal(rotatedScope, 1, BASE.minusSeconds(7_200), rotated.eventTime());
         Snapshot original = store.commit(first).snapshot();
+        Snapshot rotatedSnapshot = store.commit(rotated).snapshot();
         MONGO.getDockerClient().restartContainerCmd(MONGO.getContainerId()).exec();
         try (MongoClient restartedClient = MongoClients.create(mongoUri(databaseName))) {
             var restarted = new MongoMerchantObservationStore(restartedClient, databaseName, clock, LIMITS, verifier);
             assertThat(restarted.pending(SCOPE).pending()).isEqualTo(1);
+            assertThat(restarted.pending(rotatedScope)).isEqualTo(new PendingCounts(0, 0));
             assertThat(restarted.readSnapshot(first)).isEqualTo(original);
+            assertThat(restarted.readSnapshot(rotated)).isEqualTo(rotatedSnapshot);
             assertThat(restarted.commit(second).snapshot().priorCount()).isEqualTo(1);
             assertThat(new MongoMerchantObservationStore(restartedClient, databaseName, clock, LIMITS, verifier)
                     .readSnapshot(first)).isEqualTo(original);
@@ -437,6 +534,53 @@ class MongoMerchantObservationStoreIntegrationTest {
                 .hasMessage("MERCHANT_STORE_SCHEMA_INCOMPATIBLE");
         assertThat(oldDatabase.listCollectionNames().into(new java.util.ArrayList<>()))
                 .containsExactly(MongoMerchantObservationSchema.CANDIDATES);
+    }
+
+    @Test
+    void priorLedgerWithoutMembershipIsRefusedWithoutCreatingMissingCollections() {
+        String oldDatabaseName = databaseName + "_prior";
+        MongoDatabase oldDatabase = client.getDatabase(oldDatabaseName);
+        for (String collection : List.of(MongoMerchantObservationSchema.CANDIDATES,
+                MongoMerchantObservationSchema.HISTORY, MongoMerchantObservationSchema.MANIFEST,
+                MongoMerchantObservationSchema.COVERAGE)) {
+            oldDatabase.createCollection(collection);
+        }
+
+        assertThatThrownBy(() -> new MongoMerchantObservationStore(client, oldDatabaseName, clock, LIMITS, verifier))
+                .hasMessage("MERCHANT_STORE_SCHEMA_INCOMPATIBLE");
+        assertThat(oldDatabase.listCollectionNames().into(new java.util.ArrayList<>()))
+                .containsExactlyInAnyOrder(MongoMerchantObservationSchema.CANDIDATES,
+                        MongoMerchantObservationSchema.HISTORY, MongoMerchantObservationSchema.MANIFEST,
+                        MongoMerchantObservationSchema.COVERAGE);
+    }
+
+    @Test
+    void priorIdentityIndexLayoutIsRefusedWithoutRepair() {
+        var candidates = database.getCollection(MongoMerchantObservationSchema.CANDIDATES);
+        candidates.dropIndex("merchant_transaction_unique");
+        candidates.createIndex(new Document("institution", 1).append("source", 1).append("transaction", 1),
+                new IndexOptions().name("merchant_transaction_unique").unique(true));
+
+        assertThatThrownBy(() -> new MongoMerchantObservationStore(client, databaseName, clock, LIMITS, verifier))
+                .hasMessage("MERCHANT_STORE_SCHEMA_INCOMPATIBLE");
+        Document retained = candidates.listIndexes().into(new java.util.ArrayList<>()).stream()
+                .filter(row -> "merchant_transaction_unique".equals(row.getString("name"))).findFirst().orElseThrow();
+        assertThat(retained.get("key", Document.class).keySet()).containsExactly("institution", "source", "transaction");
+    }
+
+    @Test
+    void observationAndMembershipReadersRejectIdsNotBoundToTheirFullScope() {
+        Observation original = observation(SCOPE, 1, 1, BASE);
+        Document candidate = MerchantObservationDocumentCodec.observationDocument(original).append("status", "STAGED")
+                .append("stagedAt", Date.from(BASE));
+        candidate.put("_id", token(999));
+        assertThatThrownBy(() -> MerchantObservationDocumentCodec.decodeObservation(candidate))
+                .hasMessage("MERCHANT_STORE_CORRUPT_OBSERVATION");
+
+        Document checkpoint = MerchantObservationDocumentCodec.membershipDocument(original, null);
+        checkpoint.put("_id", token(998));
+        assertThatThrownBy(() -> MerchantObservationDocumentCodec.decodeMembership(checkpoint))
+                .hasMessage("MERCHANT_STORE_CORRUPT_MEMBERSHIP");
     }
 
     @Test
@@ -911,13 +1055,13 @@ class MongoMerchantObservationStoreIntegrationTest {
         sources.updateOne(new Document(), set("pending", Integer.MAX_VALUE), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_COVERAGE").hasNoCause();
         sources.updateOne(new Document(), set("pending", 0));
-        sources.updateOne(new Document(), set("schemaVersion", 4), bypass);
+        sources.updateOne(new Document(), set("schemaVersion", MongoMerchantObservationSchema.SCHEMA_VERSION + 1), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_SCHEMA_VERSION").hasNoCause();
-        sources.updateOne(new Document(), set("schemaVersion", 3));
+        sources.updateOne(new Document(), set("schemaVersion", MongoMerchantObservationSchema.SCHEMA_VERSION));
         var receipts = database.getCollection(MongoMerchantObservationSchema.CANDIDATES);
-        receipts.updateOne(new Document(), set("schemaVersion", 4), bypass);
+        receipts.updateOne(new Document(), set("schemaVersion", MongoMerchantObservationSchema.SCHEMA_VERSION + 1), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_OBSERVATION").hasNoCause();
-        receipts.updateOne(new Document(), set("schemaVersion", 3));
+        receipts.updateOne(new Document(), set("schemaVersion", MongoMerchantObservationSchema.SCHEMA_VERSION));
         receipts.updateOne(new Document(), set("receiptExpireAt", "test-only-sensitive-value"), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_RECEIPT").hasNoCause();
     }
@@ -1075,8 +1219,28 @@ class MongoMerchantObservationStoreIntegrationTest {
     }
     private long count(String collection) { return database.getCollection(collection).countDocuments(); }
     private Document source(Scope scope) {
-        return database.getCollection(MongoMerchantObservationSchema.COVERAGE).find(and(eq("institution", scope.institution()),
-                eq("source", scope.source()), eq("epoch", scope.epoch()), eq("identityVersion", scope.identityVersion()))).first();
+        return database.getCollection(MongoMerchantObservationSchema.COVERAGE)
+                .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first();
+    }
+    private long countForScope(String collection, Scope scope) {
+        return database.getCollection(collection).countDocuments(eq("scope", MerchantObservationDocumentCodec.scopeId(scope)));
+    }
+    private void assertUniqueIndex(String collection, String name, List<String> prefix, String identity) {
+        Document index = database.getCollection(collection).listIndexes().into(new java.util.ArrayList<>()).stream()
+                .filter(row -> name.equals(row.getString("name"))).findFirst().orElseThrow();
+        assertThat(index.getBoolean("unique")).isTrue();
+        assertThat(index.get("key", Document.class).keySet()).containsExactlyElementsOf(
+                java.util.stream.Stream.concat(prefix.stream(), java.util.stream.Stream.of(identity)).toList());
+    }
+    private static Scope changeScope(Scope scope, String field) {
+        return switch (field) {
+            case "issuer" -> new Scope(token(501), scope.institution(), scope.source(), scope.epoch(), scope.identityVersion());
+            case "institution" -> new Scope(scope.issuer(), token(502), scope.source(), scope.epoch(), scope.identityVersion());
+            case "source" -> new Scope(scope.issuer(), scope.institution(), token(503), scope.epoch(), scope.identityVersion());
+            case "epoch" -> new Scope(scope.issuer(), scope.institution(), scope.source(), token(504), scope.identityVersion());
+            case "identityVersion" -> new Scope(scope.issuer(), scope.institution(), scope.source(), scope.epoch(), 2);
+            default -> throw new IllegalArgumentException("unsupported test scope field");
+        };
     }
     private static String token(int value) { return String.format("%064x", value); }
 

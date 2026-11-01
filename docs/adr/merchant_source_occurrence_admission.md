@@ -14,9 +14,11 @@ Internal `MerchantProfile` v3 carries versioned `MerchantProfileFacts` v2. Its t
 
 Only mature `CONFIRMED_FRAUD` and `CONFIRMED_LEGITIMATE` outcomes enter the resolved-label counts; `INCONCLUSIVE`, `NEEDS_MORE_INFO`, and any unknown outcome stay excluded and are not counted as legitimate. The feedback store's unique transaction ID constraint is a storage guarantee, not proof that a future aggregate is deduplicated. Aggregate facts do not carry transaction IDs, so duplicate classification must be established by an independently admitted aggregation source. An incomplete or untrusted denominator is not zero; a zero eligible denominator cannot support a fraud-rate basis. The current transaction path still has no merchant-bound feedback, maturity policy, population coverage, or cross-source mapping, and carries no values. These facts are not added to the Mongo observation ledger or Kafka/EI v2 contracts.
 
+The temporal contract is inclusive at equality: `windowEnd <= matureThrough <= populationIdentity.asOf <= fact.provenance.observedAt <= profile.provenance.evaluatedAt` for mature labels, and `windowEnd <= populationIdentity.asOf <= observedAt <= evaluatedAt` for population denominators. `matureThrough` is the maturity cutoff of included resolved labels; `asOf` bounds the represented cohort; `observedAt` says when that aggregate became available; `evaluatedAt` is the profile's knowledge cutoff. A structurally matching cohort does not authorize its source or make future evidence available early.
+
 Observations remain scoped by issuer, institution, source, source epoch, merchant reference, and identity version. Equal raw merchant IDs or equal source pseudonyms never combine histories. Cross-source aggregation requires a separately authorized, versioned, effective-dated institution mapping. Key rotation starts a new identity scope; “first observed” means absent from the complete explicit recent window for that scoped identity, never “first ever.”
 
-Mongo schema v3 transactionally materializes a per-merchant membership checkpoint chain from each contiguous sealed source batch. Each checkpoint binds the scope, merchant, event-time occurrence, source sequence, input commitment, and same-merchant predecessor; commits and reads compare the bounded half-open history window and current occurrence with that chain. Missing or mismatched membership makes the current read unavailable. Prefix compaction removes checkpoints only with their expired receipts, preserving sequence and replay fences. Existing v2 databases are rejected at startup; local/test databases must be reset explicitly because no in-place migration is provided. These checkpoints establish internal consistency for explicitly admitted test fixtures; their commitments do not authenticate a production source.
+The current clean Mongo ledger uses internal `schemaVersion=1` and transactionally materializes a per-merchant membership checkpoint chain from each contiguous sealed source batch. This version starts at 1 because the Merchant Risk store remains an unreleased, disabled foundation; it is not a public event or API version. Each checkpoint binds the scope, merchant, event-time occurrence, source sequence, input commitment, and same-merchant predecessor; commits and reads compare the bounded half-open history window and current occurrence with that chain. Missing or mismatched membership makes the current read unavailable. Prefix compaction removes checkpoints only with their expired receipts, preserving sequence and replay fences. Event document IDs use a purpose-tagged, length-delimited SHA-256 key over all five scope fields plus `sourceEvent`; candidate, manifest, and membership uniqueness is enforced inside the exact `(issuer, institution, source, epoch, identityVersion)` scope. Earlier experimental FDP-150 layouts are rejected at startup by exact collection, validator, and index checks; there is no in-place migration. For disposable local/test state, point the test configuration at a new uniquely named empty database or recreate its isolated Testcontainers instance; do not reset shared or production databases. These checkpoints establish internal consistency for explicitly admitted test fixtures; their commitments do not authenticate a production source.
 
 The five signals keep separate prerequisites:
 
@@ -53,7 +55,7 @@ The prior implementation had a scope-wide membership count on event processing; 
 
 ### FDP-150 local workload evidence
 
-Runs on 2026-10-31 used `mongo:7.0` / MongoDB 7.0.31, Docker Desktop with one replica-set member, Windows 11, Java 21.0.10, 12 processors, JVM max heap 8,392,802,304 bytes, and no Docker CPU or memory cap reported. These are diagnostic local measurements; they do not establish HA, production throughput, or an SLO.
+The ordinary and earlier hot reference runs on 2026-10-31 used `mongo:7.0` / MongoDB 7.0.31, Docker Desktop with one replica-set member, Windows 11, Java 21.0.10, 12 processors, JVM max heap 8,392,802,304 bytes, and no Docker CPU or memory cap reported. These are diagnostic local measurements; they do not establish HA, production throughput, or an SLO.
 
 | Mode and cardinality | Operation (samples) | p50 / p95 / p99 |
 |---|---|---|
@@ -71,7 +73,7 @@ The ordinary run examined and returned exactly 7 documents per indexed collectio
 
 Hot writers share one source coverage document and contend on its revision inside Mongo transactions; seals advance only across the contiguous source-sequence fence. Transaction retries are capped at three attempts. The observed conflicts and unresolved acknowledgments are therefore properties of this deliberately serialized single-source path, with exact replay providing recovery.
 
-The ordinary 1k run passed. The hot 1k run passed. The 10k and 25k ordinary scales are `NOT VERIFIED` under the agreed targeted-run budget; reproduce with the same command, changing `merchant.store.workload.scale` to `10000` or `25000`:
+The ordinary and earlier hot 1k reference runs passed on 2026-10-31. The 10k and 25k ordinary scales are `NOT VERIFIED` under the agreed targeted-run budget; reproduce with the same command, changing `merchant.store.workload.scale` to `10000` or `25000`:
 
 ```powershell
 mvn -q "-Dmaven.repo.local=$PWD\.m2repo" -pl feature-enricher-service -am "-Dtest=MongoMerchantObservationStoreWorkloadTest#boundedWorkloadReportsLatencyPlansConflictsAndResourceEnvelope" "-Dmerchant.store.workload=true" "-Dmerchant.store.workload.scale=10000" "-Dsurefire.failIfNoSpecifiedTests=false" test
@@ -83,6 +85,34 @@ The exact 1k hot-mode invocation was:
 ```powershell
 mvn -q "-Dmaven.repo.local=$PWD\.m2repo" -pl feature-enricher-service -am "-Dtest=MongoMerchantObservationStoreWorkloadTest#hotSourceHotMerchantReportsContendedWritesReplayAndCompaction" "-Dmerchant.store.workload=true" "-Dmerchant.store.workload.hot=true" "-Dmerchant.store.workload.hot.rows=1000" "-Dsurefire.failIfNoSpecifiedTests=false" test
 ```
+
+### FDP-150 latest hot workload review (2026-11-01)
+
+At 21:51 Europe/Warsaw, the bounded-seal hot 1k mode passed on the environment stated above. This rerun supersedes the 2026-10-31 hot timing/conflict values in the historical table; the ordinary 1k values remain the 2026-10-31 reference and were not rerun alongside it. Additional state assertions for the seed and final seal were added after the measurement; they were statically reviewed but not rerun under the requested test scope.
+
+| Hot 1k operation | Samples | p50 / p95 / p99 (ms) |
+|---|---:|---:|
+| Concurrent stage | 900 | 26.695 / 97.789 / 136.933 |
+| Concurrent read | 200 | 31.307 / 52.316 / 75.288 |
+| Commit | 902 | 100.819 / 160.993 / 178.575 |
+| Exact stage replay | 1,000 | 7.008 / 9.539 / 11.305 |
+| Exact commit replay | 32 | 89.658 / 156.681 / 159.603 |
+| Window read at sequence 1 / 100 / 1,000 (10 each) | 30 total | p50 7.782 / 23.069 / 162.266; p95=p99 9.947 / 29.321 / 185.483 |
+| Prefix seal batch (one sample) / exact seal replay (one sample) | 1 / 1 | 1,025.957 / 4.778 |
+
+The fixture uses one source scope, one merchant, two writers, two readers with 100 reads each, and 1,000 observations. The four indexed plans (`merchant_history_window`, `merchant_candidate_window`, `merchant_manifest_window`, `merchant_membership_window`) each examined and returned 999 documents with 999 keys examined. Mongo reported 60,799 started commands, 1,258 failed commands (all retryable), 629 write conflicts, and 0 duplicate-key conflicts. There were 170 bounded `STAGE_UNRESOLVED` outcomes, all recovered by exact replay; three unknown commit acknowledgments were injected during final-seal contention, with zero unresolved seals. Input JSON p50 was 1,339 bytes and peak sampled used heap was 465,003,896 bytes. The prefix-seal latency is one sample and is descriptive only.
+
+The 1k bounded-read p50 grows from 7.782 ms at sequence 1 to 162.266 ms at sequence 1,000; hot commit p95 is 160.993 ms. Static inspection shows each commit reads and compares the bounded event-time ranges in history, committed candidates, manifest receipts, and membership. In this hot fixture all observations fall within the one-hour window. If all prior rows remain in-window, cumulative range-document comparisons are inferred to grow as `4 x sum(0..N-1)`, approximately `2N(N-1)`, subject to the 10,000-row history limit. This is an inference from the query shape; no 5k or 10k performance result was observed.
+
+| Workload mode | Status |
+|---|---|
+| Ordinary 1k | Passed on 2026-10-31 (reference values above) |
+| Ordinary 10k / 25k | `NOT VERIFIED` |
+| Hot 1k | Passed on 2026-11-01 |
+| Hot 5k | `NOT VERIFIED` |
+| Hot 10k | `NOT VERIFIED` |
+
+The exact hot 1k invocation is shown above. For hot 5k and 10k, use the same command with `-Dmerchant.store.workload.hot.rows=5000` or `10000`. These scales and sustainable hot-merchant throughput remain runtime pre-activation capacity gates. No optimization or production throughput claim is made from the unverified modes.
 
 ## Next Integration Owner
 

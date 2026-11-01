@@ -131,7 +131,9 @@ public record MerchantProfileFacts(
         }
     }
 
-    /** Opaque provenance references are identifiers, not signatures or standalone authorization. */
+    /**
+     * Opaque references are not authorization. observedAt is when this aggregate evidence became available.
+     */
     public record Provenance(Origin origin, String sourceRef, int sourceVersion, int policyVersion,
                              Instant observedAt, String evidenceCommitment) {
         public Provenance {
@@ -152,7 +154,7 @@ public record MerchantProfileFacts(
     public sealed interface Value permits ActivityVolume, CategoryClassification, CustomerLinkage,
             MatureFraudLabels, CoveredPopulation, InstitutionMerchantMapping { }
 
-    /** Shared, structural cohort claim; opaque commitments do not authenticate membership or authority. */
+    /** Shared structural cohort claim; asOf bounds the represented cohort, not evidence availability. */
     public record MerchantPopulationIdentity(PopulationBasis basis, String issuerRef, String institutionRef,
                                              String sourceRef, String sourceEpochRef, String merchantRef,
                                              int identityVersion, String institutionMerchantRef, int mappingVersion,
@@ -244,7 +246,7 @@ public record MerchantProfileFacts(
         @Override public String toString() { return "MerchantCustomerLinkage[redacted]"; }
     }
 
-    /** Only mature, resolved analyst outcomes count; unresolved and pending labels are excluded. */
+    /** Only mature, resolved analyst outcomes count; matureThrough is their cutoff, not aggregate availability. */
     public record MatureFraudLabels(MerchantPopulationIdentity populationIdentity, int confirmedFraud,
                                     int confirmedLegitimate, Instant matureThrough,
                                     int labelPolicyVersion) implements Value {

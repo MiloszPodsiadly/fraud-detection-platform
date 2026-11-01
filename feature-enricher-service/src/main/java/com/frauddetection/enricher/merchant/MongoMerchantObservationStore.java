@@ -101,11 +101,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         try {
             StageDecision decision = transaction(session -> {
                 Document source = source(session, observation.scope());
-                Document existing = candidates.find(session, and(eq("institution", observation.scope().institution()),
-                                eq("source", observation.scope().source()), eq("sourceEvent", observation.sourceEvent())))
+                Document existing = candidates.find(session, and(exactScope(observation.scope()),
+                                eq("sourceEvent", observation.sourceEvent())))
                         .hintString("merchant_event_unique").limit(1).first();
-                Document existingManifest = manifest.find(session, and(eq("institution", observation.scope().institution()),
-                                eq("source", observation.scope().source()), eq("sourceEvent", observation.sourceEvent())))
+                Document existingManifest = manifest.find(session, and(exactScope(observation.scope()),
+                                eq("sourceEvent", observation.sourceEvent())))
                         .hintString("merchant_manifest_event_unique").limit(1).first();
                 Document existingMembership = membership.find(session, eq("_id", eventId(observation))).first();
                 if (existing != null) {
@@ -707,8 +707,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     private boolean hasIdentityConflict(ClientSession session, Observation observation) {
         try {
             for (String identity : List.of("transaction", "occurrence", "sequence")) {
-                Bson key = and(eq("institution", observation.scope().institution()), eq("source", observation.scope().source()),
-                        "sequence".equals(identity) ? and(eq("epoch", observation.scope().epoch()), eq("sequence", observation.sequence()))
+                Bson key = and(exactScope(observation.scope()),
+                        "sequence".equals(identity) ? eq("sequence", observation.sequence())
                                 : eq(identity, "transaction".equals(identity) ? observation.transaction() : observation.occurrence()));
                 var query = session == null ? candidates.find(key) : candidates.find(session, key);
                 if (query.hintString("merchant_" + identity + "_unique").limit(1).first() != null) { return true; }
@@ -724,6 +724,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             if (session != null) { throw exception; }
             throw failure("CONFLICT_READ_UNAVAILABLE");
         }
+    }
+
+    private static Bson exactScope(Scope scope) {
+        return and(eq("issuer", scope.issuer()), eq("institution", scope.institution()), eq("source", scope.source()),
+                eq("epoch", scope.epoch()), eq("identityVersion", scope.identityVersion()));
     }
 
     private Document safeRead(MongoCollection<Document> collection, String id) {

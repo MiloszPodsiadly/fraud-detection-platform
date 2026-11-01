@@ -20,7 +20,12 @@ final class MerchantObservationDocumentCodec {
     private MerchantObservationDocumentCodec() { }
 
     static String eventId(Observation observation) {
-        return observation.scope().institution() + ':' + observation.scope().source() + ':' + observation.sourceEvent();
+        return eventId(observation.scope(), observation.sourceEvent());
+    }
+
+    static String eventId(Scope scope, String sourceEvent) {
+        return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-observation-id/v1",
+                scope.issuer(), scope.institution(), scope.source(), scope.epoch(), scope.identityVersion(), sourceEvent);
     }
 
     static String scopeId(Scope scope) {
@@ -93,7 +98,7 @@ final class MerchantObservationDocumentCodec {
                     && previousCommitment == null;
             boolean hasPrevious = previousId != null && previousSequence != null && previousEventTime != null
                     && previousCommitment != null;
-            if (!noPrevious && !hasPrevious || id == null || !id.equals(scope.institution() + ':' + scope.source() + ':' + event)
+            if (!noPrevious && !hasPrevious || id == null || !id.equals(eventId(scope, event))
                     || !scopeId(scope).equals(row.getString("scope")) || !reference(event) || !reference(merchant)
                     || !reference(input) || !reference(commitment) || sequence < 1
                     || previousSequence != null && previousSequence < 1
@@ -134,7 +139,7 @@ final class MerchantObservationDocumentCodec {
     private static String membershipCommitment(Scope scope, String id, String event, String merchant, long sequence,
                                                Instant eventTime, String inputCommitment, String previousId,
                                                Long previousSequence, Instant previousEventTime, String previousCommitment) {
-        return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-membership/v1",
+        return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-membership/v2",
                 scope.issuer(), scope.institution(), scope.source(), scope.epoch(), scope.identityVersion(), id, event,
                 merchant, sequence, eventTime, inputCommitment, previousId, previousSequence, previousEventTime,
                 previousCommitment);

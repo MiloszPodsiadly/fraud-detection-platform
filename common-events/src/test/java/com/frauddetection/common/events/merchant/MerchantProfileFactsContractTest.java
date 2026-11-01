@@ -129,6 +129,74 @@ class MerchantProfileFactsContractTest {
     }
 
     @Test
+    void matureLabelsCannotClaimAWindowKnownAfterTheirEvidenceWasObserved() {
+        MerchantProfileFacts current = availableFacts();
+        MerchantProfileFacts contradictory = withFraudFacts(current,
+                Fact.available(new MatureFraudLabels(sourcePopulationIdentity(), 1, 1, TIME.plusSeconds(60), 5),
+                        provenance(Origin.ADJUDICATED_FEEDBACK, token('5'), 5, TIME.plusSeconds(30))),
+                current.coveredPopulation(), current.institutionMerchantMapping());
+
+        assertThatThrownBy(() -> profile(contradictory, 2, 5))
+                .hasMessage("MERCHANT_PROFILE_LABEL_KNOWLEDGE_TIME");
+    }
+
+    @Test
+    void populationKnowledgeTimelineAllowsEqualityAndRejectsOneMillisecondFutureClaims() {
+        MerchantProfileFacts current = availableFacts();
+        MerchantPopulationIdentity localAtWindowEnd = sourcePopulationIdentity(TIME);
+        MerchantProfileFacts localBoundary = withFraudFacts(current,
+                Fact.available(new MatureFraudLabels(localAtWindowEnd, 1, 1, TIME, 5),
+                        provenance(Origin.ADJUDICATED_FEEDBACK, token('5'), 5, TIME)),
+                Fact.available(new CoveredPopulation(localAtWindowEnd, 2),
+                        provenance(Origin.POPULATION_COVERAGE, token('4'), 4, TIME)),
+                current.institutionMerchantMapping());
+        assertThat(profile(localBoundary, 2, 5).hasCompatibleFraudPopulationFacts()).isTrue();
+
+        MerchantPopulationIdentity mappedAtWindowEnd = mappedPopulationIdentity(4, TIME);
+        MerchantProfileFacts mappedBoundary = withFraudFacts(current,
+                Fact.available(new MatureFraudLabels(mappedAtWindowEnd, 1, 3, TIME, 5),
+                        provenance(Origin.ADJUDICATED_FEEDBACK, token('5'), 5, TIME)),
+                Fact.available(new CoveredPopulation(mappedAtWindowEnd, 20),
+                        provenance(Origin.POPULATION_COVERAGE, token('4'), 4, TIME)),
+                Fact.available(mapping(), provenance(Origin.INSTITUTION_IDENTITY_MAPPING, token('7'), 4, TIME)));
+        assertThat(profile(mappedBoundary, 2, 5).hasCompatibleFraudPopulationFacts()).isTrue();
+
+        MerchantPopulationIdentity oneMillisecondLater = sourcePopulationIdentity(TIME.plusMillis(1));
+        MerchantProfileFacts prematureLabels = withFraudFacts(current,
+                Fact.available(new MatureFraudLabels(oneMillisecondLater, 1, 1, TIME.plusMillis(1), 5),
+                        provenance(Origin.ADJUDICATED_FEEDBACK, token('5'), 5, TIME)),
+                Fact.available(new CoveredPopulation(oneMillisecondLater, 2),
+                        provenance(Origin.POPULATION_COVERAGE, token('4'), 4, TIME.plusMillis(1))),
+                current.institutionMerchantMapping());
+        assertThatThrownBy(() -> profile(prematureLabels, 2, 5))
+                .hasMessage("MERCHANT_PROFILE_LABEL_KNOWLEDGE_TIME");
+
+        MerchantProfileFacts prematurePopulation = withFraudFacts(current,
+                Fact.available(new MatureFraudLabels(oneMillisecondLater, 1, 1, TIME, 5),
+                        provenance(Origin.ADJUDICATED_FEEDBACK, token('5'), 5, TIME.plusMillis(1))),
+                Fact.available(new CoveredPopulation(oneMillisecondLater, 2),
+                        provenance(Origin.POPULATION_COVERAGE, token('4'), 4, TIME)),
+                current.institutionMerchantMapping());
+        assertThatThrownBy(() -> profile(prematurePopulation, 2, 5))
+                .hasMessage("MERCHANT_PROFILE_POPULATION_KNOWLEDGE_TIME");
+
+        MerchantPopulationIdentity knownAtEvaluation = sourcePopulationIdentity(EVALUATED);
+        MerchantProfileFacts futureAggregate = withFraudFacts(current,
+                Fact.available(new MatureFraudLabels(knownAtEvaluation, 1, 1, EVALUATED, 5),
+                        provenance(Origin.ADJUDICATED_FEEDBACK, token('5'), 5, EVALUATED.plusMillis(1))),
+                Fact.available(new CoveredPopulation(knownAtEvaluation, 2),
+                        provenance(Origin.POPULATION_COVERAGE, token('4'), 4, EVALUATED.plusMillis(1))),
+                current.institutionMerchantMapping());
+        assertThatThrownBy(() -> profile(futureAggregate, 2, 5))
+                .hasMessage("MERCHANT_PROFILE_FACT_PROVENANCE_TIME");
+
+        assertThatThrownBy(() -> new MatureFraudLabels(localAtWindowEnd, 1, 1, TIME.minusMillis(1), 5))
+                .hasMessage("MERCHANT_FACTS_LABEL_MATURITY");
+        assertThatThrownBy(() -> sourcePopulationIdentity(TIME.minusMillis(1)))
+                .hasMessage("MERCHANT_FACTS_POPULATION_WINDOW");
+    }
+
+    @Test
     void localPopulationCannotClaimMoreLabelsOrEligibleRowsThanItsObservationCohort() {
         MerchantProfileFacts valid = availableFacts();
         assertThat(profile(valid, 2, 5).hasCompatibleFraudPopulationFacts()).isTrue();
@@ -149,7 +217,7 @@ class MerchantProfileFactsContractTest {
         MerchantProfileFacts valid = availableFacts();
         MerchantPopulationIdentity foreignMerchant = new MerchantPopulationIdentity(PopulationBasis.SOURCE_OBSERVATION_COHORT,
                 SCOPE.issuerRef(), SCOPE.institutionRef(), SCOPE.sourceRef(), SCOPE.sourceEpochRef(), token('9'),
-                SCOPE.identityVersion(), null, 0, null, TIME.minusSeconds(3600), TIME, EVALUATED, 4, token('2'));
+                SCOPE.identityVersion(), null, 0, null, TIME.minusSeconds(3600), TIME, TIME.plusSeconds(60), 4, token('2'));
         MerchantProfileFacts foreign = withFraudFacts(valid,
                 Fact.available(new MatureFraudLabels(foreignMerchant, 1, 1, TIME.plusSeconds(60), 5),
                         provenance(Origin.ADJUDICATED_FEEDBACK, token('5'), 5)),
@@ -171,7 +239,7 @@ class MerchantProfileFactsContractTest {
 
         MerchantPopulationIdentity wrongDefinition = new MerchantPopulationIdentity(PopulationBasis.SOURCE_OBSERVATION_COHORT,
                 SCOPE.issuerRef(), SCOPE.institutionRef(), SCOPE.sourceRef(), SCOPE.sourceEpochRef(), SCOPE.merchantRef(),
-                SCOPE.identityVersion(), null, 0, null, TIME.minusSeconds(3600), TIME, EVALUATED, 5, token('2'));
+                SCOPE.identityVersion(), null, 0, null, TIME.minusSeconds(3600), TIME, TIME.plusSeconds(60), 5, token('2'));
         MerchantProfileFacts mismatchedVersion = withFraudFacts(valid,
                 Fact.available(new MatureFraudLabels(sourcePopulationIdentity(), 1, 1, TIME.plusSeconds(60), 5),
                         provenance(Origin.ADJUDICATED_FEEDBACK, token('5'), 5)),
@@ -371,16 +439,24 @@ class MerchantProfileFactsContractTest {
     }
 
     private static MerchantPopulationIdentity sourcePopulationIdentity() {
+        return sourcePopulationIdentity(TIME.plusSeconds(60));
+    }
+
+    private static MerchantPopulationIdentity sourcePopulationIdentity(Instant asOf) {
         return new MerchantPopulationIdentity(PopulationBasis.SOURCE_OBSERVATION_COHORT, SCOPE.issuerRef(),
                 SCOPE.institutionRef(), SCOPE.sourceRef(), SCOPE.sourceEpochRef(), SCOPE.merchantRef(),
-                SCOPE.identityVersion(), null, 0, null, TIME.minusSeconds(3600), TIME, EVALUATED, 4, token('2'));
+                SCOPE.identityVersion(), null, 0, null, TIME.minusSeconds(3600), TIME, asOf, 4, token('2'));
     }
 
     private static MerchantPopulationIdentity mappedPopulationIdentity(int mappingVersion) {
+        return mappedPopulationIdentity(mappingVersion, TIME.plusSeconds(60));
+    }
+
+    private static MerchantPopulationIdentity mappedPopulationIdentity(int mappingVersion, Instant asOf) {
         return new MerchantPopulationIdentity(PopulationBasis.INSTITUTION_MAPPED_COHORT, SCOPE.issuerRef(),
                 SCOPE.institutionRef(), SCOPE.sourceRef(), SCOPE.sourceEpochRef(), SCOPE.merchantRef(),
                 SCOPE.identityVersion(), token('8'), mappingVersion, token('9'), TIME.minusSeconds(3600), TIME,
-                EVALUATED, 4, token('a'));
+                asOf, 4, token('a'));
     }
 
     private static InstitutionMerchantMapping mapping() {
@@ -397,7 +473,7 @@ class MerchantProfileFactsContractTest {
     }
 
     private static MerchantProfileFacts.Provenance provenance(Origin origin, String sourceRef, int policyVersion) {
-        return provenance(origin, sourceRef, policyVersion, TIME.plusSeconds(30));
+        return provenance(origin, sourceRef, policyVersion, TIME.plusSeconds(60));
     }
 
     private static MerchantProfileFacts.Provenance provenance(Origin origin, String sourceRef, int policyVersion, Instant observedAt) {

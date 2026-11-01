@@ -13,6 +13,7 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoException;
 import com.mongodb.ExplainVerbosity;
+import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
@@ -29,6 +30,9 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.testcontainers.containers.MongoDBContainer;
 
 import java.nio.charset.StandardCharsets;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -96,6 +100,23 @@ class MongoMerchantObservationStoreWorkloadTest {
         } finally {
             mongo.stop();
         }
+    }
+
+    @Test
+    void hotWorkloadSealRangesAreContiguousBoundedAndExactlyCoverSupportedScales() {
+        for (int observations : List.of(1_000, 5_000, 10_000)) {
+            int seedCount = Math.min(100, observations / 10);
+            List<SealRange> ranges = boundedSealRanges(seedCount, observations, LIMITS.maxSealBatch());
+            long expectedFirst = seedCount + 1L;
+            for (SealRange range : ranges) {
+                assertThat(range.firstSequence()).isEqualTo(expectedFirst);
+                assertThat(range.size()).isBetween(1L, (long) LIMITS.maxSealBatch());
+                expectedFirst = range.throughSequence() + 1;
+            }
+            assertThat(expectedFirst - 1).isEqualTo(observations);
+        }
+        assertThat(boundedSealRanges(1_000, 1_002, LIMITS.maxSealBatch()))
+                .containsExactly(new SealRange(1_001, 1_002));
     }
 
     private static void runScale(MongoDBContainer mongo, int observations) throws Exception {
@@ -243,11 +264,24 @@ class MongoMerchantObservationStoreWorkloadTest {
             CoverageSeal seedSeal = authority.seal(scope, seedCount, BASE.minus(Duration.ofHours(2)),
                     rows.get(seedCount - 1).eventTime());
             store.seal(seedSeal);
+            Document coverageAfterSeedSeal = database.getCollection(MongoMerchantObservationSchema.COVERAGE)
+                    .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first();
+            assertThat(coverageAfterSeedSeal.getLong("sealedSequence")).isEqualTo(seedCount);
+            assertThat(coverageAfterSeedSeal.getDate("coverageStart")).isEqualTo(Date.from(seedSeal.coverageStart()));
+            assertThat(coverageAfterSeedSeal.getDate("watermark")).isEqualTo(Date.from(seedSeal.watermark()));
+            assertThat(coverageAfterSeedSeal.getInteger("accepted")).isEqualTo(seedCount);
+            assertThat(coverageAfterSeedSeal.getInteger("pending")).isEqualTo(seedCount);
+            assertThat(coverageAfterSeedSeal.getInteger("quarantined")).isZero();
+            assertThat(coverageAfterSeedSeal.getBoolean("invalidated")).isFalse();
+            assertThat(database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP)
+                    .countDocuments(eq("scope", MerchantObservationDocumentCodec.scopeId(scope)))).isEqualTo(seedCount);
             for (int sequence = 1; sequence <= seedCount; sequence++) {
                 var committed = store.commit(rows.get(sequence - 1));
                 assertThat(committed.status()).isEqualTo(CommitStatus.COMMITTED);
                 assertThat(committed.snapshot().priorCount()).isEqualTo(expectedHotPriorCount(sequence));
             }
+            assertThat(database.getCollection(MongoMerchantObservationSchema.COVERAGE)
+                    .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first().getInteger("pending")).isZero();
 
             int writerCount = 2;
             int readerCount = 2;
@@ -313,24 +347,65 @@ class MongoMerchantObservationStoreWorkloadTest {
                 exactStageReplayLatency[index] = System.nanoTime() - started;
             }
 
+            Instant coverageStart = BASE.minus(Duration.ofHours(2));
+            Instant previousWatermark = rows.get(seedCount - 1).eventTime();
+            List<Long> prefixSealLatency = new ArrayList<>();
+            for (SealRange range : boundedSealRanges(seedCount, observations, LIMITS.maxSealBatch())) {
+                CoverageSeal batchSeal = authority.seal(scope, range.throughSequence(), coverageStart,
+                        rows.get(Math.toIntExact(range.throughSequence() - 1)).eventTime());
+                long started = System.nanoTime();
+                store.seal(batchSeal);
+                prefixSealLatency.add(System.nanoTime() - started);
+
+                Document coverage = database.getCollection(MongoMerchantObservationSchema.COVERAGE)
+                        .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first();
+                assertThat(batchSeal.coverageStart()).isEqualTo(coverageStart);
+                assertThat(batchSeal.watermark()).isAfter(previousWatermark);
+                assertThat(coverage.getLong("sealedSequence")).isEqualTo(range.throughSequence());
+                assertThat(coverage.getDate("coverageStart")).isEqualTo(Date.from(coverageStart));
+                assertThat(coverage.getDate("watermark")).isEqualTo(Date.from(batchSeal.watermark()));
+                assertThat(coverage.getInteger("accepted")).isEqualTo(observations);
+                assertThat(coverage.getInteger("pending")).isEqualTo(observations - seedCount);
+                assertThat(coverage.getInteger("quarantined")).isZero();
+                assertThat(coverage.getBoolean("invalidated")).isFalse();
+                assertThat(database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP)
+                        .countDocuments(eq("scope", MerchantObservationDocumentCodec.scopeId(scope))))
+                        .isEqualTo(range.throughSequence());
+                previousWatermark = batchSeal.watermark();
+            }
+
             Observation gap = hotObservation(scope, merchant, observations + 2L);
             authority.admit(gap);
             assertThat(store.stage(gap)).isEqualTo(StageResult.CREATED);
             CoverageSeal finalSeal = authority.seal(scope, observations + 2L, BASE.minus(Duration.ofHours(2)), gap.eventTime());
             assertThatThrownBy(() -> store.seal(finalSeal)).hasMessage("MERCHANT_STORE_SOURCE_SEQUENCE_GAP");
+            Document coverageAfterGap = database.getCollection(MongoMerchantObservationSchema.COVERAGE)
+                    .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first();
+            assertThat(coverageAfterGap.getLong("sealedSequence")).isEqualTo(observations);
+            assertThat(coverageAfterGap.getDate("watermark")).isEqualTo(Date.from(previousWatermark));
+            assertThat(coverageAfterGap.getInteger("accepted")).isEqualTo(observations + 1);
+            assertThat(coverageAfterGap.getInteger("pending")).isEqualTo(observations - seedCount + 1);
+            assertThat(database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP)
+                    .countDocuments(eq("scope", MerchantObservationDocumentCodec.scopeId(scope)))).isEqualTo(observations);
             Observation missing = hotObservation(scope, merchant, observations + 1L);
             authority.admit(missing);
             assertThat(store.stage(missing)).isEqualTo(StageResult.CREATED);
 
             long[] sealLatency = new long[2];
             AtomicInteger unresolvedSeals = new AtomicInteger();
+            AtomicInteger uncertainCommitAcknowledgments = new AtomicInteger();
+            MongoMerchantObservationStore uncertainStore = new MongoMerchantObservationStore(
+                    lostCommitAcknowledgments(client, uncertainCommitAcknowledgments), databaseName, clock, LIMITS, authority);
             try (var pool = Executors.newFixedThreadPool(2)) {
                 List<Callable<Void>> sealing = new ArrayList<>(2);
                 for (int index = 0; index < 2; index++) {
                     int sampleIndex = index;
                     sealing.add(() -> {
                         long started = System.nanoTime();
-                        try { store.seal(finalSeal); }
+                        try {
+                            if (sampleIndex == 0) { store.seal(finalSeal); }
+                            else { uncertainStore.seal(finalSeal); }
+                        }
                         catch (IllegalStateException exception) {
                             if (!"MERCHANT_STORE_SEAL_UNRESOLVED".equals(exception.getMessage())) { throw exception; }
                             unresolvedSeals.incrementAndGet();
@@ -345,6 +420,19 @@ class MongoMerchantObservationStoreWorkloadTest {
             long sealRecoveryStarted = System.nanoTime();
             store.seal(finalSeal);
             long sealRecoveryLatency = System.nanoTime() - sealRecoveryStarted;
+            assertThat(uncertainCommitAcknowledgments.get()).isGreaterThan(0);
+            Document coverageAfterFinalSeal = database.getCollection(MongoMerchantObservationSchema.COVERAGE)
+                    .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first();
+            assertThat(coverageAfterFinalSeal.getLong("sealedSequence")).isEqualTo(observations + 2L);
+            assertThat(coverageAfterFinalSeal.getDate("coverageStart")).isEqualTo(Date.from(finalSeal.coverageStart()));
+            assertThat(coverageAfterFinalSeal.getDate("watermark")).isEqualTo(Date.from(finalSeal.watermark()));
+            assertThat(coverageAfterFinalSeal.getInteger("accepted")).isEqualTo(observations + 2);
+            assertThat(coverageAfterFinalSeal.getInteger("pending")).isEqualTo(observations - seedCount + 2);
+            assertThat(coverageAfterFinalSeal.getInteger("quarantined")).isZero();
+            assertThat(coverageAfterFinalSeal.getBoolean("invalidated")).isFalse();
+            assertThat(database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP)
+                    .countDocuments(eq("scope", MerchantObservationDocumentCodec.scopeId(scope))))
+                    .isEqualTo(observations + 2L);
 
             long[] commitLatency = new long[observations - seedCount + 2];
             for (long sequence = seedCount + 1L; sequence <= observations + 2L; sequence++) {
@@ -390,7 +478,10 @@ class MongoMerchantObservationStoreWorkloadTest {
                     "MERCHANT_WORKLOAD_HOT_STAGE_OUTCOMES store_unresolved=%d exact_recovery_after_contention=%d store_attempts_are_bounded=true%n",
                     unresolvedStages.size(), stageRecoveryLatency.length);
             System.out.printf(java.util.Locale.ROOT,
-                    "MERCHANT_WORKLOAD_HOT_SEAL unresolved=%d exact_replay_recovery=true%n", unresolvedSeals.get());
+                    "MERCHANT_WORKLOAD_HOT_SEAL unresolved=%d unknown_commit_acknowledgments=%d exact_replay_recovery=true%n",
+                    unresolvedSeals.get(), uncertainCommitAcknowledgments.get());
+            reportLatency("hot-prefix-seal-batches", observations,
+                    prefixSealLatency.stream().mapToLong(Long::longValue).toArray());
             reportLatency("hot-concurrent-stage", observations, stageLatency);
             reportLatency("hot-concurrent-read", observations, concurrentReadLatency);
             if (stageRecoveryLatency.length > 0) {
@@ -539,6 +630,56 @@ class MongoMerchantObservationStoreWorkloadTest {
 
     private static int expectedHotPriorCount(long sequence) {
         return Math.toIntExact(sequence - 1);
+    }
+
+    private static List<SealRange> boundedSealRanges(long sealedThrough, long targetThrough, int maximumBatchSize) {
+        if (sealedThrough < 0 || targetThrough < sealedThrough || maximumBatchSize < 1) {
+            throw new IllegalArgumentException("invalid seal range bounds");
+        }
+        List<SealRange> ranges = new ArrayList<>();
+        long firstSequence = sealedThrough + 1;
+        while (firstSequence <= targetThrough) {
+            long throughSequence = Math.min(targetThrough, firstSequence + maximumBatchSize - 1L);
+            ranges.add(new SealRange(firstSequence, throughSequence));
+            firstSequence = throughSequence + 1;
+        }
+        return List.copyOf(ranges);
+    }
+
+    private record SealRange(long firstSequence, long throughSequence) {
+        long size() { return throughSequence - firstSequence + 1; }
+    }
+
+    private static MongoClient lostCommitAcknowledgments(MongoClient delegate, AtomicInteger count) {
+        return proxy(MongoClient.class, (method, arguments) -> {
+            Object result = invoke(delegate, method, arguments);
+            if ("startSession".equals(method.getName())) {
+                ClientSession session = (ClientSession) result;
+                return proxy(ClientSession.class, (operation, parameters) -> {
+                    Object value = invoke(session, operation, parameters);
+                    if ("commitTransaction".equals(operation.getName())) {
+                        count.incrementAndGet();
+                        MongoException unknown = new MongoException(91, "TEST_ONLY_LOST_MERCHANT_SEAL_ACK");
+                        unknown.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL);
+                        throw unknown;
+                    }
+                    return value;
+                });
+            }
+            return result;
+        });
+    }
+
+    private interface Invocation { Object call(Method method, Object[] arguments) throws Throwable; }
+
+    private static <T> T proxy(Class<T> type, Invocation invocation) {
+        return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type},
+                (object, method, arguments) -> invocation.call(method, arguments)));
+    }
+
+    private static Object invoke(Object target, Method method, Object[] arguments) throws Throwable {
+        try { return method.invoke(target, arguments); }
+        catch (InvocationTargetException exception) { throw exception.getCause(); }
     }
 
     private static void reportHotWindowGrowth(MongoMerchantObservationStore store, List<Observation> rows, int observations) {

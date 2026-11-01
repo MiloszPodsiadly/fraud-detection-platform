@@ -17,7 +17,7 @@ import static com.mongodb.client.model.Filters.eq;
 
 /** Fresh bootstrap only. Existing collections must match; nothing is migrated, dropped, or repaired. */
 final class MongoMerchantObservationSchema {
-    static final int SCHEMA_VERSION = 3;
+    static final int SCHEMA_VERSION = 1;
     static final String CANDIDATES = "merchant_observation_candidates";
     static final String HISTORY = "merchant_observations";
     static final String MANIFEST = "merchant_observation_manifest";
@@ -28,25 +28,26 @@ final class MongoMerchantObservationSchema {
     static final String MANIFEST_WINDOW = "merchant_manifest_window";
     static final String MEMBERSHIP_WINDOW = "merchant_membership_window";
     private static final List<IndexSpec> CANDIDATE_INDEXES = List.of(
-            index("merchant_event_unique", true, false, "institution", "source", "sourceEvent"),
-            index("merchant_transaction_unique", true, false, "institution", "source", "transaction"),
-            index("merchant_occurrence_unique", true, false, "institution", "source", "occurrence"),
-            index("merchant_sequence_unique", true, false, "institution", "source", "epoch", "sequence"),
+            index("merchant_event_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "sourceEvent"),
+            index("merchant_transaction_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "transaction"),
+            index("merchant_occurrence_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "occurrence"),
+            index("merchant_sequence_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "sequence"),
             index(CANDIDATE_WINDOW, false, false, "scope", "merchant", "status", "eventTime", "sequence"),
             index("merchant_seal_batch", false, false, "scope", "sequence"));
     private static final List<IndexSpec> HISTORY_INDEXES = List.of(
             index(HISTORY_WINDOW, false, false, "scope", "merchant", "eventTime", "sequence"),
             index("merchant_history_ttl", false, true, "expireAt"));
     private static final List<IndexSpec> MANIFEST_INDEXES = List.of(
-            index("merchant_manifest_event_unique", true, false, "institution", "source", "sourceEvent"),
-            index("merchant_manifest_transaction_unique", true, false, "institution", "source", "transaction"),
-            index("merchant_manifest_occurrence_unique", true, false, "institution", "source", "occurrence"),
-            index("merchant_manifest_sequence_unique", true, false, "institution", "source", "epoch", "sequence"),
+            index("merchant_manifest_event_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "sourceEvent"),
+            index("merchant_manifest_transaction_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "transaction"),
+            index("merchant_manifest_occurrence_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "occurrence"),
+            index("merchant_manifest_sequence_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "sequence"),
             index(MANIFEST_WINDOW, false, false, "scope", "merchant", "eventTime", "sequence"),
             index("merchant_manifest_sequence", false, false, "scope", "sequence"));
     private static final List<IndexSpec> MEMBERSHIP_INDEXES = List.of(
             index(MEMBERSHIP_WINDOW, false, false, "scope", "merchant", "eventTime", "sequence"),
-            index("merchant_membership_sequence_unique", true, false, "institution", "source", "epoch", "sequence"));
+            index("merchant_membership_sequence_unique", true, false,
+                    "issuer", "institution", "source", "epoch", "identityVersion", "sequence"));
 
     static void initialize(MongoDatabase database) {
         Set<String> expected = Set.of(CANDIDATES, HISTORY, MANIFEST, COVERAGE, MEMBERSHIP);

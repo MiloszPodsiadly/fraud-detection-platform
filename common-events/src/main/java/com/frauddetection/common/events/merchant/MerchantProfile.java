@@ -101,6 +101,7 @@ public record MerchantProfile(
         }
     }
 
+    /** evaluatedAt is the knowledge cutoff at which this profile was evaluated. */
     public record Provenance(Instant evaluatedAt, Instant retainedFrom, Instant coverageStart, Instant watermark,
                              Long throughSequence, String historyCommitment) {
         public Provenance {
@@ -166,7 +167,8 @@ public record MerchantProfile(
         if (facts.matureFraudLabels().status() == MerchantProfileFacts.Status.AVAILABLE) {
             var labels = facts.matureFraudLabels().value();
             require(!labels.matureThrough().isAfter(provenance.evaluatedAt()), "LABELS_WINDOW");
-            validatePopulationIdentity(labels.populationIdentity(), scope, recent, provenance, facts);
+            validatePopulationIdentity(labels.populationIdentity(), scope, recent, provenance, facts,
+                    labels.matureThrough(), facts.matureFraudLabels().provenance().observedAt(), "LABEL_KNOWLEDGE_TIME");
             if (labels.populationIdentity().basis() == PopulationBasis.SOURCE_OBSERVATION_COHORT) {
                 require(recent.status() == Status.AVAILABLE
                                 && (long) labels.confirmedFraud() + labels.confirmedLegitimate() <= recent.count(),
@@ -178,7 +180,8 @@ public record MerchantProfile(
         }
         if (facts.coveredPopulation().status() == MerchantProfileFacts.Status.AVAILABLE) {
             var population = facts.coveredPopulation().value();
-            validatePopulationIdentity(population.populationIdentity(), scope, recent, provenance, facts);
+            validatePopulationIdentity(population.populationIdentity(), scope, recent, provenance, facts,
+                    null, facts.coveredPopulation().provenance().observedAt(), "POPULATION_KNOWLEDGE_TIME");
             if (population.populationIdentity().basis() == PopulationBasis.SOURCE_OBSERVATION_COHORT) {
                 require(recent.status() == Status.AVAILABLE && population.eligibleTransactions() <= recent.count(),
                         "POPULATION_OBSERVATION_COHORT");
@@ -207,7 +210,8 @@ public record MerchantProfile(
 
     private static void validatePopulationIdentity(MerchantPopulationIdentity identity, ScopeClaim scope,
                                                    WindowCount recent, Provenance provenance,
-                                                   MerchantProfileFacts facts) {
+                                                   MerchantProfileFacts facts, Instant matureThrough,
+                                                   Instant evidenceObservedAt, String timelineFailure) {
         require(identity.issuerRef().equals(scope.issuerRef())
                         && identity.institutionRef().equals(scope.institutionRef())
                         && identity.sourceRef().equals(scope.sourceRef())
@@ -217,6 +221,8 @@ public record MerchantProfile(
                         && identity.windowStart().equals(recent.start()) && identity.windowEnd().equals(recent.end())
                         && !identity.asOf().isAfter(provenance.evaluatedAt()),
                 "POPULATION_IDENTITY_SCOPE");
+        validateFactKnowledgeTimeline(identity.windowEnd(), matureThrough, identity.asOf(), evidenceObservedAt,
+                provenance.evaluatedAt(), timelineFailure);
         if (identity.basis() == PopulationBasis.SOURCE_OBSERVATION_COHORT) {
             require(recent.status() == Status.AVAILABLE && provenance.historyCommitment() != null
                             && identity.cohortCommitment().equals(provenance.historyCommitment()),
@@ -230,6 +236,18 @@ public record MerchantProfile(
                             && identity.sourceSetCommitment().equals(mapping.sourceSetCommitment()),
                     "POPULATION_MAPPING_SCOPE");
         }
+    }
+
+    /** Inclusive order: cohort window, optional label maturity, cohort cutoff, aggregate availability, profile evaluation. */
+    private static void validateFactKnowledgeTimeline(Instant windowEnd, Instant matureThrough, Instant cohortAsOf,
+                                                      Instant evidenceObservedAt, Instant profileEvaluatedAt,
+                                                      String failureCode) {
+        require(!windowEnd.isAfter(cohortAsOf)
+                        && (matureThrough == null || !matureThrough.isBefore(windowEnd)
+                        && !matureThrough.isAfter(cohortAsOf))
+                        && !cohortAsOf.isAfter(evidenceObservedAt)
+                        && !evidenceObservedAt.isAfter(profileEvaluatedAt),
+                failureCode);
     }
 
     private static FactSummary summary(MerchantProfileFacts.Fact<?> fact) {
