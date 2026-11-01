@@ -14,6 +14,7 @@ import com.mongodb.client.model.IndexOptions;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,6 +38,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -373,6 +375,8 @@ class MongoMerchantObservationStoreIntegrationTest {
         }
         assertUniqueIndex(MongoMerchantObservationSchema.MEMBERSHIP, "merchant_membership_sequence_unique",
                 scopeFields, "sequence");
+        assertUniqueIndex(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, "merchant_membership_tip_unique",
+                scopeFields, "merchant");
     }
 
     @Test
@@ -439,6 +443,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(uncertainStore.commit(first).status()).isEqualTo(CommitStatus.EXISTING);
         assertThat(acknowledgments).hasValue(3);
         assertThat(count(MongoMerchantObservationSchema.HISTORY)).isEqualTo(1);
+        assertThat(membershipTip(SCOPE, MERCHANT).getString("checkpointId")).isEqualTo(MerchantObservationDocumentCodec.eventId(first));
         assertThat(store.pending(SCOPE)).isEqualTo(new PendingCounts(0, 0));
         assertThat(store.commit(first).snapshot()).isEqualTo(store.readSnapshot(first));
     }
@@ -474,6 +479,9 @@ class MongoMerchantObservationStoreIntegrationTest {
             var restarted = new MongoMerchantObservationStore(restartedClient, databaseName, clock, LIMITS, verifier);
             assertThat(restarted.pending(SCOPE).pending()).isEqualTo(1);
             assertThat(restarted.pending(rotatedScope)).isEqualTo(new PendingCounts(0, 0));
+            assertThat(restartedClient.getDatabase(databaseName).getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)
+                    .find(eq("_id", MerchantObservationDocumentCodec.membershipTipId(SCOPE, MERCHANT))).first()
+                    .getString("checkpointId")).isEqualTo(MerchantObservationDocumentCodec.eventId(second));
             assertThat(restarted.readSnapshot(first)).isEqualTo(original);
             assertThat(restarted.readSnapshot(rotated)).isEqualTo(rotatedSnapshot);
             assertThat(restarted.commit(second).snapshot().priorCount()).isEqualTo(1);
@@ -552,6 +560,45 @@ class MongoMerchantObservationStoreIntegrationTest {
                 .containsExactlyInAnyOrder(MongoMerchantObservationSchema.CANDIDATES,
                         MongoMerchantObservationSchema.HISTORY, MongoMerchantObservationSchema.MANIFEST,
                         MongoMerchantObservationSchema.COVERAGE);
+    }
+
+    @Test
+    void sharedDatabaseWithFortyUnrelatedCollectionsBootstrapsMerchantSchemaInIsolation() {
+        String sharedDatabaseName = "shared_" + UUID.randomUUID().toString().replace("-", "");
+        MongoDatabase shared = client.getDatabase(sharedDatabaseName);
+        Set<String> unrelated = createUnrelatedCollections(shared, 40);
+        assertThat(shared.listCollectionNames().into(new java.util.ArrayList<>()))
+                .containsExactlyInAnyOrderElementsOf(unrelated);
+
+        new MongoMerchantObservationStore(client, sharedDatabaseName, clock, LIMITS, verifier);
+
+        Set<String> all = new java.util.HashSet<>(shared.listCollectionNames().into(new java.util.ArrayList<>()));
+        assertThat(all).containsExactlyInAnyOrderElementsOf(union(expectedMerchantCollections(), unrelated));
+        assertThat(shared.getCollection("shared_unrelated_marker").find(eq("_id", "preserve-me")).first())
+                .isEqualTo(new Document("_id", "preserve-me").append("marker", "unchanged"));
+    }
+
+    @Test
+    void sharedDatabaseWithFortyUnrelatedCollectionsAcceptsRestartWithTheCompleteMerchantSchema() {
+        Set<String> unrelated = createUnrelatedCollections(database, 40);
+        Set<String> before = new java.util.HashSet<>(database.listCollectionNames().into(new java.util.ArrayList<>()));
+        assertThat(before).containsExactlyInAnyOrderElementsOf(union(expectedMerchantCollections(), unrelated));
+
+        new MongoMerchantObservationStore(client, databaseName, clock, LIMITS, verifier);
+
+        Set<String> after = new java.util.HashSet<>(database.listCollectionNames().into(new java.util.ArrayList<>()));
+        assertThat(after).isEqualTo(before);
+        assertThat(database.getCollection("shared_unrelated_marker").find(eq("_id", "preserve-me")).first())
+                .isEqualTo(new Document("_id", "preserve-me").append("marker", "unchanged"));
+    }
+
+    @Test
+    void collectionEnumerationFailurePreventsMerchantSchemaBootstrap() {
+        String unavailableName = "merchant_discovery_" + UUID.randomUUID().toString().replace("-", "");
+        assertThatThrownBy(() -> new MongoMerchantObservationStore(failingCollectionEnumeration(client),
+                unavailableName, clock, LIMITS, verifier))
+                .hasMessage("MERCHANT_STORE_SCHEMA_UNAVAILABLE");
+        assertThat(client.getDatabase(unavailableName).listCollectionNames().into(new java.util.ArrayList<>())).isEmpty();
     }
 
     @Test
@@ -704,6 +751,8 @@ class MongoMerchantObservationStoreIntegrationTest {
         var uncertainStage = new MongoMerchantObservationStore(lostAcknowledgments(client, stageAcks), databaseName, clock, LIMITS, verifier);
         assertThat(uncertainStage.stage(first)).isEqualTo(StageResult.EXISTING);
         assertThat(stageAcks).hasValue(3);
+        var restartedAfterUnknownStage = new MongoMerchantObservationStore(client, databaseName, clock, LIMITS, verifier);
+        assertThat(restartedAfterUnknownStage.stage(first)).isEqualTo(StageResult.EXISTING);
         assertThat(store.pending(SCOPE).pending()).isEqualTo(1);
         CoverageSeal seal = new CoverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
         verifier.permit(seal);
@@ -711,6 +760,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         new MongoMerchantObservationStore(lostAcknowledgments(client, sealAcks), databaseName, clock, LIMITS, verifier).seal(seal);
         assertThat(sealAcks).hasValue(3);
         assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1);
+        assertThat(membershipTip(SCOPE, MERCHANT).getString("checkpointId")).isEqualTo(MerchantObservationDocumentCodec.eventId(first));
         assertThat(store.commit(first).snapshot().priorCount()).isZero();
         assertThat(store.pending(SCOPE)).isEqualTo(new PendingCounts(0, 0));
     }
@@ -771,11 +821,43 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1);
         assertThat(source(SCOPE).getLong("compactedThroughSequence")).isEqualTo(1);
         assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        Document compactedTip = membershipTip(SCOPE, MERCHANT);
+        assertThat(compactedTip.getString("checkpointId")).isEqualTo(MerchantObservationDocumentCodec.eventId(first));
+        assertThat(compactedTip.getBoolean("compacted")).isTrue();
         seal(SCOPE, 2, next.eventTime().minusSeconds(7_200), next.eventTime());
         assertThat(count(MongoMerchantObservationSchema.MEMBERSHIP)).isEqualTo(1);
+        assertThat(membershipTip(SCOPE, MERCHANT).getString("checkpointId")).isEqualTo(MerchantObservationDocumentCodec.eventId(next));
+        assertThat(membershipTip(SCOPE, MERCHANT).getBoolean("compacted")).isFalse();
         Snapshot fresh = store.commit(next).snapshot();
         assertThat(fresh.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
         assertThat(fresh.priorCount()).isZero();
+    }
+
+    @Test
+    void membershipTipsRemainBoundedPerScopeAcrossCompaction() {
+        var bounded = new MongoMerchantObservationStore(client, databaseName, clock, storageBudget(1), verifier);
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        bounded.stage(first);
+        CoverageSeal firstSeal = new CoverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        verifier.permit(firstSeal);
+        bounded.seal(firstSeal);
+        bounded.commit(first);
+
+        clock.instant = clock.instant().plus(LIMITS.receiptRetention());
+        Observation rawSecond = observation(SCOPE, 2, 2, clock.instant());
+        Observation second = new Observation(SCOPE, rawSecond.sourceEvent(), rawSecond.transaction(), rawSecond.occurrence(),
+                token(901), rawSecond.sequence(), rawSecond.eventTime(), rawSecond.sourceObservedAt(), rawSecond.payloadCommitment());
+        verifier.permit(second);
+        assertThat(bounded.stage(second)).isEqualTo(StageResult.CREATED);
+        assertThat(source(SCOPE).getLong("compactedThroughSequence")).isEqualTo(1L);
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(1L);
+
+        CoverageSeal secondSeal = new CoverageSeal(SCOPE, 2, second.eventTime().minusSeconds(7_200), second.eventTime());
+        verifier.permit(secondSeal);
+        assertThatThrownBy(() -> bounded.seal(secondSeal)).hasMessage("MERCHANT_STORE_STORAGE_CAPACITY");
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(1L);
     }
 
     @Test
@@ -796,6 +878,107 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(store.stage(approved(SCOPE, 3, 3, BASE.plusSeconds(120)))).isEqualTo(StageResult.QUARANTINED);
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
         assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+    }
+
+    @Test
+    void correlatedLossBetweenSealsCannotRebaseAnInWindowMerchantAsCompleteZero() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        Observation second = approved(SCOPE, 2, 2, BASE.plusSeconds(60));
+        store.stage(first);
+        store.stage(second);
+
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), first.eventTime());
+        Snapshot firstSnapshot = store.commit(first).snapshot();
+        assertThat(firstSnapshot.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(firstSnapshot.priorCount()).isZero();
+
+        String firstId = MerchantObservationDocumentCodec.eventId(first);
+        for (String collection : List.of(MongoMerchantObservationSchema.CANDIDATES,
+                MongoMerchantObservationSchema.HISTORY, MongoMerchantObservationSchema.MANIFEST,
+                MongoMerchantObservationSchema.MEMBERSHIP)) {
+            database.getCollection(collection).deleteOne(eq("_id", firstId));
+            assertThat(database.getCollection(collection).find(eq("_id", firstId)).first())
+                    .as("fault injection removes E1 from %s", collection).isNull();
+        }
+
+        seal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+        CommitResult result = store.commit(second);
+        assertThat(result.status()).isEqualTo(CommitStatus.QUARANTINED);
+        assertThat(result.snapshot()).isNull();
+        Document secondCheckpoint = database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP)
+                .find(eq("_id", MerchantObservationDocumentCodec.eventId(second))).first();
+        assertThat(secondCheckpoint.getString("previousCheckpointId")).isEqualTo(firstId);
+        assertThat(secondCheckpoint.getLong("previousSequence")).isEqualTo(1L);
+        Document secondTip = membershipTip(SCOPE, MERCHANT);
+        assertThat(secondTip.getString("checkpointId")).isEqualTo(MerchantObservationDocumentCodec.eventId(second));
+        assertThat(database.getCollection(MongoMerchantObservationSchema.CANDIDATES)
+                .find(eq("_id", MerchantObservationDocumentCodec.eventId(second))).first().getString("status"))
+                .isEqualTo("QUARANTINED");
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+        assertThat(source(SCOPE).getInteger("pending")).isZero();
+        assertThat(source(SCOPE).getInteger("quarantined")).isEqualTo(1);
+        assertThatThrownBy(() -> store.readSnapshot(second)).hasMessage("MERCHANT_STORE_SNAPSHOT_MISSING");
+    }
+
+    @Test
+    void missingMembershipTipCannotRebaseAnExistingMerchantChain() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        Observation second = approved(SCOPE, 2, 2, BASE.plusSeconds(60));
+        store.stage(first);
+        store.stage(second);
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), first.eventTime());
+        store.commit(first);
+        database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)
+                .deleteOne(eq("_id", MerchantObservationDocumentCodec.membershipTipId(SCOPE, MERCHANT)));
+
+        assertThatThrownBy(() -> seal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime()))
+                .hasMessage("MERCHANT_STORE_MEMBERSHIP_TIP_MISSING");
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        Snapshot firstRead = store.readSnapshot(first);
+        assertThat(firstRead.availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(firstRead.priorCount()).isNull();
+    }
+
+    @Test
+    void missingMembershipTipAfterCompactionCannotBeMistakenForNewMerchantGenesis() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        store.stage(first);
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        store.commit(first);
+
+        clock.instant = clock.instant().plus(LIMITS.receiptRetention());
+        Observation later = approved(SCOPE, 2, 2, clock.instant());
+        assertThat(store.stage(later)).isEqualTo(StageResult.CREATED);
+        assertThat(source(SCOPE).getLong("compactedThroughSequence")).isEqualTo(1L);
+        assertThat(membershipTip(SCOPE, MERCHANT).getBoolean("compacted")).isTrue();
+
+        database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)
+                .deleteOne(eq("_id", MerchantObservationDocumentCodec.membershipTipId(SCOPE, MERCHANT)));
+        assertThatThrownBy(() -> seal(SCOPE, 2, later.eventTime().minusSeconds(7_200), later.eventTime()))
+                .hasMessage("MERCHANT_STORE_MEMBERSHIP_TIP_MISSING");
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(source(SCOPE).getInteger("membershipTipCount")).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isZero();
+    }
+
+    @Test
+    void mismatchedMembershipTipRevokesACompleteRead() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        Observation second = approved(SCOPE, 2, 2, BASE.plusSeconds(60));
+        store.stage(first);
+        store.stage(second);
+        seal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+        store.commit(first);
+        store.commit(second);
+        database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS).updateOne(
+                eq("_id", MerchantObservationDocumentCodec.membershipTipId(SCOPE, MERCHANT)),
+                set("membershipCommitment", token(999)),
+                new com.mongodb.client.model.UpdateOptions().bypassDocumentValidation(true));
+
+        Snapshot snapshot = store.readSnapshot(second);
+        assertThat(snapshot.availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(snapshot.reason()).isEqualTo(Reason.HISTORY_MISSING);
+        assertThat(snapshot.priorCount()).isNull();
     }
 
     @Test
@@ -836,7 +1019,8 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(store.commit(later).snapshot().priorCount()).isEqualTo(1);
 
         for (String collection : List.of(MongoMerchantObservationSchema.CANDIDATES,
-                MongoMerchantObservationSchema.HISTORY, MongoMerchantObservationSchema.MANIFEST)) {
+                MongoMerchantObservationSchema.HISTORY, MongoMerchantObservationSchema.MANIFEST,
+                MongoMerchantObservationSchema.MEMBERSHIP)) {
             database.getCollection(collection).deleteOne(eq("_id", MerchantObservationDocumentCodec.eventId(first)));
         }
 
@@ -986,21 +1170,60 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
     }
 
-    @Test
+    @RepeatedTest(5)
     void concurrentMerchantsCannotRacePastTheScopeStorageBudget() throws Exception {
         var bounded = new MongoMerchantObservationStore(client, databaseName, clock, storageBudget(1), verifier);
         List<Observation> rows = List.of(distinctMerchant(1, BASE), distinctMerchant(2, BASE.plusSeconds(1)));
+        List<String> outcomes = new java.util.ArrayList<>();
+        CyclicBarrier start = new CyclicBarrier(2);
         try (var workers = Executors.newFixedThreadPool(2)) {
             var tasks = rows.stream().<java.util.concurrent.Callable<String>>map(row -> () -> {
-                try { return bounded.stage(row).name(); }
-                catch (IllegalStateException failure) { return failure.getMessage(); }
+                start.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                return stageOutcome(bounded, row);
             }).toList();
-            List<String> results = new java.util.ArrayList<>();
-            for (var future : workers.invokeAll(tasks)) { results.add(future.get()); }
-            assertThat(results).contains("CREATED").allMatch(result -> Set.of("CREATED", "QUARANTINED", "MERCHANT_STORE_STORAGE_CAPACITY").contains(result));
+            for (var future : workers.invokeAll(tasks)) { outcomes.add(future.get()); }
         }
+        for (int index = 0; index < outcomes.size(); index++) {
+            if ("MERCHANT_STORE_STAGE_UNRESOLVED".equals(outcomes.get(index))) {
+                outcomes.set(index, retryExactStageAfterStoreRestart(rows.get(index), storageBudget(1)));
+            }
+        }
+        assertThat(outcomes).noneMatch("MERCHANT_STORE_STAGE_UNRESOLVED"::equals)
+                .noneMatch("QUARANTINED"::equals)
+                .contains("MERCHANT_STORE_STORAGE_CAPACITY");
+        assertThat(outcomes.stream().filter(result -> Set.of("CREATED", "EXISTING").contains(result)).count())
+                .isEqualTo(1L);
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
+        assertThat(count(MongoMerchantObservationSchema.MANIFEST)).isEqualTo(1);
+        assertThat(count(MongoMerchantObservationSchema.HISTORY)).isZero();
+        assertThat(count(MongoMerchantObservationSchema.MEMBERSHIP)).isZero();
+        assertThat(count(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)).isZero();
+        Document candidate = database.getCollection(MongoMerchantObservationSchema.CANDIDATES).find().first();
+        Document receipt = database.getCollection(MongoMerchantObservationSchema.MANIFEST).find().first();
+        assertThat(candidate.getString("_id")).isEqualTo(receipt.getString("_id"));
+        assertThat(candidate.getLong("sequence")).isIn(1L, 2L);
+        assertThat(candidate.getString("status")).isEqualTo("STAGED");
+        Document coverage = source(SCOPE);
+        assertThat(coverage.getInteger("accepted")).isEqualTo(1);
+        assertThat(coverage.getInteger("pending")).isEqualTo(1);
+        assertThat(coverage.getInteger("quarantined")).isZero();
+        assertThat(coverage.getBoolean("invalidated")).isFalse();
+    }
+
+    @Test
+    void transientStageWriteContentionRetriesTheSameTransactionWithoutDuplicateRows() {
+        Observation observation = distinctMerchant(1, BASE);
+        AtomicBoolean inject = new AtomicBoolean(true);
+        MongoClient contended = transientCandidateContention(client, inject);
+        var contendedStore = new MongoMerchantObservationStore(contended, databaseName, clock, storageBudget(1), verifier);
+
+        assertThat(contendedStore.stage(observation)).isEqualTo(StageResult.CREATED);
+        assertThat(inject).isFalse();
+        assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
+        assertThat(count(MongoMerchantObservationSchema.MANIFEST)).isEqualTo(1);
         assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        assertThat(source(SCOPE).getInteger("pending")).isEqualTo(1);
+        assertThat(source(SCOPE).getInteger("quarantined")).isZero();
     }
 
     @Test
@@ -1205,6 +1428,42 @@ class MongoMerchantObservationStoreIntegrationTest {
         verifier.permit(row);
         return row;
     }
+    private Set<String> createUnrelatedCollections(MongoDatabase target, int count) {
+        Set<String> names = new java.util.HashSet<>();
+        String markerCollection = "shared_unrelated_marker";
+        target.createCollection(markerCollection);
+        names.add(markerCollection);
+        target.getCollection(markerCollection).insertOne(new Document("_id", "preserve-me").append("marker", "unchanged"));
+        for (int index = 1; index < count; index++) {
+            String name = "shared_unrelated_" + String.format("%02d", index);
+            target.createCollection(name);
+            names.add(name);
+        }
+        return names;
+    }
+    private static Set<String> expectedMerchantCollections() {
+        return Set.of(MongoMerchantObservationSchema.CANDIDATES, MongoMerchantObservationSchema.HISTORY,
+                MongoMerchantObservationSchema.MANIFEST, MongoMerchantObservationSchema.COVERAGE,
+                MongoMerchantObservationSchema.MEMBERSHIP, MongoMerchantObservationSchema.MEMBERSHIP_TIPS);
+    }
+    private static Set<String> union(Set<String> left, Set<String> right) {
+        Set<String> result = new java.util.HashSet<>(left);
+        result.addAll(right);
+        return result;
+    }
+    private String stageOutcome(MongoMerchantObservationStore target, Observation observation) {
+        try { return target.stage(observation).name(); }
+        catch (IllegalStateException failure) { return failure.getMessage(); }
+    }
+    private String retryExactStageAfterStoreRestart(Observation observation, Limits limits) {
+        MongoMerchantObservationStore restarted = new MongoMerchantObservationStore(client, databaseName, clock, limits, verifier);
+        String last = "MERCHANT_STORE_STAGE_UNRESOLVED";
+        for (int attempt = 0; attempt < MongoMerchantObservationStore.ATTEMPTS; attempt++) {
+            last = stageOutcome(restarted, observation);
+            if (!"MERCHANT_STORE_STAGE_UNRESOLVED".equals(last)) { return last; }
+        }
+        return last;
+    }
     private static Limits storageBudget(int budget) {
         return new Limits(LIMITS.window(), LIMITS.historyRetention(), LIMITS.receiptRetention(), LIMITS.replayHorizon(),
                 LIMITS.clockSkew(), 100, 100, 100, budget);
@@ -1221,6 +1480,10 @@ class MongoMerchantObservationStoreIntegrationTest {
     private Document source(Scope scope) {
         return database.getCollection(MongoMerchantObservationSchema.COVERAGE)
                 .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first();
+    }
+    private Document membershipTip(Scope scope, String merchant) {
+        return database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)
+                .find(eq("_id", MerchantObservationDocumentCodec.membershipTipId(scope, merchant))).first();
     }
     private long countForScope(String collection, Scope scope) {
         return database.getCollection(collection).countDocuments(eq("scope", MerchantObservationDocumentCodec.scopeId(scope)));
@@ -1295,6 +1558,46 @@ class MongoMerchantObservationStoreIntegrationTest {
         return proxy(MongoClient.class, (method, args) -> {
             Object result = invoke(delegate, method, args);
             return result instanceof MongoDatabase db ? faultDatabase(db, fail) : result;
+        });
+    }
+    private static MongoClient failingCollectionEnumeration(MongoClient delegate) {
+        return proxy(MongoClient.class, (method, args) -> {
+            Object result = invoke(delegate, method, args);
+            return "getDatabase".equals(method.getName()) && result instanceof MongoDatabase db
+                    ? unavailableCollectionNames(db) : result;
+        });
+    }
+    private static MongoDatabase unavailableCollectionNames(MongoDatabase delegate) {
+        return proxy(MongoDatabase.class, (method, args) -> {
+            if ("runCommand".equals(method.getName()) && args != null && args.length > 0
+                    && args[0] instanceof Document command && command.containsKey("listCollections")) {
+                throw new MongoException(91, "TEST_ONLY_COLLECTION_ENUMERATION_FAILURE");
+            }
+            Object result = invoke(delegate, method, args);
+            return result instanceof MongoDatabase db ? unavailableCollectionNames(db) : result;
+        });
+    }
+    private static MongoClient transientCandidateContention(MongoClient delegate, AtomicBoolean inject) {
+        return proxy(MongoClient.class, (method, args) -> {
+            Object result = invoke(delegate, method, args);
+            return result instanceof MongoDatabase db ? transientFaultDatabase(db, inject) : result;
+        });
+    }
+    private static MongoDatabase transientFaultDatabase(MongoDatabase delegate, AtomicBoolean inject) {
+        return proxy(MongoDatabase.class, (method, args) -> {
+            Object result = invoke(delegate, method, args);
+            if (result instanceof MongoDatabase db) { return transientFaultDatabase(db, inject); }
+            if ("getCollection".equals(method.getName()) && MongoMerchantObservationSchema.CANDIDATES.equals(args[0])) {
+                return proxy(MongoCollection.class, (operation, parameters) -> {
+                    if ("insertOne".equals(operation.getName()) && inject.compareAndSet(true, false)) {
+                        MongoException conflict = new MongoException(112, "TEST_ONLY_TRANSIENT_WRITE_CONFLICT");
+                        conflict.addLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+                        throw conflict;
+                    }
+                    return invoke(result, operation, parameters);
+                });
+            }
+            return result;
         });
     }
     private static MongoDatabase faultDatabase(MongoDatabase delegate, AtomicBoolean fail) {

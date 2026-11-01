@@ -9,7 +9,9 @@ import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.ReplaceOptions;
 import com.frauddetection.enricher.merchant.MerchantObservationDocumentCodec.MembershipCheckpoint;
+import com.frauddetection.enricher.merchant.MerchantObservationDocumentCodec.MembershipTip;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 
@@ -19,9 +21,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
@@ -43,6 +47,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     private final MongoCollection<Document> manifest;
     private final MongoCollection<Document> coverage;
     private final MongoCollection<Document> membership;
+    private final MongoCollection<Document> membershipTips;
     private final Clock clock;
     private final Limits limits;
     private final AdmissionVerifier admission;
@@ -70,6 +75,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         manifest = database.getCollection(MongoMerchantObservationSchema.MANIFEST);
         coverage = database.getCollection(MongoMerchantObservationSchema.COVERAGE);
         membership = database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP);
+        membershipTips = database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS);
     }
 
     @Override
@@ -132,6 +138,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                             .hintString("merchant_manifest_sequence").limit(1).first() != null
                             || membership.find(session, eq("scope", scopeId(observation.scope())))
                             .hintString(MongoMerchantObservationSchema.MEMBERSHIP_WINDOW).limit(1).first() != null
+                            || membershipTips.find(session, eq("scope", scopeId(observation.scope())))
+                            .hintString("merchant_membership_tip_scope").limit(1).first() != null
                             || history.find(session, eq("scope", scopeId(observation.scope())))
                             .hintString(MongoMerchantObservationSchema.HISTORY_WINDOW).limit(1).first() != null) {
                         throw failure("COVERAGE_MISSING");
@@ -216,12 +224,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     if (observation.sequence() != ++expected || observation.eventTime().isAfter(seal.watermark())
                             || "QUARANTINED".equals(row.getString("status"))) { throw failure("SOURCE_SEQUENCE_GAP"); }
                 }
-                recordMembershipBatch(session, seal.scope(), batch);
+                int newMembershipTips = recordMembershipBatch(session, seal.scope(), batch, previous,
+                        source.getLong("compactedThroughSequence"), source.getInteger("membershipTipCount"));
                 Instant retainedFrom = later(instant(source, "retainedFrom"), now().minus(limits.historyRetention()));
                 if (coverage.updateOne(session, and(eq("_id", source.getString("_id")), eq("revision", source.getLong("revision"))),
                         combine(set("sealedSequence", seal.throughSequence()), set("coverageStart", Date.from(seal.coverageStart())),
                                 set("watermark", Date.from(seal.watermark())), set("retainedFrom", Date.from(retainedFrom)),
-                                inc("revision", 1L))).getModifiedCount() != 1) {
+                                inc("membershipTipCount", newMembershipTips), inc("revision", 1L))).getModifiedCount() != 1) {
                     throw race();
                 }
                 return null;
@@ -294,7 +303,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                             || receipts.size() > limits.maxHistoryRows() || members.size() > limits.maxHistoryRows()) {
                         return quarantine(session, candidate, observation.scope(), Reason.CAPACITY_EXCEEDED);
                     }
-                    if (!matchesEvidence(rows, expected, receipts, members, currentMember, observation, start)) {
+                    if (!matchesEvidence(session, rows, expected, receipts, members, currentMember, observation, start,
+                            source.getLong("compactedThroughSequence"))) {
                         return quarantine(session, candidate, observation.scope(), Reason.HISTORY_MISSING);
                     }
                     MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, now());
@@ -383,8 +393,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 .getModifiedCount() != 1) { throw failure("COVERAGE_MISSING"); }
     }
 
-    /** Sealed source continuity materializes a per-merchant, event-time predecessor chain in the same transaction. */
-    private void recordMembershipBatch(ClientSession session, Scope scope, List<Document> batch) {
+    /** Sealed source continuity materializes membership rows and independent per-merchant tips atomically. */
+    private int recordMembershipBatch(ClientSession session, Scope scope, List<Document> batch,
+                                      long previousSealedSequence, long compactedThroughSequence, int expectedTipCount) {
+        long existingTipCount = membershipTips.countDocuments(session, eq("scope", scopeId(scope)));
+        if (existingTipCount < expectedTipCount) { throw failure("MEMBERSHIP_TIP_MISSING"); }
+        if (existingTipCount != expectedTipCount) { throw failure("MEMBERSHIP_TIP_SET_MISMATCH"); }
+        int newTipCount = 0;
         Map<String, List<Observation>> byMerchant = new HashMap<>();
         for (Document candidate : batch) {
             Observation observation = decodeObservation(candidate);
@@ -393,13 +408,41 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         for (List<Observation> merchantBatch : byMerchant.values()) {
             merchantBatch.sort(Comparator.comparing(Observation::eventTime).thenComparingLong(Observation::sequence));
             Observation first = merchantBatch.getFirst();
-            Document previous = latestMembership(session, scope, first.merchant());
+            String tipId = membershipTipId(scope, first.merchant());
+            Document tipDocument = membershipTips.find(session, eq("_id", tipId)).first();
+            Document latestMember = latestMembership(session, scope, first.merchant());
+            MembershipCheckpoint previous = null;
+            if (tipDocument == null) {
+                if (latestMember != null) { throw failure("MEMBERSHIP_TIP_MISSING"); }
+                if (existingTipCount + newTipCount >= limits.maxStoredObservations()) {
+                    throw failure("STORAGE_CAPACITY");
+                }
+                newTipCount++;
+            } else {
+                MembershipTip tip = decodeMembershipTip(tipDocument);
+                previous = tip.checkpoint();
+                if (!previous.scope().equals(scope) || !previous.merchant().equals(first.merchant())
+                        || previous.sequence() > previousSealedSequence
+                        || tip.compacted() && previous.sequence() > compactedThroughSequence) {
+                    throw failure("MEMBERSHIP_TIP_MISMATCH");
+                }
+                if (latestMember != null) {
+                    MembershipCheckpoint latest = decodeMembership(latestMember);
+                    if (latest.sequence() > previous.sequence()
+                            || latest.sequence() == previous.sequence() && !latest.commitment().equals(previous.commitment())) {
+                        throw failure("MEMBERSHIP_TIP_MISMATCH");
+                    }
+                }
+            }
             for (Observation observation : merchantBatch) {
                 Document checkpoint = membershipDocument(observation, previous);
                 membership.insertOne(session, checkpoint);
-                previous = checkpoint;
+                previous = decodeMembership(checkpoint);
             }
+            membershipTips.replaceOne(session, eq("_id", tipId), membershipTipDocument(previous, false),
+                    new ReplaceOptions().upsert(true));
         }
+        return newTipCount;
     }
 
     private Document latestMembership(ClientSession session, Scope scope, String merchant) {
@@ -408,8 +451,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 .hintString(MongoMerchantObservationSchema.MEMBERSHIP_WINDOW).limit(1).first();
     }
 
-    private boolean matchesEvidence(List<Document> rows, List<Document> expected, List<Document> receipts,
-                                    List<Document> members, Document currentMember, Observation current, Instant windowStart) {
+    private boolean matchesEvidence(ClientSession session, List<Document> rows, List<Document> expected, List<Document> receipts,
+                                    List<Document> members, Document currentMember, Observation current, Instant windowStart,
+                                    long compactedThroughSequence) {
         if (rows.size() != expected.size() || rows.size() != receipts.size() || rows.size() != members.size()
                 || !membershipMatchesObservation(currentMember, current)) { return false; }
         Map<String, MembershipCheckpoint> checkpointById = new HashMap<>();
@@ -421,6 +465,20 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 if (checkpointById.put(checkpoint.id(), checkpoint) != null) { return false; }
             }
         } catch (RuntimeException corrupt) { return false; }
+        Set<String> merchants = new HashSet<>();
+        checkpointById.values().forEach(checkpoint -> merchants.add(checkpoint.merchant()));
+        merchants.add(currentCheckpoint.merchant());
+        Map<String, Document> tipsByMerchant = new HashMap<>();
+        for (String merchant : merchants) {
+            tipsByMerchant.put(merchant, membershipTips.find(session,
+                    eq("_id", membershipTipId(current.scope(), merchant))).first());
+        }
+        for (MembershipCheckpoint checkpoint : checkpointById.values()) {
+            if (!membershipTipMatchesCheckpoint(tipsByMerchant.get(checkpoint.merchant()), checkpoint,
+                    compactedThroughSequence)) { return false; }
+        }
+        if (!membershipTipMatchesCheckpoint(tipsByMerchant.get(currentCheckpoint.merchant()), currentCheckpoint,
+                compactedThroughSequence)) { return false; }
         for (MembershipCheckpoint checkpoint : checkpointById.values()) {
             if (!membershipChainComplete(checkpoint, checkpointById, windowStart, current.eventTime())) { return false; }
         }
@@ -501,6 +559,12 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 invalidate(session, scope);
                 return source(session, scope);
             }
+            if (!membershipTipMatchesCheckpoint(membershipTips.find(session,
+                            eq("_id", membershipTipId(scope, observation.merchant()))).first(),
+                    decodeMembership(checkpoint), source.getLong("compactedThroughSequence"))) {
+                invalidate(session, scope);
+                return source(session, scope);
+            }
             String status = candidate.getString("status");
             if (!"COMMITTED".equals(status) && !"QUARANTINED".equals(status)) { break; }
             Date receiptExpiry = candidate.getDate("receiptExpireAt");
@@ -521,6 +585,21 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     || manifest.deleteOne(session, eq("_id", id)).getDeletedCount() != 1
                     || membership.deleteOne(session, eq("_id", id)).getDeletedCount() != 1) { throw race(); }
             history.deleteOne(session, eq("_id", id));
+        }
+        Set<String> compactedTipIds = new HashSet<>();
+        for (Document candidate : compact) {
+            Observation observation = decodeObservation(candidate);
+            compactedTipIds.add(membershipTipId(scope, observation.merchant()));
+        }
+        for (String tipId : compactedTipIds) {
+            Document tipDocument = membershipTips.find(session, eq("_id", tipId)).first();
+            if (tipDocument == null) { throw race(); }
+            MembershipTip tip = decodeMembershipTip(tipDocument);
+            if (tip.checkpoint().sequence() <= lastSequence && !tip.compacted()
+                    && membershipTips.replaceOne(session, eq("_id", tipId),
+                    membershipTipDocument(tip.checkpoint(), true)).getMatchedCount() != 1) {
+                throw race();
+            }
         }
         Instant retainedFrom = later(instant(source, "retainedFrom"), now.minus(limits.historyRetention()));
         if (coverage.updateOne(session, and(eq("_id", source.getString("_id")), eq("revision", source.getLong("revision")),
@@ -572,7 +651,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     || receipts.size() > limits.maxHistoryRows() || members.size() > limits.maxHistoryRows()) {
                 return unavailable(observation, Reason.CAPACITY_EXCEEDED);
             }
-            if (!matchesEvidence(rows, expected, receipts, members, currentMember, observation, stored.windowStart())) {
+            if (!matchesEvidence(session, rows, expected, receipts, members, currentMember, observation,
+                    stored.windowStart(), source.getLong("compactedThroughSequence"))) {
                 return unavailable(observation, Reason.HISTORY_MISSING);
             }
             MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, evaluatedAt);
@@ -626,9 +706,14 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         requireBinding(row, observation);
         requireReceiptFresh(row);
         if (!matchesManifest(row, safeRead(manifest, eventId(observation)))) { throw failure("HISTORY_MISSING"); }
-        if ("COMMITTED".equals(row.getString("status"))
-                && !membershipMatchesObservation(safeRead(membership, eventId(observation)), observation)) {
-            throw failure("HISTORY_MISSING");
+        if ("COMMITTED".equals(row.getString("status"))) {
+            Document member = safeRead(membership, eventId(observation));
+            Document source = safeRead(coverage, scopeId(observation.scope()));
+            if (!membershipMatchesObservation(member, observation) || source == null) { throw failure("HISTORY_MISSING"); }
+            requireSource(source, observation.scope());
+            if (!membershipTipMatchesCheckpoint(safeRead(membershipTips,
+                            membershipTipId(observation.scope(), observation.merchant())), decodeMembership(member),
+                    source.getLong("compactedThroughSequence"))) { throw failure("HISTORY_MISSING"); }
         }
         return "QUARANTINED".equals(row.getString("status")) ? StageResult.QUARANTINED : StageResult.EXISTING;
     }
@@ -681,7 +766,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 throw failure("CORRUPT_COVERAGE");
             }
             int accepted = row.getInteger("accepted");
+            int membershipTipCount = row.getInteger("membershipTipCount");
             if (accepted < 0 || accepted > limits.maxStoredObservations() || accepted < sealedSequence - compactedThrough
+                    || membershipTipCount < 0 || membershipTipCount > limits.maxStoredObservations()
                     || pending > limits.maxPending() || quarantined > accepted || (long) pending + quarantined > accepted
                     || (row.getDate("coverageStart") == null) != (row.getDate("watermark") == null)
                     || (row.getLong("sealedSequence") == 0) != (row.getDate("watermark") == null)) {
@@ -699,7 +786,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
 
     private Document sourceDocument(Scope scope, Instant now) {
         return scopeDocument(scope).append("_id", scopeId(scope)).append("revision", 0L).append("pending", 0)
-                .append("accepted", 0).append("quarantined", 0).append("sealedSequence", 0L)
+                .append("accepted", 0).append("quarantined", 0).append("membershipTipCount", 0).append("sealedSequence", 0L)
                 .append("compactedThroughSequence", 0L).append("retainedFrom", Date.from(now.minus(limits.historyRetention())))
                 .append("invalidated", false).append("policyCommitment", policyCommitment);
     }
