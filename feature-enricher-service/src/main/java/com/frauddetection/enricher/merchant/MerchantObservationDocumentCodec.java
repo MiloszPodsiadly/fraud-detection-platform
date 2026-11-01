@@ -6,6 +6,7 @@ import org.bson.Document;
 
 import java.time.Instant;
 import java.util.Date;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Versioned Mongo document mapping and identity validation, kept separate from transaction coordination. */
@@ -16,7 +17,10 @@ final class MerchantObservationDocumentCodec {
                                 String commitment) {
         @Override public String toString() { return "MerchantMembershipCheckpoint[redacted]"; }
     }
-    record MembershipTip(MembershipCheckpoint checkpoint, boolean compacted) {
+    record MembershipAnchor(String id, long sequence, Instant eventTime, String commitment) {
+        @Override public String toString() { return "MerchantMembershipAnchor[redacted]"; }
+    }
+    record MembershipTip(MembershipCheckpoint checkpoint, MembershipAnchor compactedCheckpoint, boolean compacted) {
         @Override public String toString() { return "MerchantMembershipTip[redacted]"; }
     }
 
@@ -66,8 +70,7 @@ final class MerchantObservationDocumentCodec {
     static Document membershipDocument(Observation observation, MembershipCheckpoint previous) {
         if (previous != null && (!previous.scope().equals(observation.scope())
                 || !previous.merchant().equals(observation.merchant())
-                || previous.eventTime().isAfter(observation.eventTime())
-                || previous.eventTime().equals(observation.eventTime()) && previous.sequence() >= observation.sequence())) {
+                || previous.sequence() >= observation.sequence())) {
             throw failure("MEMBERSHIP_ORDER");
         }
         String id = eventId(observation);
@@ -108,11 +111,9 @@ final class MerchantObservationDocumentCodec {
             if (!noPrevious && !hasPrevious || id == null || !id.equals(eventId(scope, event))
                     || !scopeId(scope).equals(row.getString("scope")) || !reference(event) || !reference(merchant)
                     || !reference(input) || !reference(commitment) || sequence < 1
-                    || previousSequence != null && previousSequence < 1
+                    || previousSequence != null && (previousSequence < 1 || previousSequence >= sequence)
                     || previousCommitment != null && !reference(previousCommitment)
                     || previousId != null && previousId.length() > 265
-                    || previousEventTime != null && (previousEventTime.isAfter(eventTime)
-                    || previousEventTime.equals(eventTime) && previousSequence >= sequence)
                     || !membershipCommitment(scope, id, event, merchant, sequence, eventTime, input,
                     previousId, previousSequence, previousEventTime, previousCommitment).equals(commitment)) {
                 throw failure("CORRUPT_MEMBERSHIP");
@@ -124,7 +125,17 @@ final class MerchantObservationDocumentCodec {
         }
     }
 
-    static Document membershipTipDocument(MembershipCheckpoint checkpoint, boolean compacted) {
+    static Document membershipTipDocument(MembershipCheckpoint checkpoint, MembershipAnchor compactedCheckpoint,
+                                          boolean compacted) {
+        boolean anchorMatchesCheckpoint = compactedCheckpoint != null
+                && compactedCheckpoint.id().equals(checkpoint.id())
+                && compactedCheckpoint.sequence() == checkpoint.sequence()
+                && compactedCheckpoint.eventTime().equals(checkpoint.eventTime())
+                && compactedCheckpoint.commitment().equals(checkpoint.commitment());
+        if (compacted && !anchorMatchesCheckpoint
+                || !compacted && compactedCheckpoint != null && compactedCheckpoint.sequence() >= checkpoint.sequence()) {
+            throw failure("MEMBERSHIP_TIP_MISMATCH");
+        }
         return scopeDocument(checkpoint.scope()).append("_id", membershipTipId(checkpoint.scope(), checkpoint.merchant()))
                 .append("scope", scopeId(checkpoint.scope())).append("merchant", checkpoint.merchant())
                 .append("checkpointId", checkpoint.id()).append("sourceEvent", checkpoint.sourceEvent())
@@ -134,7 +145,12 @@ final class MerchantObservationDocumentCodec {
                 .append("previousSequence", checkpoint.previousSequence())
                 .append("previousEventTime", checkpoint.previousEventTime() == null ? null : Date.from(checkpoint.previousEventTime()))
                 .append("previousCommitment", checkpoint.previousCommitment())
-                .append("membershipCommitment", checkpoint.commitment()).append("compacted", compacted);
+                .append("membershipCommitment", checkpoint.commitment())
+                .append("compactedCheckpoint", compactedCheckpoint == null ? null
+                        : new Document("id", compactedCheckpoint.id()).append("sequence", compactedCheckpoint.sequence())
+                        .append("eventTime", Date.from(compactedCheckpoint.eventTime()))
+                        .append("commitment", compactedCheckpoint.commitment()))
+                .append("compacted", compacted);
     }
 
     static MembershipTip decodeMembershipTip(Document row) {
@@ -155,23 +171,35 @@ final class MerchantObservationDocumentCodec {
                     .append("previousCommitment", row.getString("previousCommitment"))
                     .append("membershipCommitment", row.getString("membershipCommitment"));
             MembershipCheckpoint decoded = decodeMembership(checkpoint);
+            if (!row.containsKey("compactedCheckpoint")) { throw failure("CORRUPT_MEMBERSHIP_TIP"); }
+            Document anchorDocument = row.get("compactedCheckpoint", Document.class);
+            MembershipAnchor anchor = null;
+            if (anchorDocument != null) {
+                if (!anchorDocument.keySet().equals(Set.of("id", "sequence", "eventTime", "commitment"))) {
+                    throw failure("CORRUPT_MEMBERSHIP_TIP");
+                }
+                String anchorId = anchorDocument.getString("id");
+                Long anchorSequence = anchorDocument.get("sequence", Long.class);
+                Date anchorEventTime = anchorDocument.getDate("eventTime");
+                String anchorCommitment = anchorDocument.getString("commitment");
+                if (!reference(anchorId) || anchorSequence == null || anchorSequence < 1
+                        || anchorEventTime == null || !reference(anchorCommitment)
+                        || anchorSequence > decoded.sequence()) { throw failure("CORRUPT_MEMBERSHIP_TIP"); }
+                anchor = new MembershipAnchor(anchorId, anchorSequence, anchorEventTime.toInstant(), anchorCommitment);
+            }
             Boolean compacted = row.getBoolean("compacted");
-            if (!merchant.equals(decoded.merchant()) || compacted == null) { throw failure("CORRUPT_MEMBERSHIP_TIP"); }
-            return new MembershipTip(decoded, compacted);
+            boolean anchorMatchesCheckpoint = anchor != null && anchor.id().equals(decoded.id())
+                    && anchor.sequence() == decoded.sequence() && anchor.eventTime().equals(decoded.eventTime())
+                    && anchor.commitment().equals(decoded.commitment());
+            if (!merchant.equals(decoded.merchant()) || compacted == null
+                    || compacted && !anchorMatchesCheckpoint
+                    || !compacted && anchor != null && anchor.sequence() >= decoded.sequence()) {
+                throw failure("CORRUPT_MEMBERSHIP_TIP");
+            }
+            return new MembershipTip(decoded, anchor, compacted);
         } catch (RuntimeException exception) {
             throw failure("CORRUPT_MEMBERSHIP_TIP");
         }
-    }
-
-    static boolean membershipTipMatchesCheckpoint(Document row, MembershipCheckpoint checkpoint, long compactedThrough) {
-        try {
-            MembershipTip tip = decodeMembershipTip(row);
-            MembershipCheckpoint current = tip.checkpoint();
-            return current.scope().equals(checkpoint.scope()) && current.merchant().equals(checkpoint.merchant())
-                    && current.sequence() >= checkpoint.sequence()
-                    && (current.sequence() != checkpoint.sequence() || current.commitment().equals(checkpoint.commitment()))
-                    && (!tip.compacted() || current.sequence() <= compactedThrough);
-        } catch (RuntimeException exception) { return false; }
     }
 
     static boolean membershipMatchesObservation(Document row, Observation observation) {
@@ -190,13 +218,28 @@ final class MerchantObservationDocumentCodec {
                 && member.previousSequence().equals(predecessor.sequence())
                 && member.previousEventTime().equals(predecessor.eventTime())
                 && member.previousCommitment().equals(predecessor.commitment())
-                && member.scope().equals(predecessor.scope()) && member.merchant().equals(predecessor.merchant());
+                && member.scope().equals(predecessor.scope()) && member.merchant().equals(predecessor.merchant())
+                && predecessor.sequence() < member.sequence();
+    }
+
+    static boolean membershipMatchesAnchor(MembershipCheckpoint member, MembershipAnchor anchor) {
+        return anchor != null && member.previousId() != null
+                && member.previousId().equals(anchor.id())
+                && member.previousSequence().equals(anchor.sequence())
+                && member.previousEventTime().equals(anchor.eventTime())
+                && member.previousCommitment().equals(anchor.commitment())
+                && anchor.sequence() < member.sequence();
+    }
+
+    static boolean membershipHasNoPredecessor(MembershipCheckpoint member) {
+        return member.previousId() == null && member.previousSequence() == null
+                && member.previousEventTime() == null && member.previousCommitment() == null;
     }
 
     private static String membershipCommitment(Scope scope, String id, String event, String merchant, long sequence,
                                                Instant eventTime, String inputCommitment, String previousId,
                                                Long previousSequence, Instant previousEventTime, String previousCommitment) {
-        return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-membership/v2",
+        return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-membership/v3",
                 scope.issuer(), scope.institution(), scope.source(), scope.epoch(), scope.identityVersion(), id, event,
                 merchant, sequence, eventTime, inputCommitment, previousId, previousSequence, previousEventTime,
                 previousCommitment);

@@ -10,6 +10,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.ReplaceOptions;
+import com.frauddetection.enricher.merchant.MerchantObservationDocumentCodec.MembershipAnchor;
 import com.frauddetection.enricher.merchant.MerchantObservationDocumentCodec.MembershipCheckpoint;
 import com.frauddetection.enricher.merchant.MerchantObservationDocumentCodec.MembershipTip;
 import org.bson.Document;
@@ -31,7 +32,6 @@ import java.util.function.Function;
 
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Sorts.ascending;
-import static com.mongodb.client.model.Sorts.descending;
 import static com.mongodb.client.model.Updates.*;
 import static com.frauddetection.enricher.merchant.MerchantObservationDocumentCodec.*;
 
@@ -197,7 +197,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         authorize(() -> admission.requireCoverage(Objects.requireNonNull(seal)));
         if (seal.watermark().isAfter(now().plus(limits.clockSkew()))) { throw failure("FUTURE_WATERMARK"); }
         try {
-            transaction(session -> {
+            String integrityFailure = transaction(session -> {
                 Document source = source(session, seal.scope());
                 requireSource(source, seal.scope());
                 if (invalidated(source)) { throw failure("COVERAGE_INVALIDATED"); }
@@ -224,8 +224,16 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     if (observation.sequence() != ++expected || observation.eventTime().isAfter(seal.watermark())
                             || "QUARANTINED".equals(row.getString("status"))) { throw failure("SOURCE_SEQUENCE_GAP"); }
                 }
-                int newMembershipTips = recordMembershipBatch(session, seal.scope(), batch, previous,
-                        source.getLong("compactedThroughSequence"), source.getInteger("membershipTipCount"));
+                int newMembershipTips;
+                try {
+                    newMembershipTips = recordMembershipBatch(session, seal.scope(), batch, previous,
+                            source.getLong("compactedThroughSequence"), source.getInteger("membershipTipCount"));
+                } catch (IllegalStateException exception) {
+                    String code = membershipIntegrityFailureCode(exception);
+                    if (code == null) { throw exception; }
+                    invalidate(session, seal.scope());
+                    return code;
+                }
                 Instant retainedFrom = later(instant(source, "retainedFrom"), now().minus(limits.historyRetention()));
                 if (coverage.updateOne(session, and(eq("_id", source.getString("_id")), eq("revision", source.getLong("revision"))),
                         combine(set("sealedSequence", seal.throughSequence()), set("coverageStart", Date.from(seal.coverageStart())),
@@ -235,9 +243,21 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 }
                 return null;
             });
+            if (integrityFailure != null) { throw failure(integrityFailure); }
         } catch (MongoException exception) {
-            if (!matchesSeal(safeRead(coverage, scopeId(seal.scope())), seal)) { throw failure("SEAL_UNRESOLVED"); }
+            Document durable = safeRead(coverage, scopeId(seal.scope()));
+            if (durable != null && invalidated(durable)) { throw failure("COVERAGE_INVALIDATED"); }
+            if (!matchesSeal(durable, seal)) { throw failure("SEAL_UNRESOLVED"); }
         }
+    }
+
+    private static String membershipIntegrityFailureCode(IllegalStateException exception) {
+        String message = exception.getMessage();
+        if (message == null || !message.startsWith("MERCHANT_STORE_")) { return null; }
+        String code = message.substring("MERCHANT_STORE_".length());
+        return Set.of("MEMBERSHIP_TIP_MISSING", "MEMBERSHIP_TIP_SET_MISMATCH", "MEMBERSHIP_TIP_MISMATCH",
+                "MEMBERSHIP_LINEAGE_GAP", "MEMBERSHIP_CAPACITY", "MEMBERSHIP_ORDER",
+                "CORRUPT_MEMBERSHIP", "CORRUPT_MEMBERSHIP_TIP").contains(code) ? code : null;
     }
 
     @Override
@@ -304,7 +324,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                         return quarantine(session, candidate, observation.scope(), Reason.CAPACITY_EXCEEDED);
                     }
                     if (!matchesEvidence(session, rows, expected, receipts, members, currentMember, observation, start,
-                            source.getLong("compactedThroughSequence"))) {
+                            source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"))) {
                         return quarantine(session, candidate, observation.scope(), Reason.HISTORY_MISSING);
                     }
                     MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, now());
@@ -393,10 +413,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 .getModifiedCount() != 1) { throw failure("COVERAGE_MISSING"); }
     }
 
-    /** Sealed source continuity materializes membership rows and independent per-merchant tips atomically. */
+    /** Source sequence appends lineage; event time is used only to answer historical windows. */
     private int recordMembershipBatch(ClientSession session, Scope scope, List<Document> batch,
                                       long previousSealedSequence, long compactedThroughSequence, int expectedTipCount) {
-        long existingTipCount = membershipTips.countDocuments(session, eq("scope", scopeId(scope)));
+        List<Document> existingTips = membershipTips.find(session, eq("scope", scopeId(scope)))
+                .hintString("merchant_membership_tip_scope").limit(limits.maxStoredObservations() + 1)
+                .into(new ArrayList<>());
+        int existingTipCount = existingTips.size();
         if (existingTipCount < expectedTipCount) { throw failure("MEMBERSHIP_TIP_MISSING"); }
         if (existingTipCount != expectedTipCount) { throw failure("MEMBERSHIP_TIP_SET_MISMATCH"); }
         int newTipCount = 0;
@@ -406,83 +429,117 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             byMerchant.computeIfAbsent(observation.merchant(), ignored -> new ArrayList<>()).add(observation);
         }
         for (List<Observation> merchantBatch : byMerchant.values()) {
-            merchantBatch.sort(Comparator.comparing(Observation::eventTime).thenComparingLong(Observation::sequence));
+            merchantBatch.sort(Comparator.comparingLong(Observation::sequence));
             Observation first = merchantBatch.getFirst();
             String tipId = membershipTipId(scope, first.merchant());
-            Document tipDocument = membershipTips.find(session, eq("_id", tipId)).first();
-            Document latestMember = latestMembership(session, scope, first.merchant());
+            MembershipLineage lineage = membershipLineage(session, scope, first.merchant(), compactedThroughSequence,
+                    previousSealedSequence);
             MembershipCheckpoint previous = null;
-            if (tipDocument == null) {
-                if (latestMember != null) { throw failure("MEMBERSHIP_TIP_MISSING"); }
+            MembershipAnchor compactedCheckpoint = null;
+            if (lineage == null) {
                 if (existingTipCount + newTipCount >= limits.maxStoredObservations()) {
                     throw failure("STORAGE_CAPACITY");
                 }
                 newTipCount++;
             } else {
-                MembershipTip tip = decodeMembershipTip(tipDocument);
-                previous = tip.checkpoint();
-                if (!previous.scope().equals(scope) || !previous.merchant().equals(first.merchant())
-                        || previous.sequence() > previousSealedSequence
-                        || tip.compacted() && previous.sequence() > compactedThroughSequence) {
-                    throw failure("MEMBERSHIP_TIP_MISMATCH");
-                }
-                if (latestMember != null) {
-                    MembershipCheckpoint latest = decodeMembership(latestMember);
-                    if (latest.sequence() > previous.sequence()
-                            || latest.sequence() == previous.sequence() && !latest.commitment().equals(previous.commitment())) {
-                        throw failure("MEMBERSHIP_TIP_MISMATCH");
-                    }
-                }
+                MembershipTip tip = lineage.tip();
+                previous = lineage.retained().isEmpty() ? tip.checkpoint()
+                        : lineage.retained().getLast();
+                compactedCheckpoint = tip.compactedCheckpoint();
             }
             for (Observation observation : merchantBatch) {
                 Document checkpoint = membershipDocument(observation, previous);
                 membership.insertOne(session, checkpoint);
                 previous = decodeMembership(checkpoint);
             }
-            membershipTips.replaceOne(session, eq("_id", tipId), membershipTipDocument(previous, false),
+            membershipTips.replaceOne(session, eq("_id", tipId), membershipTipDocument(previous, compactedCheckpoint, false),
                     new ReplaceOptions().upsert(true));
         }
         return newTipCount;
     }
 
-    private Document latestMembership(ClientSession session, Scope scope, String merchant) {
-        return membership.find(session, and(eq("scope", scopeId(scope)), eq("merchant", merchant)))
-                .sort(descending("eventTime", "sequence"))
-                .hintString(MongoMerchantObservationSchema.MEMBERSHIP_WINDOW).limit(1).first();
+    /** The full retained chain is capacity-bounded and fetched only through its scope/merchant/sequence index. */
+    private MembershipLineage membershipLineage(ClientSession session, Scope scope, String merchant,
+                                                long compactedThroughSequence, long sealedSequence) {
+        String tipId = membershipTipId(scope, merchant);
+        var tipQuery = session == null ? membershipTips.find(eq("_id", tipId))
+                : membershipTips.find(session, eq("_id", tipId));
+        Document tipDocument = tipQuery.first();
+        var membershipQuery = session == null
+                ? membership.find(and(eq("scope", scopeId(scope)), eq("merchant", merchant)))
+                : membership.find(session, and(eq("scope", scopeId(scope)), eq("merchant", merchant)));
+        List<Document> rows = membershipQuery
+                .sort(ascending("sequence")).hintString(MongoMerchantObservationSchema.MEMBERSHIP_CHAIN)
+                .limit(limits.maxStoredObservations() + 1).into(new ArrayList<>());
+        if (rows.size() > limits.maxStoredObservations()) { throw failure("MEMBERSHIP_CAPACITY"); }
+        if (tipDocument == null) {
+            if (!rows.isEmpty()) { throw failure("MEMBERSHIP_TIP_MISSING"); }
+            return null;
+        }
+        MembershipTip tip = decodeMembershipTip(tipDocument);
+        MembershipCheckpoint tipCheckpoint = tip.checkpoint();
+        MembershipAnchor anchor = tip.compactedCheckpoint();
+        if (!tipCheckpoint.scope().equals(scope) || !tipCheckpoint.merchant().equals(merchant)
+                || tipCheckpoint.sequence() > sealedSequence
+                || anchor != null && anchor.sequence() > compactedThroughSequence
+                || tip.compacted() && tipCheckpoint.sequence() > compactedThroughSequence
+                || !tip.compacted() && tipCheckpoint.sequence() <= compactedThroughSequence) {
+            throw failure("MEMBERSHIP_TIP_MISMATCH");
+        }
+        List<MembershipCheckpoint> retained = new ArrayList<>(rows.size());
+        Map<String, MembershipCheckpoint> retainedById = new HashMap<>();
+        MembershipCheckpoint predecessor = null;
+        for (Document row : rows) {
+            MembershipCheckpoint checkpoint = decodeMembership(row);
+            if (!checkpoint.scope().equals(scope) || !checkpoint.merchant().equals(merchant)
+                    || checkpoint.sequence() <= compactedThroughSequence || checkpoint.sequence() > tipCheckpoint.sequence()) {
+                throw failure("CORRUPT_MEMBERSHIP");
+            }
+            boolean linked = predecessor != null ? membershipMatchesPredecessor(checkpoint, predecessor)
+                    : anchor == null ? membershipHasNoPredecessor(checkpoint)
+                    : membershipMatchesAnchor(checkpoint, anchor);
+            if (!linked) { throw failure("MEMBERSHIP_LINEAGE_GAP"); }
+            if (retainedById.put(checkpoint.id(), checkpoint) != null) { throw failure("CORRUPT_MEMBERSHIP"); }
+            retained.add(checkpoint);
+            predecessor = checkpoint;
+        }
+        if (tip.compacted()) {
+            if (!retained.isEmpty() || anchor == null) { throw failure("MEMBERSHIP_TIP_MISMATCH"); }
+        } else if (retained.isEmpty() || !tipCheckpoint.equals(retained.getLast())) {
+            throw failure("MEMBERSHIP_TIP_MISMATCH");
+        }
+        return new MembershipLineage(tip, List.copyOf(retained), Map.copyOf(retainedById));
     }
 
     private boolean matchesEvidence(ClientSession session, List<Document> rows, List<Document> expected, List<Document> receipts,
                                     List<Document> members, Document currentMember, Observation current, Instant windowStart,
-                                    long compactedThroughSequence) {
+                                    long compactedThroughSequence, long sealedSequence) {
         if (rows.size() != expected.size() || rows.size() != receipts.size() || rows.size() != members.size()
                 || !membershipMatchesObservation(currentMember, current)) { return false; }
-        Map<String, MembershipCheckpoint> checkpointById = new HashMap<>();
+        MembershipLineage lineage;
         MembershipCheckpoint currentCheckpoint;
         try {
             currentCheckpoint = decodeMembership(currentMember);
+            lineage = membershipLineage(session, current.scope(), current.merchant(), compactedThroughSequence, sealedSequence);
+            if (lineage == null) { return false; }
             for (Document member : members) {
                 MembershipCheckpoint checkpoint = decodeMembership(member);
-                if (checkpointById.put(checkpoint.id(), checkpoint) != null) { return false; }
+                if (!checkpoint.scope().equals(current.scope()) || !checkpoint.merchant().equals(current.merchant())
+                        || !checkpoint.equals(lineage.retainedById().get(checkpoint.id()))) { return false; }
             }
-        } catch (RuntimeException corrupt) { return false; }
-        Set<String> merchants = new HashSet<>();
-        checkpointById.values().forEach(checkpoint -> merchants.add(checkpoint.merchant()));
-        merchants.add(currentCheckpoint.merchant());
-        Map<String, Document> tipsByMerchant = new HashMap<>();
-        for (String merchant : merchants) {
-            tipsByMerchant.put(merchant, membershipTips.find(session,
-                    eq("_id", membershipTipId(current.scope(), merchant))).first());
+        } catch (IllegalStateException corrupt) { return false; }
+        if (!currentCheckpoint.equals(lineage.retainedById().get(currentCheckpoint.id()))) { return false; }
+        Set<String> expectedWindowMembers = new HashSet<>();
+        for (MembershipCheckpoint checkpoint : lineage.retained()) {
+            if (!checkpoint.eventTime().isBefore(windowStart) && checkpoint.eventTime().isBefore(current.eventTime())) {
+                expectedWindowMembers.add(checkpoint.id());
+            }
         }
-        for (MembershipCheckpoint checkpoint : checkpointById.values()) {
-            if (!membershipTipMatchesCheckpoint(tipsByMerchant.get(checkpoint.merchant()), checkpoint,
-                    compactedThroughSequence)) { return false; }
+        Set<String> actualWindowMembers = new HashSet<>();
+        for (Document member : members) {
+            if (!actualWindowMembers.add(member.getString("_id"))) { return false; }
         }
-        if (!membershipTipMatchesCheckpoint(tipsByMerchant.get(currentCheckpoint.merchant()), currentCheckpoint,
-                compactedThroughSequence)) { return false; }
-        for (MembershipCheckpoint checkpoint : checkpointById.values()) {
-            if (!membershipChainComplete(checkpoint, checkpointById, windowStart, current.eventTime())) { return false; }
-        }
-        if (!membershipChainComplete(currentCheckpoint, checkpointById, windowStart, current.eventTime())) { return false; }
+        if (!expectedWindowMembers.equals(actualWindowMembers)) { return false; }
         for (int index = 0; index < rows.size(); index++) {
             Document row = rows.get(index);
             Document candidate = expected.get(index);
@@ -500,16 +557,6 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     || !membershipMatchesObservation(member, decodeObservation(row))) { return false; }
         }
         return true;
-    }
-
-    private static boolean membershipChainComplete(MembershipCheckpoint checkpoint,
-                                                   Map<String, MembershipCheckpoint> windowCheckpoints,
-                                                   Instant windowStart, Instant asOf) {
-        if (checkpoint.previousId() == null) { return true; }
-        if (checkpoint.previousEventTime().isBefore(windowStart)) { return true; }
-        if (!checkpoint.previousEventTime().isBefore(asOf)) { return true; }
-        MembershipCheckpoint predecessor = windowCheckpoints.get(checkpoint.previousId());
-        return membershipMatchesPredecessor(checkpoint, predecessor);
     }
 
     private boolean matchesManifest(Document candidate, Document receipt) {
@@ -541,8 +588,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         }
 
         List<Document> compact = new ArrayList<>();
+        Map<String, MembershipLineage> lineages = new HashMap<>();
+        Map<String, MembershipCheckpoint> latestCompactedByMerchant = new HashMap<>();
         long expectedSequence = floor;
         int quarantined = 0;
+        Instant retainedFrom = later(instant(source, "retainedFrom"), now.minus(limits.historyRetention()));
         for (Document receipt : receipts) {
             Observation observation = decodeObservation(receipt);
             if (observation.sequence() != ++expectedSequence) {
@@ -559,9 +609,16 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 invalidate(session, scope);
                 return source(session, scope);
             }
-            if (!membershipTipMatchesCheckpoint(membershipTips.find(session,
-                            eq("_id", membershipTipId(scope, observation.merchant()))).first(),
-                    decodeMembership(checkpoint), source.getLong("compactedThroughSequence"))) {
+            MembershipLineage lineage;
+            try {
+                lineage = lineages.computeIfAbsent(observation.merchant(), merchant ->
+                        membershipLineage(session, scope, merchant, floor, sealed));
+            } catch (IllegalStateException corruptLineage) {
+                invalidate(session, scope);
+                return source(session, scope);
+            }
+            MembershipCheckpoint decodedCheckpoint = decodeMembership(checkpoint);
+            if (lineage == null || !decodedCheckpoint.equals(lineage.retainedById().get(decodedCheckpoint.id()))) {
                 invalidate(session, scope);
                 return source(session, scope);
             }
@@ -569,10 +626,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             if (!"COMMITTED".equals(status) && !"QUARANTINED".equals(status)) { break; }
             Date receiptExpiry = candidate.getDate("receiptExpireAt");
             if (receiptExpiry == null || receiptExpiry.toInstant().isAfter(now)) { break; }
+            // Keep every retained/readable event-time window outside the compacted prefix.
+            if (!observation.eventTime().isBefore(retainedFrom)) { break; }
             Document storedHistory = history.find(session, eq("_id", receipt.getString("_id"))).first();
             if (storedHistory != null && (!decodeObservation(storedHistory).equals(observation)
                     || storedHistory.getDate("expireAt") == null || instant(storedHistory, "expireAt").isAfter(now))) { break; }
             compact.add(candidate);
+            latestCompactedByMerchant.put(observation.merchant(), decodedCheckpoint);
             if ("QUARANTINED".equals(status)) { quarantined++; }
             if (compact.size() == limits.maxSealBatch()) { break; }
         }
@@ -586,22 +646,21 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     || membership.deleteOne(session, eq("_id", id)).getDeletedCount() != 1) { throw race(); }
             history.deleteOne(session, eq("_id", id));
         }
-        Set<String> compactedTipIds = new HashSet<>();
-        for (Document candidate : compact) {
-            Observation observation = decodeObservation(candidate);
-            compactedTipIds.add(membershipTipId(scope, observation.merchant()));
-        }
-        for (String tipId : compactedTipIds) {
+        for (Map.Entry<String, MembershipCheckpoint> compactedEntry : latestCompactedByMerchant.entrySet()) {
+            String tipId = membershipTipId(scope, compactedEntry.getKey());
             Document tipDocument = membershipTips.find(session, eq("_id", tipId)).first();
             if (tipDocument == null) { throw race(); }
             MembershipTip tip = decodeMembershipTip(tipDocument);
-            if (tip.checkpoint().sequence() <= lastSequence && !tip.compacted()
-                    && membershipTips.replaceOne(session, eq("_id", tipId),
-                    membershipTipDocument(tip.checkpoint(), true)).getMatchedCount() != 1) {
+            MembershipCheckpoint compactedCheckpoint = compactedEntry.getValue();
+            MembershipAnchor anchor = new MembershipAnchor(compactedCheckpoint.id(), compactedCheckpoint.sequence(),
+                    compactedCheckpoint.eventTime(), compactedCheckpoint.commitment());
+            boolean tipCompacted = tip.checkpoint().sequence() <= lastSequence;
+            if (tipCompacted && !tip.checkpoint().equals(compactedCheckpoint)) { throw race(); }
+            if (membershipTips.replaceOne(session, eq("_id", tipId),
+                    membershipTipDocument(tip.checkpoint(), anchor, tipCompacted)).getMatchedCount() != 1) {
                 throw race();
             }
         }
-        Instant retainedFrom = later(instant(source, "retainedFrom"), now.minus(limits.historyRetention()));
         if (coverage.updateOne(session, and(eq("_id", source.getString("_id")), eq("revision", source.getLong("revision")),
                         gte("accepted", compact.size()), gte("quarantined", quarantined)),
                 combine(inc("accepted", -compact.size()), inc("quarantined", -quarantined),
@@ -652,7 +711,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 return unavailable(observation, Reason.CAPACITY_EXCEEDED);
             }
             if (!matchesEvidence(session, rows, expected, receipts, members, currentMember, observation,
-                    stored.windowStart(), source.getLong("compactedThroughSequence"))) {
+                    stored.windowStart(), source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"))) {
                 return unavailable(observation, Reason.HISTORY_MISSING);
             }
             MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, evaluatedAt);
@@ -711,9 +770,12 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             Document source = safeRead(coverage, scopeId(observation.scope()));
             if (!membershipMatchesObservation(member, observation) || source == null) { throw failure("HISTORY_MISSING"); }
             requireSource(source, observation.scope());
-            if (!membershipTipMatchesCheckpoint(safeRead(membershipTips,
-                            membershipTipId(observation.scope(), observation.merchant())), decodeMembership(member),
-                    source.getLong("compactedThroughSequence"))) { throw failure("HISTORY_MISSING"); }
+            MembershipLineage lineage = membershipLineage(null, observation.scope(), observation.merchant(),
+                    source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"));
+            MembershipCheckpoint checkpoint = decodeMembership(member);
+            if (lineage == null || !checkpoint.equals(lineage.retainedById().get(checkpoint.id()))) {
+                throw failure("HISTORY_MISSING");
+            }
         }
         return "QUARANTINED".equals(row.getString("status")) ? StageResult.QUARANTINED : StageResult.EXISTING;
     }
@@ -904,5 +966,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         return exception;
     }
     private enum Capacity { NONE, PENDING, STORAGE }
+    private record MembershipLineage(MembershipTip tip, List<MembershipCheckpoint> retained,
+                                    Map<String, MembershipCheckpoint> retainedById) {
+        @Override public String toString() { return "MerchantMembershipLineage[redacted]"; }
+    }
     private record StageDecision(StageResult result, Capacity capacity) { }
 }

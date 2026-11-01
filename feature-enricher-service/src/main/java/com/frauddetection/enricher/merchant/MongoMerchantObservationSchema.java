@@ -29,6 +29,7 @@ final class MongoMerchantObservationSchema {
     static final String HISTORY_WINDOW = "merchant_history_window";
     static final String MANIFEST_WINDOW = "merchant_manifest_window";
     static final String MEMBERSHIP_WINDOW = "merchant_membership_window";
+    static final String MEMBERSHIP_CHAIN = "merchant_membership_chain";
     private static final List<IndexSpec> CANDIDATE_INDEXES = List.of(
             index("merchant_event_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "sourceEvent"),
             index("merchant_transaction_unique", true, false, "issuer", "institution", "source", "epoch", "identityVersion", "transaction"),
@@ -48,6 +49,7 @@ final class MongoMerchantObservationSchema {
             index("merchant_manifest_sequence", false, false, "scope", "sequence"));
     private static final List<IndexSpec> MEMBERSHIP_INDEXES = List.of(
             index(MEMBERSHIP_WINDOW, false, false, "scope", "merchant", "eventTime", "sequence"),
+            index(MEMBERSHIP_CHAIN, false, false, "scope", "merchant", "sequence"),
             index("merchant_membership_sequence_unique", true, false,
                     "issuer", "institution", "source", "epoch", "identityVersion", "sequence"));
     private static final List<IndexSpec> MEMBERSHIP_TIP_INDEXES = List.of(
@@ -137,6 +139,11 @@ final class MongoMerchantObservationSchema {
             required.addAll(List.of("scope", "sourceEvent", "merchant", "sequence", "eventTime", "inputCommitment",
                     "previousCheckpointId", "previousSequence", "previousEventTime", "previousCommitment", "membershipCommitment"));
         } else if (MEMBERSHIP_TIPS.equals(name)) {
+            Document compactedCheckpoint = new Document("bsonType", List.of("object", "null"))
+                    .append("required", List.of("id", "sequence", "eventTime", "commitment"))
+                    .append("additionalProperties", false)
+                    .append("properties", new Document("id", token()).append("sequence", type("long").append("minimum", 1))
+                            .append("eventTime", type("date")).append("commitment", token()));
             properties.append("scope", type("string").append("maxLength", 265)).append("merchant", token())
                     .append("checkpointId", token()).append("sourceEvent", token())
                     .append("sequence", type("long").append("minimum", 1)).append("eventTime", type("date"))
@@ -145,10 +152,11 @@ final class MongoMerchantObservationSchema {
                     .append("previousSequence", new Document("bsonType", List.of("long", "null")).append("minimum", 1))
                     .append("previousEventTime", new Document("bsonType", List.of("date", "null")))
                     .append("previousCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"))
-                    .append("membershipCommitment", token()).append("compacted", type("bool"));
+                    .append("membershipCommitment", token()).append("compactedCheckpoint", compactedCheckpoint)
+                    .append("compacted", type("bool"));
             required.addAll(List.of("scope", "merchant", "checkpointId", "sourceEvent", "sequence", "eventTime",
                     "inputCommitment", "previousCheckpointId", "previousSequence", "previousEventTime",
-                    "previousCommitment", "membershipCommitment", "compacted"));
+                    "previousCommitment", "membershipCommitment", "compactedCheckpoint", "compacted"));
         } else {
             properties.append("scope", type("string").append("maxLength", 265)).append("sourceEvent", token()).append("transaction", token())
                     .append("occurrence", token()).append("merchant", token()).append("sequence", type("long").append("minimum", 1))
