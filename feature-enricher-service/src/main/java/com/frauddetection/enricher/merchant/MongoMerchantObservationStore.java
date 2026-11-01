@@ -154,21 +154,26 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 if (invalidated(source)) {
                     return new StageDecision(StageResult.QUARANTINED, Capacity.NONE);
                 }
+                // Resolve indexed integrity conflicts before sequence and capacity dispositions can hide them.
+                // Index hints fail closed; unique indexes remain the final concurrency arbiter.
+                if (hasIdentityConflict(session, observation)) { throw failure("IDENTITY_CONFLICT"); }
                 if (observation.sequence() <= source.getLong("sealedSequence")) {
                     invalidate(session, observation.scope());
                     return new StageDecision(StageResult.QUARANTINED, Capacity.NONE);
                 }
+                boolean late = source.getDate("watermark") != null
+                        && !observation.eventTime().isAfter(instant(source, "watermark"));
                 if (source.getInteger("pending") >= limits.maxPending()) {
-                    invalidate(session, observation.scope());
+                    if (late) { invalidate(session, observation.scope()); }
                     return new StageDecision(null, Capacity.PENDING);
                 }
                 if (source.getInteger("accepted") >= limits.maxStoredObservations()) {
+                    if (late) {
+                        invalidate(session, observation.scope());
+                        return new StageDecision(null, Capacity.LATE_EVIDENCE);
+                    }
                     return new StageDecision(null, Capacity.STORAGE);
                 }
-                // Hints fail closed if required indexes disappear. Atomic unique indexes still arbitrate concurrent inserts.
-                if (hasIdentityConflict(session, observation)) { throw failure("IDENTITY_CONFLICT"); }
-                boolean late = source.getDate("watermark") != null
-                        && !observation.eventTime().isAfter(instant(source, "watermark"));
                 Document candidate = observationDocument(observation).append("status", late ? "QUARANTINED" : "STAGED")
                         .append("stagedAt", Date.from(now));
                 if (late) {
@@ -184,6 +189,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             });
             if (decision.capacity() == Capacity.PENDING) { throw failure("PENDING_CAPACITY"); }
             if (decision.capacity() == Capacity.STORAGE) { throw failure("STORAGE_CAPACITY"); }
+            if (decision.capacity() == Capacity.LATE_EVIDENCE) { throw failure("LATE_EVIDENCE_CAPACITY"); }
             return decision.result();
         } catch (MongoException exception) {
             Document durable = safeRead(candidates, eventId(observation));
@@ -1053,7 +1059,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
 
         private static Date asDate(Instant value) { return value == null ? null : Date.from(value); }
     }
-    private enum Capacity { NONE, PENDING, STORAGE }
+    private enum Capacity { NONE, PENDING, STORAGE, LATE_EVIDENCE }
     private record MembershipLineage(MembershipTip tip, List<MembershipCheckpoint> retained,
                                     Map<String, MembershipCheckpoint> retainedById) {
         @Override public String toString() { return "MerchantMembershipLineage[redacted]"; }

@@ -331,6 +331,209 @@ class MongoMerchantObservationStoreIntegrationTest {
                 .isEqualTo(receipt);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {-30, 0})
+    void lateObservationAtOrBeforeWatermarkAtFullStorageFencesWithoutReceipt(int secondsFromWatermark) {
+        Limits oneObservation = storageBudget(1);
+        MongoMerchantObservationStore bounded = storeWithLimits(oneObservation);
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        bounded.stage(first);
+        seal(bounded, SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        Snapshot original = bounded.commit(first).snapshot();
+
+        assertThat(original.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(original.priorCount()).isZero();
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
+        assertThat(bounded.stage(first)).isEqualTo(StageResult.EXISTING);
+
+        Observation late = approved(SCOPE, 2, 2, BASE.plusSeconds(secondsFromWatermark));
+        String stageFailure = null;
+        try { bounded.stage(late); }
+        catch (IllegalStateException exception) { stageFailure = exception.getMessage(); }
+
+        assertThat(source(SCOPE).getBoolean("invalidated")).as("stage outcome: " + stageFailure).isTrue();
+        assertThat(stageFailure).isEqualTo("MERCHANT_STORE_LATE_EVIDENCE_CAPACITY");
+        Document fenced = source(SCOPE);
+        assertThat(fenced.getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(fenced.getDate("watermark")).isEqualTo(Date.from(BASE));
+        assertThat(fenced.getInteger("accepted")).isEqualTo(1);
+        assertThat(fenced.getInteger("pending")).isZero();
+        assertThat(fenced.getInteger("quarantined")).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, SCOPE)).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.HISTORY, SCOPE)).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE)).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(1);
+        assertUnavailable(bounded, first);
+
+        MongoMerchantObservationStore restarted = storeWithLimits(oneObservation);
+        assertUnavailable(restarted, first);
+    }
+
+    @RepeatedTest(3)
+    void onTimeStorageCapacityAndExactReplayDoNotInvalidateCoverage() {
+        MongoMerchantObservationStore bounded = storeWithLimits(storageBudget(1));
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        bounded.stage(first);
+        seal(bounded, SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        Snapshot original = bounded.commit(first).snapshot();
+
+        assertThat(bounded.stage(first)).isEqualTo(StageResult.EXISTING);
+        Observation onTime = approved(SCOPE, 2, 2, BASE.plusSeconds(30));
+        assertThatThrownBy(() -> bounded.stage(onTime)).hasMessage("MERCHANT_STORE_STORAGE_CAPACITY");
+
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, SCOPE)).isEqualTo(1);
+        assertThat(bounded.readSnapshot(first)).isEqualTo(original);
+        assertThat(bounded.commit(first).snapshot()).isEqualTo(original);
+    }
+
+    @RepeatedTest(3)
+    void lateEvidenceAtPendingCapacityStillDurablyFencesWithoutAddingAReceipt() {
+        Limits onePending = new Limits(LIMITS.window(), LIMITS.historyRetention(), LIMITS.receiptRetention(),
+                LIMITS.replayHorizon(), LIMITS.clockSkew(), 100, 1, 100, 10);
+        MongoMerchantObservationStore bounded = storeWithLimits(onePending);
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        bounded.stage(first);
+        seal(bounded, SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        bounded.commit(first);
+        Observation pending = approved(SCOPE, 2, 2, BASE.plusSeconds(30));
+        assertThat(bounded.stage(pending)).isEqualTo(StageResult.CREATED);
+
+        Observation late = approved(SCOPE, 3, 3, BASE);
+        assertThatThrownBy(() -> bounded.stage(late)).hasMessage("MERCHANT_STORE_PENDING_CAPACITY");
+
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(source(SCOPE).getDate("watermark")).isEqualTo(Date.from(BASE));
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(2);
+        assertThat(source(SCOPE).getInteger("pending")).isEqualTo(1);
+        assertThat(source(SCOPE).getInteger("quarantined")).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(2);
+        assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, SCOPE)).isEqualTo(2);
+        assertThat(bounded.readSnapshot(first).availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(bounded.readSnapshot(first).priorCount()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"transaction", "occurrence"})
+    void fullStorageIdentityCollisionFencesWithoutAddingAnyRecords(String identity) {
+        MongoMerchantObservationStore bounded = storeWithLimits(storageBudget(1));
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        bounded.stage(first);
+        seal(bounded, SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        Snapshot original = bounded.commit(first).snapshot();
+        List<Document> candidatesBefore = ledgerState(MongoMerchantObservationSchema.CANDIDATES, SCOPE);
+        List<Document> manifestBefore = ledgerState(MongoMerchantObservationSchema.MANIFEST, SCOPE);
+        List<Document> historyBefore = ledgerState(MongoMerchantObservationSchema.HISTORY, SCOPE);
+        List<Document> membershipBefore = ledgerState(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE);
+        List<Document> tipsBefore = ledgerState(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE);
+
+        Observation conflict = reuseIdentity(first, 2, 2, BASE.plusSeconds(30), identity);
+        String outcome = stageOutcome(bounded, conflict);
+
+        assertThat(source(SCOPE).getBoolean("invalidated")).as("stage outcome: " + outcome).isTrue();
+        assertThat(outcome).isEqualTo("MERCHANT_STORE_IDENTITY_CONFLICT");
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        assertThat(source(SCOPE).getInteger("pending")).isZero();
+        assertThat(source(SCOPE).getInteger("quarantined")).isZero();
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(ledgerState(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(candidatesBefore);
+        assertThat(ledgerState(MongoMerchantObservationSchema.MANIFEST, SCOPE)).isEqualTo(manifestBefore);
+        assertThat(ledgerState(MongoMerchantObservationSchema.HISTORY, SCOPE)).isEqualTo(historyBefore);
+        assertThat(ledgerState(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE)).isEqualTo(membershipBefore);
+        assertThat(ledgerState(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(tipsBefore);
+        assertThat(original.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertUnavailable(bounded, first);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"transaction", "occurrence"})
+    void pendingCapacityIdentityCollisionReportsConflictBeforeCapacity(String identity) {
+        Limits onePending = new Limits(LIMITS.window(), LIMITS.historyRetention(), LIMITS.receiptRetention(),
+                LIMITS.replayHorizon(), LIMITS.clockSkew(), 100, 1, 100, 10);
+        MongoMerchantObservationStore bounded = storeWithLimits(onePending);
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        assertThat(bounded.stage(first)).isEqualTo(StageResult.CREATED);
+        List<Document> candidatesBefore = ledgerState(MongoMerchantObservationSchema.CANDIDATES, SCOPE);
+        List<Document> manifestBefore = ledgerState(MongoMerchantObservationSchema.MANIFEST, SCOPE);
+
+        Observation conflict = reuseIdentity(first, 2, 2, BASE.plusSeconds(30), identity);
+        String outcome = stageOutcome(bounded, conflict);
+
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+        assertThat(outcome).isEqualTo("MERCHANT_STORE_IDENTITY_CONFLICT");
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        assertThat(source(SCOPE).getInteger("pending")).isEqualTo(1);
+        assertThat(source(SCOPE).getInteger("quarantined")).isZero();
+        assertThat(ledgerState(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(candidatesBefore);
+        assertThat(ledgerState(MongoMerchantObservationSchema.MANIFEST, SCOPE)).isEqualTo(manifestBefore);
+    }
+
+    @RepeatedTest(3)
+    void sequenceCollisionAtStorageCapacityIsAnIdentityConflict() {
+        MongoMerchantObservationStore bounded = storeWithLimits(storageBudget(1));
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        bounded.stage(first);
+        seal(bounded, SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        bounded.commit(first);
+        List<Document> candidatesBefore = ledgerState(MongoMerchantObservationSchema.CANDIDATES, SCOPE);
+        List<Document> manifestBefore = ledgerState(MongoMerchantObservationSchema.MANIFEST, SCOPE);
+        Observation conflict = approved(SCOPE, 2, 1, BASE.plusSeconds(30));
+
+        String outcome = stageOutcome(bounded, conflict);
+
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+        assertThat(outcome).isEqualTo("MERCHANT_STORE_IDENTITY_CONFLICT");
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(ledgerState(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(candidatesBefore);
+        assertThat(ledgerState(MongoMerchantObservationSchema.MANIFEST, SCOPE)).isEqualTo(manifestBefore);
+        assertUnavailable(bounded, first);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"candidate", "manifest"})
+    void identityConflictUsesSurvivingCandidateOrManifestEvidence(String removedCollection) {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        store.stage(first);
+        String collection = "candidate".equals(removedCollection)
+                ? MongoMerchantObservationSchema.CANDIDATES : MongoMerchantObservationSchema.MANIFEST;
+        database.getCollection(collection).deleteOne(eq("_id", MerchantObservationDocumentCodec.eventId(first)));
+        Observation conflict = reuseIdentity(first, 2, 2, BASE.plusSeconds(30), "transaction");
+
+        assertThatThrownBy(() -> store.stage(conflict)).hasMessage("MERCHANT_STORE_IDENTITY_CONFLICT");
+
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+        assertThat(countForScope(collection, SCOPE)).isZero();
+        String surviving = "candidate".equals(removedCollection)
+                ? MongoMerchantObservationSchema.MANIFEST : MongoMerchantObservationSchema.CANDIDATES;
+        assertThat(countForScope(surviving, SCOPE)).isEqualTo(1);
+    }
+
+    @RepeatedTest(3)
+    void independentObservationAtPendingCapacityKeepsOrdinaryCapacityDisposition() {
+        Limits onePending = new Limits(LIMITS.window(), LIMITS.historyRetention(), LIMITS.receiptRetention(),
+                LIMITS.replayHorizon(), LIMITS.clockSkew(), 100, 1, 100, 10);
+        MongoMerchantObservationStore bounded = storeWithLimits(onePending);
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        bounded.stage(first);
+        Observation independent = approved(SCOPE, 2, 2, BASE.plusSeconds(30));
+
+        assertThat(stageOutcome(bounded, independent)).isEqualTo("MERCHANT_STORE_PENDING_CAPACITY");
+
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
+        assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(1);
+        assertThat(source(SCOPE).getInteger("pending")).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, SCOPE)).isEqualTo(1);
+        assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, SCOPE)).isEqualTo(1);
+    }
+
     @Test
     void coldAndExpiredCoverageStayUnavailableInsteadOfReturningACompleteZero() {
         Observation cold = approved(SCOPE, 1, 1, BASE);
@@ -1571,6 +1774,15 @@ class MongoMerchantObservationStoreIntegrationTest {
         verifier.permit(row);
         return row;
     }
+    private Observation reuseIdentity(Observation original, int id, long sequence, Instant time, String identity) {
+        Observation fresh = observation(original.scope(), id, sequence, time);
+        Observation row = new Observation(fresh.scope(), fresh.sourceEvent(),
+                "transaction".equals(identity) ? original.transaction() : fresh.transaction(),
+                "occurrence".equals(identity) ? original.occurrence() : fresh.occurrence(),
+                fresh.merchant(), fresh.sequence(), fresh.eventTime(), fresh.sourceObservedAt(), fresh.payloadCommitment());
+        verifier.permit(row);
+        return row;
+    }
     private Set<String> createUnrelatedCollections(MongoDatabase target, int count) {
         Set<String> names = new java.util.HashSet<>();
         String markerCollection = "shared_unrelated_marker";
@@ -1611,6 +1823,9 @@ class MongoMerchantObservationStoreIntegrationTest {
         return new Limits(LIMITS.window(), LIMITS.historyRetention(), LIMITS.receiptRetention(), LIMITS.replayHorizon(),
                 LIMITS.clockSkew(), 100, 100, 100, budget);
     }
+    private MongoMerchantObservationStore storeWithLimits(Limits limits) {
+        return new MongoMerchantObservationStore(client, databaseName, clock, limits, verifier);
+    }
     private static Observation observation(Scope scope, int id, long sequence, Instant time) {
         return new Observation(scope, token(100 + id), token(200 + id), token(300 + id), MERCHANT, sequence, time, time, token(400 + id));
     }
@@ -1618,6 +1833,19 @@ class MongoMerchantObservationStoreIntegrationTest {
         CoverageSeal seal = new CoverageSeal(scope, through, start, watermark);
         verifier.permit(seal);
         store.seal(seal);
+    }
+    private void seal(MongoMerchantObservationStore target, Scope scope, long through, Instant start, Instant watermark) {
+        CoverageSeal seal = new CoverageSeal(scope, through, start, watermark);
+        verifier.permit(seal);
+        target.seal(seal);
+    }
+    private void assertUnavailable(MerchantObservationStore target, Observation observation) {
+        Snapshot read = target.readSnapshot(observation);
+        assertThat(read.availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(read.priorCount()).isNull();
+        CommitResult replay = target.commit(observation);
+        assertThat(replay.snapshot().availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(replay.snapshot().priorCount()).isNull();
     }
     private long count(String collection) { return database.getCollection(collection).countDocuments(); }
     private Document source(Scope scope) {
