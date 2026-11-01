@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import static com.mongodb.client.model.Filters.*;
@@ -196,10 +197,12 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     public void seal(CoverageSeal seal) {
         authorize(() -> admission.requireCoverage(Objects.requireNonNull(seal)));
         if (seal.watermark().isAfter(now().plus(limits.clockSkew()))) { throw failure("FUTURE_WATERMARK"); }
+        AtomicReference<SealFence> sourceFence = new AtomicReference<>();
         try {
-            String integrityFailure = transaction(session -> {
+            transaction(session -> {
                 Document source = source(session, seal.scope());
                 requireSource(source, seal.scope());
+                sourceFence.set(SealFence.from(source));
                 if (invalidated(source)) { throw failure("COVERAGE_INVALIDATED"); }
                 if (matchesSeal(source, seal)) { return null; }
                 long previous = source.getLong("sealedSequence");
@@ -224,16 +227,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     if (observation.sequence() != ++expected || observation.eventTime().isAfter(seal.watermark())
                             || "QUARANTINED".equals(row.getString("status"))) { throw failure("SOURCE_SEQUENCE_GAP"); }
                 }
-                int newMembershipTips;
-                try {
-                    newMembershipTips = recordMembershipBatch(session, seal.scope(), batch, previous,
-                            source.getLong("compactedThroughSequence"), source.getInteger("membershipTipCount"));
-                } catch (IllegalStateException exception) {
-                    String code = membershipIntegrityFailureCode(exception);
-                    if (code == null) { throw exception; }
-                    invalidate(session, seal.scope());
-                    return code;
-                }
+                int newMembershipTips = recordMembershipBatch(session, seal.scope(), batch, previous,
+                        source.getLong("compactedThroughSequence"), source.getInteger("membershipTipCount"));
                 Instant retainedFrom = later(instant(source, "retainedFrom"), now().minus(limits.historyRetention()));
                 if (coverage.updateOne(session, and(eq("_id", source.getString("_id")), eq("revision", source.getLong("revision"))),
                         combine(set("sealedSequence", seal.throughSequence()), set("coverageStart", Date.from(seal.coverageStart())),
@@ -243,7 +238,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 }
                 return null;
             });
-            if (integrityFailure != null) { throw failure(integrityFailure); }
+        } catch (IllegalStateException exception) {
+            String code = membershipIntegrityFailureCode(exception);
+            if (code == null) { throw exception; }
+            SealFence fence = sourceFence.get();
+            if (fence == null) { throw failure("MEMBERSHIP_INTEGRITY_UNRESOLVED"); }
+            invalidateAfterMembershipIntegrityFailure(seal.scope(), fence);
+            throw failure(code);
         } catch (MongoException exception) {
             Document durable = safeRead(coverage, scopeId(seal.scope()));
             if (durable != null && invalidated(durable)) { throw failure("COVERAGE_INVALIDATED"); }
@@ -256,8 +257,48 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         if (message == null || !message.startsWith("MERCHANT_STORE_")) { return null; }
         String code = message.substring("MERCHANT_STORE_".length());
         return Set.of("MEMBERSHIP_TIP_MISSING", "MEMBERSHIP_TIP_SET_MISMATCH", "MEMBERSHIP_TIP_MISMATCH",
-                "MEMBERSHIP_LINEAGE_GAP", "MEMBERSHIP_CAPACITY", "MEMBERSHIP_ORDER",
-                "CORRUPT_MEMBERSHIP", "CORRUPT_MEMBERSHIP_TIP").contains(code) ? code : null;
+                "MEMBERSHIP_LINEAGE_GAP", "MEMBERSHIP_ORDER", "CORRUPT_MEMBERSHIP",
+                "CORRUPT_MEMBERSHIP_TIP").contains(code) ? code : null;
+    }
+
+    private void invalidateAfterMembershipIntegrityFailure(Scope scope, SealFence fence) {
+        if (fence.revision() == Long.MAX_VALUE) { throw membershipIntegrityUnresolved(); }
+        try {
+            transaction(session -> {
+                Document current = source(session, scope);
+                requireSource(current, scope);
+                if (fence.matches(current, scope, true)) { return null; }
+                if (!fence.matches(current, scope, false)) { throw membershipIntegrityUnresolved(); }
+                if (coverage.updateOne(session, fence.filter(scope),
+                        combine(set("invalidated", true), inc("revision", 1L))).getModifiedCount() != 1) {
+                    throw membershipIntegrityUnresolved();
+                }
+                return null;
+            });
+        } catch (MongoException exception) {
+            if (hasDurableMembershipIntegrityFence(scope, fence)) { return; }
+            throw membershipIntegrityUnresolved();
+        } catch (RuntimeException exception) {
+            if (exception instanceof IllegalStateException state
+                    && "MERCHANT_STORE_MEMBERSHIP_INTEGRITY_UNRESOLVED".equals(state.getMessage())) {
+                throw state;
+            }
+            throw membershipIntegrityUnresolved();
+        }
+    }
+
+    private boolean hasDurableMembershipIntegrityFence(Scope scope, SealFence fence) {
+        try {
+            Document durable = safeRead(coverage, scopeId(scope));
+            requireSource(durable, scope);
+            return fence.matches(durable, scope, true);
+        } catch (RuntimeException unavailableOrChanged) {
+            return false;
+        }
+    }
+
+    private static IllegalStateException membershipIntegrityUnresolved() {
+        return failure("MEMBERSHIP_INTEGRITY_UNRESOLVED");
     }
 
     @Override
@@ -964,6 +1005,53 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         MongoException exception = new MongoException(112, "MERCHANT_STORE_WRITE_RACE");
         exception.addLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
         return exception;
+    }
+    private record SealFence(long revision, long sealedSequence, long compactedThroughSequence,
+                             int accepted, int pending, int quarantined, int membershipTipCount,
+                             Instant coverageStart, Instant watermark, Instant retainedFrom,
+                             String policyCommitment) {
+        private static SealFence from(Document source) {
+            return new SealFence(source.getLong("revision"), source.getLong("sealedSequence"),
+                    source.getLong("compactedThroughSequence"), source.getInteger("accepted"),
+                    source.getInteger("pending"), source.getInteger("quarantined"),
+                    source.getInteger("membershipTipCount"), nullableInstant(source, "coverageStart"),
+                    nullableInstant(source, "watermark"), nullableInstant(source, "retainedFrom"),
+                    source.getString("policyCommitment"));
+        }
+
+        private boolean matches(Document source, Scope scope, boolean invalidated) {
+            return source != null && scope.equals(decodeScope(source))
+                    && scopeId(scope).equals(source.getString("_id"))
+                    && Objects.equals(policyCommitment, source.getString("policyCommitment"))
+                    && Objects.equals(revision + (invalidated ? 1L : 0L), source.getLong("revision"))
+                    && Objects.equals(sealedSequence, source.getLong("sealedSequence"))
+                    && Objects.equals(compactedThroughSequence, source.getLong("compactedThroughSequence"))
+                    && Objects.equals(accepted, source.getInteger("accepted"))
+                    && Objects.equals(pending, source.getInteger("pending"))
+                    && Objects.equals(quarantined, source.getInteger("quarantined"))
+                    && Objects.equals(membershipTipCount, source.getInteger("membershipTipCount"))
+                    && Objects.equals(coverageStart, nullableInstant(source, "coverageStart"))
+                    && Objects.equals(watermark, nullableInstant(source, "watermark"))
+                    && Objects.equals(retainedFrom, nullableInstant(source, "retainedFrom"))
+                    && Objects.equals(invalidated, source.getBoolean("invalidated"));
+        }
+
+        private Bson filter(Scope scope) {
+            return and(eq("_id", scopeId(scope)), exactScope(scope), eq("policyCommitment", policyCommitment),
+                    eq("revision", revision), eq("sealedSequence", sealedSequence),
+                    eq("compactedThroughSequence", compactedThroughSequence), eq("accepted", accepted),
+                    eq("pending", pending), eq("quarantined", quarantined),
+                    eq("membershipTipCount", membershipTipCount), eq("coverageStart", asDate(coverageStart)),
+                    eq("watermark", asDate(watermark)), eq("retainedFrom", asDate(retainedFrom)),
+                    eq("invalidated", false));
+        }
+
+        private static Instant nullableInstant(Document source, String field) {
+            Date value = source.getDate(field);
+            return value == null ? null : value.toInstant();
+        }
+
+        private static Date asDate(Instant value) { return value == null ? null : Date.from(value); }
     }
     private enum Capacity { NONE, PENDING, STORAGE }
     private record MembershipLineage(MembershipTip tip, List<MembershipCheckpoint> retained,

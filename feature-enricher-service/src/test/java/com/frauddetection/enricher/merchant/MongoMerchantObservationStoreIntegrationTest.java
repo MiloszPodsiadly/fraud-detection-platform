@@ -42,8 +42,10 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.mongodb.client.model.Filters.*;
+import static com.mongodb.client.model.Sorts.ascending;
 import static com.mongodb.client.model.Updates.set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -157,6 +159,61 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(laterResult.snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
         assertThat(laterResult.snapshot().priorCount()).isEqualTo(1);
         assertThat(store.readSnapshot(laterSequenceFirst)).isEqualTo(laterResult.snapshot());
+    }
+
+    @Test
+    void failedMultiMerchantSealRollsBackEarlierMembershipWritesAndFencesScope() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        Observation second = distinctMerchant(2, BASE.plusSeconds(60));
+        store.stage(first);
+        store.stage(second);
+
+        FailAfterFirstMerchantWrites fault = new FailAfterFirstMerchantWrites();
+        MongoClient faultingClient = fault.wrap(client);
+        var faultingStore = new MongoMerchantObservationStore(faultingClient, databaseName, clock, LIMITS, verifier);
+        CoverageSeal seal = new CoverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+        verifier.permit(seal);
+        Document beforeProgress = sealProgress(SCOPE);
+        long beforeRevision = source(SCOPE).getLong("revision");
+        List<Document> beforeMembership = ledgerState(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE);
+        List<Document> beforeTips = ledgerState(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE);
+        fault.arm();
+
+        assertThatThrownBy(() -> faultingStore.seal(seal))
+                .hasMessage("MERCHANT_STORE_MEMBERSHIP_LINEAGE_GAP");
+
+        assertThat(fault.failureInjected()).isTrue();
+        assertThat(fault.firstCheckpointAndTipWereVisibleInTransaction()).isTrue();
+        Document expectedAfter = new Document("sealProgress", beforeProgress)
+                .append("membership", beforeMembership).append("membershipTips", beforeTips)
+                .append("invalidated", true).append("revision", beforeRevision + 1L);
+        assertThat(sealFailureState(SCOPE)).isEqualTo(expectedAfter);
+    }
+
+    @Test
+    void validMultiMerchantSealWritesBothMerchantChains() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        Observation second = distinctMerchant(2, BASE.plusSeconds(60));
+        store.stage(first);
+        store.stage(second);
+
+        seal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(2L);
+        assertThat(source(SCOPE).getInteger("membershipTipCount")).isEqualTo(2);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE)).isEqualTo(2);
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(2);
+
+        CommitResult firstResult = store.commit(first);
+        CommitResult secondResult = store.commit(second);
+        assertThat(firstResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(firstResult.snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(firstResult.snapshot().priorCount()).isZero();
+        assertThat(secondResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(secondResult.snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(secondResult.snapshot().priorCount()).isZero();
+        assertThat(store.pending(SCOPE)).isEqualTo(new PendingCounts(0, 0));
     }
 
     @ParameterizedTest
@@ -1571,6 +1628,27 @@ class MongoMerchantObservationStoreIntegrationTest {
         return database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)
                 .find(eq("_id", MerchantObservationDocumentCodec.membershipTipId(scope, merchant))).first();
     }
+    private Document sealProgress(Scope scope) {
+        Document row = source(scope);
+        return new Document("sealedSequence", row.getLong("sealedSequence"))
+                .append("compactedThroughSequence", row.getLong("compactedThroughSequence"))
+                .append("accepted", row.getInteger("accepted")).append("pending", row.getInteger("pending"))
+                .append("quarantined", row.getInteger("quarantined"))
+                .append("membershipTipCount", row.getInteger("membershipTipCount"))
+                .append("watermark", row.getDate("watermark")).append("coverageStart", row.getDate("coverageStart"))
+                .append("policyCommitment", row.getString("policyCommitment"));
+    }
+    private Document sealFailureState(Scope scope) {
+        Document row = source(scope);
+        return new Document("sealProgress", sealProgress(scope))
+                .append("membership", ledgerState(MongoMerchantObservationSchema.MEMBERSHIP, scope))
+                .append("membershipTips", ledgerState(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, scope))
+                .append("invalidated", row.getBoolean("invalidated")).append("revision", row.getLong("revision"));
+    }
+    private List<Document> ledgerState(String collection, Scope scope) {
+        return database.getCollection(collection).find(eq("scope", MerchantObservationDocumentCodec.scopeId(scope)))
+                .sort(ascending("_id")).into(new java.util.ArrayList<>()).stream().map(Document::new).toList();
+    }
     private long countForScope(String collection, Scope scope) {
         return database.getCollection(collection).countDocuments(eq("scope", MerchantObservationDocumentCodec.scopeId(scope)));
     }
@@ -1708,5 +1786,96 @@ class MongoMerchantObservationStoreIntegrationTest {
     private static Object invoke(Object target, Method method, Object[] args) throws Throwable {
         try { return method.invoke(target, args); }
         catch (InvocationTargetException exception) { throw exception.getCause(); }
+    }
+    private static final class FailAfterFirstMerchantWrites {
+        private final AtomicBoolean armed = new AtomicBoolean();
+        private final AtomicBoolean firstTipWritten = new AtomicBoolean();
+        private final AtomicBoolean failureInjected = new AtomicBoolean();
+        private final AtomicBoolean firstWritesVisible = new AtomicBoolean();
+        private final AtomicReference<String> firstMerchant = new AtomicReference<>();
+        private final AtomicReference<String> firstCheckpointId = new AtomicReference<>();
+        private volatile MongoCollection<Document> membership;
+        private volatile MongoCollection<Document> tips;
+
+        private MongoClient wrap(MongoClient delegate) {
+            return proxy(MongoClient.class, (method, args) -> {
+                Object result = invoke(delegate, method, args);
+                return result instanceof MongoDatabase db ? wrap(db) : result;
+            });
+        }
+
+        private MongoDatabase wrap(MongoDatabase delegate) {
+            return proxy(MongoDatabase.class, (method, args) -> {
+                Object result = invoke(delegate, method, args);
+                if (result instanceof MongoDatabase db) { return wrap(db); }
+                if ("getCollection".equals(method.getName()) && args != null && args.length > 0) {
+                    if (MongoMerchantObservationSchema.MEMBERSHIP.equals(args[0])) {
+                        @SuppressWarnings("unchecked") MongoCollection<Document> collection = (MongoCollection<Document>) result;
+                        return membershipCollection(collection);
+                    }
+                    if (MongoMerchantObservationSchema.MEMBERSHIP_TIPS.equals(args[0])) {
+                        @SuppressWarnings("unchecked") MongoCollection<Document> collection = (MongoCollection<Document>) result;
+                        return tipCollection(collection);
+                    }
+                }
+                return result;
+            });
+        }
+
+        private MongoCollection<Document> membershipCollection(MongoCollection<Document> delegate) {
+            membership = delegate;
+            return proxy(MongoCollection.class, (method, args) -> {
+                ClientSession session = args != null && args.length > 0 && args[0] instanceof ClientSession value ? value : null;
+                Document checkpoint = args == null ? null : java.util.Arrays.stream(args)
+                        .filter(Document.class::isInstance).map(Document.class::cast).findFirst().orElse(null);
+                if (armed.get() && "insertOne".equals(method.getName()) && session != null && checkpoint != null) {
+                    String merchant = checkpoint.getString("merchant");
+                    String first = firstMerchant.get();
+                    if (first == null) {
+                        Object result = invoke(delegate, method, args);
+                        firstCheckpointId.set(checkpoint.getString("_id"));
+                        firstMerchant.set(merchant);
+                        return result;
+                    }
+                    if (!merchant.equals(first) && firstTipWritten.get()) {
+                        String firstId = firstCheckpointId.get();
+                        Document persistedCheckpoint = delegate.find(session, eq("_id", firstId)).first();
+                        Document persistedTip = tips.find(session,
+                                eq("_id", MerchantObservationDocumentCodec.membershipTipId(SCOPE, first))).first();
+                        boolean visible = persistedCheckpoint != null && persistedTip != null
+                                && firstId.equals(persistedTip.getString("checkpointId"));
+                        firstWritesVisible.set(visible);
+                        if (!visible) { throw new IllegalStateException("TEST_ONLY_FIRST_MERCHANT_WRITES_NOT_VISIBLE"); }
+                        failureInjected.set(true);
+                        throw new IllegalStateException("MERCHANT_STORE_MEMBERSHIP_LINEAGE_GAP");
+                    }
+                }
+                return invoke(delegate, method, args);
+            });
+        }
+
+        private MongoCollection<Document> tipCollection(MongoCollection<Document> delegate) {
+            tips = delegate;
+            return proxy(MongoCollection.class, (method, args) -> {
+                Object result = invoke(delegate, method, args);
+                ClientSession session = args != null && args.length > 0 && args[0] instanceof ClientSession value ? value : null;
+                Document replacement = args != null && args.length > 2 && args[2] instanceof Document value ? value : null;
+                if (armed.get() && "replaceOne".equals(method.getName()) && session != null && replacement != null
+                        && replacement.getString("merchant").equals(firstMerchant.get())) {
+                    String firstId = firstCheckpointId.get();
+                    Document persistedCheckpoint = membership.find(session, eq("_id", firstId)).first();
+                    Document persistedTip = delegate.find(session, eq("_id", replacement.getString("_id"))).first();
+                    if (persistedCheckpoint != null && persistedTip != null
+                            && firstId.equals(persistedTip.getString("checkpointId"))) {
+                        firstTipWritten.set(true);
+                    }
+                }
+                return result;
+            });
+        }
+
+        private void arm() { armed.set(true); }
+        private boolean failureInjected() { return failureInjected.get(); }
+        private boolean firstCheckpointAndTipWereVisibleInTransaction() { return firstWritesVisible.get(); }
     }
 }
