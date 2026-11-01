@@ -120,15 +120,43 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(store.commit(later).status()).isEqualTo(CommitStatus.WAITING_FOR_COVERAGE);
         seal(SCOPE, 3, BASE.minusSeconds(7_200), later.eventTime());
         assertThat(store.commit(later).status()).isEqualTo(CommitStatus.WAITING_FOR_PREDECESSOR);
-        assertThat(store.commit(earlier).snapshot().priorCount()).isZero();
-        assertThat(store.commit(middle).snapshot().priorCount()).isEqualTo(1);
-        Snapshot snapshot = store.commit(later).snapshot();
+        CommitResult earlierResult = store.commit(earlier);
+        assertThat(earlierResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(earlierResult.snapshot().priorCount()).isZero();
+        CommitResult middleResult = store.commit(middle);
+        assertThat(middleResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(middleResult.snapshot().priorCount()).isEqualTo(1);
+        CommitResult laterResult = store.commit(later);
+        assertThat(laterResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        Snapshot snapshot = laterResult.snapshot();
         assertThat(snapshot.priorCount()).isEqualTo(2);
         assertThat(store.stage(later)).isEqualTo(StageResult.EXISTING);
         assertThat(store.commit(later).status()).isEqualTo(CommitStatus.EXISTING);
         assertThat(store.readSnapshot(later)).isEqualTo(snapshot);
         assertThat(store.pending(SCOPE)).isEqualTo(new PendingCounts(0, 0));
         assertThat(count(MongoMerchantObservationSchema.HISTORY)).isEqualTo(3);
+    }
+
+    @Test
+    void reverseEventTimeAcrossSeparateSealsKeepsSourceSequenceLineage() {
+        Observation laterSequenceFirst = approved(SCOPE, 1, 1, BASE.plusSeconds(300));
+        Observation earlierSequenceSecond = approved(SCOPE, 2, 2, BASE);
+        store.stage(laterSequenceFirst);
+        store.stage(earlierSequenceSecond);
+
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), laterSequenceFirst.eventTime());
+        assertThat(store.commit(earlierSequenceSecond).status()).isEqualTo(CommitStatus.WAITING_FOR_COVERAGE);
+        seal(SCOPE, 2, BASE.minusSeconds(7_200), laterSequenceFirst.eventTime());
+
+        CommitResult earlierResult = store.commit(earlierSequenceSecond);
+        assertThat(earlierResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(earlierResult.snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(earlierResult.snapshot().priorCount()).isZero();
+        CommitResult laterResult = store.commit(laterSequenceFirst);
+        assertThat(laterResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(laterResult.snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(laterResult.snapshot().priorCount()).isEqualTo(1);
+        assertThat(store.readSnapshot(laterSequenceFirst)).isEqualTo(laterResult.snapshot());
     }
 
     @ParameterizedTest
@@ -834,6 +862,62 @@ class MongoMerchantObservationStoreIntegrationTest {
     }
 
     @Test
+    void compactionAnchorTracksSourceSequenceWhenEventTimeOrderIsReversed() {
+        Observation laterSequenceFirst = approved(SCOPE, 1, 1, BASE.plusSeconds(300));
+        Observation earlierSequenceSecond = approved(SCOPE, 2, 2, BASE);
+        store.stage(laterSequenceFirst);
+        store.stage(earlierSequenceSecond);
+        seal(SCOPE, 2, BASE.minusSeconds(7_200), laterSequenceFirst.eventTime());
+
+        CommitResult earlierResult = store.commit(earlierSequenceSecond);
+        assertThat(earlierResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(earlierResult.snapshot().priorCount()).isZero();
+        CommitResult laterResult = store.commit(laterSequenceFirst);
+        assertThat(laterResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(laterResult.snapshot().priorCount()).isEqualTo(1);
+
+        clock.instant = clock.instant().plus(LIMITS.receiptRetention());
+        Observation next = approved(SCOPE, 3, 3, clock.instant());
+        assertThat(store.stage(next)).isEqualTo(StageResult.CREATED);
+        Document tip = membershipTip(SCOPE, MERCHANT);
+        Document anchor = tip.get("compactedCheckpoint", Document.class);
+        assertThat(tip.getBoolean("compacted")).isTrue();
+        assertThat(tip.getString("checkpointId")).isEqualTo(MerchantObservationDocumentCodec.eventId(earlierSequenceSecond));
+        assertThat(anchor.getString("id")).isEqualTo(MerchantObservationDocumentCodec.eventId(earlierSequenceSecond));
+        assertThat(anchor.getLong("sequence")).isEqualTo(2L);
+
+        seal(SCOPE, 3, next.eventTime().minusSeconds(7_200), next.eventTime());
+        CommitResult nextResult = store.commit(next);
+        assertThat(nextResult.status()).isEqualTo(CommitStatus.COMMITTED);
+        assertThat(nextResult.snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(nextResult.snapshot().priorCount()).isZero();
+    }
+
+    @Test
+    void corruptedCompactionAnchorInvalidatesTheScopeBeforeAdvancingTheSeal() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        store.stage(first);
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), first.eventTime());
+        assertThat(store.commit(first).status()).isEqualTo(CommitStatus.COMMITTED);
+
+        clock.instant = clock.instant().plus(LIMITS.receiptRetention());
+        Observation next = approved(SCOPE, 2, 2, clock.instant());
+        assertThat(store.stage(next)).isEqualTo(StageResult.CREATED);
+        database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS).updateOne(
+                eq("_id", MerchantObservationDocumentCodec.membershipTipId(SCOPE, MERCHANT)),
+                set("compactedCheckpoint.id", token(999)),
+                new com.mongodb.client.model.UpdateOptions().bypassDocumentValidation(true));
+
+        assertThatThrownBy(() -> seal(SCOPE, 2, next.eventTime().minusSeconds(7_200), next.eventTime()))
+                .hasMessage("MERCHANT_STORE_CORRUPT_MEMBERSHIP_TIP");
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
+        assertThat(store.commit(next).status()).isEqualTo(CommitStatus.QUARANTINED);
+        assertThat(database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP)
+                .find(eq("_id", MerchantObservationDocumentCodec.eventId(next))).first()).isNull();
+    }
+
+    @Test
     void membershipTipsRemainBoundedPerScopeAcrossCompaction() {
         var bounded = new MongoMerchantObservationStore(client, databaseName, clock, storageBudget(1), verifier);
         Observation first = approved(SCOPE, 1, 1, BASE);
@@ -901,16 +985,18 @@ class MongoMerchantObservationStoreIntegrationTest {
                     .as("fault injection removes E1 from %s", collection).isNull();
         }
 
-        seal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+        assertThatThrownBy(() -> seal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime()))
+                .hasMessage("MERCHANT_STORE_MEMBERSHIP_TIP_MISMATCH");
+        assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(source(SCOPE).getBoolean("invalidated")).isTrue();
         CommitResult result = store.commit(second);
         assertThat(result.status()).isEqualTo(CommitStatus.QUARANTINED);
         assertThat(result.snapshot()).isNull();
         Document secondCheckpoint = database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP)
                 .find(eq("_id", MerchantObservationDocumentCodec.eventId(second))).first();
-        assertThat(secondCheckpoint.getString("previousCheckpointId")).isEqualTo(firstId);
-        assertThat(secondCheckpoint.getLong("previousSequence")).isEqualTo(1L);
+        assertThat(secondCheckpoint).isNull();
         Document secondTip = membershipTip(SCOPE, MERCHANT);
-        assertThat(secondTip.getString("checkpointId")).isEqualTo(MerchantObservationDocumentCodec.eventId(second));
+        assertThat(secondTip.getString("checkpointId")).isEqualTo(firstId);
         assertThat(database.getCollection(MongoMerchantObservationSchema.CANDIDATES)
                 .find(eq("_id", MerchantObservationDocumentCodec.eventId(second))).first().getString("status"))
                 .isEqualTo("QUARANTINED");
