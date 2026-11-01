@@ -164,15 +164,14 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 boolean late = source.getDate("watermark") != null
                         && !observation.eventTime().isAfter(instant(source, "watermark"));
                 if (source.getInteger("pending") >= limits.maxPending()) {
-                    if (late) { invalidate(session, observation.scope()); }
+                    // An admitted observation rejected before persistence may belong to any retained window,
+                    // including one before the first watermark. Fence the exact scope before reporting capacity.
+                    invalidate(session, observation.scope());
                     return new StageDecision(null, Capacity.PENDING);
                 }
                 if (source.getInteger("accepted") >= limits.maxStoredObservations()) {
-                    if (late) {
-                        invalidate(session, observation.scope());
-                        return new StageDecision(null, Capacity.LATE_EVIDENCE);
-                    }
-                    return new StageDecision(null, Capacity.STORAGE);
+                    invalidate(session, observation.scope());
+                    return new StageDecision(null, late ? Capacity.LATE_EVIDENCE : Capacity.STORAGE);
                 }
                 Document candidate = observationDocument(observation).append("status", late ? "QUARANTINED" : "STAGED")
                         .append("stagedAt", Date.from(now));
