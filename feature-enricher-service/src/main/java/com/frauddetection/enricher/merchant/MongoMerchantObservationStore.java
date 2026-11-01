@@ -274,7 +274,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 requireSource(current, scope);
                 if (fence.matches(current, scope, true)) { return null; }
                 if (!fence.matches(current, scope, false)) { throw membershipIntegrityUnresolved(); }
-                if (coverage.updateOne(session, fence.filter(scope),
+                if (coverage.updateOne(session, fence.invalidationFilter(scope),
                         combine(set("invalidated", true), inc("revision", 1L))).getModifiedCount() != 1) {
                     throw membershipIntegrityUnresolved();
                 }
@@ -1012,13 +1012,12 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         return exception;
     }
     private record SealFence(long revision, long sealedSequence, long compactedThroughSequence,
-                             int accepted, int pending, int quarantined, int membershipTipCount,
+                             int membershipTipCount,
                              Instant coverageStart, Instant watermark, Instant retainedFrom,
                              String policyCommitment) {
         private static SealFence from(Document source) {
             return new SealFence(source.getLong("revision"), source.getLong("sealedSequence"),
-                    source.getLong("compactedThroughSequence"), source.getInteger("accepted"),
-                    source.getInteger("pending"), source.getInteger("quarantined"),
+                    source.getLong("compactedThroughSequence"),
                     source.getInteger("membershipTipCount"), nullableInstant(source, "coverageStart"),
                     nullableInstant(source, "watermark"), nullableInstant(source, "retainedFrom"),
                     source.getString("policyCommitment"));
@@ -1028,12 +1027,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             return source != null && scope.equals(decodeScope(source))
                     && scopeId(scope).equals(source.getString("_id"))
                     && Objects.equals(policyCommitment, source.getString("policyCommitment"))
-                    && Objects.equals(revision + (invalidated ? 1L : 0L), source.getLong("revision"))
+                    && source.getLong("revision") >= revision + (invalidated ? 1L : 0L)
                     && Objects.equals(sealedSequence, source.getLong("sealedSequence"))
                     && Objects.equals(compactedThroughSequence, source.getLong("compactedThroughSequence"))
-                    && Objects.equals(accepted, source.getInteger("accepted"))
-                    && Objects.equals(pending, source.getInteger("pending"))
-                    && Objects.equals(quarantined, source.getInteger("quarantined"))
                     && Objects.equals(membershipTipCount, source.getInteger("membershipTipCount"))
                     && Objects.equals(coverageStart, nullableInstant(source, "coverageStart"))
                     && Objects.equals(watermark, nullableInstant(source, "watermark"))
@@ -1041,11 +1037,10 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     && Objects.equals(invalidated, source.getBoolean("invalidated"));
         }
 
-        private Bson filter(Scope scope) {
+        private Bson invalidationFilter(Scope scope) {
             return and(eq("_id", scopeId(scope)), exactScope(scope), eq("policyCommitment", policyCommitment),
-                    eq("revision", revision), eq("sealedSequence", sealedSequence),
-                    eq("compactedThroughSequence", compactedThroughSequence), eq("accepted", accepted),
-                    eq("pending", pending), eq("quarantined", quarantined),
+                    gte("revision", revision), eq("sealedSequence", sealedSequence),
+                    eq("compactedThroughSequence", compactedThroughSequence),
                     eq("membershipTipCount", membershipTipCount), eq("coverageStart", asDate(coverageStart)),
                     eq("watermark", asDate(watermark)), eq("retainedFrom", asDate(retainedFrom)),
                     eq("invalidated", false));

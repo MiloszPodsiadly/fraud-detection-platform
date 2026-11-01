@@ -38,8 +38,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -188,6 +190,86 @@ class MongoMerchantObservationStoreIntegrationTest {
                 .append("membership", beforeMembership).append("membershipTips", beforeTips)
                 .append("invalidated", true).append("revision", beforeRevision + 1L);
         assertThat(sealFailureState(SCOPE)).isEqualTo(expectedAfter);
+    }
+
+    @Test
+    void failedMembershipSealFencesConcurrentSameScopeStageAndSurvivesRestart() throws Exception {
+        Observation prior = distinctMerchant(1, BASE);
+        store.stage(prior);
+        seal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
+        Snapshot priorSnapshot = store.commit(prior).snapshot();
+        assertThat(priorSnapshot.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+
+        Observation firstInFailedSeal = distinctMerchant(2, BASE.plusSeconds(30));
+        Observation secondInFailedSeal = distinctMerchant(3, BASE.plusSeconds(60));
+        Observation concurrent = distinctMerchant(4, BASE.plusSeconds(90));
+        store.stage(firstInFailedSeal);
+        store.stage(secondInFailedSeal);
+
+        FailAfterFirstMerchantWrites fault = new FailAfterFirstMerchantWrites();
+        CountDownLatch invalidationStarted = new CountDownLatch(1);
+        CountDownLatch resumeInvalidation = new CountDownLatch(1);
+        AtomicInteger invalidationAcknowledgments = new AtomicInteger();
+        fault.pauseInvalidation(invalidationStarted, resumeInvalidation);
+        fault.failInvalidationUpdateOnce();
+        MongoClient uncertainClient = lostAcknowledgments(client, invalidationAcknowledgments);
+        var faultingStore = new MongoMerchantObservationStore(fault.wrap(uncertainClient), databaseName, clock, LIMITS, verifier);
+        CoverageSeal failedSeal = new CoverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), secondInFailedSeal.eventTime());
+        verifier.permit(failedSeal);
+        Document beforeProgress = sealProgress(SCOPE);
+        beforeProgress.remove("accepted");
+        beforeProgress.remove("pending");
+        beforeProgress.remove("quarantined");
+        List<Document> beforeMembership = ledgerState(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE);
+        List<Document> beforeTips = ledgerState(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE);
+        fault.arm();
+
+        try (var workers = Executors.newFixedThreadPool(1)) {
+            var sealResult = workers.submit(() -> {
+                try {
+                    faultingStore.seal(failedSeal);
+                    return "SEALED";
+                } catch (IllegalStateException exception) {
+                    return exception.getMessage();
+                }
+            });
+            assertThat(invalidationStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            try {
+                assertThat(store.stage(concurrent)).isEqualTo(StageResult.CREATED);
+
+                Scope rotated = new Scope(SCOPE.issuer(), SCOPE.institution(), SCOPE.source(), token(77), SCOPE.identityVersion());
+                Observation rotatedObservation = approved(rotated, 5, 1, BASE);
+                store.stage(rotatedObservation);
+                seal(rotated, 1, BASE.minusSeconds(7_200), BASE);
+                assertThat(store.commit(rotatedObservation).snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+                assertThat(source(rotated).getBoolean("invalidated")).isFalse();
+            } finally {
+                resumeInvalidation.countDown();
+            }
+
+            String outcome = sealResult.get(10, TimeUnit.SECONDS);
+            Snapshot afterRace = store.readSnapshot(prior);
+            assertThat(fault.invalidationConflictWasInjected()).isTrue();
+            assertThat(invalidationAcknowledgments).hasValue(3);
+            assertThat(source(SCOPE).getBoolean("invalidated"))
+                    .as("seal outcome=%s, old availability=%s, old priorCount=%s", outcome,
+                            afterRace.availability(), afterRace.priorCount()).isTrue();
+            assertThat(outcome).isEqualTo("MERCHANT_STORE_MEMBERSHIP_LINEAGE_GAP");
+            Document afterProgress = sealProgress(SCOPE);
+            afterProgress.remove("accepted");
+            afterProgress.remove("pending");
+            afterProgress.remove("quarantined");
+            assertThat(afterProgress).isEqualTo(beforeProgress);
+            assertThat(ledgerState(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE)).isEqualTo(beforeMembership);
+            assertThat(ledgerState(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(beforeTips);
+            assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
+            assertThat(source(SCOPE).getInteger("accepted")).isEqualTo(4);
+            assertThat(source(SCOPE).getInteger("pending")).isEqualTo(3);
+            assertUnavailable(store, prior);
+
+            MongoMerchantObservationStore restarted = storeWithLimits(LIMITS);
+            assertUnavailable(restarted, prior);
+        }
     }
 
     @Test
@@ -2070,8 +2152,13 @@ class MongoMerchantObservationStoreIntegrationTest {
         private final AtomicBoolean firstTipWritten = new AtomicBoolean();
         private final AtomicBoolean failureInjected = new AtomicBoolean();
         private final AtomicBoolean firstWritesVisible = new AtomicBoolean();
+        private final AtomicBoolean invalidationConflictOnce = new AtomicBoolean();
+        private final AtomicBoolean invalidationConflictInjected = new AtomicBoolean();
         private final AtomicReference<String> firstMerchant = new AtomicReference<>();
         private final AtomicReference<String> firstCheckpointId = new AtomicReference<>();
+        private final AtomicBoolean pauseInvalidationOnce = new AtomicBoolean();
+        private volatile CountDownLatch invalidationStarted;
+        private volatile CountDownLatch resumeInvalidation;
         private volatile MongoCollection<Document> membership;
         private volatile MongoCollection<Document> tips;
 
@@ -2095,8 +2182,33 @@ class MongoMerchantObservationStoreIntegrationTest {
                         @SuppressWarnings("unchecked") MongoCollection<Document> collection = (MongoCollection<Document>) result;
                         return tipCollection(collection);
                     }
+                    if (MongoMerchantObservationSchema.COVERAGE.equals(args[0])) {
+                        @SuppressWarnings("unchecked") MongoCollection<Document> collection = (MongoCollection<Document>) result;
+                        return coverageCollection(collection);
+                    }
                 }
                 return result;
+            });
+        }
+
+        private MongoCollection<Document> coverageCollection(MongoCollection<Document> delegate) {
+            return proxy(MongoCollection.class, (method, args) -> {
+                ClientSession session = args != null && args.length > 0 && args[0] instanceof ClientSession value ? value : null;
+                if ("updateOne".equals(method.getName()) && session != null && failureInjected.get()
+                        && invalidationConflictOnce.compareAndSet(true, false)) {
+                    invalidationConflictInjected.set(true);
+                    MongoException conflict = new MongoException(112, "TEST_ONLY_INVALIDATION_WRITE_CONFLICT");
+                    conflict.addLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+                    throw conflict;
+                }
+                if ("find".equals(method.getName()) && session != null && failureInjected.get()
+                        && pauseInvalidationOnce.compareAndSet(true, false)) {
+                    invalidationStarted.countDown();
+                    if (!resumeInvalidation.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("TEST_ONLY_INVALIDATION_BARRIER_TIMEOUT");
+                    }
+                }
+                return invoke(delegate, method, args);
             });
         }
 
@@ -2153,6 +2265,13 @@ class MongoMerchantObservationStoreIntegrationTest {
         }
 
         private void arm() { armed.set(true); }
+        private void pauseInvalidation(CountDownLatch started, CountDownLatch resume) {
+            invalidationStarted = started;
+            resumeInvalidation = resume;
+            pauseInvalidationOnce.set(true);
+        }
+        private void failInvalidationUpdateOnce() { invalidationConflictOnce.set(true); }
+        private boolean invalidationConflictWasInjected() { return invalidationConflictInjected.get(); }
         private boolean failureInjected() { return failureInjected.get(); }
         private boolean firstCheckpointAndTipWereVisibleInTransaction() { return firstWritesVisible.get(); }
     }
