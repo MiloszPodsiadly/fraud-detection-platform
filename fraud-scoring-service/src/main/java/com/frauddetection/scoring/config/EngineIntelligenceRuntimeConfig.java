@@ -29,6 +29,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 
 import java.time.Clock;
 import java.util.List;
@@ -37,9 +38,16 @@ import java.util.List;
 @EnableConfigurationProperties({
         EngineIntelligenceEmissionProperties.class,
         VelocityEngineProperties.class,
-        DeviceRiskEngineProperties.class
+        DeviceRiskEngineProperties.class,
+        MerchantRiskEngineProperties.class
 })
 public class EngineIntelligenceRuntimeConfig {
+
+    @Bean
+    @Lazy(false)
+    public MerchantRiskEngineConfigurationValidator merchantRiskEngineConfigurationValidator(MerchantRiskEngineProperties properties) {
+        return new MerchantRiskEngineConfigurationValidator(properties);
+    }
 
     @Bean
     public EngineIntelligenceEmissionService engineIntelligenceEmissionService(

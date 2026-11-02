@@ -157,6 +157,7 @@ class FraudEngineContractRuntimeIsolationTest {
                 scoringRoot,
                 scoringRoot.resolve("engine"),
                 scoringRoot.resolve("device"),
+                scoringRoot.resolve("merchant/MerchantRiskSignalEngine.java"),
                 scoringRoot.resolve("orchestration"),
                 reviewedProducerWiring
         );
@@ -169,6 +170,7 @@ class FraudEngineContractRuntimeIsolationTest {
 
         assertThat(existingScoringRuntime)
                 .doesNotContain("FraudSignalEngine")
+                .doesNotContain("MerchantRiskSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
                 .doesNotContain("engineResults");
@@ -177,7 +179,8 @@ class FraudEngineContractRuntimeIsolationTest {
                 .contains("FraudSignalEngineRegistry fraudSignalEngineRegistry(")
                 .contains("List.of(ruleBasedSignalEngine, pythonMlSignalEngine)")
                 .contains("List.of(ruleBasedSignalEngine, pythonMlSignalEngine, velocity)")
-                .doesNotContain("DeviceRiskSignalEngine");
+                .doesNotContain("DeviceRiskSignalEngine")
+                .doesNotContain("MerchantRiskSignalEngine");
         assertThat(deviceProperties).contains("@DefaultValue(\"false\") boolean enabled");
         assertThat(runtimeValidator)
                 .contains("if (deviceRiskEngineProperties.enabled())")
