@@ -53,7 +53,7 @@
         <bouncycastle.version>1.86</bouncycastle.version>
         <xz.version>1.12</xz.version>
         <jackson.version>3.2.3</jackson.version>
-        <jackson2.version>2.22.3</jackson2.version>
+        <jackson2.version>2.22.4</jackson2.version>
         <jackson2.annotations.version>2.22</jackson2.annotations.version>
         <prometheus.version>1.9.0</prometheus.version>
         <lz4-java.version>1.12.0</lz4-java.version>
