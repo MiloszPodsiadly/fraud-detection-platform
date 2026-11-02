@@ -50,7 +50,7 @@ services:
 
   model-promotion-observation-key-loader:
     profiles: !reset []
-    image: eclipse-temurin:21-jre
+    image: eclipse-temurin:25-jre
     restart: "no"
     network_mode: none
     entrypoint:
@@ -79,7 +79,7 @@ services:
 
   model-promotion-policy-key-loader:
     profiles: !reset []
-    image: eclipse-temurin:21-jre
+    image: eclipse-temurin:25-jre
     restart: "no"
     network_mode: none
     entrypoint:
