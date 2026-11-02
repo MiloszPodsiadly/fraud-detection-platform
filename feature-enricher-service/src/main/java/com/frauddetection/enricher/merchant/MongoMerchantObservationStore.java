@@ -84,9 +84,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         authorize(() -> admission.requireObservation(Objects.requireNonNull(observation)));
         Instant now = now();
         if (observation.eventTime().isAfter(now.plus(limits.clockSkew()))
-                || observation.sourceObservedAt().isAfter(now.plus(limits.clockSkew()))) { throw failure("FUTURE_EVENT"); }
+                || observation.sourceObservedAt().isAfter(now.plus(limits.clockSkew()))) {
+            rejectTemporallyInvalidObservation(observation, now, "FUTURE_EVENT");
+        }
         if (!observation.eventTime().isAfter(now.minus(limits.replayHorizon()))) {
-            rejectExpiredObservation(observation);
+            rejectTemporallyInvalidObservation(observation, now, "REPLAY_EXPIRED");
         }
         try { return stageAuthorized(observation, now); }
         catch (IllegalStateException exception) {
@@ -106,19 +108,23 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         }
     }
 
-    private void rejectExpiredObservation(Observation observation) {
+    private void rejectTemporallyInvalidObservation(Observation observation, Instant now, String disposition) {
         AtomicReference<SealFence> fence = new AtomicReference<>();
-        AtomicReference<String> fencedDisposition = new AtomicReference<>("REPLAY_EXPIRED");
+        AtomicReference<String> fencedDisposition = new AtomicReference<>(disposition);
         for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
-            fence.set(null);
-            fencedDisposition.set("REPLAY_EXPIRED");
+            if (fence.get() == null) { fencedDisposition.set(disposition); }
             try {
-                String disposition = transaction(session -> expiredDisposition(session, observation, fence, fencedDisposition));
-                throw failure(disposition);
+                String resolvedDisposition = transaction(session -> rejectedTimeDisposition(
+                        session, observation, now, disposition, fence, fencedDisposition));
+                SealFence expected = fence.get();
+                if (expected != null && !hasDurableTimeFence(observation.scope(), expected)) {
+                    throw failure("REPLAY_FENCE_UNRESOLVED");
+                }
+                throw failure(resolvedDisposition);
             } catch (MongoException exception) {
                 SealFence expected = fence.get();
                 if (exception.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)
-                        && expected != null && hasDurableExpiredFence(observation.scope(), expected)) {
+                        && expected != null && hasDurableTimeFence(observation.scope(), expected)) {
                     throw failure(fencedDisposition.get());
                 }
                 if (exception.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)
@@ -131,9 +137,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         throw failure("REPLAY_FENCE_UNRESOLVED");
     }
 
-    private String expiredDisposition(ClientSession session, Observation observation,
-                                      AtomicReference<SealFence> fence,
-                                      AtomicReference<String> fencedDisposition) {
+    private String rejectedTimeDisposition(ClientSession session, Observation observation, Instant now,
+                                           String rejectionDisposition, AtomicReference<SealFence> fence,
+                                           AtomicReference<String> fencedDisposition) {
         Scope scope = observation.scope();
         String eventId = eventId(observation);
         Document source = source(session, scope);
@@ -147,14 +153,22 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         Document eventHistory = history.find(session, eq("_id", eventId)).first();
 
         if (source == null) {
-            return hasScopeArtifacts(session, scope) || !eventCandidates.isEmpty() || !eventReceipts.isEmpty()
-                    || eventMember != null || eventHistory != null ? "COVERAGE_MISSING" : "REPLAY_EXPIRED";
+            if (hasScopeArtifacts(session, scope) || !eventCandidates.isEmpty() || !eventReceipts.isEmpty()
+                    || eventMember != null || eventHistory != null) {
+                return "COVERAGE_MISSING";
+            }
+            Document cleanSource = sourceDocument(scope, now);
+            fence.set(SealFence.from(cleanSource));
+            fencedDisposition.set(rejectionDisposition);
+            Document coldFence = new Document(cleanSource).append("revision", 1L).append("invalidated", true);
+            coverage.insertOne(session, coldFence);
+            return rejectionDisposition;
         }
         requireSource(source, scope);
-        if (invalidated(source)) { return "REPLAY_EXPIRED"; }
+        if (invalidated(source)) { return rejectionDisposition; }
 
         if (eventCandidates.size() > 1 || eventReceipts.size() > 1) {
-            return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
         }
         Document candidate = eventCandidates.isEmpty() ? null : eventCandidates.getFirst();
         Document receipt = eventReceipts.isEmpty() ? null : eventReceipts.getFirst();
@@ -162,38 +176,38 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             Observation stored;
             try { stored = decodeObservation(candidate); }
             catch (IllegalStateException corrupt) {
-                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
             }
             if (!observation.equals(stored)) {
-                return fenceExpiredSource(session, source, scope, "IDENTITY_CONFLICT", fence, fencedDisposition);
+                return fenceRejectedTimeSource(session, source, scope, "IDENTITY_CONFLICT", fence, fencedDisposition);
             }
             boolean exactManifest;
             try { exactManifest = receipt != null && matchesManifest(candidate, receipt); }
             catch (RuntimeException corruptManifest) { exactManifest = false; }
             if (!exactManifest) {
-                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
             }
             if (eventHistory != null) {
                 try {
                     if (!observation.equals(decodeObservation(eventHistory))) {
-                        return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                        return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
                     }
                 } catch (IllegalStateException corrupt) {
-                    return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                    return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
                 }
             }
             String status;
             try { status = candidate.getString("status"); }
             catch (RuntimeException corruptStatus) {
-                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
             }
-            if (!Set.of("STAGED", "COMMITTED", "QUARANTINED").contains(status)) {
-                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            if (!"STAGED".equals(status) && !"COMMITTED".equals(status) && !"QUARANTINED".equals(status)) {
+                return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
             }
             boolean sealed = observation.sequence() <= source.getLong("sealedSequence");
             if (sealed != (eventMember != null)
                     || eventMember != null && !membershipMatchesObservation(eventMember, observation)) {
-                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
             }
             if (eventMember != null) {
                 try {
@@ -201,29 +215,29 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     MembershipLineage lineage = membershipLineage(session, scope, observation.merchant(),
                             source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"));
                     if (lineage == null || !checkpoint.equals(lineage.retainedById().get(checkpoint.id()))) {
-                        return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                        return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
                     }
                 } catch (IllegalStateException corruptLineage) {
-                    return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                    return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
                 }
             }
             try { requireReceiptFresh(candidate); }
             catch (IllegalStateException expiredOrCorrupt) {
                 if ("MERCHANT_STORE_RECEIPT_EXPIRED".equals(expiredOrCorrupt.getMessage())) { return "REPLAY_EXPIRED"; }
-                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
             }
-            return "REPLAY_EXPIRED";
+            return rejectionDisposition;
         }
 
         if (receipt != null || eventMember != null || eventHistory != null) {
-            return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            return fenceRejectedTimeSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
         }
         if (hasIdentityConflict(session, observation)) {
-            return fenceExpiredSource(session, source, scope, "IDENTITY_CONFLICT", fence, fencedDisposition);
+            return fenceRejectedTimeSource(session, source, scope, "IDENTITY_CONFLICT", fence, fencedDisposition);
         }
         // Event time can run backwards relative to sequence. Without an exact durable receipt,
-        // conservatively fence this source before rejecting the expired event.
-        return fenceExpiredSource(session, source, scope, "REPLAY_EXPIRED", fence, fencedDisposition);
+        // conservatively fence this source before rejecting the observation.
+        return fenceRejectedTimeSource(session, source, scope, rejectionDisposition, fence, fencedDisposition);
     }
 
     private boolean hasScopeArtifacts(ClientSession session, Scope scope) {
@@ -237,9 +251,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 .limit(1).first() != null;
     }
 
-    private String fenceExpiredSource(ClientSession session, Document source, Scope scope, String disposition,
-                                      AtomicReference<SealFence> fence,
-                                      AtomicReference<String> fencedDisposition) {
+    private String fenceRejectedTimeSource(ClientSession session, Document source, Scope scope, String disposition,
+                                           AtomicReference<SealFence> fence,
+                                           AtomicReference<String> fencedDisposition) {
         if (source.getLong("revision") == Long.MAX_VALUE) { throw failure("REPLAY_FENCE_UNRESOLVED"); }
         fencedDisposition.set(disposition);
         SealFence expected = SealFence.from(source);
@@ -251,7 +265,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         return disposition;
     }
 
-    private boolean hasDurableExpiredFence(Scope scope, SealFence expected) {
+    private boolean hasDurableTimeFence(Scope scope, SealFence expected) {
         try {
             Document durable = safeRead(coverage, scopeId(scope));
             if (durable == null) { return false; }
@@ -569,6 +583,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             try {
                 Document source = source(session, observation.scope());
                 requireSource(source, observation.scope());
+                if (invalidated(source)) { return unavailable(observation, Reason.HISTORY_MISSING); }
                 Document row = candidates.find(session, eq("_id", eventId(observation))).first();
                 requireBinding(row, observation);
                 requireReceiptFresh(row);

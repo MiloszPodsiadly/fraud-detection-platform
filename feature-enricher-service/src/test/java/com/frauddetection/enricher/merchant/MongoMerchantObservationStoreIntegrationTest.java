@@ -6,6 +6,7 @@ import com.github.dockerjava.api.model.ExposedPort;
 import com.mongodb.MongoException;
 import com.mongodb.ExplainVerbosity;
 import com.mongodb.client.ClientSession;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
@@ -788,28 +789,467 @@ class MongoMerchantObservationStoreIntegrationTest {
     }
 
     @Test
-    void replayExpiryBoundaryIsInclusiveAndColdExpiredInputLeavesNoSource() {
+    void coldExpiredBeforeFirstValidStageCannotYieldCompleteWindow() {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        MongoMerchantObservationStore bounded = storeWithLimits(replayLimits);
+        Scope scope = changeScope(SCOPE, "issuer");
+        Instant now = clock.instant();
+        assertThat(source(scope)).isNull();
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, scope)).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, scope)).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.HISTORY, scope)).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP, scope)).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, scope)).isZero();
+
+        Observation expired = approved(scope, 30, 2, now.minus(Duration.ofHours(36)));
+        assertThatThrownBy(() -> bounded.stage(expired)).hasMessage("MERCHANT_STORE_REPLAY_EXPIRED");
+        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, scope)).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, scope)).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.HISTORY, scope)).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP, scope)).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, scope)).isZero();
+
+        Observation first = approved(scope, 31, 1, now.minus(Duration.ofMinutes(30)));
+        StageResult firstResult = bounded.stage(first);
+        Snapshot committed = null;
+        String sealResult;
+        try {
+            seal(bounded, scope, 1, first.eventTime().minus(Duration.ofDays(2)), first.eventTime());
+            sealResult = "SEALED";
+        } catch (IllegalStateException rejectedSeal) {
+            sealResult = rejectedSeal.getMessage();
+        }
+        String commitResult;
+        try {
+            CommitResult result = bounded.commit(first);
+            committed = result.snapshot();
+            commitResult = result.status().name();
+        } catch (IllegalStateException rejectedCommit) {
+            commitResult = rejectedCommit.getMessage();
+        }
+        Document fenced = source(scope);
+        boolean noFalseComplete = fenced != null && fenced.getBoolean("invalidated")
+                && (committed == null || committed.availability() != Availability.COMPLETE_WINDOW
+                || committed.priorCount() == null);
+        assertThat(fenced.getInteger("accepted")).isZero();
+        assertThat(fenced.getInteger("pending")).isZero();
+        assertThat(fenced.getInteger("quarantined")).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, scope)).isZero();
+        assertThat(noFalseComplete)
+                .as("cold B then A must not yield a false complete zero; invalidated=%s, stage(A)=%s, seal=%s, commit=%s, snapshot=%s",
+                        fenced != null && fenced.getBoolean("invalidated"), firstResult, sealResult, commitResult, committed)
+                .isTrue();
+        assertThat(countForEvent(MongoMerchantObservationSchema.CANDIDATES, expired)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.MANIFEST, expired)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.HISTORY, expired)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.MEMBERSHIP, expired)).isZero();
+    }
+
+    @Test
+    void coldExpiredAndInitialStageAreAtomicUnderRace() throws Exception {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        Scope scope = changeScope(SCOPE, "institution");
+        PauseNextCoverageRead pause = new PauseNextCoverageRead(client);
+        MongoMerchantObservationStore expiredStore = new MongoMerchantObservationStore(
+                pause.client(), databaseName, clock, replayLimits, verifier);
+        MongoMerchantObservationStore firstStore = storeWithLimits(replayLimits);
+        Instant now = clock.instant();
+        Observation expired = approved(scope, 32, 2, now.minus(Duration.ofHours(36)));
+        Observation first = approved(scope, 33, 1, now.minus(Duration.ofMinutes(30)));
+        pause.arm();
+
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var expiredResult = executor.submit(() -> stageOutcome(expiredStore, expired));
+            assertThat(pause.awaitRead()).isTrue();
+            StageResult firstStage = firstStore.stage(first);
+            Document afterFirstStage = source(scope);
+            assertThat(firstStage).isEqualTo(StageResult.CREATED);
+            assertThat(afterFirstStage.getInteger("accepted")).isEqualTo(1);
+            pause.release();
+            String rejected = expiredResult.get(10, TimeUnit.SECONDS);
+
+            String sealResult;
+            try {
+                seal(firstStore, scope, 1, first.eventTime().minus(Duration.ofDays(2)), first.eventTime());
+                sealResult = "SEALED";
+            } catch (IllegalStateException rejectedSeal) {
+                sealResult = rejectedSeal.getMessage();
+            }
+            Snapshot committed = null;
+            String commitResult;
+            try {
+                CommitResult result = firstStore.commit(first);
+                committed = result.snapshot();
+                commitResult = result.status().name();
+            } catch (IllegalStateException rejectedCommit) {
+                commitResult = rejectedCommit.getMessage();
+            }
+
+            Document fenced = source(scope);
+            boolean noFalseComplete = fenced != null && fenced.getBoolean("invalidated")
+                    && ("MERCHANT_STORE_REPLAY_EXPIRED".equals(rejected)
+                    || "MERCHANT_STORE_REPLAY_FENCE_UNRESOLVED".equals(rejected))
+                    && (committed == null || committed.availability() == Availability.UNAVAILABLE);
+            assertThat(fenced.getInteger("accepted")).as("A stage=%s, source after A=%s, final source=%s, B=%s",
+                    firstStage, afterFirstStage, fenced, rejected).isEqualTo(1);
+            assertThat(fenced.getInteger("pending") + fenced.getInteger("quarantined"))
+                    .as("A is either pending or quarantined after the racing fence: %s", fenced).isEqualTo(1);
+            assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, scope)).isZero();
+            assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, scope)).isEqualTo(1);
+            assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, scope)).isEqualTo(1);
+            assertThat(noFalseComplete)
+                    .as("racing B rejection and A initialization must fence S; B=%s, invalidated=%s, seal=%s, commit=%s, snapshot=%s",
+                            rejected, fenced != null && fenced.getBoolean("invalidated"), sealResult, commitResult, committed)
+                    .isTrue();
+        } finally {
+            pause.release();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void replayExpiryBoundaryIsInclusiveAndColdExpiredInputPersistsOnlyFence() {
         Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
                 Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
         MongoMerchantObservationStore bounded = storeWithLimits(replayLimits);
         Instant boundary = clock.instant().minus(Duration.ofDays(1));
-        Scope coldExpiredScope = changeScope(SCOPE, "issuer");
-        Observation exactlyExpired = approved(coldExpiredScope, 10, 1, boundary);
+        Scope coldExpiredScope = changeScope(SCOPE, "epoch");
+        Observation exactlyExpired = approved(coldExpiredScope, 34, 1, boundary);
         assertThatThrownBy(() -> bounded.stage(exactlyExpired)).hasMessage("MERCHANT_STORE_REPLAY_EXPIRED");
-        assertThat(source(coldExpiredScope)).isNull();
-        assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, coldExpiredScope)).isZero();
-        assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, coldExpiredScope)).isZero();
-        assertThat(countForScope(MongoMerchantObservationSchema.HISTORY, coldExpiredScope)).isZero();
-        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP, coldExpiredScope)).isZero();
-        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, coldExpiredScope)).isZero();
+        Document fence = source(coldExpiredScope);
+        assertThat(fence).isNotNull();
+        assertThat(fence.getBoolean("invalidated")).isTrue();
+        assertThat(fence.getInteger("accepted")).isZero();
+        assertThat(fence.getInteger("pending")).isZero();
+        assertThat(fence.getInteger("quarantined")).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.CANDIDATES, exactlyExpired)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.MANIFEST, exactlyExpired)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.HISTORY, exactlyExpired)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.MEMBERSHIP, exactlyExpired)).isZero();
 
-        Scope inHorizonScope = changeScope(SCOPE, "institution");
-        Observation oneMillisecondInside = approved(inHorizonScope, 11, 1, boundary.plusMillis(1));
+        Scope inHorizonScope = changeScope(SCOPE, "source");
+        Observation oneMillisecondInside = approved(inHorizonScope, 35, 1, boundary.plusMillis(1));
         assertThat(bounded.stage(oneMillisecondInside)).isEqualTo(StageResult.CREATED);
-        Document source = source(inHorizonScope);
-        assertThat(source.getInteger("accepted")).isEqualTo(1);
-        assertThat(source.getInteger("pending")).isEqualTo(1);
-        assertThat(source.getBoolean("invalidated")).isFalse();
+        Document healthy = source(inHorizonScope);
+        assertThat(healthy.getInteger("accepted")).isEqualTo(1);
+        assertThat(healthy.getInteger("pending")).isEqualTo(1);
+        assertThat(healthy.getBoolean("invalidated")).isFalse();
+    }
+
+    @Test
+    void futureSourceObservationCannotPreservePotentiallyAffectedCompleteHistory() {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        MongoMerchantObservationStore bounded = storeWithLimits(replayLimits);
+        Scope scope = changeScope(SCOPE, "identityVersion");
+        Instant now = clock.instant();
+        Observation first = approved(scope, 36, 1, now.minus(Duration.ofMinutes(30)));
+        assertThat(bounded.stage(first)).isEqualTo(StageResult.CREATED);
+        seal(bounded, scope, 1, first.eventTime().minus(Duration.ofDays(2)), first.eventTime());
+        assertThat(bounded.commit(first).snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+
+        Observation template = observation(scope, 37, 2, now.minus(Duration.ofMinutes(60)));
+        Observation observedInFuture = new Observation(template.scope(), template.sourceEvent(), template.transaction(),
+                template.occurrence(), template.merchant(), template.sequence(), template.eventTime(),
+                now.plus(replayLimits.clockSkew()).plusMillis(1), template.payloadCommitment());
+        verifier.permit(observedInFuture);
+        Document sourceBefore = source(scope);
+        assertThatThrownBy(() -> bounded.stage(observedInFuture)).hasMessage("MERCHANT_STORE_FUTURE_EVENT");
+
+        Snapshot after = bounded.readSnapshot(first);
+        Document sourceAfter = source(scope);
+        assertThat(sourceAfter.getBoolean("invalidated")).isTrue();
+        assertThat(List.of(sourceAfter.getInteger("accepted"), sourceAfter.getInteger("pending"),
+                sourceAfter.getInteger("quarantined")))
+                .containsExactly(sourceBefore.getInteger("accepted"), sourceBefore.getInteger("pending"),
+                        sourceBefore.getInteger("quarantined"));
+        assertThat(after.availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(after.priorCount()).isNull();
+        assertNoRejectedObservationDocuments(observedInFuture);
+
+        Scope independentScope = changeScope(scope, "institution");
+        Observation independent = approved(independentScope, 52, 1, now.minus(Duration.ofMinutes(30)));
+        assertThat(bounded.stage(independent)).isEqualTo(StageResult.CREATED);
+        seal(bounded, independentScope, 1, independent.eventTime().minus(Duration.ofDays(2)), independent.eventTime());
+        assertThat(bounded.commit(independent).snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+    }
+
+    @Test
+    void coldFutureSourceObservationFenceSurvivesStoreRestartBeforeValidStage() {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        MongoMerchantObservationStore bounded = storeWithLimits(replayLimits);
+        Scope scope = changeScope(SCOPE, "source");
+        Instant now = clock.instant();
+        Observation template = observation(scope, 38, 2, now.minus(Duration.ofHours(1)));
+        Observation observedInFuture = new Observation(template.scope(), template.sourceEvent(), template.transaction(),
+                template.occurrence(), template.merchant(), template.sequence(), template.eventTime(),
+                now.plus(replayLimits.clockSkew()).plusMillis(1), template.payloadCommitment());
+        verifier.permit(observedInFuture);
+        assertThat(source(scope)).isNull();
+        assertThatThrownBy(() -> bounded.stage(observedInFuture)).hasMessage("MERCHANT_STORE_FUTURE_EVENT");
+        Document coldFence = source(scope);
+        assertThat(coldFence.getBoolean("invalidated")).isTrue();
+        assertThat(coldFence.getInteger("accepted")).isZero();
+        assertThat(coldFence.getInteger("pending")).isZero();
+        assertThat(coldFence.getInteger("quarantined")).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, scope)).isZero();
+
+        MongoMerchantObservationStore restarted = storeWithLimits(replayLimits);
+        Observation first = approved(scope, 39, 1, now.minus(Duration.ofMinutes(30)));
+        StageResult staged = restarted.stage(first);
+        Snapshot snapshot = null;
+        try {
+            seal(restarted, scope, 1, first.eventTime().minus(Duration.ofDays(2)), first.eventTime());
+            snapshot = restarted.commit(first).snapshot();
+        } catch (IllegalStateException failClosed) {
+            // A durable fence may reject either operation; no successful complete snapshot is allowed.
+        }
+        Document fence = source(scope);
+        assertThat(fence).isNotNull();
+        assertThat(fence.getBoolean("invalidated")).isTrue();
+        assertThat(snapshot == null || snapshot.availability() != Availability.COMPLETE_WINDOW
+                || snapshot.priorCount() == null).isTrue();
+        assertNoRejectedObservationDocuments(observedInFuture);
+    }
+
+    @Test
+    void coldFutureEventTimeIsDurablyFencedWithoutStoringRejectedObservation() {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        MongoMerchantObservationStore bounded = storeWithLimits(replayLimits);
+        Scope scope = changeScope(SCOPE, "epoch");
+        Instant now = clock.instant();
+        Observation template = observation(scope, 40, 2,
+                now.plus(replayLimits.clockSkew()).plusMillis(1));
+        Observation eventTimeInFutureOnly = new Observation(template.scope(), template.sourceEvent(), template.transaction(),
+                template.occurrence(), template.merchant(), template.sequence(), template.eventTime(), now,
+                template.payloadCommitment());
+        verifier.permit(eventTimeInFutureOnly);
+        assertThatThrownBy(() -> bounded.stage(eventTimeInFutureOnly)).hasMessage("MERCHANT_STORE_FUTURE_EVENT");
+
+        Document fence = source(scope);
+        assertThat(fence).isNotNull();
+        assertThat(fence.getBoolean("invalidated")).isTrue();
+        assertThat(fence.getInteger("accepted")).isZero();
+        assertThat(fence.getInteger("pending")).isZero();
+        assertThat(fence.getInteger("quarantined")).isZero();
+        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, scope)).isZero();
+        Observation later = approved(scope, 41, 1, now.minus(Duration.ofMinutes(30)));
+        StageResult staged = bounded.stage(later);
+        assertThat(staged).isEqualTo(StageResult.QUARANTINED);
+        assertThat(bounded.readSnapshot(later).availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertNoRejectedObservationDocuments(eventTimeInFutureOnly);
+    }
+
+    @Test
+    void coldFutureRejectionAndInitialStageAreAtomicUnderRace() throws Exception {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        Scope scope = changeScope(SCOPE, "institution");
+        PauseNextCoverageRead pause = new PauseNextCoverageRead(client);
+        MongoMerchantObservationStore futureStore = new MongoMerchantObservationStore(
+                pause.client(), databaseName, clock, replayLimits, verifier);
+        MongoMerchantObservationStore firstStore = storeWithLimits(replayLimits);
+        Instant now = clock.instant();
+        Observation template = observation(scope, 47, 2, now.minus(Duration.ofHours(1)));
+        Observation future = new Observation(template.scope(), template.sourceEvent(), template.transaction(),
+                template.occurrence(), template.merchant(), template.sequence(), template.eventTime(),
+                now.plus(replayLimits.clockSkew()).plusMillis(1), template.payloadCommitment());
+        verifier.permit(future);
+        Observation first = approved(scope, 48, 1, now.minus(Duration.ofMinutes(30)));
+        pause.arm();
+
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var rejectedResult = executor.submit(() -> stageOutcome(futureStore, future));
+            assertThat(pause.awaitRead()).isTrue();
+            assertThat(firstStore.stage(first)).isEqualTo(StageResult.CREATED);
+            pause.release();
+            String rejected = rejectedResult.get(10, TimeUnit.SECONDS);
+
+            String sealResult;
+            Snapshot snapshot = null;
+            try {
+                seal(firstStore, scope, 1, first.eventTime().minus(Duration.ofDays(2)), first.eventTime());
+                snapshot = firstStore.commit(first).snapshot();
+                sealResult = "SEALED";
+            } catch (IllegalStateException failClosed) {
+                sealResult = failClosed.getMessage();
+            }
+            Document fence = source(scope);
+            assertThat(fence).isNotNull();
+            assertThat(fence.getBoolean("invalidated")).isTrue();
+            assertThat(fence.getInteger("accepted")).isEqualTo(1);
+            assertThat(fence.getInteger("pending") + fence.getInteger("quarantined")).isEqualTo(1);
+            assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, scope)).isZero();
+            assertThat(countForScope(MongoMerchantObservationSchema.CANDIDATES, scope)).isEqualTo(1);
+            assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, scope)).isEqualTo(1);
+            assertThat(rejected.equals("MERCHANT_STORE_FUTURE_EVENT")
+                    || rejected.equals("MERCHANT_STORE_REPLAY_FENCE_UNRESOLVED")).isTrue();
+            assertThat(snapshot == null || snapshot.availability() != Availability.COMPLETE_WINDOW
+                    || snapshot.priorCount() == null)
+                    .as("concurrent future rejection must not leave a false complete window; seal=%s, snapshot=%s",
+                            sealResult, snapshot)
+                    .isTrue();
+            assertNoRejectedObservationDocuments(future);
+        } finally {
+            pause.release();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void futureTimeSkewBoundariesAndExactReplayRemainExplicit() {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        MongoMerchantObservationStore bounded = storeWithLimits(replayLimits);
+        Instant now = clock.instant();
+
+        Scope eventBoundaryScope = changeScope(SCOPE, "issuer");
+        Observation eventBoundaryTemplate = observation(eventBoundaryScope, 42, 1,
+                now.plus(replayLimits.clockSkew()));
+        Observation eventBoundary = new Observation(eventBoundaryTemplate.scope(), eventBoundaryTemplate.sourceEvent(),
+                eventBoundaryTemplate.transaction(), eventBoundaryTemplate.occurrence(), eventBoundaryTemplate.merchant(),
+                eventBoundaryTemplate.sequence(), eventBoundaryTemplate.eventTime(), now,
+                eventBoundaryTemplate.payloadCommitment());
+        verifier.permit(eventBoundary);
+        assertThat(bounded.stage(eventBoundary)).isEqualTo(StageResult.CREATED);
+
+        Scope eventBeyondScope = changeScope(SCOPE, "institution");
+        Observation eventBeyondTemplate = observation(eventBeyondScope, 43, 1,
+                now.plus(replayLimits.clockSkew()).plusMillis(1));
+        Observation eventBeyond = new Observation(eventBeyondTemplate.scope(), eventBeyondTemplate.sourceEvent(),
+                eventBeyondTemplate.transaction(), eventBeyondTemplate.occurrence(), eventBeyondTemplate.merchant(),
+                eventBeyondTemplate.sequence(), eventBeyondTemplate.eventTime(), now,
+                eventBeyondTemplate.payloadCommitment());
+        verifier.permit(eventBeyond);
+        assertThatThrownBy(() -> bounded.stage(eventBeyond)).hasMessage("MERCHANT_STORE_FUTURE_EVENT");
+        assertThat(source(eventBeyondScope).getBoolean("invalidated")).isTrue();
+
+        Scope observedBoundaryScope = changeScope(SCOPE, "source");
+        Observation observedBoundary = observation(observedBoundaryScope, 44, 1, now.minus(Duration.ofMinutes(30)));
+        observedBoundary = new Observation(observedBoundary.scope(), observedBoundary.sourceEvent(), observedBoundary.transaction(),
+                observedBoundary.occurrence(), observedBoundary.merchant(), observedBoundary.sequence(), observedBoundary.eventTime(),
+                now.plus(replayLimits.clockSkew()), observedBoundary.payloadCommitment());
+        verifier.permit(observedBoundary);
+        assertThat(bounded.stage(observedBoundary)).isEqualTo(StageResult.CREATED);
+
+        Scope observedBeyondScope = changeScope(SCOPE, "epoch");
+        Observation observedBeyondTemplate = observation(observedBeyondScope, 45, 1, now.minus(Duration.ofMinutes(30)));
+        Observation observedBeyond = new Observation(observedBeyondTemplate.scope(), observedBeyondTemplate.sourceEvent(),
+                observedBeyondTemplate.transaction(), observedBeyondTemplate.occurrence(), observedBeyondTemplate.merchant(),
+                observedBeyondTemplate.sequence(), observedBeyondTemplate.eventTime(),
+                now.plus(replayLimits.clockSkew()).plusMillis(1), observedBeyondTemplate.payloadCommitment());
+        verifier.permit(observedBeyond);
+        assertThatThrownBy(() -> bounded.stage(observedBeyond)).hasMessage("MERCHANT_STORE_FUTURE_EVENT");
+        assertThat(source(observedBeyondScope).getBoolean("invalidated")).isTrue();
+
+        Scope replayScope = changeScope(SCOPE, "identityVersion");
+        Observation replay = approved(replayScope, 46, 1, now.minus(Duration.ofMinutes(30)));
+        assertThat(bounded.stage(replay)).isEqualTo(StageResult.CREATED);
+        seal(bounded, replayScope, 1, replay.eventTime().minus(Duration.ofDays(2)), replay.eventTime());
+        assertThat(bounded.commit(replay).snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        Document replaySourceBeforeClockChange = source(replayScope);
+        clock.instant = now.minus(Duration.ofHours(2));
+        assertThatThrownBy(() -> bounded.stage(replay)).hasMessage("MERCHANT_STORE_FUTURE_EVENT");
+        Document replaySourceAfter = source(replayScope);
+        assertThat(replaySourceAfter.getBoolean("invalidated")).isFalse();
+        assertThat(replaySourceAfter.getInteger("accepted")).isEqualTo(replaySourceBeforeClockChange.getInteger("accepted"));
+        assertThat(replaySourceAfter.getInteger("pending")).isEqualTo(replaySourceBeforeClockChange.getInteger("pending"));
+        assertThat(bounded.readSnapshot(replay).availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+    }
+
+    @Test
+    void coldExpiredFenceUnknownCommitAcknowledgmentIsReadBackBeforeReplayExpired() {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        Scope scope = changeScope(SCOPE, "epoch");
+        AtomicInteger acknowledgments = new AtomicInteger();
+        MongoMerchantObservationStore uncertain = new MongoMerchantObservationStore(
+                lostAcknowledgments(client, acknowledgments), databaseName, clock, replayLimits, verifier);
+        Observation expired = approved(scope, 49, 1, clock.instant().minus(Duration.ofDays(1)));
+
+        assertThatThrownBy(() -> uncertain.stage(expired)).hasMessage("MERCHANT_STORE_REPLAY_EXPIRED");
+
+        assertThat(acknowledgments).hasValue(MongoMerchantObservationStore.ATTEMPTS);
+        Document fence = source(scope);
+        assertThat(fence).isNotNull();
+        assertThat(fence.getBoolean("invalidated")).isTrue();
+        assertThat(fence.getInteger("accepted")).isZero();
+        assertThat(fence.getInteger("pending")).isZero();
+        assertNoRejectedObservationDocuments(expired);
+    }
+
+    @Test
+    void unadmittedFutureObservationPerformsNoMongoOperation() {
+        Scope scope = changeScope(SCOPE, "source");
+        MongoOperationCounter operations = new MongoOperationCounter(client);
+        TestOnlyMerchantSource denyingAdmission = new TestOnlyMerchantSource();
+        MongoMerchantObservationStore denied = new MongoMerchantObservationStore(
+                operations.client(), databaseName, clock, LIMITS, denyingAdmission);
+        Instant now = clock.instant();
+        Observation future = observation(scope, 50, 1, now.plus(LIMITS.clockSkew()).plusMillis(1));
+        operations.start();
+
+        assertThatThrownBy(() -> denied.stage(future)).hasMessage("MERCHANT_STORE_NOT_ADMITTED");
+
+        assertThat(operations.calls()).isZero();
+        assertThat(source(scope)).isNull();
+    }
+
+    @Test
+    void nullCandidateStatusFencesExpiredExactReplayWithControlledHistoryError() {
+        Limits replayLimits = new Limits(Duration.ofDays(2), Duration.ofDays(4), Duration.ofDays(4),
+                Duration.ofDays(1), Duration.ofMinutes(2), 100, 100, 100, 1_000);
+        MongoMerchantObservationStore bounded = storeWithLimits(replayLimits);
+        Instant originalNow = clock.instant();
+        Observation first = approved(SCOPE, 51, 1, originalNow.minus(Duration.ofMinutes(30)));
+        assertThat(bounded.stage(first)).isEqualTo(StageResult.CREATED);
+        seal(bounded, SCOPE, 1, first.eventTime().minus(Duration.ofDays(2)), first.eventTime());
+        assertThat(bounded.commit(first).snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+
+        clock.instant = originalNow.plus(Duration.ofHours(25));
+        assertThat(bounded.readSnapshot(first).availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        var candidates = database.getCollection(MongoMerchantObservationSchema.CANDIDATES);
+        candidates.updateOne(eq("sourceEvent", first.sourceEvent()), set("status", null),
+                new com.mongodb.client.model.UpdateOptions().bypassDocumentValidation(true));
+        Document beforeFence = source(SCOPE);
+        List<Long> ledgerCounts = List.of(
+                countForScope(MongoMerchantObservationSchema.CANDIDATES, SCOPE),
+                countForScope(MongoMerchantObservationSchema.MANIFEST, SCOPE),
+                countForScope(MongoMerchantObservationSchema.HISTORY, SCOPE),
+                countForScope(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE),
+                countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE));
+
+        assertThatThrownBy(() -> bounded.stage(first))
+                .hasMessage("MERCHANT_STORE_HISTORY_MISSING").hasNoCause();
+
+        Document afterFence = source(SCOPE);
+        assertThat(afterFence.getBoolean("invalidated")).isTrue();
+        assertThat(afterFence.getInteger("accepted")).isEqualTo(beforeFence.getInteger("accepted"));
+        assertThat(afterFence.getInteger("pending")).isEqualTo(beforeFence.getInteger("pending"));
+        assertThat(afterFence.getInteger("quarantined")).isEqualTo(beforeFence.getInteger("quarantined"));
+        assertThat(List.of(
+                countForScope(MongoMerchantObservationSchema.CANDIDATES, SCOPE),
+                countForScope(MongoMerchantObservationSchema.MANIFEST, SCOPE),
+                countForScope(MongoMerchantObservationSchema.HISTORY, SCOPE),
+                countForScope(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE),
+                countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)))
+                .isEqualTo(ledgerCounts);
+        assertThat(bounded.readSnapshot(first).availability()).isEqualTo(Availability.UNAVAILABLE);
+    }
+
+    private void assertNoRejectedObservationDocuments(Observation observation) {
+        assertThat(countForEvent(MongoMerchantObservationSchema.CANDIDATES, observation)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.MANIFEST, observation)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.HISTORY, observation)).isZero();
+        assertThat(countForEvent(MongoMerchantObservationSchema.MEMBERSHIP, observation)).isZero();
     }
 
     @Test
@@ -2037,11 +2477,13 @@ class MongoMerchantObservationStoreIntegrationTest {
 
     @Test
     void futureObservationAndWatermarkBoundariesAreExplicitAndDoNotWriteRejectedInput() {
-        Observation observedInFuture = new Observation(SCOPE, token(101), token(201), token(301), MERCHANT, 1,
+        Scope futureScope = changeScope(SCOPE, "institution");
+        Observation observedInFuture = new Observation(futureScope, token(101), token(201), token(301), MERCHANT, 1,
                 BASE, clock.instant().plusSeconds(121), token(401));
         verifier.permit(observedInFuture);
         assertThatThrownBy(() -> store.stage(observedInFuture)).hasMessage("MERCHANT_STORE_FUTURE_EVENT");
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isZero();
+        assertThat(source(futureScope).getBoolean("invalidated")).isTrue();
         Observation boundary = approved(SCOPE, 1, 1, clock.instant().plusSeconds(120));
         store.stage(boundary);
         CoverageSeal future = new CoverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), clock.instant().plusSeconds(121));
@@ -2181,6 +2623,9 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(replay.snapshot().priorCount()).isNull();
     }
     private long count(String collection) { return database.getCollection(collection).countDocuments(); }
+    private long countForEvent(String collection, Observation observation) {
+        return database.getCollection(collection).countDocuments(eq("_id", MerchantObservationDocumentCodec.eventId(observation)));
+    }
     private Document source(Scope scope) {
         return database.getCollection(MongoMerchantObservationSchema.COVERAGE)
                 .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first();
@@ -2380,6 +2825,51 @@ class MongoMerchantObservationStoreIntegrationTest {
         private void start() { calls.set(0); active.set(true); }
         private int calls() { return calls.get(); }
         private void record() { if (active.get()) { calls.incrementAndGet(); } }
+    }
+    private static final class PauseNextCoverageRead {
+        private final MongoClient delegate;
+        private final AtomicBoolean armed = new AtomicBoolean();
+        private final CountDownLatch paused = new CountDownLatch(1);
+        private final CountDownLatch released = new CountDownLatch(1);
+
+        private PauseNextCoverageRead(MongoClient delegate) { this.delegate = delegate; }
+        private MongoClient client() {
+            return proxy(MongoClient.class, (method, args) -> {
+                Object result = invoke(delegate, method, args);
+                return result instanceof MongoDatabase db ? database(db) : result;
+            });
+        }
+        private MongoDatabase database(MongoDatabase delegate) {
+            return proxy(MongoDatabase.class, (method, args) -> {
+                Object result = invoke(delegate, method, args);
+                if (result instanceof MongoDatabase db) { return database(db); }
+                if ("getCollection".equals(method.getName()) && MongoMerchantObservationSchema.COVERAGE.equals(args[0])) {
+                    @SuppressWarnings("unchecked") MongoCollection<Document> collection = (MongoCollection<Document>) result;
+                    return proxy(MongoCollection.class, (operation, parameters) -> {
+                        Object value = invoke(collection, operation, parameters);
+                        if ("find".equals(operation.getName()) && parameters != null && parameters.length > 0
+                                && parameters[0] instanceof ClientSession && armed.compareAndSet(true, false)) {
+                            @SuppressWarnings("unchecked") FindIterable<Document> iterable = (FindIterable<Document>) value;
+                            return proxy(FindIterable.class, (cursorOperation, cursorParameters) -> {
+                                Object row = invoke(iterable, cursorOperation, cursorParameters);
+                                if ("first".equals(cursorOperation.getName())) {
+                                    paused.countDown();
+                                    if (!released.await(10, TimeUnit.SECONDS)) {
+                                        throw new IllegalStateException("TEST_ONLY_COVERAGE_READ_BARRIER_TIMEOUT");
+                                    }
+                                }
+                                return row;
+                            });
+                        }
+                        return value;
+                    });
+                }
+                return result;
+            });
+        }
+        private void arm() { armed.set(true); }
+        private boolean awaitRead() throws InterruptedException { return paused.await(10, TimeUnit.SECONDS); }
+        private void release() { released.countDown(); }
     }
     private static final class FailAfterFirstMerchantWrites {
         private final AtomicBoolean armed = new AtomicBoolean();
