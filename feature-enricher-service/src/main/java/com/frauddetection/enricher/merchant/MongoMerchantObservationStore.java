@@ -583,11 +583,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             try {
                 Document source = source(session, observation.scope());
                 requireSource(source, observation.scope());
-                if (invalidated(source)) { return unavailable(observation, Reason.HISTORY_MISSING); }
                 Document row = candidates.find(session, eq("_id", eventId(observation))).first();
                 requireBinding(row, observation);
                 requireReceiptFresh(row);
                 if (!"COMMITTED".equals(row.getString("status"))) { throw failure("SNAPSHOT_MISSING"); }
+                if (invalidated(source)) { return unavailable(observation, Reason.HISTORY_MISSING); }
                 Snapshot stored = decodeSnapshot(row, observation);
                 if (!matchesManifest(row, manifest.find(session, eq("_id", eventId(observation))).first())) {
                     return unavailable(observation, Reason.HISTORY_MISSING);

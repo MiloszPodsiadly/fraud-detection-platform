@@ -786,6 +786,10 @@ class MongoMerchantObservationStoreIntegrationTest {
                 .containsExactly(true, Availability.UNAVAILABLE, null);
         assertThat(source(independentScope).getBoolean("invalidated")).isFalse();
         assertThat(bounded.readSnapshot(independent).availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        MongoMerchantObservationStore restarted = storeWithLimits(replayLimits);
+        Snapshot afterRestart = restarted.readSnapshot(first);
+        assertThat(afterRestart.availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(afterRestart.priorCount()).isNull();
     }
 
     @Test
@@ -1042,7 +1046,9 @@ class MongoMerchantObservationStoreIntegrationTest {
         Observation later = approved(scope, 41, 1, now.minus(Duration.ofMinutes(30)));
         StageResult staged = bounded.stage(later);
         assertThat(staged).isEqualTo(StageResult.QUARANTINED);
-        assertThat(bounded.readSnapshot(later).availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThatThrownBy(() -> bounded.readSnapshot(later)).hasMessage("MERCHANT_STORE_CANDIDATE_MISSING");
+        assertThat(countForEvent(MongoMerchantObservationSchema.CANDIDATES, later)).isZero();
+        assertThat(source(scope).getBoolean("invalidated")).isTrue();
         assertNoRejectedObservationDocuments(eventTimeInFutureOnly);
     }
 
@@ -1242,7 +1248,31 @@ class MongoMerchantObservationStoreIntegrationTest {
                 countForScope(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE),
                 countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)))
                 .isEqualTo(ledgerCounts);
-        assertThat(bounded.readSnapshot(first).availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThatThrownBy(() -> bounded.readSnapshot(first)).hasMessage("MERCHANT_STORE_CANDIDATE_STATE").hasNoCause();
+    }
+
+    @Test
+    void invalidatedCoveragePreservesStagedAndQuarantinedSnapshotErrors() {
+        Scope stagedScope = changeScope(SCOPE, "source");
+        Observation staged = approved(stagedScope, 53, 1, clock.instant().minus(Duration.ofMinutes(30)));
+        assertThat(store.stage(staged)).isEqualTo(StageResult.CREATED);
+        database.getCollection(MongoMerchantObservationSchema.COVERAGE).updateOne(
+                eq("_id", MerchantObservationDocumentCodec.scopeId(stagedScope)),
+                com.mongodb.client.model.Updates.combine(set("invalidated", true),
+                        com.mongodb.client.model.Updates.inc("revision", 1L)));
+        assertThatThrownBy(() -> store.readSnapshot(staged)).hasMessage("MERCHANT_STORE_SNAPSHOT_MISSING");
+
+        Scope quarantinedScope = changeScope(SCOPE, "institution");
+        Observation first = approved(quarantinedScope, 54, 1, BASE);
+        Observation late = approved(quarantinedScope, 55, 2, BASE.minusSeconds(30));
+        assertThat(store.stage(first)).isEqualTo(StageResult.CREATED);
+        seal(quarantinedScope, 1, BASE.minusSeconds(7_200), first.eventTime());
+        assertThat(store.stage(late)).isEqualTo(StageResult.QUARANTINED);
+        assertThat(source(quarantinedScope).getBoolean("invalidated")).isTrue();
+        assertThat(database.getCollection(MongoMerchantObservationSchema.CANDIDATES)
+                .find(eq("_id", MerchantObservationDocumentCodec.eventId(late))).first().getString("status"))
+                .isEqualTo("QUARANTINED");
+        assertThatThrownBy(() -> store.readSnapshot(late)).hasMessage("MERCHANT_STORE_SNAPSHOT_MISSING");
     }
 
     private void assertNoRejectedObservationDocuments(Observation observation) {
