@@ -85,7 +85,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         Instant now = now();
         if (observation.eventTime().isAfter(now.plus(limits.clockSkew()))
                 || observation.sourceObservedAt().isAfter(now.plus(limits.clockSkew()))) { throw failure("FUTURE_EVENT"); }
-        if (!observation.eventTime().isAfter(now.minus(limits.replayHorizon()))) { throw failure("REPLAY_EXPIRED"); }
+        if (!observation.eventTime().isAfter(now.minus(limits.replayHorizon()))) {
+            rejectExpiredObservation(observation);
+        }
         try { return stageAuthorized(observation, now); }
         catch (IllegalStateException exception) {
             if ("MERCHANT_STORE_IDENTITY_CONFLICT".equals(exception.getMessage())) {
@@ -102,6 +104,160 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             }
             throw exception;
         }
+    }
+
+    private void rejectExpiredObservation(Observation observation) {
+        AtomicReference<SealFence> fence = new AtomicReference<>();
+        AtomicReference<String> fencedDisposition = new AtomicReference<>("REPLAY_EXPIRED");
+        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+            fence.set(null);
+            fencedDisposition.set("REPLAY_EXPIRED");
+            try {
+                String disposition = transaction(session -> expiredDisposition(session, observation, fence, fencedDisposition));
+                throw failure(disposition);
+            } catch (MongoException exception) {
+                SealFence expected = fence.get();
+                if (exception.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)
+                        && expected != null && hasDurableExpiredFence(observation.scope(), expected)) {
+                    throw failure(fencedDisposition.get());
+                }
+                if (exception.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)
+                        && attempt + 1 < ATTEMPTS) {
+                    continue;
+                }
+                throw failure("REPLAY_FENCE_UNRESOLVED");
+            }
+        }
+        throw failure("REPLAY_FENCE_UNRESOLVED");
+    }
+
+    private String expiredDisposition(ClientSession session, Observation observation,
+                                      AtomicReference<SealFence> fence,
+                                      AtomicReference<String> fencedDisposition) {
+        Scope scope = observation.scope();
+        String eventId = eventId(observation);
+        Document source = source(session, scope);
+        List<Document> eventCandidates = candidates.find(session,
+                        and(exactScope(scope), eq("sourceEvent", observation.sourceEvent())))
+                .hintString("merchant_event_unique").limit(2).into(new ArrayList<>());
+        List<Document> eventReceipts = manifest.find(session,
+                        and(exactScope(scope), eq("sourceEvent", observation.sourceEvent())))
+                .hintString("merchant_manifest_event_unique").limit(2).into(new ArrayList<>());
+        Document eventMember = membership.find(session, eq("_id", eventId)).first();
+        Document eventHistory = history.find(session, eq("_id", eventId)).first();
+
+        if (source == null) {
+            return hasScopeArtifacts(session, scope) || !eventCandidates.isEmpty() || !eventReceipts.isEmpty()
+                    || eventMember != null || eventHistory != null ? "COVERAGE_MISSING" : "REPLAY_EXPIRED";
+        }
+        requireSource(source, scope);
+        if (invalidated(source)) { return "REPLAY_EXPIRED"; }
+
+        if (eventCandidates.size() > 1 || eventReceipts.size() > 1) {
+            return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+        }
+        Document candidate = eventCandidates.isEmpty() ? null : eventCandidates.getFirst();
+        Document receipt = eventReceipts.isEmpty() ? null : eventReceipts.getFirst();
+        if (candidate != null) {
+            Observation stored;
+            try { stored = decodeObservation(candidate); }
+            catch (IllegalStateException corrupt) {
+                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            }
+            if (!observation.equals(stored)) {
+                return fenceExpiredSource(session, source, scope, "IDENTITY_CONFLICT", fence, fencedDisposition);
+            }
+            boolean exactManifest;
+            try { exactManifest = receipt != null && matchesManifest(candidate, receipt); }
+            catch (RuntimeException corruptManifest) { exactManifest = false; }
+            if (!exactManifest) {
+                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            }
+            if (eventHistory != null) {
+                try {
+                    if (!observation.equals(decodeObservation(eventHistory))) {
+                        return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                    }
+                } catch (IllegalStateException corrupt) {
+                    return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                }
+            }
+            String status;
+            try { status = candidate.getString("status"); }
+            catch (RuntimeException corruptStatus) {
+                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            }
+            if (!Set.of("STAGED", "COMMITTED", "QUARANTINED").contains(status)) {
+                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            }
+            boolean sealed = observation.sequence() <= source.getLong("sealedSequence");
+            if (sealed != (eventMember != null)
+                    || eventMember != null && !membershipMatchesObservation(eventMember, observation)) {
+                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            }
+            if (eventMember != null) {
+                try {
+                    MembershipCheckpoint checkpoint = decodeMembership(eventMember);
+                    MembershipLineage lineage = membershipLineage(session, scope, observation.merchant(),
+                            source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"));
+                    if (lineage == null || !checkpoint.equals(lineage.retainedById().get(checkpoint.id()))) {
+                        return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                    }
+                } catch (IllegalStateException corruptLineage) {
+                    return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+                }
+            }
+            try { requireReceiptFresh(candidate); }
+            catch (IllegalStateException expiredOrCorrupt) {
+                if ("MERCHANT_STORE_RECEIPT_EXPIRED".equals(expiredOrCorrupt.getMessage())) { return "REPLAY_EXPIRED"; }
+                return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+            }
+            return "REPLAY_EXPIRED";
+        }
+
+        if (receipt != null || eventMember != null || eventHistory != null) {
+            return fenceExpiredSource(session, source, scope, "HISTORY_MISSING", fence, fencedDisposition);
+        }
+        if (hasIdentityConflict(session, observation)) {
+            return fenceExpiredSource(session, source, scope, "IDENTITY_CONFLICT", fence, fencedDisposition);
+        }
+        // Event time can run backwards relative to sequence. Without an exact durable receipt,
+        // conservatively fence this source before rejecting the expired event.
+        return fenceExpiredSource(session, source, scope, "REPLAY_EXPIRED", fence, fencedDisposition);
+    }
+
+    private boolean hasScopeArtifacts(ClientSession session, Scope scope) {
+        String id = scopeId(scope);
+        return candidates.find(session, eq("scope", id)).hintString("merchant_seal_batch").limit(1).first() != null
+                || manifest.find(session, eq("scope", id)).hintString("merchant_manifest_sequence").limit(1).first() != null
+                || membership.find(session, eq("scope", id)).hintString(MongoMerchantObservationSchema.MEMBERSHIP_WINDOW)
+                .limit(1).first() != null
+                || membershipTips.find(session, eq("scope", id)).hintString("merchant_membership_tip_scope").limit(1).first() != null
+                || history.find(session, eq("scope", id)).hintString(MongoMerchantObservationSchema.HISTORY_WINDOW)
+                .limit(1).first() != null;
+    }
+
+    private String fenceExpiredSource(ClientSession session, Document source, Scope scope, String disposition,
+                                      AtomicReference<SealFence> fence,
+                                      AtomicReference<String> fencedDisposition) {
+        if (source.getLong("revision") == Long.MAX_VALUE) { throw failure("REPLAY_FENCE_UNRESOLVED"); }
+        fencedDisposition.set(disposition);
+        SealFence expected = SealFence.from(source);
+        fence.set(expected);
+        if (coverage.updateOne(session, expected.invalidationFilter(scope),
+                combine(set("invalidated", true), inc("revision", 1L))).getModifiedCount() != 1) {
+            throw race();
+        }
+        return disposition;
+    }
+
+    private boolean hasDurableExpiredFence(Scope scope, SealFence expected) {
+        try {
+            Document durable = safeRead(coverage, scopeId(scope));
+            if (durable == null) { return false; }
+            requireSource(durable, scope);
+            return expected.matches(durable, scope, true);
+        } catch (RuntimeException unavailable) { return false; }
     }
 
     private StageResult stageAuthorized(Observation observation, Instant now) {
