@@ -131,7 +131,7 @@ services:
   audit-trust-key-loader:
     profiles:
       - audit-trust-loader
-    image: eclipse-temurin:21-jre
+    image: eclipse-temurin:25-jre
     restart: "no"
     network_mode: none
     entrypoint:
