@@ -475,6 +475,7 @@ class FraudEngineContractRuntimeIsolationTest {
         return sourceFilesExcept(uiRoot,
                 uiRoot.resolve("components/TransactionRiskIntelligencePanel.jsx"),
                 uiRoot.resolve("components/TransactionRiskIntelligencePanel.test.jsx"),
+                uiRoot.resolve("components/TransactionRiskIntelligenceOwnership.test.jsx"),
                 uiRoot.resolve("pages/TransactionScoringWorkspacePage.jsx"),
                 uiRoot.resolve("pages/TransactionScoringWorkspacePage.test.jsx"),
                 uiRoot.resolve("transactions")
