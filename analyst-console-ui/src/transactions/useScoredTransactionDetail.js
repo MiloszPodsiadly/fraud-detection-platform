@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
 import { useOptionalWorkspaceRuntime } from "../workspace/useWorkspaceRuntime.js";
 import { validateTransactionRiskIntelligenceDetail } from "./transactionRiskIntelligenceValidation.js";
@@ -15,76 +15,109 @@ export function useScoredTransactionDetail({
   const effectiveSession = session !== undefined ? session : runtime?.session;
   const effectiveAuthProvider = authProvider !== undefined ? authProvider : runtime?.authProvider;
   const normalizedTransactionId = normalizeTransactionId(transactionId);
-  const [detail, setDetail] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const requestIdentity = useMemo(() => ({
+    transactionId: normalizedTransactionId,
+    enabled: Boolean(enabled),
+    apiClient: effectiveApiClient,
+    session: effectiveSession,
+    authProvider: effectiveAuthProvider
+  }), [
+    effectiveApiClient,
+    effectiveAuthProvider,
+    effectiveSession,
+    enabled,
+    normalizedTransactionId
+  ]);
+  const [requestState, setRequestState] = useState({
+    identity: null,
+    detail: null,
+    isLoading: false,
+    error: null
+  });
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const sessionIdentity = `${effectiveAuthProvider?.kind || "none"}:${effectiveSession?.userId || ""}`;
+  const requestIdentityRef = useRef(requestIdentity);
 
-  const clear = useCallback(() => {
+  useLayoutEffect(() => {
+    requestIdentityRef.current = requestIdentity;
+  }, [requestIdentity]);
+
+  const clear = useCallback((identity) => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     requestSeqRef.current += 1;
-    setDetail(null);
-    setError(null);
-    setIsLoading(false);
+    setRequestState({ identity, detail: null, isLoading: false, error: null });
   }, []);
 
+  const canRequest = Boolean(
+    requestIdentity.enabled
+    && requestIdentity.apiClient
+    && requestIdentity.transactionId
+  );
+
   const load = useCallback(async () => {
-    if (!enabled || !effectiveApiClient || !normalizedTransactionId) {
-      clear();
+    const identity = requestIdentity;
+    if (requestIdentityRef.current !== identity) {
       return null;
     }
+    if (!canRequest) {
+      clear(identity);
+      return null;
+    }
+
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
-    setDetail(null);
-    setIsLoading(true);
-    setError(null);
+    setRequestState({ identity, detail: null, isLoading: true, error: null });
+
     try {
-      const nextDetail = await effectiveApiClient.getScoredTransactionDetail(normalizedTransactionId, {
+      const nextDetail = await identity.apiClient.getScoredTransactionDetail(identity.transactionId, {
         signal: abortController.signal
       });
-      if (requestSeqRef.current !== requestSeq) {
+      if (requestSeqRef.current !== requestSeq || requestIdentityRef.current !== identity) {
         return null;
       }
       const validation = validateTransactionRiskIntelligenceDetail(nextDetail);
-      if (!validation.valid) {
+      const responseTransactionId = validation.valid ? normalizeTransactionId(nextDetail.transactionId) : null;
+      if (!validation.valid || responseTransactionId !== identity.transactionId) {
         const validationError = new Error("INVALID_TRANSACTION_RISK_INTELLIGENCE_RESPONSE");
-        validationError.code = validation.reason;
-        setDetail(null);
-        setError(validationError);
+        validationError.code = validation.valid ? "TRANSACTION_ID_MISMATCH" : validation.reason;
+        setRequestState({ identity, detail: null, isLoading: true, error: validationError });
         return null;
       }
-      setDetail(nextDetail);
+      setRequestState({ identity, detail: nextDetail, isLoading: true, error: null });
       return nextDetail;
     } catch (apiError) {
-      if (requestSeqRef.current !== requestSeq || isAbortError(apiError)) {
+      if (
+        requestSeqRef.current !== requestSeq
+        || requestIdentityRef.current !== identity
+        || isAbortError(apiError)
+      ) {
         return null;
       }
-      setDetail(null);
-      setError(apiError);
+      setRequestState({ identity, detail: null, isLoading: true, error: apiError });
       return null;
     } finally {
-      if (requestSeqRef.current === requestSeq) {
-        setIsLoading(false);
+      if (requestSeqRef.current === requestSeq && requestIdentityRef.current === identity) {
+        setRequestState((current) => current.identity === identity
+          ? { ...current, isLoading: false }
+          : current);
         if (abortControllerRef.current === abortController) {
           abortControllerRef.current = null;
         }
       }
     }
-  }, [clear, effectiveApiClient, enabled, normalizedTransactionId]);
+  }, [canRequest, clear, requestIdentity]);
 
   useEffect(() => {
-    if (!enabled || !effectiveApiClient || !normalizedTransactionId) {
-      clear();
+    if (!canRequest) {
+      clear(requestIdentity);
       return;
     }
-    load();
-  }, [clear, effectiveApiClient, enabled, load, normalizedTransactionId, sessionIdentity]);
+    void load();
+  }, [canRequest, clear, load, requestIdentity]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();
@@ -92,10 +125,11 @@ export function useScoredTransactionDetail({
     requestSeqRef.current += 1;
   }, []);
 
+  const ownsCurrentRequest = requestState.identity === requestIdentity;
   return {
-    detail,
-    isLoading,
-    error,
+    detail: ownsCurrentRequest ? requestState.detail : null,
+    isLoading: canRequest && (!ownsCurrentRequest || requestState.isLoading),
+    error: ownsCurrentRequest ? requestState.error : null,
     refresh: load
   };
 }
