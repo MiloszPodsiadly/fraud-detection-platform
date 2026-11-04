@@ -22,6 +22,7 @@ export function TransactionScoringWorkspaceContainer({
       onTransactionPageSizeChange={onPageSizeChange}
       apiClient={apiClient}
       canReadTransactions={canReadTransactions}
+      viewIdentity={transactionStreamState.viewIdentity}
       workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
   );

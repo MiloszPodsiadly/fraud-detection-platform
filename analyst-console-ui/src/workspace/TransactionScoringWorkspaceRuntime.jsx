@@ -16,10 +16,8 @@ export function TransactionScoringWorkspaceRuntime({
   });
 
   useEffect(() => {
-    if (canReadTransactions === true) {
-      setCounterValue("transactions", transactionStreamState.page.totalElements);
-    }
-  }, [canReadTransactions, setCounterValue, transactionStreamState.page.totalElements]);
+    setCounterValue("transactions", transactionStreamState.page.totalElements);
+  }, [setCounterValue, transactionStreamState.page.totalElements]);
 
   function changeTransactionPage(page) {
     transactionStreamState.setRequest((current) => ({ ...current, page: Math.min(Math.max(Number(page) || 0, 0), 1000) }));
@@ -51,7 +49,7 @@ export function TransactionScoringWorkspaceRuntime({
         onPageChange={changeTransactionPage}
         onPageSizeChange={changeTransactionPageSize}
         apiClient={apiClient}
-        canReadTransactions={canReadTransactions}
+        canReadTransactions={sharedWorkspaceReadsEnabled && apiClient ? canReadTransactions : undefined}
       />
     ),
     navigationState: {

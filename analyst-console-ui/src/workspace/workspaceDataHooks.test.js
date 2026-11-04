@@ -186,12 +186,13 @@ describe("workspace data hooks", () => {
   });
 
   it("keeps scored transaction data isolated across apiClient session switch", async () => {
+    const authProvider = { kind: "demo" };
     const first = deferred();
     const second = deferred();
     const apiClientA = { ...workspaceApiClient, listScoredTransactions: vi.fn().mockReturnValue(first.promise) };
     const apiClientB = { ...workspaceApiClient, listScoredTransactions: vi.fn().mockReturnValue(second.promise) };
     const { result, rerender } = renderHook(
-      ({ session, apiClient }) => useScoredTransactionStream({ enabled: true, session, authProvider: { kind: "demo" }, apiClient }),
+      ({ session, apiClient }) => useScoredTransactionStream({ enabled: true, session, authProvider, apiClient }),
       { initialProps: { session: { userId: "user-a" }, apiClient: apiClientA } }
     );
     await waitFor(() => expect(apiClientA.listScoredTransactions).toHaveBeenCalledTimes(1));

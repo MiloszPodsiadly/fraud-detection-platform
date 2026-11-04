@@ -127,7 +127,9 @@ export function WorkspaceDashboardShell({
               canReadPolicySecurity
             })}
             showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}
-            workspaceCounters={workspaceCounterState.counters}
+            workspaceCounters={activeRoute.key === "transactionScoring"
+              ? { ...workspaceCounterState.counters, transactions: navigationState.transactionPage?.totalElements ?? 0 }
+              : workspaceCounterState.counters}
             workspaceCountersStatus={workspaceCounterState}
             canReadFraudCases={canReadFraudCases}
             canReadAlerts={canReadAlerts}

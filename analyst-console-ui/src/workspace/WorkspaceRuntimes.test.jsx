@@ -164,7 +164,9 @@ describe("workspace runtime ownership", () => {
 
     renderRuntime(routeKey, {}, runtimeValue(), { ...runtimeProps(), onResult });
 
-    await waitFor(() => expect(lastRuntimeResult(onResult)?.error?.message).toBe(`${routeKey} unavailable`));
+    await waitFor(() => expect(lastRuntimeResult(onResult)?.error?.message).toBe(
+      routeKey === "transactionScoring" ? "Scored transactions are temporarily unavailable." : `${routeKey} unavailable`
+    ));
   });
 
   it("promotion readiness failure does not hide shadow performance state", async () => {

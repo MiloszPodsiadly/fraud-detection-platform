@@ -7,6 +7,7 @@ describe("TransactionScoringWorkspaceContainer", () => {
     const onTransactionFiltersChange = vi.fn();
     const { container } = render(
       <TransactionScoringWorkspaceContainer
+        canReadTransactions
         transactionStreamState={{
           page: { content: [transaction("txn-1")], totalElements: 73, totalPages: 8, page: 0, size: 10 },
           request: { page: 0, size: 10, query: "", riskLevel: "ALL", status: "ALL" },

@@ -13,6 +13,7 @@ describe("TransactionScoringWorkspacePage", () => {
   it("integrates Transaction Risk Intelligence into one expanded scored transaction row with aria wiring", () => {
     render(
       <TransactionScoringWorkspacePage
+        canReadTransactions
         transactionPage={{
           content: [
             transaction("txn-1"),
@@ -56,6 +57,7 @@ describe("TransactionScoringWorkspacePage", () => {
   it("keeps the details button keyboard reachable and closes when selected transaction disappears", () => {
     const { rerender } = render(
       <TransactionScoringWorkspacePage
+        canReadTransactions
         transactionPage={{
           content: [
             transaction("txn-1"),
@@ -93,6 +95,7 @@ describe("TransactionScoringWorkspacePage", () => {
 
     rerender(
       <TransactionScoringWorkspacePage
+        canReadTransactions
         transactionPage={{
           content: [transaction("txn-1")],
           page: 0,
@@ -112,7 +115,8 @@ describe("TransactionScoringWorkspacePage", () => {
     expect(screen.queryByRole("region", { name: "Mock transaction risk intelligence" })).not.toBeInTheDocument();
   });
 
-  it("passes disabled detail read gate when transaction reads are not enabled", () => {
+  it.each([false, undefined])("closes the whole page when read capability is %s even with a stale page", (capability) => {
+    const retry = vi.fn();
     render(
       <TransactionScoringWorkspacePage
         transactionPage={{
@@ -124,17 +128,23 @@ describe("TransactionScoringWorkspacePage", () => {
         }}
         isLoading={false}
         error={null}
-        onRetry={vi.fn()}
+        onRetry={retry}
         onTransactionPageChange={vi.fn()}
         onTransactionPageSizeChange={vi.fn()}
         apiClient={{ getScoredTransactionDetail: vi.fn() }}
-        canReadTransactions={false}
+        canReadTransactions={capability}
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
-
-    expect(screen.getByRole("region", { name: "Mock transaction risk intelligence" })).toHaveTextContent("enabled: false");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Details" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
+    expect(screen.queryByText("txn-1")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Page size")).not.toBeInTheDocument();
+    expect(screen.getByText("Transaction reads unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(retry).not.toHaveBeenCalled();
   });
 });
 
