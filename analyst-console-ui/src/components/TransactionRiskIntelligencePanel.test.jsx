@@ -80,6 +80,116 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(screen.getByText("alertRecommended is a scored transaction field, not a final payment decision.")).toBeInTheDocument();
   });
 
+  it("renders transaction merchant context separately from verified Merchant Risk history", () => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({
+        merchantInfo: {
+          merchantName: "Northwind Books",
+          merchantId: "merchant-17",
+          merchantCategoryCode: "5732",
+          merchantCategory: "Books",
+          channel: "ECOMMERCE",
+          acquiringCountryCode: "PL",
+          attributes: { privateMapValue: "must-not-render" }
+        }
+      }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
+    expect(within(merchant).getByText("Merchant name")).toBeInTheDocument();
+    expect(within(merchant).getByText("Northwind Books")).toBeInTheDocument();
+    expect(within(merchant).getByText("merchant-17")).toBeInTheDocument();
+    expect(within(merchant).getByText("5732")).toBeInTheDocument();
+    expect(within(merchant).getByText("Books")).toBeInTheDocument();
+    expect(within(merchant).getByText("ECOMMERCE")).toBeInTheDocument();
+    expect(within(merchant).getByText("PL")).toBeInTheDocument();
+    expect(merchant).toHaveTextContent("context only");
+    expect(merchant).toHaveTextContent("Verified Merchant Risk history is not provided by this transaction detail.");
+    expect(merchant).toHaveTextContent("Absence of evidence is not evidence of low risk.");
+    expect(merchant).not.toHaveTextContent("must-not-render");
+    expect(merchant).not.toHaveTextContent(/score|percentage|first-ever|prior observations/i);
+  });
+
+  it("keeps the evidence limitation when merchant details are absent", () => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ merchantInfo: null }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
+    expect(merchant).toHaveTextContent("Merchant details not supplied with this transaction.");
+    expect(merchant).toHaveTextContent("Verified Merchant Risk history is not provided by this transaction detail.");
+  });
+
+  it("omits malformed and unsafe merchant values while rendering HTML-looking text safely", () => {
+    const longMerchantId = "m".repeat(129);
+    const controlValue = "North\u0000wind";
+    const bidiValue = "North\u202ewind";
+    const htmlLookingName = "<script>merchant()</script>";
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({
+        merchantInfo: {
+          merchantName: htmlLookingName,
+          merchantId: longMerchantId,
+          merchantCategoryCode: controlValue,
+          merchantCategory: bidiValue,
+          channel: { label: "ONLINE" },
+          acquiringCountryCode: ["PL"],
+          attributes: {
+            nestedPii: { email: "private@example.test" },
+            tokenHint: "hidden-token",
+            unbounded: "x".repeat(10_000),
+            html: "<img src=x onerror=alert(1)>"
+          }
+        }
+      }),
+      isLoading: false,
+      error: null
+    });
+
+    const { container } = renderPanel();
+
+    const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
+    expect(within(merchant).getByText(htmlLookingName)).toBeInTheDocument();
+    expect(merchant.querySelector("script")).toBeNull();
+    expect(merchant.querySelector("img")).toBeNull();
+    expect(merchant).not.toHaveTextContent("Not supplied.");
+    expect(container.textContent).not.toContain(longMerchantId);
+    expect(container.textContent).not.toContain(controlValue);
+    expect(container.textContent).not.toContain(bidiValue);
+    expect(container.textContent).not.toContain("private@example.test");
+    expect(container.textContent).not.toContain("hidden-token");
+    expect(container.textContent).not.toContain("x".repeat(500));
+  });
+
+  it.each([
+    ["numeric fields", { merchantName: 42, merchantId: 17 }],
+    ["array fields", { merchantName: ["Northwind"], channel: ["ONLINE"] }],
+    ["empty merchant record", {}],
+    ["missing merchant record", undefined],
+    ["non-record merchant data", ["Northwind"]],
+    ["primitive merchant data", "Northwind"]
+  ])("shows the neutral empty state for %s", (_caseName, merchantInfo) => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ merchantInfo }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
+    expect(merchant).toHaveTextContent("Merchant details not supplied with this transaction.");
+    expect(merchant).not.toHaveTextContent("Northwind");
+  });
+
   it("does not enable detail fetch when panel reads are disabled", () => {
     renderPanel({ enabled: false });
 
@@ -89,6 +199,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     }));
     expect(screen.getByText("Transaction risk intelligence is not available without transaction read permission.")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Transaction Summary" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Merchant Investigation" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Diagnostic Boundary" })).toBeInTheDocument();
   });
 
@@ -214,6 +325,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     useScoredTransactionDetail.mockReturnValue({ detail: null, isLoading: true, error: null });
     const { rerender } = renderPanel();
     expect(screen.getByText("Loading transaction risk intelligence...")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Merchant Investigation" })).not.toBeInTheDocument();
 
     useScoredTransactionDetail.mockReturnValue({ detail: null, isLoading: false, error: null });
     rerender(<TransactionRiskIntelligencePanel transactionId="" apiClient={{}} />);
@@ -226,6 +338,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     });
     rerender(<TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} />);
     expect(screen.getByText("The transaction risk intelligence response is malformed or missing required safety fields.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Merchant Investigation" })).not.toBeInTheDocument();
   });
 
   it("renders analyst feedback form with boundary copy and neutral labels", () => {

@@ -535,6 +535,15 @@ describe("transactionRiskIntelligenceValidation", () => {
     }))).toMatchObject({ valid: false, reason: "UNSAFE_DETAIL_RESPONSE" });
   });
 
+  it("keeps rejecting unsafe field names nested inside transaction merchant attributes", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      merchantInfo: {
+        merchantName: "Northwind Books",
+        attributes: { privateMetadata: { Secret: "must-not-be-accepted" } }
+      }
+    }))).toMatchObject({ valid: false, reason: "UNSAFE_DETAIL_RESPONSE" });
+  });
+
   it("rejects contradictory comparison values", () => {
     const comparison = {
       comparisonType: "RULES_VS_ML",
