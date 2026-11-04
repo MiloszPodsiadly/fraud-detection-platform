@@ -115,6 +115,35 @@ describe("TransactionScoringWorkspacePage", () => {
     expect(screen.queryByRole("region", { name: "Mock transaction risk intelligence" })).not.toBeInTheDocument();
   });
 
+  it("uses recommendation wording while keeping the existing backend filter values", () => {
+    const onTransactionFiltersChange = vi.fn();
+    render(
+      <TransactionScoringWorkspacePage
+        transactionPage={{ content: [], page: 0, size: 25, totalPages: 0, totalElements: 0 }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionFiltersChange={onTransactionFiltersChange}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+        canReadTransactions
+      />
+    );
+
+    const filter = screen.getByLabelText("Alert recommendation");
+    expect(screen.getByRole("option", { name: "No review recommendation" })).toHaveValue("LEGITIMATE");
+    expect(screen.getByRole("option", { name: "Review recommended" })).toHaveValue("SUSPICIOUS");
+
+    fireEvent.change(filter, { target: { value: "LEGITIMATE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(onTransactionFiltersChange).toHaveBeenCalledWith(expect.objectContaining({
+      status: "LEGITIMATE",
+      page: 0
+    }));
+  });
+
   it.each([false, undefined])("closes the whole page when read capability is %s even with a stale page", (capability) => {
     const retry = vi.fn();
     render(

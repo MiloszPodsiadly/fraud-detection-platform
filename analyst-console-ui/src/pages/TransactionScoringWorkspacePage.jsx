@@ -7,6 +7,11 @@ import { TransactionMonitorTable } from "../components/TransactionMonitorTable.j
 import { TransactionRiskIntelligencePanel } from "../components/TransactionRiskIntelligencePanel.jsx";
 
 const INITIAL_FILTER_REQUEST = { query: "", riskLevel: "ALL", status: "ALL" };
+const ALERT_RECOMMENDATION_FILTERS = [
+  ["ALL", "All"],
+  ["LEGITIMATE", "No review recommendation"],
+  ["SUSPICIOUS", "Review recommended"]
+];
 
 export function TransactionScoringWorkspacePage({
   transactionPage,
@@ -168,10 +173,10 @@ function TransactionMonitorFilters({ request, viewIdentity, onApply }) {
           </select>
         </label>
         <label>
-          Classification
+          Alert recommendation
           <select value={draft.status} onChange={(event) => updateField("status", event.target.value)}>
-            {["ALL", "LEGITIMATE", "SUSPICIOUS"].map((status) => (
-              <option key={status} value={status}>{status}</option>
+            {ALERT_RECOMMENDATION_FILTERS.map(([status, label]) => (
+              <option key={status} value={status}>{label}</option>
             ))}
           </select>
         </label>
@@ -182,7 +187,9 @@ function TransactionMonitorFilters({ request, viewIdentity, onApply }) {
           <span className="tag">Backend-filtered stream</span>
           {request.query ? <span className="tag">Search filter set</span> : <span className="tag">No search query</span>}
           {request.riskLevel && request.riskLevel !== "ALL" && <span className="tag">Risk: {request.riskLevel}</span>}
-          {request.status && request.status !== "ALL" && <span className="tag">Classification: {request.status}</span>}
+          {request.status && request.status !== "ALL" && (
+            <span className="tag">Alert recommendation: {alertRecommendationFilterLabel(request.status)}</span>
+          )}
         </div>
         <div className="workQueueToolbarActions">
           <button className="secondaryButton compactButton" type="button" onClick={applyFilters} disabled={!draftChanged}>
@@ -203,6 +210,10 @@ function editableTransactionRequest(request = {}) {
     riskLevel: request.riskLevel || "ALL",
     status: request.status || request.classification || "ALL"
   };
+}
+
+function alertRecommendationFilterLabel(status) {
+  return ALERT_RECOMMENDATION_FILTERS.find(([value]) => value === status)?.[1] || status;
 }
 
 function sameTransactionRequest(left, right) {

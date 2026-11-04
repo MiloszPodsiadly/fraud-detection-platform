@@ -154,7 +154,7 @@ describe("transaction scoring read boundary with real provider, API client, hook
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "second" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "third" } });
-    fireEvent.change(screen.getByLabelText("Classification"), { target: { value: "SUSPICIOUS" } });
+    fireEvent.change(screen.getByLabelText("Alert recommendation"), { target: { value: "SUSPICIOUS" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(screen.queryByText("Merchant a")).not.toBeInTheDocument();
 

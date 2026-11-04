@@ -19,7 +19,7 @@ export function TransactionMonitorTable({
             <th>Transaction</th>
             <th>Merchant</th>
             <th>Amount</th>
-            <th>Classification</th>
+            <th>Alert recommendation</th>
             <th>Scored</th>
             <th className="numericCell">Score</th>
             <th>Detail</th>
@@ -29,6 +29,11 @@ export function TransactionMonitorTable({
           {transactions.map((transaction) => {
             const expanded = expandedTransactionId === transaction.transactionId;
             const detailPanelId = transactionRiskIntelligencePanelId(transaction.transactionId);
+            const recommendation = transaction.alertRecommended === true
+              ? { label: "Review recommended", className: "classificationReview" }
+              : transaction.alertRecommended === false
+                ? { label: "No review recommendation", className: "classificationNeutral" }
+                : { label: "Unknown", className: "classificationNeutral" };
             return (
               <Fragment key={transaction.transactionId}>
                 <tr key={transaction.transactionId}>
@@ -44,8 +49,8 @@ export function TransactionMonitorTable({
                   </td>
                   <td>{formatAmount(transaction.transactionAmount)}</td>
                   <td>
-                    <span className={`classificationPill ${transaction.alertRecommended ? "classificationReview" : "classificationClear"}`}>
-                      {transaction.alertRecommended ? "Suspicious" : "Legitimate"}
+                    <span className={`classificationPill ${recommendation.className}`}>
+                      {recommendation.label}
                     </span>
                   </td>
                   <td>{formatDateTime(transaction.scoredAt)}</td>
