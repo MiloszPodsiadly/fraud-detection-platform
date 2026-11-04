@@ -12,6 +12,7 @@ import {
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
 import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
+import { merchantDisplayValue } from "../transactions/merchantDisplay.js";
 
 const STATUS_COPY = {
   AVAILABLE: "Engine Intelligence is available for this transaction.",
@@ -28,9 +29,6 @@ const MERCHANT_DISPLAY_FIELDS = [
   ["Channel", "channel"],
   ["Acquiring country", "acquiringCountryCode"]
 ];
-const MAX_MERCHANT_DISPLAY_LENGTH = 128;
-const MERCHANT_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
-const MERCHANT_BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 
 export function TransactionRiskIntelligencePanel({
   transactionId,
@@ -110,12 +108,8 @@ function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
 }
 
 function MerchantInvestigationSection({ merchantInfo }) {
-  const merchantFields = isMerchantInfoRecord(merchantInfo)
-    ? MERCHANT_DISPLAY_FIELDS.map(([label, key]) => [
-      label,
-      merchantDisplayText(Object.prototype.hasOwnProperty.call(merchantInfo, key) ? merchantInfo[key] : undefined)
-    ]).filter(([, value]) => value !== null)
-    : [];
+  const merchantFields = MERCHANT_DISPLAY_FIELDS.map(([label, key]) => [label, merchantDisplayValue(merchantInfo, key)])
+    .filter(([, value]) => value !== null);
   const hasMerchantContext = merchantFields.length > 0;
 
   return (
@@ -131,35 +125,13 @@ function MerchantInvestigationSection({ merchantInfo }) {
           ))}
         </dl>
       ) : (
-        <p className="emptyStateMessage">Merchant details not supplied with this transaction.</p>
+        <p className="emptyStateMessage">No displayable transaction merchant details are available.</p>
       )}
       <p className="sectionCopy">
         Verified Merchant Risk history is not provided by this transaction detail. The current implementation does not connect an independently admitted merchant evidence source. Absence of evidence is not evidence of low risk.
       </p>
     </section>
   );
-}
-
-function isMerchantInfoRecord(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function merchantDisplayText(value) {
-  if (
-    typeof value !== "string"
-    || value.length === 0
-    || value.length > MAX_MERCHANT_DISPLAY_LENGTH
-    || value.trim() !== value
-    || MERCHANT_CONTROL_CHARACTERS.test(value)
-    || MERCHANT_BIDI_CONTROLS.test(value)
-  ) {
-    return null;
-  }
-  return value;
 }
 
 const FEEDBACK_OPTIONS = [

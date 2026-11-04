@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
 import { RiskBadge } from "./RiskBadge.jsx";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
+import { merchantDisplayValue } from "../transactions/merchantDisplay.js";
 
 export function TransactionMonitorTable({
   transactions,
@@ -37,8 +38,9 @@ export function TransactionMonitorTable({
                     <span>{transaction.customerId}</span>
                   </td>
                   <td>
-                    <strong>{transaction.merchantInfo?.merchantName || transaction.merchantInfo?.merchantId || "Unknown merchant"}</strong>
-                    <span>{transaction.merchantInfo?.channel || "Unknown channel"}</span>
+                    <strong>{merchantDisplayValue(transaction.merchantInfo, "merchantName")
+                      || merchantDisplayValue(transaction.merchantInfo, "merchantId") || "Unknown merchant"}</strong>
+                    <span>{merchantDisplayValue(transaction.merchantInfo, "channel") || "Unknown channel"}</span>
                   </td>
                   <td>{formatAmount(transaction.transactionAmount)}</td>
                   <td>

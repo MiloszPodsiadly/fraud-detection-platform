@@ -124,7 +124,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     renderPanel();
 
     const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
-    expect(merchant).toHaveTextContent("Merchant details not supplied with this transaction.");
+    expect(merchant).toHaveTextContent("No displayable transaction merchant details are available.");
     expect(merchant).toHaveTextContent("Verified Merchant Risk history is not provided by this transaction detail.");
   });
 
@@ -172,6 +172,7 @@ describe("TransactionRiskIntelligencePanel", () => {
   it.each([
     ["numeric fields", { merchantName: 42, merchantId: 17 }],
     ["array fields", { merchantName: ["Northwind"], channel: ["ONLINE"] }],
+    ["only blocked strings", { merchantName: "x".repeat(129), merchantId: "blocked\u202e", channel: "bad\nchannel" }],
     ["empty merchant record", {}],
     ["missing merchant record", undefined],
     ["non-record merchant data", ["Northwind"]],
@@ -186,7 +187,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     renderPanel();
 
     const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
-    expect(merchant).toHaveTextContent("Merchant details not supplied with this transaction.");
+    expect(merchant).toHaveTextContent("No displayable transaction merchant details are available.");
     expect(merchant).not.toHaveTextContent("Northwind");
   });
 
