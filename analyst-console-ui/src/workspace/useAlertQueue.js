@@ -10,6 +10,8 @@ const INITIAL_ALERT_PAGE = {
   size: 10
 };
 const INITIAL_ALERT_REQUEST = { page: 0, size: 10 };
+const INVALID_ALERT_PAGE = "INVALID_ALERT_PAGE";
+const ALERT_PAGE_UNAVAILABLE_MESSAGE = "Alerts are temporarily unavailable. Please retry.";
 
 export function useAlertQueue({ enabled = true, session, authProvider, apiClient } = {}) {
   const runtime = useOptionalWorkspaceRuntime();
@@ -66,7 +68,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
 
   const refresh = useCallback(async () => {
     const current = currentIdentityRef.current;
-    if (!current?.owner.enabled || !current.owner.apiClient) {
+    if (current?.owner !== owner || !owner.enabled || !owner.apiClient) {
       return null;
     }
 
@@ -90,13 +92,19 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
       if (!isCurrent()) {
         return null;
       }
+      if (!isValidAlertPage(nextPage, current.request)) {
+        throw new Error(INVALID_ALERT_PAGE);
+      }
       setState({ identity: current, page: nextPage, isLoading: false, error: null, hasLoaded: true });
       return nextPage;
     } catch (apiError) {
       if (!isCurrent() || isAbortError(apiError)) {
         return null;
       }
-      setState({ identity: current, page: INITIAL_ALERT_PAGE, isLoading: false, error: apiError, hasLoaded: false });
+      const safeError = apiError instanceof SyntaxError || apiError?.message === INVALID_ALERT_PAGE
+        ? new Error(ALERT_PAGE_UNAVAILABLE_MESSAGE)
+        : apiError;
+      setState({ identity: current, page: INITIAL_ALERT_PAGE, isLoading: false, error: safeError, hasLoaded: false });
       return null;
     } finally {
       if (isCurrent()) {
@@ -106,7 +114,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
         }
       }
     }
-  }, []);
+  }, [owner]);
 
   useEffect(() => {
     if (!canRequest) {
@@ -142,4 +150,20 @@ function normalizeRequest(value = {}) {
 
 function sameRequest(left, right) {
   return left.page === right.page && left.size === right.size;
+}
+
+function isValidAlertPage(value, request) {
+  return isRecord(value)
+    && Array.isArray(value.content)
+    && value.content.length <= request.size
+    && value.content.every(isRecord)
+    && Number.isSafeInteger(value.totalElements) && value.totalElements >= 0
+    && Number.isSafeInteger(value.totalPages) && value.totalPages >= 0
+    && Number.isSafeInteger(value.page) && value.page === request.page
+    && Number.isSafeInteger(value.size) && value.size === request.size
+    && value.totalPages === Math.ceil(value.totalElements / request.size);
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

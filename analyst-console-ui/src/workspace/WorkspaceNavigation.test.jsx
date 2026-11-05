@@ -199,3 +199,69 @@ describe("WorkspaceNavigation shadow performance diagnostic boundary", () => {
     expect(screen.getByRole("link", { name: /Global fraud cases\s*42/ })).toBeInTheDocument();
   });
 });
+
+describe("WorkspaceNavigation governance counter authority", () => {
+  it("shows unavailable for unknown or denied access without retaining old totals", () => {
+    const { rerender } = render(governanceNavigation({
+      authority: true,
+      analytics: { totals: { advisories: 91 } },
+      queue: { count: 92 }
+    }));
+
+    expect(screen.getByRole("link", { name: "Audit analytics 91" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Governance 92" })).toBeInTheDocument();
+
+    rerender(governanceNavigation({
+      authority: undefined,
+      analytics: { totals: { advisories: 91 } },
+      queue: { count: 92 }
+    }));
+
+    expect(screen.getByRole("link", { name: "Audit analytics Unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Governance Unavailable" })).toBeInTheDocument();
+    expect(screen.queryByText("91")).not.toBeInTheDocument();
+    expect(screen.queryByText("92")).not.toBeInTheDocument();
+
+    rerender(governanceNavigation({
+      authority: false,
+      analytics: { totals: { advisories: 91 } },
+      queue: { count: 92 }
+    }));
+
+    expect(screen.getByRole("link", { name: "Audit analytics No access Access unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Governance No access Access unavailable" })).toBeInTheDocument();
+    expect(screen.queryByText("91")).not.toBeInTheDocument();
+    expect(screen.queryByText("92")).not.toBeInTheDocument();
+  });
+
+  it("shows explicit zero for authorized successful empty reads", () => {
+    render(governanceNavigation({
+      authority: true,
+      analytics: { totals: { advisories: 0 } },
+      queue: { count: 0 }
+    }));
+
+    expect(screen.getByRole("link", { name: "Audit analytics 0" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Governance 0" })).toBeInTheDocument();
+  });
+
+  it("shows unavailable for authorized reads before their first response", () => {
+    render(governanceNavigation({ authority: true }));
+
+    expect(screen.getByRole("link", { name: "Audit analytics Unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Governance Unavailable" })).toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+});
+
+function governanceNavigation({ authority, analytics, queue }) {
+  return (
+    <WorkspaceNavigation
+      workspacePage="reports"
+      workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.reports, WORKSPACE_ROUTE_REGISTRY.compliance]}
+      canReadGovernanceAdvisories={authority}
+      governanceAnalytics={analytics}
+      advisoryQueue={queue}
+    />
+  );
+}

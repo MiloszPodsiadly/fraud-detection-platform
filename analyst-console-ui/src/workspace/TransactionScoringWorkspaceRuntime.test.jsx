@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { Component, useLayoutEffect, useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTHORITIES } from "../auth/session.js";
 import { availableDetail } from "../transactions/transactionRiskIntelligenceFixtures.js";
@@ -32,6 +32,26 @@ describe("transaction scoring read boundary with real provider, API client, hook
     expect(await screen.findByRole("link", { name: "Transactions 0" })).toBeInTheDocument();
   });
 
+  it("does not let a saved runtime refresh call the next owner's transaction client", async () => {
+    const transport = installTransport();
+    const frames = [];
+    const { rerender } = render(workspace(session("a"), frames));
+    expect(await screen.findByText("Merchant a")).toBeInTheDocument();
+    const savedRefreshA = frames.at(-1).result.refreshWorkspace;
+
+    frames.length = 0;
+    rerender(workspace(session("b"), frames));
+    expect(await screen.findByText("Merchant b")).toBeInTheDocument();
+    const ownerBCallsBeforeStaleRefresh = transport.calls.filter((call) => call.owner === "b" && call.kind === "list").length;
+
+    await act(async () => { await savedRefreshA(); });
+    expect(transport.calls.filter((call) => call.owner === "b" && call.kind === "list")).toHaveLength(ownerBCallsBeforeStaleRefresh);
+
+    const freshRefreshB = frames.at(-1).result.refreshWorkspace;
+    await act(async () => { await freshRefreshB(); });
+    await waitFor(() => expect(transport.calls.filter((call) => call.owner === "b" && call.kind === "list")).toHaveLength(ownerBCallsBeforeStaleRefresh + 1));
+  });
+
   it("does not present the initial empty alert page as a confirmed zero counter", async () => {
     const pending = deferred();
     installTransport({ detail: () => pending.promise });
@@ -46,6 +66,48 @@ describe("transaction scoring read boundary with real provider, API client, hook
 
     await act(async () => pending.resolve(jsonResponse({ content: [], page: 0, size: 10, totalElements: 0, totalPages: 0 })));
     expect(await screen.findByRole("link", { name: "Alerts 0" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["HTTP 204", () => new Response(null, { status: 204 })],
+    ["HTTP 200 JSON null", () => jsonResponse(null)],
+    ["missing page envelope", () => jsonResponse({ message: "private malformed backend detail" })],
+    ["null content", () => jsonResponse({ content: null, totalElements: 0, totalPages: 0, page: 0, size: 10 })],
+    ["non-array content", () => jsonResponse({ content: {}, totalElements: 0, totalPages: 0, page: 0, size: 10 })],
+    ["null alert row", () => jsonResponse({ content: [null], totalElements: 1, totalPages: 1, page: 0, size: 10 })],
+    ["wrong response page", () => jsonResponse({ content: [], totalElements: 0, totalPages: 0, page: 1, size: 10 })],
+    ["wrong response size", () => jsonResponse({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 })]
+  ])("fails closed on %s through the real alert workspace", async (_caseName, responseFactory) => {
+    const transport = installTransport({ detail: () => responseFactory() });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      render(
+        <RenderFailureBoundary>
+          <StatefulWorkspaceShell
+            currentSession={{ ...session("a"), authorities: [AUTHORITIES.ALERT_READ] }}
+            frames={[]}
+            initialWorkspacePage="fraudTransaction"
+          />
+        </RenderFailureBoundary>
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("render-failure")).not.toBeInTheDocument();
+        expect(screen.getByRole("alert")).toHaveTextContent("Alerts are temporarily unavailable. Please retry.");
+      });
+      expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Alerts Unavailable" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Alerts 0" })).not.toBeInTheDocument();
+      expect(screen.queryByText("No alerts on this loaded page match the local filters.")).not.toBeInTheDocument();
+      expect(screen.queryByText("private malformed backend detail")).not.toBeInTheDocument();
+      expect(transport.calls.some((call) => call.path.endsWith("/alerts"))).toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      await waitFor(() => expect(transport.calls.filter((call) => call.path.endsWith("/alerts"))).toHaveLength(2));
+      expect(screen.getByRole("alert")).toHaveTextContent("Alerts are temporarily unavailable. Please retry.");
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("clears the prior alert page in the first commit after an owner change", async () => {
@@ -520,6 +582,18 @@ function ShellCommitProbe({ frames, children }) {
   const ref = useRef(null);
   useLayoutEffect(() => { frames.push(ref.current.textContent); });
   return <div ref={ref}>{children}</div>;
+}
+
+class RenderFailureBoundary extends Component {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? <div data-testid="render-failure">Workspace render failed</div> : this.props.children;
+  }
 }
 
 function StatefulWorkspaceShell({ currentSession, frames, initialWorkspacePage = "transactionScoring" }) {

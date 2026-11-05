@@ -61,7 +61,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
 
   const refresh = useCallback(async () => {
     const current = currentIdentityRef.current;
-    if (!current?.owner.enabled || !current.owner.apiClient) {
+    if (current?.owner !== owner || !owner.enabled || !owner.apiClient) {
       return null;
     }
     activeRequestRef.current?.controller.abort();
@@ -95,7 +95,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
         }
       }
     }
-  }, []);
+  }, [owner]);
 
   useEffect(() => {
     if (!canRequest) {

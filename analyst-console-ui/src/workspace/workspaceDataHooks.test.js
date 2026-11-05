@@ -17,7 +17,7 @@ const getSuspiciousTransaction = vi.fn();
 describe("workspace data hooks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    listAlerts.mockResolvedValue(page([]));
+    listAlerts.mockResolvedValue(page([], { size: 10 }));
     listScoredTransactions.mockResolvedValue(page([]));
     listSuspiciousTransactions.mockResolvedValue(suspiciousSlice([]));
     getSuspiciousTransaction.mockResolvedValue(suspiciousTransaction({ suspiciousTransactionId: "suspicious-1" }));
@@ -40,12 +40,88 @@ describe("workspace data hooks", () => {
   });
 
   it("loads alert queue when enabled", async () => {
-    listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1 }));
+    listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1, size: 10 }));
 
     const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient: workspaceApiClient }));
 
     await waitFor(() => expect(result.current.page.content).toEqual([{ alertId: "alert-1" }]));
     expect(result.current.page.totalElements).toBe(1);
+  });
+
+  it("does not let a saved alert refresh cross an owner transition", async () => {
+    const ownerAClient = { listAlerts: vi.fn().mockResolvedValue(page([{ alertId: "alert-a" }], { size: 10 })) };
+    const ownerBClient = { listAlerts: vi.fn().mockResolvedValue(page([{ alertId: "alert-b" }], { size: 10 })) };
+    const ownerA = {
+      enabled: true,
+      apiClient: ownerAClient,
+      session: { userId: "same-analyst", issuer: "issuer-a", subject: "subject-a", authorities: ["ALERT_READ"] },
+      authProvider: { kind: "oidc", issuer: "issuer-a" }
+    };
+    const ownerB = {
+      ...ownerA,
+      apiClient: ownerBClient,
+      session: { userId: "same-analyst", issuer: "issuer-b", subject: "subject-b", authorities: [] },
+      authProvider: { kind: "oidc", issuer: "issuer-b" }
+    };
+    const { result, rerender } = renderHook((props) => useAlertQueue(props), { initialProps: ownerA });
+    await waitFor(() => expect(result.current.page.content[0]?.alertId).toBe("alert-a"));
+    const savedRefreshA = result.current.refresh;
+
+    rerender(ownerB);
+    await waitFor(() => expect(result.current.page.content[0]?.alertId).toBe("alert-b"));
+    const savedRefreshB = result.current.refresh;
+
+    let staleBResult;
+    await act(async () => { staleBResult = await savedRefreshA(); });
+    expect(staleBResult).toBeNull();
+    expect(ownerBClient.listAlerts).toHaveBeenCalledTimes(1);
+
+    let freshBResult;
+    await act(async () => { freshBResult = await savedRefreshB(); });
+    expect(freshBResult.content[0].alertId).toBe("alert-b");
+    expect(ownerBClient.listAlerts).toHaveBeenCalledTimes(2);
+
+    rerender(ownerA);
+    await waitFor(() => expect(result.current.page.content[0]?.alertId).toBe("alert-a"));
+    const freshRefreshA = result.current.refresh;
+    let staleAResult;
+    await act(async () => { staleAResult = await savedRefreshA(); });
+    expect(staleAResult).toBeNull();
+    expect(ownerAClient.listAlerts).toHaveBeenCalledTimes(2);
+
+    let currentAResult;
+    await act(async () => { currentAResult = await freshRefreshA(); });
+    expect(currentAResult.content[0].alertId).toBe("alert-a");
+    expect(ownerAClient.listAlerts).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["null response", null],
+    ["missing page envelope", {}],
+    ["null content", { content: null, totalElements: 0, totalPages: 0, page: 0, size: 10 }],
+    ["non-array content", { content: {}, totalElements: 0, totalPages: 0, page: 0, size: 10 }],
+    ["null alert row", { content: [null], totalElements: 1, totalPages: 1, page: 0, size: 10 }],
+    ["negative total", { content: [], totalElements: -1, totalPages: 0, page: 0, size: 10 }],
+    ["fractional page index", { content: [], totalElements: 0, totalPages: 0, page: 0.5, size: 10 }],
+    ["unexpected response page", { content: [], totalElements: 0, totalPages: 0, page: 1, size: 10 }],
+    ["unexpected response size", { content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 }],
+    ["page total mismatch", { content: [], totalElements: 11, totalPages: 1, page: 0, size: 10 }],
+    ["content exceeds requested size", { content: Array.from({ length: 11 }, (_, index) => ({ alertId: `alert-${index}` })), totalElements: 11, totalPages: 2, page: 0, size: 10 }]
+  ])("rejects malformed alert page before publication: %s", async (_caseName, response) => {
+    const apiClient = { listAlerts: vi.fn().mockResolvedValue(response) };
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient }));
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    expect(result.current.hasLoaded).toBe(false);
+    expect(result.current.page).toMatchObject({
+      content: [],
+      totalElements: 0,
+      totalPages: 0,
+      page: 0,
+      size: 10
+    });
+    expect(result.current.error.message).toBe("Alerts are temporarily unavailable. Please retry.");
   });
 
   it("does not fetch workspace data without an explicit apiClient", async () => {
@@ -83,7 +159,7 @@ describe("workspace data hooks", () => {
   });
 
   it("clears alert queue state when disabled after data was loaded", async () => {
-    listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1 }));
+    listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1, size: 10 }));
     const apiClient = workspaceApiClient;
     const { result, rerender } = renderHook(({ enabled }) => useAlertQueue({ enabled, apiClient }), {
       initialProps: { enabled: true }

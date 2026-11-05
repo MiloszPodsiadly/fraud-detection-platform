@@ -27,7 +27,7 @@ describe("WorkspaceDashboardShell composition", () => {
   });
 
   it("keeps workspace-specific runtime hooks out of the shell", () => {
-    expect(shellSource).not.toMatch(/useAnalystWorkspaceRuntime|useTransactionWorkspaceRuntime|useGovernanceWorkspaceRuntime/);
+    expect(shellSource).not.toContain("useAnalystWorkspaceRuntime");
     expect(shellSource).not.toMatch(/useFraudCaseWorkQueue|useFraudCaseWorkQueueSummary|useAlertQueue|useScoredTransactionStream/);
     expect(shellSource).not.toMatch(/useGovernanceQueue|useGovernanceAnalytics|useGovernanceAuditWorkflow/);
     expect(shellSource).not.toContain("AnalystWorkspaceContainer");

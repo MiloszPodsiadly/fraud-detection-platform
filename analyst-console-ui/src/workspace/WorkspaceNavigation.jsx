@@ -103,9 +103,7 @@ export function WorkspaceNavigation({
         : undefined
     },
     reports: {
-      value: canReadGovernanceAdvisories === false
-        ? "No access"
-        : governanceAnalytics?.totals?.advisories ?? 0,
+      value: counterValueForAuthority(canReadGovernanceAdvisories, governanceAnalytics?.totals?.advisories),
       authority: canReadGovernanceAdvisories
     },
     shadowPerformance: {
@@ -114,9 +112,7 @@ export function WorkspaceNavigation({
       title: "Current offline model governance evidence."
     },
     compliance: {
-      value: canReadGovernanceAdvisories === false
-        ? "No access"
-        : advisoryQueue?.count ?? 0,
+      value: counterValueForAuthority(canReadGovernanceAdvisories, advisoryQueue?.count),
       authority: canReadGovernanceAdvisories
     }
   };

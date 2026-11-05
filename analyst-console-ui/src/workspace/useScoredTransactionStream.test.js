@@ -74,6 +74,7 @@ describe("useScoredTransactionStream ownership", () => {
     const frames = [];
     const { result } = renderStream(readContext(apiClient), frames);
     await waitFor(() => expect(result.current.page.content).toHaveLength(1));
+    const savedRefresh = result.current.refresh;
 
     frames.length = 0;
     act(() => result.current.setRequest((current) => ({ ...current, query: "merchant-two", page: 1 })));
@@ -84,30 +85,54 @@ describe("useScoredTransactionStream ownership", () => {
     await act(async () => second.resolve(page("second", { page: 1 })));
     expect(result.current.page.content[0].transactionId).toBe("txn-third");
 
-    await act(async () => result.current.refresh());
+    await act(async () => savedRefresh());
     expect(apiClient.listScoredTransactions).toHaveBeenLastCalledWith(currentRequest, expect.anything());
     expect(result.current.page.content[0].transactionId).toBe("txn-refresh");
   });
 
-  it("keeps a saved refresh on the current owner and makes it inert after disable or unmount", async () => {
+  it("rejects saved refresh callbacks after owner transitions but keeps fresh callbacks active", async () => {
     const oldClient = { listScoredTransactions: vi.fn().mockResolvedValue(page("old")) };
     const newClient = { listScoredTransactions: vi.fn().mockResolvedValue(page("new")) };
     const initial = readContext(oldClient);
     const { result, rerender, unmount } = renderStream(initial);
     await waitFor(() => expect(result.current.page.content).toHaveLength(1));
     const savedRefresh = result.current.refresh;
-    rerender({ ...initial, apiClient: newClient });
+    const ownerB = {
+      ...initial,
+      apiClient: newClient,
+      session: { ...initial.session, issuer: "issuer-b", subject: "subject-b", authorities: ["ALERT_READ"] },
+      authProvider: { kind: "demo", issuer: "issuer-b" }
+    };
+    rerender(ownerB);
     await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-new"));
 
-    await act(async () => savedRefresh());
+    let staleResult;
+    await act(async () => { staleResult = await savedRefresh(); });
+    expect(staleResult).toBeNull();
     expect(oldClient.listScoredTransactions).toHaveBeenCalledTimes(1);
+    expect(newClient.listScoredTransactions).toHaveBeenCalledTimes(1);
+    const savedRefreshB = result.current.refresh;
+    await act(async () => savedRefreshB());
     expect(newClient.listScoredTransactions).toHaveBeenCalledTimes(2);
-    rerender({ ...initial, apiClient: newClient, enabled: false });
-    await act(async () => savedRefresh());
-    expect(newClient.listScoredTransactions).toHaveBeenCalledTimes(2);
+
+    rerender(initial);
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-old"));
+    let staleAReturn;
+    await act(async () => { staleAReturn = await savedRefresh(); });
+    expect(staleAReturn).toBeNull();
+    expect(oldClient.listScoredTransactions).toHaveBeenCalledTimes(2);
+    const savedRefreshA2 = result.current.refresh;
+    await act(async () => savedRefreshA2());
+    expect(oldClient.listScoredTransactions).toHaveBeenCalledTimes(3);
+
+    rerender({ ...ownerB, enabled: false });
+    let disabledResult;
+    await act(async () => { disabledResult = await savedRefreshA2(); });
+    expect(disabledResult).toBeNull();
+    expect(oldClient.listScoredTransactions).toHaveBeenCalledTimes(3);
     unmount();
-    await savedRefresh();
-    expect(newClient.listScoredTransactions).toHaveBeenCalledTimes(2);
+    await savedRefreshA2();
+    expect(oldClient.listScoredTransactions).toHaveBeenCalledTimes(3);
   });
 
   it("does not refetch for ordinary rerenders or equivalent normalized requests", async () => {

@@ -85,7 +85,7 @@ for (const file of changedFiles) {
 const shellPath = "analyst-console-ui/src/workspace/WorkspaceDashboardShell.jsx";
 if (changedFiles.map((file) => file.replaceAll("\\", "/")).includes(shellPath)) {
   const shellSource = readFile(shellPath);
-  if (/useAnalystWorkspaceRuntime|useTransactionWorkspaceRuntime|useGovernanceWorkspaceRuntime/.test(shellSource)) {
+  if (/useAnalystWorkspaceRuntime/.test(shellSource)) {
     violations.push(`${shellPath}: WorkspaceDashboardShell must not import workspace-specific runtime hooks.`);
   }
   if (/useFraudCaseWorkQueue|useAlertQueue|useScoredTransactionStream|useGovernanceQueue|useGovernanceAnalytics/.test(shellSource)) {

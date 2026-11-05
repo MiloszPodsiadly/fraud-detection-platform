@@ -25,6 +25,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -44,6 +45,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -262,14 +264,53 @@ class ScoredTransactionControllerDetailTest {
         verify(engineIntelligenceReadService, org.mockito.Mockito.never()).read(any());
     }
 
+    @Test
+    void scoredTransactionListAndDetailSerializeBigDecimalAsExactJsonNumbers() throws Exception {
+        when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(
+                        scoredTransaction("txn-ordinary", new Money(new BigDecimal("1249.99"), "USD")),
+                        scoredTransaction("txn-supported-maximum", new Money(new BigDecimal("999999999999.99"), "USD")),
+                        scoredTransaction("txn-outside-ingest-bound", new Money(new BigDecimal("9007199254740993.01"), "USD"))
+                )));
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-detail"))
+                .thenReturn(scoredTransaction("txn-detail", new Money(new BigDecimal("9007199254740993.01"), "USD")));
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-detail"), any()))
+                .thenReturn(EngineIntelligenceReadModel.notProjected("txn-detail"));
+
+        String listResponse = mockMvc.perform(get("/api/v1/transactions/scored"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        String detailResponse = mockMvc.perform(get("/api/v1/transactions/scored/txn-detail"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(listResponse).contains(
+                "\"transactionAmount\":{\"amount\":1249.99,\"currency\":\"USD\"}",
+                "\"transactionAmount\":{\"amount\":999999999999.99,\"currency\":\"USD\"}",
+                "\"transactionAmount\":{\"amount\":9007199254740993.01,\"currency\":\"USD\"}"
+        );
+        assertThat(detailResponse).contains(
+                "\"transactionAmount\":{\"amount\":9007199254740993.01,\"currency\":\"USD\"}"
+        );
+    }
+
     private ScoredTransaction scoredTransaction(String transactionId) {
+        return scoredTransaction(transactionId, null);
+    }
+
+    private ScoredTransaction scoredTransaction(String transactionId, Money transactionAmount) {
         return new ScoredTransaction(
                 transactionId,
                 "customer-1",
                 "correlation-1",
                 Instant.parse("2026-06-18T10:00:00Z"),
                 Instant.parse("2026-06-18T10:00:01Z"),
-                null,
+                transactionAmount,
                 null,
                 0.91d,
                 RiskLevel.CRITICAL,

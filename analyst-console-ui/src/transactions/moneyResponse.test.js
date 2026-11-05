@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatAmount } from "../utils/format.js";
 import { isValidMoneyResponse } from "./moneyResponse.js";
+import { createAlertsApiClient } from "../api/alertsApi.js";
+import { createDemoAuthProvider } from "../auth/authProvider.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("MoneyResponse validation and presentation", () => {
   it.each([
@@ -54,5 +60,28 @@ describe("MoneyResponse validation and presentation", () => {
 
     expect(formatAmount({ amount, currency: "USD" })).toBe(formatter.format(amount));
     expect(formatAmount({ amount, currency: "USD" })).not.toBe(formatter.format(Number(amount)));
+  });
+
+  it("keeps supported BigDecimal wire amounts accurate through JSON parsing and display", async () => {
+    const wireResponse = new Response(
+      '{"content":[{"transactionId":"txn-ordinary","transactionAmount":{"amount":1249.99,"currency":"USD"}},{"transactionId":"txn-supported-maximum","transactionAmount":{"amount":999999999999.99,"currency":"USD"}},{"transactionId":"txn-outside-ingest-bound","transactionAmount":{"amount":9007199254740993.01,"currency":"USD"}}],"totalElements":3,"totalPages":1,"page":0,"size":25}',
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(wireResponse);
+
+    const apiClient = createAlertsApiClient({
+      baseUrl: "http://alerts.test",
+      authProvider: createDemoAuthProvider()
+    });
+    const page = await apiClient.listScoredTransactions({ page: 0, size: 25 });
+
+    expect(typeof page.content[1].transactionAmount.amount).toBe("number");
+    expect(formatAmount(page.content[0].transactionAmount)).toBe(
+      new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(1249.99)
+    );
+    expect(formatAmount(page.content[1].transactionAmount)).toBe(
+      new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format("999999999999.99")
+    );
+    expect(page.content[2].transactionAmount.amount).toBe(9007199254740994);
   });
 });
