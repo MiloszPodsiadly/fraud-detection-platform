@@ -3,6 +3,7 @@ import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
 import { RiskBadge } from "./RiskBadge.jsx";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 import { merchantDisplayValue } from "../transactions/merchantDisplay.js";
+import { alertRecommendationPresentation } from "../transactions/alertRecommendationPresentation.js";
 
 export function TransactionMonitorTable({
   transactions,
@@ -29,11 +30,7 @@ export function TransactionMonitorTable({
           {transactions.map((transaction) => {
             const expanded = expandedTransactionId === transaction.transactionId;
             const detailPanelId = transactionRiskIntelligencePanelId(transaction.transactionId);
-            const recommendation = transaction.alertRecommended === true
-              ? { label: "Review recommended", className: "classificationReview" }
-              : transaction.alertRecommended === false
-                ? { label: "No review recommendation", className: "classificationNeutral" }
-                : { label: "Unknown", className: "classificationNeutral" };
+            const recommendation = alertRecommendationPresentation(transaction.alertRecommended);
             return (
               <Fragment key={transaction.transactionId}>
                 <tr key={transaction.transactionId}>

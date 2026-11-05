@@ -145,6 +145,82 @@ describe("useScoredTransactionStream ownership", () => {
     }
   );
 
+  it.each(["", "   ", "0x10", "NaN", "Infinity", "1e999", "01.25"])(
+    "rejects malformed MoneyResponse decimal %s",
+    async (amount) => {
+      const payload = page("invalid-amount");
+      payload.content[0].transactionAmount = { amount, currency: "USD" };
+      const { result } = renderStream(readContext({ listScoredTransactions: vi.fn().mockResolvedValue(payload) }));
+
+      await waitFor(() => expect(result.current.error).toBeTruthy());
+      expect(result.current.page.content).toEqual([]);
+    }
+  );
+
+  it.each(["false", "true", 0, 1, [], {}])("rejects malformed list alertRecommended value %s", async (alertRecommended) => {
+    const payload = page("invalid-recommendation");
+    payload.content[0].alertRecommended = alertRecommended;
+    const { result } = renderStream(readContext({ listScoredTransactions: vi.fn().mockResolvedValue(payload) }));
+
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    expect(result.current.page.content).toEqual([]);
+  });
+
+  it.each([
+    [{ amount: 10, currency: "US" }],
+    [{ amount: 10, currency: "usd" }],
+    [{ amount: 10, currency: "USD " }],
+    [{ amount: [], currency: "USD" }],
+    [{ amount: 10 }],
+    [{ currency: "USD" }],
+    [{ amount: null, currency: "US" }],
+    [{ amount: null, currency: null }]
+  ])("rejects malformed MoneyResponse currency or shape %s", async (transactionAmount) => {
+    const payload = page("invalid-currency");
+    payload.content[0].transactionAmount = transactionAmount;
+    const { result } = renderStream(readContext({ listScoredTransactions: vi.fn().mockResolvedValue(payload) }));
+
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    expect(result.current.page.content).toEqual([]);
+  });
+
+  it.each([
+    [{ amount: 0, currency: "USD" }],
+    [{ amount: "-12.50", currency: "PLN" }],
+    [{ amount: "1e-300", currency: "EUR" }],
+    [{ amount: 1e300, currency: "JPY" }],
+    [null],
+    [undefined]
+  ])("accepts valid optional MoneyResponse values %s", async (transactionAmount) => {
+    const payload = page("valid-amount");
+    payload.content[0].transactionAmount = transactionAmount;
+    const { result } = renderStream(readContext({ listScoredTransactions: vi.fn().mockResolvedValue(payload) }));
+
+    await waitFor(() => expect(result.current.page.content).toHaveLength(1));
+    expect(result.current.error).toBeNull();
+  });
+
+  it("does not show an old owner's rows when the new owner's amount contract is malformed", async () => {
+    const oldClient = { listScoredTransactions: vi.fn().mockResolvedValue(page("owner-a")) };
+    const malformedPage = page("owner-b");
+    malformedPage.content[0].transactionAmount = { amount: "", currency: "USD" };
+    const newClient = { listScoredTransactions: vi.fn().mockResolvedValue(malformedPage) };
+    const initial = readContext(oldClient);
+    const frames = [];
+    const { result, rerender } = renderStream(initial, frames);
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-owner-a"));
+
+    frames.length = 0;
+    rerender({ ...initial, apiClient: newClient, session: { ...initial.session, issuer: "issuer-b" } });
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      expect(frame.page.content).toEqual([]);
+    }
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    expect(result.current.page.content).toEqual([]);
+    expect(result.current.error.message).not.toContain("owner-b");
+  });
+
   it("does not fetch without a client and aborts outstanding requests on unmount", async () => {
     const missing = renderStream(readContext(null));
     expect(missing.result.current.page.content).toEqual([]);

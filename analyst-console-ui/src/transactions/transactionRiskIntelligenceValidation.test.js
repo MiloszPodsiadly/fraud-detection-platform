@@ -40,6 +40,37 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail()).valid).toBe(true);
   });
 
+  it.each([true, false, null, undefined])("accepts legacy optional alertRecommended value %s", (alertRecommended) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ alertRecommended })).valid).toBe(true);
+  });
+
+  it.each(["false", "true", 0, 1, {}, []])("rejects malformed alertRecommended value %s", (alertRecommended) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ alertRecommended }))).toMatchObject({
+      valid: false,
+      reason: "INVALID_DETAIL_ALERT_RECOMMENDED"
+    });
+  });
+
+  it("accepts missing alertRecommended for older detail payloads", () => {
+    const value = detail();
+    delete value.alertRecommended;
+
+    expect(validateTransactionRiskIntelligenceDetail(value).valid).toBe(true);
+  });
+
+  it.each([null, { amount: null }, { amount: 0, currency: "PLN" }, { amount: "-12.50", currency: "USD" }])(
+    "accepts an optional MoneyResponse amount %s",
+    (transactionAmount) => {
+      expect(validateTransactionRiskIntelligenceDetail(detail({ transactionAmount })).valid).toBe(true);
+    }
+  );
+
+  it("rejects malformed MoneyResponse amounts in detail", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      transactionAmount: { amount: "0x10", currency: "USD" }
+    }))).toMatchObject({ valid: false, reason: "INVALID_DETAIL_TRANSACTION_AMOUNT" });
+  });
+
   it("accepts shared three-engine golden fixture", () => {
     const result = validateTransactionRiskIntelligenceDetail(detail({
       engineIntelligence: {

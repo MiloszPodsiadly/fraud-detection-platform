@@ -13,6 +13,7 @@ import { useScoredTransactionDetail } from "../transactions/useScoredTransaction
 import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 import { merchantDisplayValue } from "../transactions/merchantDisplay.js";
+import { alertRecommendationPresentation } from "../transactions/alertRecommendationPresentation.js";
 
 const STATUS_COPY = {
   AVAILABLE: "Engine Intelligence is available for this transaction.",
@@ -68,6 +69,7 @@ export function TransactionRiskIntelligencePanel({
 
 function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
   const intelligence = detail.engineIntelligence;
+  const alertRecommendation = alertRecommendationPresentation(detail.alertRecommended);
   return (
     <>
       <section className="detailSection" aria-label="Transaction Summary">
@@ -79,7 +81,7 @@ function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
           <Field label="Scored at" value={formatDateTime(detail.scoredAt)} />
           <Field label="Fraud score" value={formatScore(detail.fraudScore)} />
           <Field label="Risk level" value={detail.riskLevel || "Not available"} />
-          <Field label="Alert recommendation flag" value={detail.alertRecommended ? "Present" : "Not present"} />
+          <Field label="Alert recommendation flag" value={alertRecommendation.label} />
           <Field label="Reason codes" value={listText(detail.reasonCodes)} />
         </dl>
         <p className="sectionCopy">alertRecommended is a scored transaction field, not a final payment decision.</p>

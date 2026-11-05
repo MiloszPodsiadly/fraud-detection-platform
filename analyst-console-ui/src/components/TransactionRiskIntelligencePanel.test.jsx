@@ -76,8 +76,32 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(within(summary).getByText("corr-available-1")).toBeInTheDocument();
     expect(within(summary).getByText("0.91")).toBeInTheDocument();
     expect(within(summary).getByText("Alert recommendation flag")).toBeInTheDocument();
-    expect(within(summary).getByText("Present")).toBeInTheDocument();
+    expect(within(summary).getByText("Review recommended")).toBeInTheDocument();
     expect(screen.getByText("alertRecommended is a scored transaction field, not a final payment decision.")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["true", true, "Review recommended", false],
+    ["false", false, "No review recommendation", false],
+    ["null", null, "Unknown", false],
+    ["undefined", undefined, "Unknown", false],
+    ["missing", undefined, "Unknown", true]
+  ])("renders the same alert recommendation policy for %s in detail", (_label, alertRecommended, expected, omit) => {
+    const detail = availableDetail();
+    if (omit) {
+      delete detail.alertRecommended;
+    } else {
+      detail.alertRecommended = alertRecommended;
+    }
+    useScoredTransactionDetail.mockReturnValue({
+      detail,
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    expect(within(screen.getByRole("region", { name: "Transaction Summary" })).getByText(expected)).toBeInTheDocument();
   });
 
   it("renders transaction merchant context separately from verified Merchant Risk history", () => {

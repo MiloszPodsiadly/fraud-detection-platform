@@ -1,3 +1,5 @@
+import { isValidMoneyResponse } from "../transactions/moneyResponse.js";
+
 export function formatDateTime(value) {
   if (!value) {
     return "Not available";
@@ -18,12 +20,22 @@ export function formatScore(value) {
 }
 
 export function formatAmount(money) {
-  if (!money || money.amount === null || money.amount === undefined) {
+  if (money === null || money === undefined) {
+    return "Not supplied";
+  }
+  if (!isValidMoneyResponse(money)) {
+    return "Not available";
+  }
+  if (money.amount === null) {
     return "Not supplied";
   }
 
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: money.currency || "USD"
-  }).format(Number(money.amount));
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: money.currency
+    }).format(Number(money.amount));
+  } catch {
+    return "Not available";
+  }
 }

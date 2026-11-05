@@ -1,4 +1,5 @@
 import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
+import { isValidMoneyResponse } from "./moneyResponse.js";
 
 const DETAIL_STATUSES = new Set(["AVAILABLE", "ABSENT", "UNAVAILABLE", "DEGRADED"]);
 const ANALYST_RECOMMENDATION_STATUSES = new Set([
@@ -104,6 +105,12 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   }
   if (!validOptionalTimestamp(detail.transactionTimestamp) || !validOptionalTimestamp(detail.scoredAt)) {
     return invalid("INVALID_DETAIL_TIMESTAMP");
+  }
+  if (detail.alertRecommended != null && typeof detail.alertRecommended !== "boolean") {
+    return invalid("INVALID_DETAIL_ALERT_RECOMMENDED");
+  }
+  if (!isValidMoneyResponse(detail.transactionAmount)) {
+    return invalid("INVALID_DETAIL_TRANSACTION_AMOUNT");
   }
   if (!isBoundedArray(detail.reasonCodes, MAX_REASON_CODES) || !detail.reasonCodes.every((reasonCode) => safeString(reasonCode))) {
     return invalid("INVALID_DETAIL_REASON_CODES");

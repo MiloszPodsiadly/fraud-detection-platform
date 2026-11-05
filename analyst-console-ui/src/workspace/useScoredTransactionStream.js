@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isAbortError } from "../api/apiErrors.js";
+import { isValidMoneyResponse } from "../transactions/moneyResponse.js";
 import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 const INITIAL_TRANSACTION_PAGE = {
@@ -153,17 +154,7 @@ function validRow(row) {
     && (row.fraudScore == null || Number.isFinite(row.fraudScore))
     && (row.alertRecommended == null || typeof row.alertRecommended === "boolean")
     && (row.scoredAt == null || (optionalText(row.scoredAt) && Number.isFinite(Date.parse(row.scoredAt))))
-    && validAmount(row.transactionAmount);
-}
-
-function validAmount(money) {
-  if (money == null) {
-    return true;
-  }
-  return isRecord(money) && (money.amount == null || (
-    ["number", "string"].includes(typeof money.amount) && Number.isFinite(Number(money.amount))
-    && typeof money.currency === "string" && /^[A-Z]{3}$/.test(money.currency)
-  ));
+    && isValidMoneyResponse(row.transactionAmount);
 }
 
 function isRecord(value) {
