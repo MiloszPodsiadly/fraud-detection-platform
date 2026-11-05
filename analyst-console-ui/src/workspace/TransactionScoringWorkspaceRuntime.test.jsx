@@ -20,6 +20,97 @@ afterEach(() => {
 });
 
 describe("transaction scoring read boundary with real provider, API client, hooks and views", () => {
+  it("does not present the initial empty page as a confirmed zero counter", async () => {
+    const pending = deferred();
+    installTransport({ list: () => pending.promise });
+    const frames = [];
+    render(<StatefulWorkspaceShell currentSession={session("a")} frames={frames} />);
+
+    expect(screen.getByRole("link", { name: "Transactions Unavailable" })).toBeInTheDocument();
+
+    await act(async () => pending.resolve(jsonResponse(listPage("a", {}, 0))));
+    expect(await screen.findByRole("link", { name: "Transactions 0" })).toBeInTheDocument();
+  });
+
+  it("does not present the initial empty alert page as a confirmed zero counter", async () => {
+    const pending = deferred();
+    installTransport({ detail: () => pending.promise });
+    const frames = [];
+    render(<StatefulWorkspaceShell
+      currentSession={{ ...session("a"), authorities: [AUTHORITIES.ALERT_READ] }}
+      frames={frames}
+      initialWorkspacePage="fraudTransaction"
+    />);
+
+    expect(screen.getByRole("link", { name: "Alerts Unavailable" })).toBeInTheDocument();
+
+    await act(async () => pending.resolve(jsonResponse({ content: [], page: 0, size: 10, totalElements: 0, totalPages: 0 })));
+    expect(await screen.findByRole("link", { name: "Alerts 0" })).toBeInTheDocument();
+  });
+
+  it("clears the prior alert page in the first commit after an owner change", async () => {
+    const pendingB = deferred();
+    const transport = installTransport({
+      detail: (call) => call.owner === "a" ? jsonResponse(alertPage("a")) : pendingB.promise
+    });
+    const frames = [];
+    const sessionA = { ...session("a"), authorities: [AUTHORITIES.ALERT_READ] };
+    const { rerender } = render(<StatefulWorkspaceShell
+      currentSession={sessionA}
+      frames={frames}
+      initialWorkspacePage="fraudTransaction"
+    />);
+    expect(await screen.findByText("private-reason-a")).toBeInTheDocument();
+
+    frames.length = 0;
+    rerender(<StatefulWorkspaceShell
+      currentSession={{ ...sessionA, issuer: "b", subject: "subject-b" }}
+      frames={frames}
+      initialWorkspacePage="fraudTransaction"
+    />);
+
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) expect(frame.text).not.toContain("private-reason-a");
+    expect(screen.queryByText("private-reason-a")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading fraud alerts...")).toBeInTheDocument();
+    await waitFor(() => expect(transport.calls.some((call) => call.owner === "b" && call.kind === "detail")).toBe(true));
+
+    await act(async () => pendingB.resolve(jsonResponse(alertPage("b"))));
+    expect(await screen.findByText("private-reason-b")).toBeInTheDocument();
+  });
+
+  it("ignores a late alert-page response from the previous owner", async () => {
+    const pendingA = deferred();
+    let aReads = 0;
+    const transport = installTransport({
+      detail: (call) => call.owner === "a"
+        ? ++aReads === 1 ? jsonResponse(alertPage("a")) : pendingA.promise
+        : jsonResponse(alertPage("b"))
+    });
+    const frames = [];
+    const sessionA = { ...session("a"), authorities: [AUTHORITIES.ALERT_READ] };
+    const { rerender } = render(<StatefulWorkspaceShell
+      currentSession={sessionA}
+      frames={frames}
+      initialWorkspacePage="fraudTransaction"
+    />);
+    expect(await screen.findByText("private-reason-a")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Page size"), { target: { value: "25" } });
+    await waitFor(() => expect(transport.calls.filter((call) => call.owner === "a" && call.kind === "detail")).toHaveLength(2));
+
+    frames.length = 0;
+    rerender(<StatefulWorkspaceShell
+      currentSession={{ ...sessionA, issuer: "b", subject: "subject-b" }}
+      frames={frames}
+      initialWorkspacePage="fraudTransaction"
+    />);
+    expect(await screen.findByText("private-reason-b")).toBeInTheDocument();
+
+    await act(async () => pendingA.resolve(jsonResponse(alertPage("a-late"))));
+    expect(screen.getByText("private-reason-b")).toBeInTheDocument();
+    expect(screen.queryByText("private-reason-a-late")).not.toBeInTheDocument();
+  });
+
   it.each([false, undefined])("closes loaded rows, expanded merchant and controls in every commit when permission becomes %s", async (capability) => {
     const transport = installTransport();
     const frames = [];
@@ -431,8 +522,8 @@ function ShellCommitProbe({ frames, children }) {
   return <div ref={ref}>{children}</div>;
 }
 
-function StatefulWorkspaceShell({ currentSession, frames }) {
-  const [workspacePage, setWorkspacePage] = useState("transactionScoring");
+function StatefulWorkspaceShell({ currentSession, frames, initialWorkspacePage = "transactionScoring" }) {
+  const [workspacePage, setWorkspacePage] = useState(initialWorkspacePage);
   return (
     <WorkspaceRuntimeProvider session={currentSession} authProvider={provider}>
       <WorkspaceLifecycleCommitProbe frames={frames}>
@@ -641,6 +732,24 @@ function listPage(owner, params = {}, total = owner === "a" ? 731 : 2, transacti
     }],
     page: Number(params.page || 0), size: Number(params.size || 25), totalElements: total,
     totalPages: Math.ceil(total / Number(params.size || 25))
+  };
+}
+
+function alertPage(owner) {
+  return {
+    content: [{
+      alertId: `alert-${owner}`,
+      alertReason: `private-reason-${owner}`,
+      alertStatus: "OPEN",
+      customerId: `customer-${owner}`,
+      fraudScore: 0.8,
+      riskLevel: "HIGH",
+      transactionId: `transaction-${owner}`
+    }],
+    page: 0,
+    size: 10,
+    totalElements: 1,
+    totalPages: 1
   };
 }
 

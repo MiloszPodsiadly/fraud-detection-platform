@@ -88,6 +88,11 @@ export function WorkspaceDashboardShell({
           invalidWorkspaceRoute,
           resolvedRoute
         });
+        const workspaceCountersForRoute = activeRoute.key === "transactionScoring"
+          ? { ...workspaceCounterState.counters, transactions: navigationState.transactionPage?.totalElements ?? null }
+          : activeRoute.key === "fraudTransaction"
+            ? { ...workspaceCounterState.counters, alerts: navigationState.alertPage?.totalElements ?? null }
+            : workspaceCounterState.counters;
 
         if ((selectedAlertId || selectedFraudCaseId || selectedLinkedAlertContext) && apiClient) {
           return (
@@ -127,9 +132,7 @@ export function WorkspaceDashboardShell({
               canReadPolicySecurity
             })}
             showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}
-            workspaceCounters={activeRoute.key === "transactionScoring"
-              ? { ...workspaceCounterState.counters, transactions: navigationState.transactionPage?.totalElements ?? 0 }
-              : workspaceCounterState.counters}
+            workspaceCounters={workspaceCountersForRoute}
             workspaceCountersStatus={workspaceCounterState}
             canReadFraudCases={canReadFraudCases}
             canReadAlerts={canReadAlerts}

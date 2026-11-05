@@ -13,6 +13,7 @@ describe("AlertsListPage frame", () => {
         advisoryQueue={{ count: 1 }}
         governanceAnalytics={{ totals: { advisories: 3 } }}
         fraudCaseSummary={{ totalFraudCases: 8 }}
+        canReadAlerts={true}
         sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
         onWorkspaceChange={vi.fn()}
       >
@@ -71,21 +72,63 @@ describe("AlertsListPage frame", () => {
     expect(screen.queryByText(/Last refreshed/)).not.toBeInTheDocument();
   });
 
-  it("renders unavailable workspace counters as zero when the user has no loaded data", () => {
+  it("keeps unknown-capability counters unavailable even when stale counts are supplied", () => {
     render(
       <AlertsListPage
         workspacePage="analyst"
-        workspaceCounters={{ alerts: null, transactions: null }}
+        workspaceCounters={{ alerts: 12, fraudCases: 13, suspiciousTransactions: 14, transactions: 15 }}
         workspaceCountersStatus={{ failedCounters: [], errorByCounter: {}, stale: false }}
+        alertPage={page(16)}
+        transactionPage={page(17)}
+        fraudCaseSummary={{ totalFraudCases: 18 }}
+        fraudCaseTotalElements={19}
+        canReadAlerts={undefined}
+        canReadTransactions={undefined}
+        canReadFraudCases={undefined}
+        canReadSuspiciousTransactions={undefined}
         sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
       >
         <section><h2>Fraud Case Work Queue</h2></section>
       </AlertsListPage>
     );
 
-    expect(screen.getByRole("link", { name: /Transactions\s*0/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Alerts\s*0/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Global fraud cases\s*0/ })).toBeInTheDocument();
+    const navigation = screen.getByRole("navigation", { name: "Analyst workspace sections" });
+    expect(screen.getByRole("link", { name: "Transactions Unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Alerts Unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Global fraud cases Unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Signal total unavailable" })).toHaveTextContent("Unavailable");
+    for (const previousCount of [12, 13, 14, 15, 16, 17, 18, 19]) {
+      expect(navigation).not.toHaveTextContent(String(previousCount));
+    }
+  });
+
+  it("shows confirmed zero counts only when each read authority and zero response are explicit", () => {
+    render(
+      <AlertsListPage
+        workspacePage="analyst"
+        workspaceCounters={{ alerts: 0, fraudCases: 0, suspiciousTransactions: 0, transactions: 0 }}
+        workspaceCountersStatus={{ degraded: false, failedCounters: [], errorByCounter: {}, stale: false }}
+        alertPage={page(0)}
+        transactionPage={page(0)}
+        fraudCaseSummary={{ totalFraudCases: 0 }}
+        fraudCaseTotalElements={0}
+        advisoryQueue={{ count: 0 }}
+        governanceAnalytics={{ totals: { advisories: 0 } }}
+        canReadTransactions={true}
+        canReadAlerts={true}
+        canReadFraudCases={true}
+        canReadSuspiciousTransactions={true}
+        canReadGovernanceAdvisories={true}
+        sessionState={{ status: SESSION_STATES.AUTHENTICATED }}
+      >
+        <section><h2>Fraud Case Work Queue</h2></section>
+      </AlertsListPage>
+    );
+
+    expect(screen.getByRole("link", { name: "Transactions 0" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Alerts 0" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Global fraud cases 0" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workspace signal total 0" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Audit analytics\s*0/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Governance\s*0/ })).toBeInTheDocument();
   });

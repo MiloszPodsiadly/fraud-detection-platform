@@ -757,9 +757,10 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 .contains("useWorkspaceCounters(",
                         "workspaceCountersStatus={workspaceCounterState}",
                         "showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}")
-                .contains("workspaceCounters={activeRoute.key === \"transactionScoring\"")
-                .contains("transactions: navigationState.transactionPage?.totalElements ?? 0")
-                .contains(": workspaceCounterState.counters}");
+                .contains("const workspaceCountersForRoute = activeRoute.key === \"transactionScoring\"")
+                .contains("transactions: navigationState.transactionPage?.totalElements ?? null")
+                .contains("alerts: navigationState.alertPage?.totalElements ?? null")
+                .contains("workspaceCounters={workspaceCountersForRoute}");
         assertThat(runtime).contains(
                 "useShadowPerformanceSummary",
                 "summaryState={summaryState}"

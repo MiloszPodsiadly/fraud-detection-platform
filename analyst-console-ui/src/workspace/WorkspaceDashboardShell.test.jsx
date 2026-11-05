@@ -83,9 +83,10 @@ describe("WorkspaceDashboardShell composition", () => {
     ].join("\n");
 
     expect(shellSource).toContain("useWorkspaceCounters");
-    expect(shellSource).toContain('workspaceCounters={activeRoute.key === "transactionScoring"');
-    expect(shellSource).toContain("transactions: navigationState.transactionPage?.totalElements ?? 0");
-    expect(shellSource).toContain(": workspaceCounterState.counters}");
+    expect(shellSource).toContain('const workspaceCountersForRoute = activeRoute.key === "transactionScoring"');
+    expect(shellSource).toContain("transactions: navigationState.transactionPage?.totalElements ?? null");
+    expect(shellSource).toContain("alerts: navigationState.alertPage?.totalElements ?? null");
+    expect(shellSource).toContain("workspaceCounters={workspaceCountersForRoute}");
     expect(shellSource).toContain("workspaceCountersStatus={workspaceCounterState}");
     expect(shadowContainerSource).toContain("summary={summaryState.summary}");
     expect(shadowContentSources).not.toContain("useWorkspaceCounters");

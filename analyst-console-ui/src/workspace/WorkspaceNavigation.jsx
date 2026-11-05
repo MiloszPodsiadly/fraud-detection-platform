@@ -30,11 +30,14 @@ export function WorkspaceNavigation({
     failedCounterNames,
     workspaceCountersStatus
   ) && workspaceCounters.suspiciousTransactions == null;
+  const suspiciousCounterUnavailable = showWorkspaceCounters
+    && canReadSuspiciousTransactions === true
+    && workspaceCounters.suspiciousTransactions == null;
   const transactionGlobalCount = showWorkspaceCounters
-    ? counterValueForAuthority(canReadTransactions, workspaceCounters.transactions ?? transactionPage?.totalElements ?? 0)
+    ? counterValueForAuthority(canReadTransactions, workspaceCounters.transactions ?? transactionPage?.totalElements)
     : null;
   const alertGlobalCount = showWorkspaceCounters
-    ? counterValueForAuthority(canReadAlerts, workspaceCounters.alerts ?? alertPage?.totalElements ?? 0)
+    ? counterValueForAuthority(canReadAlerts, workspaceCounters.alerts ?? alertPage?.totalElements)
     : null;
   const fraudCaseGlobalCount = showWorkspaceCounters && canReadFraudCases === true
     ? fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements
@@ -42,7 +45,7 @@ export function WorkspaceNavigation({
   const fraudCaseSummaryLabel = !showWorkspaceCounters
     ? null
     : canReadFraudCases === true
-      ? fraudCaseSummaryError ? "Unavailable" : String(fraudCaseGlobalCount ?? 0)
+      ? fraudCaseSummaryError || fraudCaseGlobalCount == null ? "Unavailable" : String(fraudCaseGlobalCount)
       : counterValueForAuthority(canReadFraudCases);
   const fraudCaseSummaryDisplayLabel = canReadFraudCases === true && isFraudCaseSummaryLoading
     ? "..."
@@ -72,11 +75,11 @@ export function WorkspaceNavigation({
     },
     suspiciousTransactions: {
       value: canReadSuspiciousTransactions === true
-        ? showWorkspaceCounters ? workspaceCounters.suspiciousTransactions ?? 0 : null
+        ? showWorkspaceCounters ? workspaceCounters.suspiciousTransactions ?? "Unavailable" : null
         : counterValueForAuthority(canReadSuspiciousTransactions),
       authority: canReadSuspiciousTransactions,
       stale: isCounterStale("suspiciousTransactions", failedCounterNames, workspaceCountersStatus),
-      unavailable: suspiciousSummaryUnavailable,
+      unavailable: suspiciousSummaryUnavailable || suspiciousCounterUnavailable,
       title: suspiciousSummaryUnavailable
         ? "Summary temporarily unavailable. Not page count, fraud count, case count, or analyst workload."
         : showWorkspaceCounters
@@ -86,7 +89,7 @@ export function WorkspaceNavigation({
         ? undefined
         : canReadSuspiciousTransactions === false
           ? undefined
-          : suspiciousSummaryUnavailable || canReadSuspiciousTransactions !== true
+          : suspiciousSummaryUnavailable || suspiciousCounterUnavailable || canReadSuspiciousTransactions !== true
             ? "Signal total unavailable"
             : `Workspace signal total ${workspaceCounters.suspiciousTransactions ?? 0}`
     },
@@ -185,7 +188,7 @@ function counterValueForAuthority(authority, value) {
   if (authority !== true) {
     return "Unavailable";
   }
-  return value;
+  return value ?? "Unavailable";
 }
 
 function isCounterUnavailable(counterName, failedCounterNames, workspaceCountersStatus) {

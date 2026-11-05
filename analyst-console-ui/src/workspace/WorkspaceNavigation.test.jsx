@@ -53,7 +53,8 @@ describe("WorkspaceNavigation suspicious transaction counter copy", () => {
     );
 
     expect(screen.getByRole("link", { name: /Signal total unavailable/i })).toBeInTheDocument();
-    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
     expect(screen.getByText("Signal total unavailable")).toBeInTheDocument();
     expect(screen.queryByText(/raw backend/i)).not.toBeInTheDocument();
   });
@@ -103,6 +104,52 @@ describe("WorkspaceNavigation suspicious transaction counter copy", () => {
       expect(navigation).not.toHaveTextContent(ownerCount);
     }
     expect(navigation).not.toHaveTextContent(/\b0\b/);
+  });
+
+  it("shows unavailable instead of zero when an authorized counter has no response yet", () => {
+    render(
+      <WorkspaceNavigation
+        workspacePage="transactionScoring"
+        workspaceRoutes={[
+          WORKSPACE_ROUTE_REGISTRY.transactionScoring,
+          WORKSPACE_ROUTE_REGISTRY.fraudTransaction,
+          WORKSPACE_ROUTE_REGISTRY.suspiciousTransactions,
+          WORKSPACE_ROUTE_REGISTRY.analyst
+        ]}
+        workspaceCounters={{ alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null }}
+        workspaceCountersStatus={{ degraded: false, failedCounters: [], errorByCounter: {}, stale: false, isLoading: true }}
+        canReadTransactions={true}
+        canReadAlerts={true}
+        canReadFraudCases={true}
+        canReadSuspiciousTransactions={true}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "Transactions Unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Alerts Unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Global fraud cases Unavailable" })).toBeInTheDocument();
+    const suspiciousSignals = screen.getByRole("link", { name: /Signal total unavailable/i });
+    expect(suspiciousSignals).toHaveTextContent("Unavailable");
+    expect(suspiciousSignals).not.toHaveTextContent(/\b0\b/);
+  });
+
+  it("marks a retained authorized count as last known after a failed refresh", () => {
+    render(
+      <WorkspaceNavigation
+        workspacePage="transactionScoring"
+        workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.transactionScoring]}
+        workspaceCounters={{ alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: 5 }}
+        workspaceCountersStatus={{
+          degraded: true,
+          failedCounters: ["transactions"],
+          errorByCounter: { transactions: "Counter unavailable" },
+          stale: true
+        }}
+        canReadTransactions={true}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "Transactions 5 Last known" })).toBeInTheDocument();
   });
 
   function renderSuspiciousNavigation(total) {

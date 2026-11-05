@@ -16,8 +16,10 @@ export function TransactionScoringWorkspaceRuntime({
   });
 
   useEffect(() => {
-    setCounterValue("transactions", transactionStreamState.page.totalElements);
-  }, [setCounterValue, transactionStreamState.page.totalElements]);
+    if (!transactionStreamState.isLoading && !transactionStreamState.error) {
+      setCounterValue("transactions", transactionStreamState.page.totalElements);
+    }
+  }, [setCounterValue, transactionStreamState.error, transactionStreamState.isLoading, transactionStreamState.page.totalElements]);
 
   function changeTransactionPage(page) {
     transactionStreamState.setRequest((current) => ({ ...current, page: Math.min(Math.max(Number(page) || 0, 0), 1000) }));
@@ -53,7 +55,9 @@ export function TransactionScoringWorkspaceRuntime({
       />
     ),
     navigationState: {
-      transactionPage: transactionStreamState.page
+      transactionPage: transactionStreamState.isLoading || transactionStreamState.error
+        ? null
+        : transactionStreamState.page
     },
     error: transactionStreamState.error,
     refreshWorkspace
