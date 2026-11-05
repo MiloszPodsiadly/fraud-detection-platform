@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ShadowPerformanceReadApiArchitectureGuardTest {
 
@@ -752,12 +753,13 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String container = Files.readString(UI_ROOT.resolve("workspace/ShadowPerformanceWorkspaceContainer.jsx"));
         String page = Files.readString(UI_ROOT.resolve("pages/ShadowPerformanceDashboardPage.jsx"));
 
-        assertThat(shell).contains(
-                "useWorkspaceCounters",
-                "workspaceCounters={workspaceCounterState.counters}",
-                "workspaceCountersStatus={workspaceCounterState}",
-                "showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}"
-        );
+        assertThat(shell)
+                .contains("useWorkspaceCounters(",
+                        "workspaceCountersStatus={workspaceCounterState}",
+                        "showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}")
+                .contains("workspaceCounters={activeRoute.key === \"transactionScoring\"")
+                .contains("transactions: navigationState.transactionPage?.totalElements ?? 0")
+                .contains(": workspaceCounterState.counters}");
         assertThat(runtime).contains(
                 "useShadowPerformanceSummary",
                 "summaryState={summaryState}"
@@ -767,7 +769,20 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "isLoading={summaryState.isLoading}",
                 "error={summaryState.error}"
         );
-        assertThat(String.join("\n", dashboard, runtime, container, page)).doesNotContain(
+        assertShadowPerformanceSourcesDoNotOwnWorkspaceCounters(dashboard, runtime, container, page);
+    }
+
+    @Test
+    void counterBoundaryRejectsSharedCounterUseInsideShadowPerformanceContent() {
+        assertThatThrownBy(() -> assertShadowPerformanceSourcesDoNotOwnWorkspaceCounters(
+                "import { useWorkspaceCounters } from '../workspace/useWorkspaceCounters.js';",
+                "const total = workspaceCounterState.counters.transactions;"
+        )).isInstanceOf(AssertionError.class)
+                .hasMessageContaining("workspaceCounterState");
+    }
+
+    private void assertShadowPerformanceSourcesDoNotOwnWorkspaceCounters(String... sources) {
+        assertThat(String.join("\n", sources)).doesNotContain(
                 "useWorkspaceCounters",
                 "workspaceCounters",
                 "workspaceCounterState",
