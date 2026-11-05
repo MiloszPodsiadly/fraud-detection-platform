@@ -47,4 +47,12 @@ describe("MoneyResponse validation and presentation", () => {
     expect(formatAmount(null)).toBe("Not supplied");
     expect(formatAmount({ amount: " ", currency: "USD" })).toBe("Not available");
   });
+
+  it("preserves decimal-string precision when formatting BigDecimal responses", () => {
+    const amount = "9007199254740993.01";
+    const formatter = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+
+    expect(formatAmount({ amount, currency: "USD" })).toBe(formatter.format(amount));
+    expect(formatAmount({ amount, currency: "USD" })).not.toBe(formatter.format(Number(amount)));
+  });
 });

@@ -34,7 +34,7 @@ export function formatAmount(money) {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: money.currency
-    }).format(Number(money.amount));
+    }).format(money.amount);
   } catch {
     return "Not available";
   }
