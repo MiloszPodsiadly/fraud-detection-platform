@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTHORITIES } from "../auth/session.js";
 import { availableDetail } from "../transactions/transactionRiskIntelligenceFixtures.js";
@@ -282,6 +282,124 @@ describe("transaction scoring read boundary with real provider, API client, hook
       expect(text).not.toContain("Merchant a");
     }
   });
+
+  it.each(["transactionScoring", "shadowPerformance"])(
+    "redacts all old shared counter families in the first %s commit after a same-user owner change",
+    async (workspacePage) => {
+      const transport = installCounterTransport();
+      const frames = [];
+      function shell(currentSession) {
+        return (
+          <WorkspaceRuntimeProvider session={currentSession} authProvider={provider}>
+            <ShellCommitProbe frames={frames}>
+              <WorkspaceDashboardShell
+                workspacePage={workspacePage}
+                clearSelection={noOp}
+                navigateWorkspace={noOp}
+                sessionState={{ status: "authenticated" }}
+              />
+            </ShellCommitProbe>
+          </WorkspaceRuntimeProvider>
+        );
+      }
+
+      const { rerender } = render(shell(counterSession("a")));
+      await waitFor(() => {
+        const navigation = document.querySelector(".workspaceTabs");
+        expect(navigation?.textContent).toContain("9101");
+        expect(navigation?.textContent).toContain("9202");
+        expect(navigation?.textContent).toContain("9303");
+        expect(navigation?.textContent).toContain("9404");
+      });
+      if (workspacePage === "transactionScoring") {
+        expect(await screen.findByText("Merchant a")).toBeInTheDocument();
+      }
+
+      frames.length = 0;
+      rerender(shell(counterSession("b")));
+      expect(frames.length).toBeGreaterThan(0);
+      for (const text of frames) {
+        for (const ownerData of ["9101", "9202", "9303", "9404"]) {
+          expect(text).not.toContain(ownerData);
+        }
+      }
+      expect(transport.calls.some((call) => call.owner === "b")).toBe(true);
+    }
+  );
+
+  it("isolates pending A transaction reads across shell navigation, B return, filters and permission revocation", async () => {
+    const transport = installLifecycleTransport();
+    const frames = [];
+    const { rerender } = render(<StatefulWorkspaceShell currentSession={counterSession("a")} frames={frames} />);
+
+    expect(await screen.findByText("Merchant a")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("9101");
+      expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("9202");
+      expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("9303");
+      expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("731");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    await waitFor(() => expect(transport.calls.some((call) => call.owner === "a" && call.kind === "detail")).toBe(true));
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "private-draft-a" } });
+    const aListCallsBeforeRefresh = transport.calls.filter((call) => call.owner === "a" && call.kind === "list" && call.params.size === "25").length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(transport.calls.filter((call) => call.owner === "a" && call.kind === "list" && call.params.size === "25").length)
+      .toBeGreaterThan(aListCallsBeforeRefresh));
+    const pendingAListCall = transport.calls.filter((call) => call.owner === "a" && call.kind === "list" && call.params.size === "25").at(-1);
+    const pendingADetailCall = transport.calls.find((call) => call.owner === "a" && call.kind === "detail");
+
+    fireEvent.click(screen.getByRole("link", { name: /Model evidence/ }));
+    await waitFor(() => expect(document.querySelector(".workspaceTabActive")).toHaveTextContent("Model evidence"));
+    frames.length = 0;
+    rerender(<StatefulWorkspaceShell currentSession={counterSession("b")} frames={frames} />);
+
+    expectCommittedFramesHaveNoOwnerA(frames);
+    expect(pendingAListCall.signal.aborted).toBe(true);
+    expect(pendingADetailCall.signal.aborted).toBe(true);
+    await waitFor(() => expect(transport.calls.some((call) => call.owner === "b")).toBe(true));
+
+    await act(async () => transport.pendingADetail.resolve(jsonResponse(detailFor("a", "txn-a"))));
+    expectCommittedFramesHaveNoOwnerA(frames);
+    await act(async () => transport.pendingAList.reject(new Error("private A transport failure")));
+    expectCommittedFramesHaveNoOwnerA(frames);
+
+    fireEvent.click(screen.getByRole("link", { name: /Transactions/ }));
+    expect(await screen.findByText("Merchant b")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(transport.calls.filter((call) => call.owner === "b" && call.kind === "detail")).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "B-query" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() => expect(transport.calls.some((call) => call.owner === "b" && call.kind === "list" && call.params.query === "B-query")).toBe(true));
+    expect(await screen.findByText("txn-b-B-query-0")).toBeInTheDocument();
+    expectCommittedFramesHaveNoOwnerA(frames);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
+    expect(screen.getByText("txn-b-B-query-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(await screen.findByRole("region", { name: "Merchant Investigation" })).toHaveTextContent("merchant-b");
+    expect(transport.calls.filter((call) => call.owner === "b" && call.kind === "detail")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(transport.calls.filter((call) => call.owner === "b" && call.kind === "list" && call.params.size === "25").length).toBeGreaterThanOrEqual(4));
+    expect(transport.calls.filter((call) => call.owner === "b" && call.kind === "list" && call.params.query === "B-query").at(-1).params)
+      .toMatchObject({ query: "B-query", page: "1", size: "25" });
+
+    transport.holdNextBList = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(transport.pendingBList).toBeDefined());
+    const pendingBSignal = transport.calls.filter((call) => call.owner === "b" && call.kind === "list" && call.params.size === "25").at(-1).signal;
+    const callsBeforeRevoke = transport.calls.length;
+    frames.length = 0;
+    rerender(<StatefulWorkspaceShell currentSession={counterSession("b", false)} frames={frames} />);
+
+    expectCommittedFramesHaveNoOwnerA(frames);
+    expect(pendingBSignal.aborted).toBe(true);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(transport.calls.slice(callsBeforeRevoke).some((call) => call.owner === "b" && call.path.includes("transactions/scored"))).toBe(false);
+    await act(async () => transport.pendingBList.resolve(jsonResponse(listPage("b", {}, 51, "txn-b-late"))));
+    expectCommittedFramesHaveNoOwnerA(frames);
+    expect(screen.queryByText("txn-b-late")).not.toBeInTheDocument();
+  });
 });
 
 function workspace(currentSession, frames, props = {}) {
@@ -313,6 +431,33 @@ function ShellCommitProbe({ frames, children }) {
   return <div ref={ref}>{children}</div>;
 }
 
+function StatefulWorkspaceShell({ currentSession, frames }) {
+  const [workspacePage, setWorkspacePage] = useState("transactionScoring");
+  return (
+    <WorkspaceRuntimeProvider session={currentSession} authProvider={provider}>
+      <WorkspaceLifecycleCommitProbe frames={frames}>
+        <WorkspaceDashboardShell
+          workspacePage={workspacePage}
+          navigateWorkspace={setWorkspacePage}
+          clearSelection={noOp}
+          sessionState={{ status: "authenticated" }}
+        />
+      </WorkspaceLifecycleCommitProbe>
+    </WorkspaceRuntimeProvider>
+  );
+}
+
+function WorkspaceLifecycleCommitProbe({ frames, children }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    frames.push({
+      text: ref.current.textContent,
+      inputs: Array.from(ref.current.querySelectorAll("input")).map((node) => node.value)
+    });
+  });
+  return <div ref={ref}>{children}</div>;
+}
+
 function expectNoA(frames) {
   expect(frames.length).toBeGreaterThan(0);
   for (const frame of frames) {
@@ -321,6 +466,20 @@ function expectNoA(frames) {
       expect(JSON.stringify(frame.page)).not.toContain(value);
     }
     expect(frame.inputs).not.toContain("private-draft-a");
+  }
+}
+
+function expectCommittedFramesHaveNoOwnerA(frames) {
+  expect(frames.length).toBeGreaterThan(0);
+  const oldOwnerValues = [
+    "Merchant a", "merchant-a", "txn-a", "customer-a", "private-draft-a",
+    "private A transport failure", "9101", "9202", "9303", "731", "9404"
+  ];
+  for (const frame of frames) {
+    for (const value of oldOwnerValues) {
+      expect(frame.text).not.toContain(value);
+      expect(frame.inputs).not.toContain(value);
+    }
   }
 }
 
@@ -339,11 +498,136 @@ function installTransport({ list = (call) => jsonResponse(listPage(call.owner, c
   return { calls };
 }
 
+function installCounterTransport() {
+  const calls = [];
+  const pendingForB = [];
+  const fetchTransport = vi.fn((url, options) => {
+    const parsed = new URL(url, "http://localhost");
+    const call = {
+      owner: options.headers["X-Test-Owner"],
+      path: parsed.pathname,
+      params: Object.fromEntries(parsed.searchParams),
+      signal: options.signal
+    };
+    calls.push(call);
+    if (call.owner === "b") {
+      const pending = deferred();
+      pendingForB.push(pending);
+      return pending.promise;
+    }
+    if (call.path.endsWith("/alerts")) {
+      return Promise.resolve(jsonResponse({ content: [], page: 0, size: 1, totalElements: 9101, totalPages: 0 }));
+    }
+    if (call.path.includes("work-queue/summary")) {
+      return Promise.resolve(jsonResponse({ totalFraudCases: 9202 }));
+    }
+    if (call.path.includes("suspicious-transactions/summary")) {
+      return Promise.resolve(jsonResponse({ totalSuspiciousTransactions: 9303 }));
+    }
+    if (call.path.endsWith("/scored")) {
+      return Promise.resolve(jsonResponse(listPage("a", call.params, 9404)));
+    }
+    if (call.path.includes("shadow-performance/summary/current")) {
+      return Promise.resolve(jsonResponse({ message: "No current summary." }, 404));
+    }
+    return Promise.resolve(jsonResponse({}, 404));
+  });
+  vi.stubGlobal("fetch", fetchTransport);
+  return { calls, pendingForB };
+}
+
+function installLifecycleTransport() {
+  const calls = [];
+  const pendingAList = deferred();
+  const pendingADetail = deferred();
+  const pendingBList = deferred();
+  let aScoredPageReads = 0;
+  let holdNextBList = false;
+  const fetchTransport = vi.fn((url, options) => {
+    const parsed = new URL(url, "http://localhost");
+    const path = parsed.pathname;
+    const owner = options.headers["X-Test-Owner"];
+    const kind = path.endsWith("/feedback") ? "feedback"
+      : path.endsWith("/scored") ? "list"
+        : path.includes("transactions/scored/") ? "detail"
+          : "summary";
+    const call = {
+      kind,
+      owner,
+      path,
+      params: Object.fromEntries(parsed.searchParams),
+      signal: options.signal
+    };
+    calls.push(call);
+
+    if (kind === "feedback") return Promise.resolve(jsonResponse({}, 404));
+    if (owner === "a" && kind === "list" && call.params.size === "25" && ++aScoredPageReads > 1) {
+      return pendingAList.promise;
+    }
+    if (owner === "a" && kind === "detail") return pendingADetail.promise;
+    if (owner === "b" && kind === "list" && call.params.size === "25" && holdNextBList) {
+      holdNextBList = false;
+      return pendingBList.promise;
+    }
+    if (owner === "b" && kind === "detail") {
+      const transactionId = path.match(/\/transactions\/scored\/([^/]+)/)?.[1] || "txn-b";
+      return Promise.resolve(jsonResponse(detailFor("b", transactionId)));
+    }
+    if (path.endsWith("/alerts")) {
+      return Promise.resolve(jsonResponse({ content: [], page: 0, size: 1, totalElements: owner === "a" ? 9101 : 1101, totalPages: 0 }));
+    }
+    if (path.includes("work-queue/summary")) {
+      return Promise.resolve(jsonResponse({ totalFraudCases: owner === "a" ? 9202 : 1202 }));
+    }
+    if (path.includes("suspicious-transactions/summary")) {
+      return Promise.resolve(jsonResponse({ totalSuspiciousTransactions: owner === "a" ? 9303 : 1303 }));
+    }
+    if (path.endsWith("/scored")) {
+      if (call.params.size === "1") {
+        return Promise.resolve(jsonResponse(listPage(owner, call.params, owner === "a" ? 9404 : 1404)));
+      }
+      const transactionId = owner === "b"
+        ? `txn-b-${call.params.query || "initial"}-${call.params.page || "0"}`
+        : "txn-a";
+      return Promise.resolve(jsonResponse(listPage(owner, call.params, owner === "a" ? 731 : 51, transactionId)));
+    }
+    if (path.includes("shadow-performance/summary/current")) {
+      return Promise.resolve(jsonResponse({ message: "No current summary." }, 404));
+    }
+    return Promise.resolve(jsonResponse({}, 404));
+  });
+  vi.stubGlobal("fetch", fetchTransport);
+  return {
+    calls,
+    pendingAList,
+    pendingADetail,
+    pendingBList,
+    get holdNextBList() { return holdNextBList; },
+    set holdNextBList(value) { holdNextBList = value; }
+  };
+}
+
 function session(owner, capability = true) {
   return {
     userId: "same-analyst", issuer: owner, subject: "subject-" + owner, roles: ["READ_ONLY_ANALYST"],
     authorities: capability === true ? [AUTHORITIES.TRANSACTION_MONITOR_READ]
       : capability === false ? [AUTHORITIES.FRAUD_CASE_READ] : []
+  };
+}
+
+function counterSession(owner, transactionCapability = true) {
+  return {
+    userId: "same-analyst",
+    issuer: owner,
+    subject: `subject-${owner}`,
+    roles: [owner === "a" ? "ANALYST_A" : "ANALYST_B"],
+    authorities: [
+      AUTHORITIES.ALERT_READ,
+      AUTHORITIES.FRAUD_CASE_READ,
+      AUTHORITIES.SUSPICIOUS_TRANSACTION_READ,
+      ...(transactionCapability ? [AUTHORITIES.TRANSACTION_MONITOR_READ] : []),
+      AUTHORITIES.SHADOW_PERFORMANCE_READ
+    ]
   };
 }
 

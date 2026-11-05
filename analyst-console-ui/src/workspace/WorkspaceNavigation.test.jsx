@@ -79,6 +79,32 @@ describe("WorkspaceNavigation suspicious transaction counter copy", () => {
     expect(screen.queryByText(/cursor-secret/i)).not.toBeInTheDocument();
   });
 
+  it("does not turn unknown counter authority into zero or retain a supplied count", () => {
+    render(
+      <WorkspaceNavigation
+        workspacePage="transactionScoring"
+        workspaceRoutes={[
+          WORKSPACE_ROUTE_REGISTRY.transactionScoring,
+          WORKSPACE_ROUTE_REGISTRY.fraudTransaction,
+          WORKSPACE_ROUTE_REGISTRY.suspiciousTransactions,
+          WORKSPACE_ROUTE_REGISTRY.analyst
+        ]}
+        workspaceCounters={{ alerts: 9101, fraudCases: 9202, suspiciousTransactions: 9303, transactions: 9404 }}
+        alertPage={{ totalElements: 9101 }}
+        transactionPage={{ totalElements: 9404 }}
+        fraudCaseSummary={{ totalFraudCases: 9202 }}
+        fraudCaseTotalElements={9202}
+      />
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "Analyst workspace sections" });
+    expect(navigation).toHaveTextContent("Unavailable");
+    for (const ownerCount of ["9101", "9202", "9303", "9404"]) {
+      expect(navigation).not.toHaveTextContent(ownerCount);
+    }
+    expect(navigation).not.toHaveTextContent(/\b0\b/);
+  });
+
   function renderSuspiciousNavigation(total) {
     return render(
       <WorkspaceNavigation

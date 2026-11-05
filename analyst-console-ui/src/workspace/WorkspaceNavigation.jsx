@@ -30,22 +30,23 @@ export function WorkspaceNavigation({
     failedCounterNames,
     workspaceCountersStatus
   ) && workspaceCounters.suspiciousTransactions == null;
-  const transactionGlobalCount = !showWorkspaceCounters
-    ? null
-    : canReadTransactions === false
-    ? "No access"
-    : workspaceCounters.transactions ?? transactionPage?.totalElements ?? 0;
-  const alertGlobalCount = !showWorkspaceCounters
-    ? null
-    : canReadAlerts === false
-    ? "No access"
-    : workspaceCounters.alerts ?? alertPage?.totalElements ?? 0;
-  const fraudCaseGlobalCount = showWorkspaceCounters ? fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements : null;
+  const transactionGlobalCount = showWorkspaceCounters
+    ? counterValueForAuthority(canReadTransactions, workspaceCounters.transactions ?? transactionPage?.totalElements ?? 0)
+    : null;
+  const alertGlobalCount = showWorkspaceCounters
+    ? counterValueForAuthority(canReadAlerts, workspaceCounters.alerts ?? alertPage?.totalElements ?? 0)
+    : null;
+  const fraudCaseGlobalCount = showWorkspaceCounters && canReadFraudCases === true
+    ? fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements
+    : null;
   const fraudCaseSummaryLabel = !showWorkspaceCounters
     ? null
-    : fraudCaseSummaryError
-    ? "Unavailable"
-    : fraudCaseGlobalCount == null ? "0" : String(fraudCaseGlobalCount);
+    : canReadFraudCases === true
+      ? fraudCaseSummaryError ? "Unavailable" : String(fraudCaseGlobalCount ?? 0)
+      : counterValueForAuthority(canReadFraudCases);
+  const fraudCaseSummaryDisplayLabel = canReadFraudCases === true && isFraudCaseSummaryLoading
+    ? "..."
+    : fraudCaseSummaryLabel;
   const fraudCaseSummaryGeneratedAt = fraudCaseSummary?.generatedAt
     ? new Date(fraudCaseSummary.generatedAt).toLocaleString()
     : null;
@@ -70,9 +71,9 @@ export function WorkspaceNavigation({
       stale: isCounterStale("alerts", failedCounterNames, workspaceCountersStatus)
     },
     suspiciousTransactions: {
-      value: canReadSuspiciousTransactions === false
-        ? "No access"
-        : showWorkspaceCounters ? workspaceCounters.suspiciousTransactions ?? 0 : null,
+      value: canReadSuspiciousTransactions === true
+        ? showWorkspaceCounters ? workspaceCounters.suspiciousTransactions ?? 0 : null
+        : counterValueForAuthority(canReadSuspiciousTransactions),
       authority: canReadSuspiciousTransactions,
       stale: isCounterStale("suspiciousTransactions", failedCounterNames, workspaceCountersStatus),
       unavailable: suspiciousSummaryUnavailable,
@@ -83,16 +84,20 @@ export function WorkspaceNavigation({
           : "Workspace signal counters are not shown for this diagnostic route.",
       ariaLabel: !showWorkspaceCounters
         ? undefined
-        : suspiciousSummaryUnavailable
-        ? "Signal total unavailable"
-        : `Workspace signal total ${workspaceCounters.suspiciousTransactions ?? 0}`
+        : canReadSuspiciousTransactions === false
+          ? undefined
+          : suspiciousSummaryUnavailable || canReadSuspiciousTransactions !== true
+            ? "Signal total unavailable"
+            : `Workspace signal total ${workspaceCounters.suspiciousTransactions ?? 0}`
     },
     analyst: {
-      value: isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel,
+      value: fraudCaseSummaryDisplayLabel,
       authority: canReadFraudCases,
       stale: Boolean(fraudCaseSummaryError),
       title: showWorkspaceCounters ? fraudCaseSummaryHint : "Global fraud case counters are not shown for this diagnostic route.",
-      ariaLabel: showWorkspaceCounters ? `Global fraud cases ${isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}` : undefined
+      ariaLabel: showWorkspaceCounters
+        ? `Global fraud cases ${canReadFraudCases === true && isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}`
+        : undefined
     },
     reports: {
       value: canReadGovernanceAdvisories === false
@@ -171,6 +176,16 @@ function CounterMeta({ authority, stale = false, unavailable = false }) {
     return <small className="counterMeta">Last known</small>;
   }
   return null;
+}
+
+function counterValueForAuthority(authority, value) {
+  if (authority === false) {
+    return "No access";
+  }
+  if (authority !== true) {
+    return "Unavailable";
+  }
+  return value;
 }
 
 function isCounterUnavailable(counterName, failedCounterNames, workspaceCountersStatus) {

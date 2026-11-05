@@ -306,6 +306,112 @@ describe("useWorkspaceCounters", () => {
     expect(result.current.counters).toEqual(counters({ alerts: 10, transactions: 20 }));
   });
 
+  it("fences saved callbacks and late results through a key-only A-B-A owner transition", async () => {
+    const oldARefresh = deferred();
+    const bRequest = deferred();
+    const newARequest = deferred();
+    const client = {
+      listAlerts: vi.fn()
+        .mockResolvedValueOnce(page(3))
+        .mockReturnValueOnce(oldARefresh.promise)
+        .mockReturnValueOnce(bRequest.promise)
+        .mockReturnValueOnce(newARequest.promise)
+    };
+    const options = {
+      enabled: true,
+      apiClient: client,
+      includeFraudCases: false,
+      includeSuspiciousTransactions: false,
+      includeTransactions: false,
+      canReadAlerts: true
+    };
+    const { result, rerender } = renderHook(({ resetKey }) => useWorkspaceCounters({
+      ...options,
+      workspaceSessionResetKey: resetKey
+    }), { initialProps: { resetKey: "owner-a" } });
+
+    await waitFor(() => expect(result.current.counters.alerts).toBe(3));
+    const savedARefresh = result.current.refresh;
+    const savedASetter = result.current.setCounterValue;
+    rerender({ resetKey: "owner-a" });
+    expect(client.listAlerts).toHaveBeenCalledTimes(1);
+
+    await act(async () => { void result.current.refresh(); });
+    await waitFor(() => expect(client.listAlerts).toHaveBeenCalledTimes(2));
+    const oldASignal = client.listAlerts.mock.calls[1][1].signal;
+
+    rerender({ resetKey: "owner-b" });
+    expect(result.current.counters).toEqual(counters());
+    expect(result.current.degraded).toBe(false);
+    expect(result.current.stale).toBe(false);
+    expect(result.current.errorByCounter).toEqual({});
+    expect(result.current.lastRefreshedAt).toBeNull();
+    expect(oldASignal.aborted).toBe(true);
+    await waitFor(() => expect(client.listAlerts).toHaveBeenCalledTimes(3));
+    const savedBRefresh = result.current.refresh;
+    const savedBSetter = result.current.setCounterValue;
+
+    savedASetter("alerts", 9991);
+    await act(async () => { await savedARefresh(); });
+    expect(client.listAlerts).toHaveBeenCalledTimes(3);
+    expect(result.current.counters.alerts).toBeNull();
+
+    rerender({ resetKey: "owner-a" });
+    await waitFor(() => expect(client.listAlerts).toHaveBeenCalledTimes(4));
+    const newASignal = client.listAlerts.mock.calls[3][1].signal;
+    expect(newASignal.aborted).toBe(false);
+    savedBSetter("alerts", 9992);
+    await act(async () => { await savedBRefresh(); });
+    expect(client.listAlerts).toHaveBeenCalledTimes(4);
+
+    await act(async () => {
+      oldARefresh.resolve(page(1));
+      bRequest.resolve(page(2));
+      await Promise.all([oldARefresh.promise, bRequest.promise]);
+    });
+    expect(result.current.counters.alerts).toBeNull();
+
+    await act(async () => {
+      newARequest.resolve(page(7));
+      await newARequest.promise;
+    });
+    await waitFor(() => expect(result.current.counters.alerts).toBe(7));
+  });
+
+  it("treats an explicit API client replacement as an owner change with a stable reset key", async () => {
+    const next = deferred();
+    const firstClient = { listAlerts: vi.fn().mockResolvedValue(page(4)) };
+    const secondClient = { listAlerts: vi.fn().mockReturnValue(next.promise) };
+    const { result, rerender } = renderHook(({ client }) => useWorkspaceCounters({
+      enabled: true,
+      apiClient: client,
+      workspaceSessionResetKey: "stable-key",
+      includeFraudCases: false,
+      includeSuspiciousTransactions: false,
+      includeTransactions: false,
+      canReadAlerts: true
+    }), { initialProps: { client: firstClient } });
+
+    await waitFor(() => expect(result.current.counters.alerts).toBe(4));
+    const savedRefresh = result.current.refresh;
+    const savedSetter = result.current.setCounterValue;
+    rerender({ client: secondClient });
+
+    expect(result.current.counters).toEqual(counters());
+    expect(result.current.lastRefreshedAt).toBeNull();
+    await waitFor(() => expect(secondClient.listAlerts).toHaveBeenCalledTimes(1));
+    savedSetter("alerts", 9993);
+    await act(async () => { await savedRefresh(); });
+    expect(firstClient.listAlerts).toHaveBeenCalledTimes(1);
+    expect(result.current.counters.alerts).toBeNull();
+
+    await act(async () => {
+      next.resolve(page(8));
+      await next.promise;
+    });
+    await waitFor(() => expect(result.current.counters.alerts).toBe(8));
+  });
+
   it("does not mark aborted counter requests fresh", async () => {
     listAlerts.mockRejectedValue(new DOMException("aborted", "AbortError"));
     listScoredTransactions.mockRejectedValue(new DOMException("aborted", "AbortError"));
