@@ -332,6 +332,85 @@ describe("useScoredTransactionStream ownership", () => {
     }
   );
 
+  it.each([
+    ["below range", -0.01],
+    ["above range", 1.01],
+    ["outside score domain", 2.5],
+    ["NaN", Number.NaN],
+    ["positive infinity", Number.POSITIVE_INFINITY],
+    ["negative infinity", Number.NEGATIVE_INFINITY],
+    ["numeric string", "0.91"],
+    ["NaN string", "NaN"],
+    ["object", {}],
+    ["array", []],
+    ["boolean", true]
+  ])("rejects malformed scored fraudScore: %s", async (_caseName, fraudScore) => {
+    const response = page("invalid-score");
+    response.content[0].fraudScore = fraudScore;
+    const apiClient = { listScoredTransactions: vi.fn().mockResolvedValue(response) };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(result.current.error?.message).toBe("The scored transaction response is malformed."));
+    expect(result.current.page.content).toEqual([]);
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.page.content.some((row) => row.fraudScore === fraudScore)).toBe(false);
+  });
+
+  it.each([0, 1, 0.91, null, undefined])("accepts valid optional scored fraudScore %s", async (fraudScore) => {
+    const response = page("valid-score");
+    if (fraudScore === undefined) {
+      delete response.content[0].fraudScore;
+    } else {
+      response.content[0].fraudScore = fraudScore;
+    }
+    const apiClient = { listScoredTransactions: vi.fn().mockResolvedValue(response) };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(result.current.page.content).toHaveLength(1));
+    expect(result.current.error).toBeNull();
+    expect(result.current.page.content[0].fraudScore).toBe(fraudScore);
+  });
+
+  it("clears visible rows when a refresh returns an invalid fraudScore", async () => {
+    const invalidResponse = page("invalid-after-refresh");
+    invalidResponse.content[0].fraudScore = 1.01;
+    const apiClient = {
+      listScoredTransactions: vi.fn()
+        .mockResolvedValueOnce(page("valid-before-refresh"))
+        .mockResolvedValueOnce(invalidResponse)
+    };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-valid-before-refresh"));
+    await act(async () => result.current.refresh());
+
+    expect(result.current.page.content).toEqual([]);
+    expect(result.current.error?.message).toBe("The scored transaction response is malformed.");
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it("does not show old rows or a malformed score after an owner change", async () => {
+    const oldClient = { listScoredTransactions: vi.fn().mockResolvedValue(page("owner-a")) };
+    const malformedPage = page("owner-b");
+    malformedPage.content[0].fraudScore = 2.5;
+    const newClient = { listScoredTransactions: vi.fn().mockResolvedValue(malformedPage) };
+    const initial = readContext(oldClient);
+    const frames = [];
+    const { result, rerender } = renderStream(initial, frames);
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-owner-a"));
+
+    frames.length = 0;
+    rerender({ ...initial, apiClient: newClient, session: { ...initial.session, issuer: "issuer-b" } });
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) expect(frame.page.content).toEqual([]);
+
+    await waitFor(() => expect(result.current.error?.message).toBe("The scored transaction response is malformed."));
+    expect(result.current.page.content).toEqual([]);
+    expect(JSON.stringify(frames)).not.toContain("txn-owner-a");
+    expect(JSON.stringify(frames)).not.toContain("txn-owner-b");
+    expect(newClient.listScoredTransactions).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["", "   ", "0x10", "NaN", "Infinity", "1e999", "01.25"])(
     "rejects malformed MoneyResponse decimal %s",
     async (amount) => {

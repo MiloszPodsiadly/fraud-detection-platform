@@ -36,6 +36,44 @@ describe("transaction scoring read boundary with real provider, API client, hook
     expect(await screen.findByRole("link", { name: "Transactions 0" })).toBeInTheDocument();
   });
 
+  it("rejects an invalid scored fraudScore and recovers through the real workspace retry", async () => {
+    let listReads = 0;
+    const frames = [];
+    const currentSession = { ...session("score"), issuer: "SESSION_PRIVATE_SCORE_CANARY" };
+    const transport = installTransport({
+      list: (call) => {
+        listReads += 1;
+        if (listReads === 1) {
+          const invalidPage = listPage("score", call.params, 1, "txn-score-invalid-canary");
+          invalidPage.content[0].fraudScore = 2.5;
+          invalidPage.content[0].customerId = "PRIVATE_SCORE_ROW_CANARY";
+          return jsonResponse(invalidPage);
+        }
+        const validPage = listPage("score", call.params, 1, "txn-score-recovered");
+        validPage.content[0].fraudScore = 0.91;
+        return jsonResponse(validPage);
+      }
+    });
+    render(
+      <RenderFailureBoundary>
+        {workspace(currentSession, frames)}
+      </RenderFailureBoundary>
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The scored transaction response is malformed.");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("render-failure")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("txn-score-invalid-canary");
+    expect(document.body.textContent).not.toContain("PRIVATE_SCORE_ROW_CANARY");
+    expect(document.body.textContent).not.toContain("SESSION_PRIVATE_SCORE_CANARY");
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("txn-score-recovered")).toBeInTheDocument();
+    expect(screen.getByText("0.91")).toBeInTheDocument();
+    expect(transport.calls.filter((call) => call.kind === "list")).toHaveLength(2);
+    expect(screen.queryByTestId("render-failure")).not.toBeInTheDocument();
+  });
+
   it("keeps the Transactions navigation count global while the stream is filtered", async () => {
     const transport = installTransport({
       list: (call) => {
@@ -200,7 +238,7 @@ describe("transaction scoring read boundary with real provider, API client, hook
     />);
 
     expect(await screen.findByText("private-reason-known")).toBeInTheDocument();
-    expect(screen.getByTestId("global-alerts")).toHaveTextContent("1");
+    await waitFor(() => expect(screen.getByTestId("global-alerts")).toHaveTextContent("1"));
     fireEvent.click(screen.getByRole("button", { name: "Refresh queue" }));
 
     expect(await screen.findByText("Alerts are temporarily unavailable. Please retry.")).toBeInTheDocument();

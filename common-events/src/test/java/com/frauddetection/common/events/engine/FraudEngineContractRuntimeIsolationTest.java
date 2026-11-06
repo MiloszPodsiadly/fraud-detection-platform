@@ -441,6 +441,26 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("engineResults");
     }
 
+    @Test
+    void transactionRiskIntelligencePanelIntegrationTestDoesNotReferencePrivateScoringTypes() throws Exception {
+        String integrationTest = Files.readString(repositoryRoot().resolve(
+                "analyst-console-ui/src/components/TransactionRiskIntelligencePanel.integration.test.jsx"
+        ));
+
+        assertThat(integrationTest)
+                .doesNotContain("FraudSignalEngine")
+                .doesNotContain("FraudEngineDescriptor")
+                .doesNotContain("FraudEngineResult")
+                .doesNotContain("ScoringContext")
+                .doesNotContain("FeatureSnapshotReader")
+                .doesNotContain("FeatureSnapshotValue")
+                .doesNotContain("FeatureSnapshotScalarType")
+                .doesNotContain("FeatureSnapshotKeyPolicy")
+                .doesNotContain("FraudScoringOrchestrator")
+                .doesNotContain("FraudIntelligenceResult")
+                .doesNotContain("engineResults");
+    }
+
     private String javaSources(Path root) throws IOException {
         return sourceFiles(root, ".java");
     }
@@ -475,6 +495,7 @@ class FraudEngineContractRuntimeIsolationTest {
         return sourceFilesExcept(uiRoot,
                 uiRoot.resolve("components/TransactionRiskIntelligencePanel.jsx"),
                 uiRoot.resolve("components/TransactionRiskIntelligencePanel.test.jsx"),
+                uiRoot.resolve("components/TransactionRiskIntelligencePanel.integration.test.jsx"),
                 uiRoot.resolve("components/TransactionRiskIntelligenceOwnership.test.jsx"),
                 uiRoot.resolve("pages/TransactionScoringWorkspacePage.jsx"),
                 uiRoot.resolve("pages/TransactionScoringWorkspacePage.test.jsx"),

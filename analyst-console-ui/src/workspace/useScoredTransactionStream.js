@@ -169,7 +169,12 @@ function validRow(row) {
     && typeof row.transactionId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(row.transactionId)
     && optionalText(row.customerId)
     && (row.riskLevel == null || ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(row.riskLevel))
-    && (row.fraudScore == null || Number.isFinite(row.fraudScore))
+    && (row.fraudScore == null || (
+      typeof row.fraudScore === "number"
+      && Number.isFinite(row.fraudScore)
+      && row.fraudScore >= 0
+      && row.fraudScore <= 1
+    ))
     && (row.alertRecommended == null || typeof row.alertRecommended === "boolean")
     && (row.scoredAt == null || (optionalText(row.scoredAt) && Number.isFinite(Date.parse(row.scoredAt))))
     && isValidMoneyResponse(row.transactionAmount);
