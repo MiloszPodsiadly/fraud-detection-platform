@@ -171,14 +171,20 @@ function sameRequest(left, right) {
 }
 
 function isValidAlertPage(value, request) {
+  const contentLength = Array.isArray(value?.content) ? value.content.length : -1;
+  const pageOffset = request.page * request.size;
+  const pageEnd = pageOffset + contentLength;
   return isRecord(value)
     && Array.isArray(value.content)
-    && value.content.length <= request.size
+    && contentLength <= request.size
     && value.content.every(isValidAlertSummary)
     && Number.isSafeInteger(value.totalElements) && value.totalElements >= 0
     && Number.isSafeInteger(value.totalPages) && value.totalPages >= 0
     && Number.isSafeInteger(value.page) && value.page === request.page
     && Number.isSafeInteger(value.size) && value.size === request.size
+    && Number.isSafeInteger(pageOffset)
+    && Number.isSafeInteger(pageEnd)
+    && (contentLength === 0 || pageEnd <= value.totalElements)
     && value.totalPages === Math.ceil(value.totalElements / request.size)
     && (value.page < value.totalPages || value.content.length === 0);
 }

@@ -40,6 +40,66 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail()).valid).toBe(true);
   });
 
+  it.each(["LOW", "MEDIUM", "HIGH", "CRITICAL"])("accepts top-level risk level %s", (riskLevel) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ riskLevel })).valid).toBe(true);
+  });
+
+  it.each([null, undefined])("accepts historical optional top-level fields when set to %s", (value) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      riskLevel: value,
+      correlationId: value,
+      customerId: value,
+      fraudScore: value
+    })).valid).toBe(true);
+  });
+
+  it("accepts missing historical optional top-level fields", () => {
+    const value = detail();
+    delete value.riskLevel;
+    delete value.correlationId;
+    delete value.customerId;
+    delete value.fraudScore;
+
+    expect(validateTransactionRiskIntelligenceDetail(value).valid).toBe(true);
+  });
+
+  it.each([
+    ["riskLevel", { value: "HIGH" }],
+    ["riskLevel", []],
+    ["riskLevel", "NOT_A_RISK_LEVEL"],
+    ["riskLevel", 5],
+    ["riskLevel", true],
+    ["correlationId", { value: "corr-1" }],
+    ["correlationId", []],
+    ["correlationId", true],
+    ["correlationId", 7],
+    ["correlationId", "bad\u0001id"],
+    ["customerId", { value: "customer-1" }],
+    ["customerId", []],
+    ["customerId", true],
+    ["customerId", "bad\u0001id"],
+    ["fraudScore", "0.91"],
+    ["fraudScore", "NaN"],
+    ["fraudScore", {}],
+    ["fraudScore", []],
+    ["fraudScore", true],
+    ["fraudScore", Number.NaN],
+    ["fraudScore", Number.POSITIVE_INFINITY],
+    ["fraudScore", Number.NEGATIVE_INFINITY],
+    ["fraudScore", -0.01],
+    ["fraudScore", 1.01]
+  ])("rejects malformed top-level %s value %s", (field, value) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ [field]: value })).valid).toBe(false);
+  });
+
+  it.each(["correlationId", "customerId"])("accepts a bounded safe %s string", (field) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ [field]: `${field}-1` })).valid).toBe(true);
+  });
+
+  it.each([0, 1, 0.91])("accepts valid nullable fraud score %s", (fraudScore) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ fraudScore })).valid).toBe(true);
+  });
+
   it.each([true, false, null, undefined])("accepts legacy optional alertRecommended value %s", (alertRecommended) => {
     expect(validateTransactionRiskIntelligenceDetail(detail({ alertRecommended })).valid).toBe(true);
   });

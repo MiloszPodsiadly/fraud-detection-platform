@@ -103,6 +103,18 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!safeString(detail.transactionId)) {
     return invalid("MISSING_TRANSACTION_ID");
   }
+  if (!engineIntelligenceContract.optionalOneOf(detail.riskLevel, engineIntelligenceContract.RISK_LEVELS)) {
+    return invalid("INVALID_DETAIL_RISK_LEVEL");
+  }
+  if (!isOptionalSafeString(detail.correlationId)) {
+    return invalid("INVALID_DETAIL_CORRELATION_ID");
+  }
+  if (!isOptionalSafeString(detail.customerId)) {
+    return invalid("INVALID_DETAIL_CUSTOMER_ID");
+  }
+  if (!isOptionalFraudScore(detail.fraudScore)) {
+    return invalid("INVALID_DETAIL_FRAUD_SCORE");
+  }
   if (!validOptionalTimestamp(detail.transactionTimestamp) || !validOptionalTimestamp(detail.scoredAt)) {
     return invalid("INVALID_DETAIL_TIMESTAMP");
   }
@@ -299,6 +311,15 @@ function isNumberOrNull(value) {
 
 function isStringOrNull(value) {
   return value === null || typeof value === "string";
+}
+
+function isOptionalSafeString(value) {
+  return value === undefined || value === null || safeString(value);
+}
+
+function isOptionalFraudScore(value) {
+  return value === undefined || value === null
+    || (Number.isFinite(value) && value >= 0 && value <= 1);
 }
 
 function safeString(value, maxLength = engineIntelligenceContract.MAX_PUBLIC_STRING_LENGTH) {

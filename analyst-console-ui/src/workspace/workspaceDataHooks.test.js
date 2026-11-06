@@ -48,6 +48,36 @@ describe("workspace data hooks", () => {
     expect(result.current.page.totalElements).toBe(1);
   });
 
+  it("accepts a coherent final page where the returned rows end at the declared total", async () => {
+    const firstPageRows = Array.from({ length: 10 }, (_, index) => ({ alertId: `alert-${index}` }));
+    const finalPageRows = Array.from({ length: 5 }, (_, index) => ({ alertId: `alert-${index + 10}` }));
+    const apiClient = {
+      listAlerts: vi.fn()
+        .mockResolvedValueOnce({ content: firstPageRows, totalElements: 15, totalPages: 2, page: 0, size: 10 })
+        .mockResolvedValueOnce({ content: finalPageRows, totalElements: 15, totalPages: 2, page: 1, size: 10 })
+    };
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient }));
+
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true));
+    act(() => result.current.setRequest({ page: 1, size: 10 }));
+    await waitFor(() => expect(result.current.page.page).toBe(1));
+
+    expect(result.current.page.content).toEqual(finalPageRows);
+    expect(result.current.page.totalElements).toBe(15);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("accepts an empty page zero for a genuinely empty alert queue", async () => {
+    const apiClient = {
+      listAlerts: vi.fn().mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 })
+    };
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient }));
+
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true));
+    expect(result.current.page).toEqual({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
+    expect(result.current.error).toBeNull();
+  });
+
   it("does not let a saved alert refresh cross an owner transition", async () => {
     const ownerAClient = { listAlerts: vi.fn().mockResolvedValue(page([{ alertId: "alert-a" }], { size: 10 })) };
     const ownerBClient = { listAlerts: vi.fn().mockResolvedValue(page([{ alertId: "alert-b" }], { size: 10 })) };
@@ -106,6 +136,9 @@ describe("workspace data hooks", () => {
     ["unexpected response page", { content: [], totalElements: 0, totalPages: 0, page: 1, size: 10 }],
     ["unexpected response size", { content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 }],
     ["page total mismatch", { content: [], totalElements: 11, totalPages: 1, page: 0, size: 10 }],
+    ["more rows than declared total", { content: [{ alertId: "alert-1" }, { alertId: "alert-2" }], totalElements: 1, totalPages: 1, page: 0, size: 10 }],
+    ["rows with zero total", { content: [{ alertId: "alert-1" }], totalElements: 0, totalPages: 0, page: 0, size: 10 }],
+    ["page offset plus rows exceeds total", { content: Array.from({ length: 6 }, (_, index) => ({ alertId: `alert-${index}` })), totalElements: 15, totalPages: 2, page: 1, size: 10 }],
     ["content exceeds requested size", { content: Array.from({ length: 11 }, (_, index) => ({ alertId: `alert-${index}` })), totalElements: 11, totalPages: 2, page: 0, size: 10 }],
     ["array alert row", { content: [[]], totalElements: 1, totalPages: 1, page: 0, size: 10 }],
     ["object alert reason", page([{ alertId: "alert-1", alertReason: { private: true } }], { size: 10 })],

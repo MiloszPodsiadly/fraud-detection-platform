@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { Component, useLayoutEffect, useRef, useState } from "react";
+import { Component, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTHORITIES } from "../auth/session.js";
 import { availableDetail } from "../transactions/transactionRiskIntelligenceFixtures.js";
@@ -169,6 +169,47 @@ describe("transaction scoring read boundary with real provider, API client, hook
 
     await act(async () => pending.resolve(jsonResponse({ content: [], page: 0, size: 10, totalElements: 0, totalPages: 0 })));
     expect(await screen.findByRole("link", { name: "Alerts 0" })).toBeInTheDocument();
+  });
+
+  it("does not publish contradictory alert rows or counters after a successful page", async () => {
+    let alertReads = 0;
+    const onCounterUpdate = vi.fn();
+    const invalidRows = ["contradictory-1", "contradictory-2"].map((alertId) => ({
+      ...alertPage("invalid").content[0],
+      alertId,
+      alertReason: alertId
+    }));
+    installTransport({
+      detail: (call) => {
+        if (!call.path.endsWith("/alerts")) return jsonResponse({}, 404);
+        alertReads += 1;
+        if (alertReads === 1) return jsonResponse(alertPage("known"));
+        return jsonResponse({
+          content: invalidRows,
+          page: 0,
+          size: 10,
+          totalElements: 1,
+          totalPages: 1
+        });
+      }
+    });
+    render(<AlertCounterRuntimeShell
+      currentSession={{ ...session("a"), authorities: [AUTHORITIES.ALERT_READ] }}
+      frames={[]}
+      onCounterUpdate={onCounterUpdate}
+    />);
+
+    expect(await screen.findByText("private-reason-known")).toBeInTheDocument();
+    expect(screen.getByTestId("global-alerts")).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh queue" }));
+
+    expect(await screen.findByText("Alerts are temporarily unavailable. Please retry.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText("contradictory-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("contradictory-2")).not.toBeInTheDocument();
+    expect(screen.getByTestId("global-alerts")).toHaveTextContent("1");
+    expect(onCounterUpdate).toHaveBeenCalledTimes(1);
+    expect(onCounterUpdate).toHaveBeenCalledWith("alerts", 1);
   });
 
   it.each([
@@ -1156,6 +1197,35 @@ function AlertWorkspaceRuntime({ currentSession, frames }) {
         onOpenAlert={noOp}
       >
         {(result) => <WorkspaceRuntimeCommitProbe result={result} frames={frames} />}
+      </AlertRuntime>
+    </WorkspaceRuntimeProvider>
+  );
+}
+
+function AlertCounterRuntimeShell({ currentSession, frames, onCounterUpdate }) {
+  const [alertCount, setAlertCount] = useState(null);
+  const setCounterValue = useCallback((key, value) => {
+    if (key === "alerts") {
+      onCounterUpdate?.(key, value);
+      setAlertCount(value);
+    }
+  }, [onCounterUpdate]);
+
+  return (
+    <WorkspaceRuntimeProvider session={currentSession} authProvider={provider}>
+      <output data-testid="global-alerts">{alertCount ?? "Unavailable"}</output>
+      <AlertRuntime
+        route={alertRoute}
+        sharedWorkspaceReadsEnabled
+        setCounterValue={setCounterValue}
+        onOpenAlert={noOp}
+      >
+        {(result) => (
+          <>
+            <button type="button" onClick={() => { void result.refreshWorkspace(); }}>Refresh queue</button>
+            <WorkspaceRuntimeCommitProbe result={result} frames={frames} />
+          </>
+        )}
       </AlertRuntime>
     </WorkspaceRuntimeProvider>
   );

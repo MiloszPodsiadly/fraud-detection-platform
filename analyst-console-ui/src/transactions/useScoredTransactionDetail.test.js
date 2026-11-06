@@ -243,6 +243,21 @@ describe("useScoredTransactionDetail", () => {
     expect(result.current.detail).toBeNull();
   });
 
+  it("fails closed on malformed top-level scalars without exposing the response", async () => {
+    const rawMarker = "PRIVATE_RAW_DETAIL_CANARY";
+    const apiClient = apiClientWith(detail({ correlationId: { rawMarker } }));
+    const { result } = renderHook(() => useScoredTransactionDetail({
+      transactionId: "txn-1",
+      enabled: true,
+      apiClient
+    }));
+
+    await waitFor(() => expect(result.current.error?.message).toBe("INVALID_TRANSACTION_RISK_INTELLIGENCE_RESPONSE"));
+    expect(result.current.detail).toBeNull();
+    expect(result.current.error?.code).toBe("INVALID_DETAIL_CORRELATION_ID");
+    expect(JSON.stringify({ detail: result.current.detail, error: result.current.error })).not.toContain(rawMarker);
+  });
+
   it("rejects a response that belongs to a different transaction", async () => {
     const apiClient = apiClientWith(detail({ transactionId: "txn-other" }));
     const { result } = renderHook(() => useScoredTransactionDetail({
