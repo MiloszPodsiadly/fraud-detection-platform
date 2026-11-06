@@ -210,11 +210,14 @@ export function useWorkspaceCounters({
         || !ownerCanReadCounter(capabilities, counterName)) {
       return;
     }
+    if (!isValidWorkspaceCounterValue(value)) {
+      return;
+    }
     writeState((current) => ({
       ...current,
       counters: {
         ...current.counters,
-        [counterName]: value ?? current.counters[counterName]
+        [counterName]: value
       },
       ...counterRecovered(current, counterName)
     }));
@@ -225,6 +228,10 @@ export function useWorkspaceCounters({
     refresh,
     setCounterValue
   }), [refresh, setCounterValue, state]);
+}
+
+export function isValidWorkspaceCounterValue(value) {
+  return Number.isSafeInteger(value) && value >= 0;
 }
 
 function ownerCanReadCounter(capabilities, counterName) {
@@ -327,7 +334,11 @@ function reduceCounterResults(current, requests, results, authorityState) {
     const result = results[index];
     if (result.status === "fulfilled") {
       try {
-        counters[request.name] = request.readValue(result.value) ?? counters[request.name];
+        const value = request.readValue(result.value);
+        if (!isValidWorkspaceCounterValue(value)) {
+          throw new Error("Counter response is invalid");
+        }
+        counters[request.name] = value;
         hasSuccessfulRefresh = true;
       } catch (error) {
         hasNonAbortFailure = true;
@@ -394,10 +405,11 @@ function readSuspiciousTransactionSummaryTotal(summary) {
 
 function recordCounterFailure(errorByCounter, counterName, reason, current, counters) {
   errorByCounter[counterName] = counterFailureMessage(counterName, reason);
-  if (current.counters[counterName] !== null && current.counters[counterName] !== undefined) {
+  if (isValidWorkspaceCounterValue(current.counters[counterName])) {
     counters[counterName] = current.counters[counterName];
     return true;
   }
+  counters[counterName] = null;
   return false;
 }
 

@@ -146,7 +146,6 @@ export function WorkspaceDashboardShell({
             isFraudCaseSummaryLoading={navigationState.isFraudCaseSummaryLoading
               || (activeRoute.key !== "analyst" && workspaceCounterState.isLoading && workspaceCounterState.counters.fraudCases == null)}
             onWorkspaceChange={navigateWorkspace}
-            transactionPage={navigationState.transactionPage}
             advisoryQueue={navigationState.advisoryQueue}
             governanceAnalytics={navigationState.governanceAnalytics}
             sessionState={sessionState}

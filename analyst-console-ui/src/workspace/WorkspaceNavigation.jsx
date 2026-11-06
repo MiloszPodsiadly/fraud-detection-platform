@@ -1,4 +1,5 @@
 import { WORKSPACE_ROUTE_ENTRIES } from "./WorkspaceRouteRegistry.jsx";
+import { isValidWorkspaceCounterValue } from "./useWorkspaceCounters.js";
 
 export function WorkspaceNavigation({
   workspacePage,
@@ -13,7 +14,6 @@ export function WorkspaceNavigation({
   canReadGovernanceAdvisories,
   canReadModelGovernance,
   alertPage,
-  transactionPage,
   fraudCaseSummary,
   fraudCaseSummaryError,
   fraudCaseTotalElements,
@@ -29,18 +29,20 @@ export function WorkspaceNavigation({
     "suspiciousTransactions",
     failedCounterNames,
     workspaceCountersStatus
-  ) && workspaceCounters.suspiciousTransactions == null;
+  ) && !isValidWorkspaceCounterValue(workspaceCounters.suspiciousTransactions);
   const suspiciousCounterUnavailable = showWorkspaceCounters
     && canReadSuspiciousTransactions === true
-    && workspaceCounters.suspiciousTransactions == null;
+    && !isValidWorkspaceCounterValue(workspaceCounters.suspiciousTransactions);
   const transactionGlobalCount = showWorkspaceCounters
-    ? counterValueForAuthority(canReadTransactions, workspaceCounters.transactions ?? transactionPage?.totalElements)
+    ? counterValueForAuthority(canReadTransactions, workspaceCounters.transactions)
     : null;
   const alertGlobalCount = showWorkspaceCounters
     ? counterValueForAuthority(canReadAlerts, workspaceCounters.alerts ?? alertPage?.totalElements)
     : null;
+  const fraudCaseSummaryCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements;
   const fraudCaseGlobalCount = showWorkspaceCounters && canReadFraudCases === true
-    ? fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements
+    && isValidWorkspaceCounterValue(fraudCaseSummaryCount)
+    ? fraudCaseSummaryCount
     : null;
   const fraudCaseSummaryLabel = !showWorkspaceCounters
     ? null
@@ -75,7 +77,7 @@ export function WorkspaceNavigation({
     },
     suspiciousTransactions: {
       value: canReadSuspiciousTransactions === true
-        ? showWorkspaceCounters ? workspaceCounters.suspiciousTransactions ?? "Unavailable" : null
+        ? showWorkspaceCounters ? counterValueForAuthority(canReadSuspiciousTransactions, workspaceCounters.suspiciousTransactions) : null
         : counterValueForAuthority(canReadSuspiciousTransactions),
       authority: canReadSuspiciousTransactions,
       stale: isCounterStale("suspiciousTransactions", failedCounterNames, workspaceCountersStatus),
@@ -91,7 +93,7 @@ export function WorkspaceNavigation({
           ? undefined
           : suspiciousSummaryUnavailable || suspiciousCounterUnavailable || canReadSuspiciousTransactions !== true
             ? "Signal total unavailable"
-            : `Workspace signal total ${workspaceCounters.suspiciousTransactions ?? 0}`
+            : `Workspace signal total ${workspaceCounters.suspiciousTransactions}`
     },
     analyst: {
       value: fraudCaseSummaryDisplayLabel,
@@ -184,7 +186,7 @@ function counterValueForAuthority(authority, value) {
   if (authority !== true) {
     return "Unavailable";
   }
-  return value ?? "Unavailable";
+  return isValidWorkspaceCounterValue(value) ? value : "Unavailable";
 }
 
 function isCounterUnavailable(counterName, failedCounterNames, workspaceCountersStatus) {

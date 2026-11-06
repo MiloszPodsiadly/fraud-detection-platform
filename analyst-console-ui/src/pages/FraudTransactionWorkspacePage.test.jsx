@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { useAlertQueue } from "../workspace/useAlertQueue.js";
 import { FraudTransactionWorkspacePage } from "./FraudTransactionWorkspacePage.jsx";
 
 describe("FraudTransactionWorkspacePage filter draft ownership", () => {
@@ -130,6 +131,207 @@ describe("Alert Queue local filtering and backend pagination", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });
+
+describe("Alert Queue recovery when the queue shrinks", () => {
+  it("recovers an empty out-of-range page to page zero once and keeps the local filter draft", async () => {
+    const requests = [];
+    const responses = [
+      queuePage(0, 30, "a"),
+      queuePage(1, 30, "a"),
+      queuePage(2, 30, "a"),
+      queuePage(2, 0, "a"),
+      queuePage(0, 0, "a")
+    ];
+    const apiClient = {
+      listAlerts: vi.fn(({ page: pageNumber, size }) => {
+        requests.push({ page: pageNumber, size });
+        return Promise.resolve(responses[requests.length - 1]);
+      })
+    };
+    render(<AlertQueueHookPage apiClient={apiClient} session={alertSession("a")} />);
+
+    expect(await screen.findByRole("button", { name: "Review" })).toHaveAttribute("data-detail-origin", "alert-alert-a-0");
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "saved-filter" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 3 of 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh queue" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("queue-request-page")).toHaveTextContent("0");
+      expect(screen.getByTestId("queue-loaded")).toHaveTextContent("true");
+      expect(screen.getByTestId("queue-total")).toHaveTextContent("0");
+    });
+
+    expect(requests).toEqual([
+      { page: 0, size: 10 },
+      { page: 1, size: 10 },
+      { page: 2, size: 10 },
+      { page: 2, size: 10 },
+      { page: 0, size: 10 }
+    ]);
+    expect(screen.getByLabelText("Search")).toHaveValue("saved-filter");
+    expect(screen.queryByText(/Page \d+ of \d+/)).not.toBeInTheDocument();
+  });
+
+  it("recovers a page beyond the new last page when rows remain", async () => {
+    const requests = [];
+    const apiClient = {
+      listAlerts: vi.fn(({ page: pageNumber, size }) => {
+        requests.push({ page: pageNumber, size });
+        if (requests.length <= 5) return Promise.resolve(queuePage(pageNumber, 50, "a"));
+        if (requests.length === 6) return Promise.resolve(queuePage(pageNumber, 15, "a"));
+        return Promise.resolve(queuePage(pageNumber, 15, "a"));
+      })
+    };
+    render(<AlertQueueHookPage apiClient={apiClient} session={alertSession("a")} />);
+
+    expect(await screen.findByRole("button", { name: "Review" })).toHaveAttribute("data-detail-origin", "alert-alert-a-0");
+    for (let pageNumber = 1; pageNumber <= 4; pageNumber += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(await screen.findByText(`Page ${pageNumber + 1} of 5`)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh queue" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("queue-request-page")).toHaveTextContent("0");
+      expect(screen.getByTestId("queue-loaded")).toHaveTextContent("true");
+      expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Review" })).toHaveAttribute("data-detail-origin", "alert-alert-a-0");
+    });
+
+    expect(requests.map(({ page: pageNumber }) => pageNumber)).toEqual([0, 1, 2, 3, 4, 4, 0]);
+    expect(screen.getByTestId("queue-total")).toHaveTextContent("15");
+  });
+
+  it("does not loop when the page-zero recovery request fails", async () => {
+    const requests = [];
+    const apiClient = {
+      listAlerts: vi.fn(({ page: pageNumber, size }) => {
+        requests.push({ page: pageNumber, size });
+        if (requests.length <= 3) return Promise.resolve(queuePage(pageNumber, 30, "a"));
+        if (requests.length === 4) return Promise.resolve(queuePage(pageNumber, 0, "a"));
+        return Promise.reject(new Error("private storage host and customer data"));
+      })
+    };
+    render(<AlertQueueHookPage apiClient={apiClient} session={alertSession("a")} />);
+
+    expect(await screen.findByRole("button", { name: "Review" })).toHaveAttribute("data-detail-origin", "alert-alert-a-0");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 3 of 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh queue" }));
+
+    await waitFor(() => expect(screen.getByTestId("queue-error")).toHaveTextContent(
+      "Alerts are temporarily unavailable. Please retry."
+    ));
+    expect(requests.map(({ page: pageNumber }) => pageNumber)).toEqual([0, 1, 2, 2, 0]);
+    expect(screen.getByTestId("queue-error")).toHaveTextContent("Alerts are temporarily unavailable. Please retry.");
+  });
+
+  it("fences a pending page-zero recovery when the queue owner changes", async () => {
+    const pendingARecovery = deferred();
+    const requestsA = [];
+    let recoverySignal;
+    const clientA = {
+      listAlerts: vi.fn(({ page: pageNumber, size }, { signal }) => {
+        requestsA.push(pageNumber);
+        if (requestsA.length <= 3) return Promise.resolve(queuePage(pageNumber, 30, "a"));
+        if (requestsA.length === 4) return Promise.resolve(queuePage(pageNumber, 0, "a"));
+        recoverySignal = signal;
+        return pendingARecovery.promise;
+      })
+    };
+    const clientB = {
+      listAlerts: vi.fn(({ page: pageNumber }) => Promise.resolve(queuePage(pageNumber, 1, "b")))
+    };
+    const { rerender } = render(
+      <AlertQueueHookPage apiClient={clientA} session={alertSession("a")} />
+    );
+
+    expect(await screen.findByRole("button", { name: "Review" })).toHaveAttribute("data-detail-origin", "alert-alert-a-0");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 3 of 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh queue" }));
+    await waitFor(() => expect(requestsA).toHaveLength(5));
+
+    rerender(<AlertQueueHookPage apiClient={clientB} session={alertSession("b")} />);
+    expect(await screen.findByRole("button", { name: "Review" })).toHaveAttribute("data-detail-origin", "alert-alert-b-0");
+    expect(recoverySignal.aborted).toBe(true);
+    expect(clientB.listAlerts).toHaveBeenCalledTimes(1);
+
+    await act(async () => pendingARecovery.resolve(queuePage(0, 1, "a-late")));
+    expect(screen.getByRole("button", { name: "Review" })).toHaveAttribute("data-detail-origin", "alert-alert-b-0");
+    expect(screen.queryByRole("button", { name: "Review" })).not.toHaveAttribute("data-detail-origin", "alert-alert-a-late-0");
+    expect(clientB.listAlerts).toHaveBeenCalledTimes(1);
+  });
+});
+
+function AlertQueueHookPage({ apiClient, session }) {
+  const queue = useAlertQueue({ apiClient, enabled: true, session, authProvider: alertAuthProvider });
+  return (
+    <>
+      <output data-testid="queue-request-page">{queue.request.page}</output>
+      <output data-testid="queue-loaded">{String(queue.hasLoaded)}</output>
+      <output data-testid="queue-total">{queue.page.totalElements}</output>
+      <output data-testid="queue-error">{queue.error?.message ?? ""}</output>
+      <button type="button" onClick={() => { void queue.refresh(); }}>Refresh queue</button>
+      <FraudTransactionWorkspacePage
+        alertPage={queue.page}
+        viewIdentity={queue.viewIdentity}
+        isLoading={queue.isLoading}
+        error={queue.error}
+        onRetry={queue.refresh}
+        onAlertPageChange={(pageNumber) => queue.setRequest({ page: pageNumber, size: queue.request.size })}
+        onAlertPageSizeChange={(size) => queue.setRequest({ page: 0, size })}
+        onOpenAlert={vi.fn()}
+      />
+    </>
+  );
+}
+
+const alertAuthProvider = { kind: "test", getRequestHeaders: () => ({}) };
+
+function alertSession(owner) {
+  return { issuer: `issuer-${owner}`, subject: `subject-${owner}` };
+}
+
+function queuePage(pageNumber, totalElements, owner) {
+  const size = 10;
+  const totalPages = Math.ceil(totalElements / size);
+  return {
+    content: totalElements > 0 && pageNumber < totalPages
+      ? [{
+        alertId: `alert-${owner}-${pageNumber}`,
+        transactionId: `transaction-${owner}-${pageNumber}`,
+        customerId: `customer-${owner}-${pageNumber}`,
+        alertReason: `reason-${owner}-${pageNumber}`,
+        riskLevel: "HIGH",
+        alertStatus: "OPEN",
+        fraudScore: 0.8,
+        alertTimestamp: "2026-11-04T10:00:00Z"
+      }]
+      : [],
+    page: pageNumber,
+    size,
+    totalElements,
+    totalPages
+  };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
 
 function page(pageNumber, customerId, { totalPages = 2, totalElements = 20 } = {}) {
   return {

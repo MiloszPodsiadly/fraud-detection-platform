@@ -105,6 +105,10 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
       if (!isValidAlertPage(nextPage, current.request)) {
         throw new Error(INVALID_ALERT_PAGE);
       }
+      if (isOutOfRangeAlertPage(nextPage, current.request)) {
+        setRequest({ page: 0, size: current.request.size });
+        return null;
+      }
       setState({ identity: current, page: nextPage, isLoading: false, error: null, hasLoaded: true });
       return nextPage;
     } catch (apiError) {
@@ -127,7 +131,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
         }
       }
     }
-  }, [owner]);
+  }, [owner, setRequest]);
 
   useEffect(() => {
     if (!canRequest) {
@@ -175,7 +179,14 @@ function isValidAlertPage(value, request) {
     && Number.isSafeInteger(value.totalPages) && value.totalPages >= 0
     && Number.isSafeInteger(value.page) && value.page === request.page
     && Number.isSafeInteger(value.size) && value.size === request.size
-    && value.totalPages === Math.ceil(value.totalElements / request.size);
+    && value.totalPages === Math.ceil(value.totalElements / request.size)
+    && (value.page < value.totalPages || value.content.length === 0);
+}
+
+function isOutOfRangeAlertPage(value, request) {
+  return request.page > 0
+    && value.content.length === 0
+    && request.page >= value.totalPages;
 }
 
 function isValidAlertSummary(value) {

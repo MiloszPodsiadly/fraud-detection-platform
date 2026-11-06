@@ -26,7 +26,7 @@ afterEach(() => {
 describe("transaction scoring read boundary with real provider, API client, hooks and views", () => {
   it("does not present the initial empty page as a confirmed zero counter", async () => {
     const pending = deferred();
-    installTransport({ list: () => pending.promise });
+    installTransport({ list: () => pending.promise.then((response) => response.clone()) });
     const frames = [];
     render(<StatefulWorkspaceShell currentSession={session("a")} frames={frames} />);
 
@@ -53,6 +53,85 @@ describe("transaction scoring read boundary with real provider, API client, hook
     expect(screen.getByRole("link", { name: "Transactions 12400" })).toBeInTheDocument();
     expect(transport.calls.filter((call) => call.kind === "list" && call.params.size === "1")).toHaveLength(1);
     expect(transport.calls.filter((call) => call.kind === "list" && call.params.size === "25" && call.params.query === "narrowed")).toHaveLength(1);
+  });
+
+  it.each(["filtered-first", "global-counter-first"])(
+    "keeps a failed global count unavailable when the filtered stream resolves %s",
+    async (completionOrder) => {
+      const globalCounter = deferred();
+      const filteredStream = deferred();
+      const transport = installTransport({
+        list: (call) => {
+          if (call.params.size === "1") return globalCounter.promise;
+          if (call.params.query === "narrowed") return filteredStream.promise;
+          return jsonResponse(listPage("a", call.params, 12400));
+        }
+      });
+      const frames = [];
+      render(<StatefulWorkspaceShell currentSession={counterSession("a")} frames={frames} />);
+
+      expect(await screen.findByText("Merchant a")).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText("Search"), { target: { value: "narrowed" } });
+      fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+      await waitFor(() => expect(transport.calls.some((call) => call.kind === "list"
+        && call.params.size === "25" && call.params.query === "narrowed")).toBe(true));
+
+      const finishGlobalCounterFailure = async () => {
+        await act(async () => {
+          globalCounter.resolve(jsonResponse({ message: "private counter failure" }, 503));
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      };
+      const finishFilteredStream = async () => {
+        await act(async () => filteredStream.resolve(jsonResponse(
+          listPage("a", { page: "0", size: "25", query: "narrowed" }, 72, "txn-filtered")
+        )));
+      };
+
+      if (completionOrder === "global-counter-first") {
+        await finishGlobalCounterFailure();
+        await finishFilteredStream();
+      } else {
+        await finishFilteredStream();
+        await finishGlobalCounterFailure();
+      }
+
+      expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
+      expect(screen.getAllByText("72", { selector: "strong" }).length).toBeGreaterThan(0);
+      expect(screen.getByRole("link", { name: "Transactions Unavailable" })).toBeInTheDocument();
+      for (const frame of frames) expect(frame.text).not.toMatch(/Transactions\s*72/);
+    }
+  );
+
+  it("keeps the previous valid global count as last known after a filtered refresh fails", async () => {
+    let globalReads = 0;
+    const transport = installTransport({
+      list: (call) => {
+        if (call.params.size === "1") {
+          globalReads += 1;
+          return globalReads === 1
+            ? jsonResponse(listPage("a", call.params, 12400))
+            : jsonResponse({ message: "private counter failure" }, 503);
+        }
+        return jsonResponse(listPage("a", call.params, call.params.query ? 72 : 12400));
+      },
+      detail: (call) => call.path.endsWith("/alerts") && call.params.size === "1"
+        ? jsonResponse({ message: "private alert counter failure" }, 503)
+        : detailFor(call.owner, call.path.split("/").at(-1))
+    });
+    render(<StatefulWorkspaceShell currentSession={counterSession("a")} frames={[]} />);
+
+    expect(await screen.findByRole("link", { name: "Transactions 12400" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "narrowed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry counters" }));
+    await waitFor(() => expect(transport.calls.filter((call) => call.kind === "list" && call.params.size === "1")).toHaveLength(2));
+
+    expect(await screen.findByRole("link", { name: "Transactions 12400 Last known" })).toBeInTheDocument();
+    expect(screen.getAllByText("72", { selector: "strong" }).length).toBeGreaterThan(0);
+    expect(transport.calls.filter((call) => call.kind === "list" && call.params.size === "1")).toHaveLength(2);
   });
 
   it("does not let a saved runtime refresh call the next owner's transaction client", async () => {

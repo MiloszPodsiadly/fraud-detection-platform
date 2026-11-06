@@ -9,9 +9,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import java.lang.reflect.RecordComponent;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -752,15 +754,41 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String runtime = Files.readString(UI_ROOT.resolve("workspace/ShadowPerformanceWorkspaceRuntime.jsx"));
         String container = Files.readString(UI_ROOT.resolve("workspace/ShadowPerformanceWorkspaceContainer.jsx"));
         String page = Files.readString(UI_ROOT.resolve("pages/ShadowPerformanceDashboardPage.jsx"));
+        String navigation = Files.readString(UI_ROOT.resolve("workspace/WorkspaceNavigation.jsx"));
+        String counterHook = Files.readString(UI_ROOT.resolve("workspace/useWorkspaceCounters.js"));
+        List<String> summaryFields = Arrays.stream(ShadowPerformanceSummary.class.getRecordComponents())
+                .map(RecordComponent::getName)
+                .toList();
+        List<String> metricFields = Arrays.stream(ShadowPerformanceSummary.ShadowPerformanceMetrics.class.getRecordComponents())
+                .map(RecordComponent::getName)
+                .toList();
 
         assertThat(shell)
                 .contains("useWorkspaceCounters(",
+                        "includeTransactions: true",
                         "workspaceCountersStatus={workspaceCounterState}",
-                        "showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}")
-                .contains("const workspaceCountersForRoute = activeRoute.key === \"transactionScoring\"")
-                .contains("transactions: navigationState.transactionPage?.totalElements ?? null")
+                        "showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}",
+                        "workspaceCounters={workspaceCountersForRoute}")
+                .contains("const workspaceCountersForRoute = activeRoute.key === \"fraudTransaction\"")
                 .contains("alerts: navigationState.alertPage?.totalElements ?? null")
-                .contains("workspaceCounters={workspaceCountersForRoute}");
+                .doesNotContain("activeRoute.key === \"transactionScoring\"",
+                        "transactions: navigationState.transactionPage?.totalElements ?? null");
+        assertThat(counterHook).contains(
+                "listScoredTransactions({",
+                "query: \"\"",
+                "riskLevel: \"ALL\"",
+                "status: \"ALL\""
+        );
+        assertThat(navigation)
+                .contains("workspaceCounters.transactions")
+                .doesNotContain("transactionPage", "navigationState.transactionPage?.totalElements");
+        assertThat(summaryFields)
+                .contains("metrics", "evaluationPopulation")
+                .doesNotContain("workspaceCounters", "transactions", "totalTransactions", "totalFraudCases",
+                        "totalSuspiciousTransactions");
+        assertThat(metricFields)
+                .contains("alertRecommendedPrecision", "falsePositiveRate")
+                .doesNotContain("alerts", "fraudCases", "suspiciousTransactions", "transactions", "workspaceCounters");
         assertThat(runtime).contains(
                 "useShadowPerformanceSummary",
                 "summaryState={summaryState}"

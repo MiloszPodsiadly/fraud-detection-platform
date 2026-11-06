@@ -139,6 +139,7 @@ describe("WorkspaceNavigation suspicious transaction counter copy", () => {
         workspacePage="transactionScoring"
         workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.transactionScoring]}
         workspaceCounters={{ alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: 5 }}
+        transactionPage={{ totalElements: 72 }}
         workspaceCountersStatus={{
           degraded: true,
           failedCounters: ["transactions"],
@@ -150,6 +151,42 @@ describe("WorkspaceNavigation suspicious transaction counter copy", () => {
     );
 
     expect(screen.getByRole("link", { name: "Transactions 5 Last known" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Transactions 72" })).not.toBeInTheDocument();
+  });
+
+  it("does not use the filtered page total when the global transaction counter is unavailable", () => {
+    render(
+      <WorkspaceNavigation
+        workspacePage="transactionScoring"
+        workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.transactionScoring]}
+        workspaceCounters={{ alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null }}
+        workspaceCountersStatus={{
+          degraded: true,
+          failedCounters: ["transactions"],
+          errorByCounter: { transactions: "Counter unavailable" },
+          stale: false
+        }}
+        canReadTransactions={true}
+        transactionPage={{ totalElements: 72 }}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "Transactions Unavailable" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Transactions 72" })).not.toBeInTheDocument();
+  });
+
+  it("does not render malformed workspace counter objects as navigation content", () => {
+    render(
+      <WorkspaceNavigation
+        workspacePage="transactionScoring"
+        workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.transactionScoring]}
+        workspaceCounters={{ alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: { value: 42 } }}
+        canReadTransactions={true}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "Transactions Unavailable" })).toBeInTheDocument();
+    expect(screen.queryByText("42")).not.toBeInTheDocument();
   });
 
   function renderSuspiciousNavigation(total) {
