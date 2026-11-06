@@ -90,6 +90,168 @@ describe("useScoredTransactionStream ownership", () => {
     expect(result.current.page.content[0].transactionId).toBe("txn-refresh");
   });
 
+  it("recovers an out-of-range page once while preserving the current backend filters and size", async () => {
+    const requests = [];
+    const apiClient = {
+      listScoredTransactions: vi.fn((request) => {
+        requests.push({ ...request });
+        if (requests.length === 1) {
+          return Promise.resolve(scoredResponse({ page: 0, size: 25, totalElements: 125, content: [page("initial").content[0]] }));
+        }
+        if (requests.length === 2) {
+          return Promise.resolve(scoredResponse({ page: 3, size: 10, totalElements: 4, content: [] }));
+        }
+        return Promise.resolve(scoredResponse({ page: 0, size: 10, totalElements: 4, content: [page("recovered").content[0]] }));
+      })
+    };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-initial"));
+    act(() => result.current.setRequest({
+      page: 3,
+      size: 10,
+      query: "merchant query",
+      riskLevel: "HIGH",
+      status: "SUSPICIOUS"
+    }));
+
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-recovered"));
+    expect(requests).toEqual([
+      { page: 0, size: 25, query: "", riskLevel: "ALL", status: "ALL" },
+      { page: 3, size: 10, query: "merchant query", riskLevel: "HIGH", status: "SUSPICIOUS" },
+      { page: 0, size: 10, query: "merchant query", riskLevel: "HIGH", status: "SUSPICIOUS" }
+    ]);
+    expect(result.current.request).toMatchObject({
+      page: 0,
+      size: 10,
+      query: "merchant query",
+      riskLevel: "HIGH",
+      status: "SUSPICIOUS"
+    });
+  });
+
+  it.each([
+    ["inconsistent total page count", { page: 0, size: 25, totalElements: 10, totalPages: 0, content: [] }],
+    ["rows with zero total", { page: 0, size: 25, totalElements: 0, totalPages: 0, content: [page("contradictory").content[0]] }]
+  ])("rejects contradictory page metadata: %s", async (_name, response) => {
+    const apiClient = { listScoredTransactions: vi.fn().mockResolvedValue(scoredResponse(response)) };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(result.current.error?.message).toBe("The scored transaction response is malformed."));
+    expect(result.current.page.content).toEqual([]);
+  });
+
+  it("recovers a page that shrank to zero rows and does not loop when page zero is empty", async () => {
+    const requests = [];
+    const apiClient = {
+      listScoredTransactions: vi.fn((request) => {
+        requests.push({ ...request });
+        if (requests.length === 1) {
+          return Promise.resolve(scoredResponse({ page: 0, size: 25, totalElements: 125, content: [page("initial").content[0]] }));
+        }
+        if (requests.length === 2) {
+          return Promise.resolve(scoredResponse({ page: request.page, size: request.size, totalElements: 0, content: [] }));
+        }
+        return Promise.resolve(scoredResponse({ page: 0, size: request.size, totalElements: 0, content: [] }));
+      })
+    };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(result.current.page.content).toHaveLength(1));
+    act(() => result.current.setRequest((current) => ({ ...current, page: 1000 })));
+    await waitFor(() => expect(result.current.request.page).toBe(0));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.page).toMatchObject({ content: [], page: 0, totalElements: 0, totalPages: 0 });
+    expect(result.current.error).toBeNull();
+    expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(3);
+    expect(requests.map(({ page: pageNumber }) => pageNumber)).toEqual([0, 1000, 0]);
+  });
+
+  it("shows a safe recovery error and allows a later manual retry", async () => {
+    const apiClient = {
+      listScoredTransactions: vi.fn()
+        .mockResolvedValueOnce(scoredResponse({ page: 0, size: 25, totalElements: 125, content: [page("initial").content[0]] }))
+        .mockResolvedValueOnce(scoredResponse({ page: 3, size: 25, totalElements: 10, content: [] }))
+        .mockRejectedValueOnce(new Error("private issuer and transaction diagnostics"))
+        .mockResolvedValueOnce(scoredResponse({ page: 0, size: 25, totalElements: 10, content: [page("retried").content[0]] }))
+    };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-initial"));
+    act(() => result.current.setRequest((current) => ({ ...current, page: 3 })));
+    await waitFor(() => expect(result.current.error?.message).toBe("Scored transactions are temporarily unavailable."));
+
+    expect(result.current.request.page).toBe(0);
+    expect(result.current.page.content).toEqual([]);
+    expect(result.current.error.message).not.toContain("private issuer");
+    expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(3);
+
+    await act(async () => result.current.refresh());
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-retried"));
+    expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(4);
+  });
+
+  it("aborts and fences an unresolved page-zero recovery when the owner changes", async () => {
+    const pendingRecovery = deferred();
+    const oldClient = {
+      listScoredTransactions: vi.fn()
+        .mockResolvedValueOnce(scoredResponse({ page: 0, size: 25, totalElements: 125, content: [page("owner-a").content[0]] }))
+        .mockResolvedValueOnce(scoredResponse({ page: 3, size: 25, totalElements: 10, content: [] }))
+        .mockReturnValueOnce(pendingRecovery.promise)
+    };
+    const newClient = {
+      listScoredTransactions: vi.fn().mockResolvedValue(scoredResponse({
+        page: 0,
+        size: 25,
+        totalElements: 1,
+        content: [page("owner-b").content[0]]
+      }))
+    };
+    const initial = readContext(oldClient);
+    const { result, rerender } = renderStream(initial);
+
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-owner-a"));
+    act(() => result.current.setRequest((current) => ({ ...current, page: 3 })));
+    await waitFor(() => expect(oldClient.listScoredTransactions).toHaveBeenCalledTimes(3));
+    const recoverySignal = oldClient.listScoredTransactions.mock.calls[2][1].signal;
+
+    rerender({ ...initial, apiClient: newClient, session: { ...initial.session, issuer: "issuer-b" } });
+    expect(recoverySignal.aborted).toBe(true);
+    await waitFor(() => expect(result.current.page.content[0]?.transactionId).toBe("txn-owner-b"));
+
+    await act(async () => pendingRecovery.resolve(scoredResponse({
+      page: 0,
+      size: 25,
+      totalElements: 1,
+      content: [page("owner-a-late").content[0]]
+    })));
+    expect(result.current.page.content[0]?.transactionId).toBe("txn-owner-b");
+    expect(newClient.listScoredTransactions).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts consistent capped filtered totals from the backend", async () => {
+    const response = scoredResponse({
+      page: 399,
+      size: 25,
+      totalElements: 10_000,
+      totalPages: 400,
+      content: []
+    });
+    const apiClient = {
+      listScoredTransactions: vi.fn()
+        .mockResolvedValueOnce(scoredResponse({ page: 0, size: 25, totalElements: 10_000, totalPages: 400 }))
+        .mockResolvedValueOnce(response)
+    };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(1));
+    act(() => result.current.setRequest({ page: 399, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" }));
+    await waitFor(() => expect(result.current.page.page).toBe(399));
+    expect(result.current.error).toBeNull();
+    expect(result.current.page.totalElements).toBe(10_000);
+  });
+
   it("rejects saved refresh callbacks after owner transitions but keeps fresh callbacks active", async () => {
     const oldClient = { listScoredTransactions: vi.fn().mockResolvedValue(page("old")) };
     const newClient = { listScoredTransactions: vi.fn().mockResolvedValue(page("new")) };
@@ -278,10 +440,15 @@ function readContext(apiClient) {
 }
 
 function page(name, request = {}) {
-  return {
+  const response = {
     content: [{ transactionId: "txn-" + name, customerId: "customer-" + name, merchantInfo: { merchantName: "Merchant " + name } }],
-    totalElements: 73, totalPages: 8, page: 0, size: 25, ...request
+    totalElements: 73, page: 0, size: 25, ...request
   };
+  return { ...response, totalPages: Math.ceil(response.totalElements / response.size) };
+}
+
+function scoredResponse({ content = [], page: pageNumber = 0, size = 25, totalElements = 0, totalPages = Math.ceil(totalElements / size) }) {
+  return { content, page: pageNumber, size, totalElements, totalPages };
 }
 
 function deferred() {

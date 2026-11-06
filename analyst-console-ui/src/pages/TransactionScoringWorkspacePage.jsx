@@ -75,20 +75,22 @@ export function TransactionScoringWorkspacePage({
             />
           )}
           {!isLoading && !error && transactions.length > 0 && (
-            <>
-              <TransactionMonitorTable
-                transactions={transactions}
-                expandedTransactionId={expandedTransactionId}
-                onToggleTransaction={(transactionId) => setSelection({ viewIdentity, transactionId })}
-                renderTransactionDetail={(transaction, detailPanelId) => (
-                  <TransactionRiskIntelligencePanel
-                    transactionId={transaction.transactionId}
-                    apiClient={apiClient}
-                    enabled={canReadTransactions === true}
-                    panelId={detailPanelId}
-                  />
-                )}
-              />
+            <TransactionMonitorTable
+              transactions={transactions}
+              expandedTransactionId={expandedTransactionId}
+              onToggleTransaction={(transactionId) => setSelection({ viewIdentity, transactionId })}
+              renderTransactionDetail={(transaction, detailPanelId) => (
+                <TransactionRiskIntelligencePanel
+                  transactionId={transaction.transactionId}
+                  apiClient={apiClient}
+                  enabled={canReadTransactions === true}
+                  panelId={detailPanelId}
+                />
+              )}
+            />
+          )}
+          {!isLoading && !error && transactionPage.page < transactionPage.totalPages
+            && (transactionPage.totalPages > 1 || transactionPage.totalElements > 0) && (
               <PaginationControls
                 page={transactionPage.page}
                 size={transactionPage.size}
@@ -99,7 +101,6 @@ export function TransactionScoringWorkspacePage({
                 onPageChange={onTransactionPageChange}
                 onSizeChange={onTransactionPageSizeChange}
               />
-            </>
           )}
         </>
       )}

@@ -164,10 +164,71 @@ describe("transaction scoring read boundary with real provider, API client, hook
       initialWorkspacePage="fraudTransaction"
     />);
 
+    expect(screen.queryByText("No alerts on this loaded page match the local filters.")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Alerts Unavailable" })).toBeInTheDocument();
 
     await act(async () => pending.resolve(jsonResponse({ content: [], page: 0, size: 10, totalElements: 0, totalPages: 0 })));
     expect(await screen.findByRole("link", { name: "Alerts 0" })).toBeInTheDocument();
+  });
+
+  it.each([
+    [false, "No access", (owner) => ({ ...session(owner), authorities: [AUTHORITIES.FRAUD_CASE_READ] })],
+    [undefined, "Alerts unavailable", (owner) => ({ ...session(owner), authorities: [] })]
+  ])("does not read or render an empty queue when alert capability is %s", async (capability, title, makeSession) => {
+    const transport = installTransport();
+    render(
+      <StatefulWorkspaceShell
+        currentSession={makeSession("a")}
+        frames={[]}
+        initialWorkspacePage="fraudTransaction"
+      />
+    );
+
+    expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Page size")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText("No alerts on this loaded page match the local filters.")).not.toBeInTheDocument();
+    expect(transport.calls.filter((call) => call.path.endsWith("/alerts"))).toHaveLength(0);
+  });
+
+  it.each([
+    [false, (sessionValue) => ({ ...sessionValue, authorities: [AUTHORITIES.FRAUD_CASE_READ] })],
+    [undefined, (sessionValue) => ({ ...sessionValue, authorities: [] })]
+  ])("redacts alert rows and controls in the first commit when read capability becomes %s", async (capability, revoke) => {
+    const transport = installTransport({ detail: () => jsonResponse(alertPage("a", "private-alert-customer")) });
+    const frames = [];
+    const initialSession = { ...session("a"), authorities: [AUTHORITIES.ALERT_READ] };
+    const { rerender } = render(
+      <StatefulWorkspaceShell
+        currentSession={initialSession}
+        frames={frames}
+        initialWorkspacePage="fraudTransaction"
+      />
+    );
+
+    expect(await screen.findByText("private-reason-a")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toBeInTheDocument();
+    const alertReadsBeforeRevocation = transport.calls.filter((call) => call.path.endsWith("/alerts")).length;
+    frames.length = 0;
+    rerender(
+      <StatefulWorkspaceShell
+        currentSession={revoke(initialSession)}
+        frames={frames}
+        initialWorkspacePage="fraudTransaction"
+      />
+    );
+
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      expect(frame.text).not.toContain("private-reason-a");
+      expect(frame.text).not.toContain("private-alert-customer");
+      expect(Object.keys(frame.controls)).toEqual([]);
+    }
+    expect(screen.getByRole("heading", { name: capability === false ? "No access" : "Alerts unavailable" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(transport.calls.filter((call) => call.path.endsWith("/alerts"))).toHaveLength(alertReadsBeforeRevocation);
   });
 
   it("resets Alert Queue filter drafts synchronously across owner and capability switches", async () => {
@@ -238,13 +299,13 @@ describe("transaction scoring read boundary with real provider, API client, hook
     rerender(
       <StatefulWorkspaceShell currentSession={deniedA} frames={frames} initialWorkspacePage="fraudTransaction" />
     );
-    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+    expectAlertFilterControlsHidden(frames);
 
     frames.length = 0;
     rerender(
       <StatefulWorkspaceShell currentSession={{ ...sessionA, authorities: [] }} frames={frames} initialWorkspacePage="fraudTransaction" />
     );
-    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+    expectAlertFilterControlsHidden(frames);
 
     frames.length = 0;
     rerender(
@@ -736,6 +797,67 @@ describe("transaction scoring read boundary with real provider, API client, hook
     expect(transport.calls.filter((call) => call.kind === "detail")).toHaveLength(0);
   });
 
+  it("recovers a stale filtered page to page zero without losing the analyst's filters", async () => {
+    const scoredRequests = [];
+    let pageThreeReads = 0;
+    let filteredPageZeroReads = 0;
+    const transport = installTransport({
+      list: (call) => {
+        if (call.params.size === "1") return jsonResponse(listPage("a", call.params, 12400));
+        scoredRequests.push({ ...call.params });
+        const pageNumber = Number(call.params.page || 0);
+        const size = Number(call.params.size || 25);
+        if (call.params.query === "merchant-recovery" && size === 50 && pageNumber === 3) {
+          pageThreeReads += 1;
+          if (pageThreeReads === 1) return jsonResponse(listPage("a", call.params, 200, "txn-page-three"));
+          return jsonResponse({ content: [], page: 3, size: 50, totalElements: 10, totalPages: 1 });
+        }
+        if (call.params.query === "merchant-recovery" && size === 50 && pageNumber === 0) {
+          filteredPageZeroReads += 1;
+          return jsonResponse(listPage("a", call.params, filteredPageZeroReads === 1 ? 200 : 10,
+            filteredPageZeroReads === 1 ? "txn-page-size-change" : "txn-recovered"));
+        }
+        return jsonResponse(listPage("a", call.params, call.params.query ? 200 : 300, `txn-page-${pageNumber}`));
+      }
+    });
+    const frames = [];
+    render(<StatefulWorkspaceShell currentSession={session("a")} frames={frames} />);
+
+    expect(await screen.findByText("Merchant a")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "merchant-recovery" } });
+    fireEvent.change(screen.getByLabelText("Risk"), { target: { value: "HIGH" } });
+    fireEvent.change(screen.getByLabelText("Alert recommendation"), { target: { value: "SUSPICIOUS" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("Page 1 of 8")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Page size"), { target: { value: "50" } });
+    expect(await screen.findByText("Page 1 of 4")).toBeInTheDocument();
+    for (let pageNumber = 1; pageNumber <= 3; pageNumber += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(await screen.findByText(`Page ${pageNumber + 1} of 4`)).toBeInTheDocument();
+    }
+
+    frames.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("Page 1 of 1")).toBeInTheDocument();
+    expect(await screen.findByText("txn-recovered")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("merchant-recovery");
+    expect(screen.getByLabelText("Risk")).toHaveValue("HIGH");
+    expect(screen.getByLabelText("Alert recommendation")).toHaveValue("SUSPICIOUS");
+    expect(screen.getByLabelText("Page size")).toHaveValue("50");
+    for (const frame of frames) {
+      expect(frame.text).not.toContain("Page 4 of 1");
+      expect(frame.text).not.toContain("No scored transactions match this view");
+    }
+
+    const matchingRequests = scoredRequests.filter((params) => params.query === "merchant-recovery" && params.size === "50");
+    expect(matchingRequests.slice(-2)).toEqual([
+      { page: "3", size: "50", query: "merchant-recovery", riskLevel: "HIGH", classification: "SUSPICIOUS" },
+      { page: "0", size: "50", query: "merchant-recovery", riskLevel: "HIGH", classification: "SUSPICIOUS" }
+    ]);
+    expect(transport.calls.filter((call) => call.kind === "list" && call.params.size === "1")).toHaveLength(1);
+  });
+
   it.each([401, 403, 404, 500, 503, "network", "invalid"])("drops previous rows for %s without exposing transport exceptions", async (failure) => {
     let fail = false;
     installTransport({
@@ -1130,6 +1252,11 @@ function expectAlertFilterFrames(frames, expected) {
   for (const frame of frames) {
     expect(frame.controls).toMatchObject(expected);
   }
+}
+
+function expectAlertFilterControlsHidden(frames) {
+  expect(frames.length).toBeGreaterThan(0);
+  for (const frame of frames) expect(Object.keys(frame.controls)).toEqual([]);
 }
 
 function installTransport({ list = (call) => jsonResponse(listPage(call.owner, call.params)), detail = (call) => jsonResponse(detailFor(call.owner, call.path.split("/").at(-1))) } = {}) {

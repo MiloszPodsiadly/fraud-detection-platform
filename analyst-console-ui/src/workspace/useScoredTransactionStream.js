@@ -79,6 +79,10 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
       if (!validPage(nextPage, current.request)) {
         throw new Error("INVALID_SCORED_TRANSACTION_PAGE");
       }
+      if (isOutOfRangePage(nextPage, current.request)) {
+        setRequest({ ...current.request, page: 0 });
+        return null;
+      }
       setState({ identity: current, page: nextPage, isLoading: false, error: null });
       return nextPage;
     } catch (apiError) {
@@ -95,7 +99,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
         }
       }
     }
-  }, [owner]);
+  }, [owner, setRequest]);
 
   useEffect(() => {
     if (!canRequest) {
@@ -137,13 +141,27 @@ function sameRequest(left, right) {
 }
 
 function validPage(value, request) {
-  return isRecord(value)
-    && Array.isArray(value.content)
-    && value.content.length <= request.size
-    && value.page === request.page && value.size === request.size
-    && Number.isSafeInteger(value.totalElements) && value.totalElements >= 0
-    && Number.isSafeInteger(value.totalPages) && value.totalPages >= 0
-    && value.content.every(validRow);
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (!Array.isArray(value.content)
+    || value.content.length > request.size
+    || !Number.isSafeInteger(value.page) || value.page !== request.page
+    || !Number.isSafeInteger(value.size) || value.size !== request.size
+    || !Number.isSafeInteger(value.totalElements) || value.totalElements < 0
+    || !Number.isSafeInteger(value.totalPages) || value.totalPages < 0
+    || value.totalPages !== Math.ceil(value.totalElements / request.size)
+    || (value.content.length > 0 && value.totalElements < request.page * request.size + value.content.length)
+    || !value.content.every(validRow)) {
+    return false;
+  }
+  return true;
+}
+
+function isOutOfRangePage(value, request) {
+  return request.page > 0
+    && value.content.length === 0
+    && request.page >= value.totalPages;
 }
 
 function validRow(row) {

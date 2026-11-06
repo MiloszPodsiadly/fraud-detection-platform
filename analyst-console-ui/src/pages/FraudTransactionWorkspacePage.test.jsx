@@ -3,6 +3,97 @@ import { describe, expect, it, vi } from "vitest";
 import { useAlertQueue } from "../workspace/useAlertQueue.js";
 import { FraudTransactionWorkspacePage } from "./FraudTransactionWorkspacePage.jsx";
 
+describe("FraudTransactionWorkspacePage capability and load state", () => {
+  it.each([
+    [false, "No access", "Alert read access is unavailable."],
+    [undefined, "Alerts unavailable", "Alert read capability has not been established for this session."]
+  ])("does not show filters or stale rows when alert capability is %s", (canReadAlerts, title, message) => {
+    render(
+      <FraudTransactionWorkspacePage
+        alertPage={page(0, "private-customer")}
+        viewIdentity={{}}
+        canReadAlerts={canReadAlerts}
+        hasLoaded={false}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Page size")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText("private-customer")).not.toBeInTheDocument();
+    expect(screen.queryByText("No alerts on this loaded page match the local filters.")).not.toBeInTheDocument();
+  });
+
+  it("shows loading rather than a confirmed empty queue before the first authorized read completes", () => {
+    render(
+      <FraudTransactionWorkspacePage
+        alertPage={{ content: [], page: 0, size: 10, totalPages: 0, totalElements: 0 }}
+        viewIdentity={{}}
+        canReadAlerts
+        hasLoaded={false}
+        isLoading
+        error={null}
+        onRetry={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Loading fraud alerts...")).toBeInTheDocument();
+    expect(screen.queryByText("No alerts on this loaded page match the local filters.")).not.toBeInTheDocument();
+  });
+
+  it("does not claim a loaded empty queue when an authorized runtime has no page or request", () => {
+    render(
+      <FraudTransactionWorkspacePage
+        alertPage={{ content: [], page: 0, size: 10, totalPages: 0, totalElements: 0 }}
+        viewIdentity={{}}
+        canReadAlerts
+        hasLoaded={false}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Alert queue not loaded" })).toBeInTheDocument();
+    expect(screen.queryByText("No alerts on this loaded page match the local filters.")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty queue state only after an authorized read loaded an empty page", () => {
+    render(
+      <FraudTransactionWorkspacePage
+        alertPage={{ content: [], page: 0, size: 10, totalPages: 0, totalElements: 0 }}
+        viewIdentity={{}}
+        canReadAlerts
+        hasLoaded
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onAlertPageChange={vi.fn()}
+        onAlertPageSizeChange={vi.fn()}
+        onOpenAlert={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText("Search")).toBeInTheDocument();
+    expect(screen.getByText("No alerts on this loaded page match the local filters.")).toBeInTheDocument();
+  });
+});
+
 describe("FraudTransactionWorkspacePage filter draft ownership", () => {
   it("preserves filters for one owner and resets them synchronously for another", () => {
     const ownerA = {};
@@ -12,6 +103,8 @@ describe("FraudTransactionWorkspacePage filter draft ownership", () => {
       <FraudTransactionWorkspacePage
         alertPage={page(0, "customer-a")}
         viewIdentity={ownerA}
+        canReadAlerts
+        hasLoaded
         isLoading={false}
         error={null}
         onRetry={vi.fn()}
@@ -31,6 +124,8 @@ describe("FraudTransactionWorkspacePage filter draft ownership", () => {
       <FraudTransactionWorkspacePage
         alertPage={page(1, "customer-a-next")}
         viewIdentity={ownerA}
+        canReadAlerts
+        hasLoaded
         isLoading={false}
         error={null}
         onRetry={vi.fn()}
@@ -48,6 +143,8 @@ describe("FraudTransactionWorkspacePage filter draft ownership", () => {
       <FraudTransactionWorkspacePage
         alertPage={page(0, "customer-b")}
         viewIdentity={ownerB}
+        canReadAlerts
+        hasLoaded
         isLoading={false}
         error={null}
         onRetry={vi.fn()}
@@ -75,6 +172,8 @@ describe("Alert Queue local filtering and backend pagination", () => {
     const props = {
       alertPage: page(0, "customer-a", { totalPages: 3, totalElements: 30 }),
       viewIdentity: owner,
+      canReadAlerts: true,
+      hasLoaded: true,
       isLoading: false,
       error: null,
       onRetry: vi.fn(),
@@ -105,6 +204,8 @@ describe("Alert Queue local filtering and backend pagination", () => {
   it("shows one-page controls for loaded alerts and no pagination for an empty queue", () => {
     const props = {
       viewIdentity: {},
+      canReadAlerts: true,
+      hasLoaded: true,
       isLoading: false,
       error: null,
       onRetry: vi.fn(),
@@ -283,6 +384,8 @@ function AlertQueueHookPage({ apiClient, session }) {
       <FraudTransactionWorkspacePage
         alertPage={queue.page}
         viewIdentity={queue.viewIdentity}
+        canReadAlerts
+        hasLoaded={queue.hasLoaded}
         isLoading={queue.isLoading}
         error={queue.error}
         onRetry={queue.refresh}

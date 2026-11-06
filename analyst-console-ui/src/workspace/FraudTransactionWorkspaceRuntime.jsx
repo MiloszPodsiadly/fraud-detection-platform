@@ -39,6 +39,8 @@ export function FraudTransactionWorkspaceRuntime({
       <FraudTransactionWorkspaceContainer
         headingLabel={route.heading.label}
         alertQueueState={alertQueueState}
+        canReadAlerts={canReadAlerts}
+        hasLoaded={alertQueueState.hasLoaded}
         onRetryWorkspace={refreshWorkspace}
         onPageChange={changeAlertPage}
         onPageSizeChange={changeAlertPageSize}

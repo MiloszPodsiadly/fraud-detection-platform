@@ -144,6 +144,26 @@ describe("TransactionScoringWorkspacePage", () => {
     }));
   });
 
+  it("keeps pagination controls available for an empty page with valid navigation metadata", () => {
+    render(
+      <TransactionScoringWorkspacePage
+        canReadTransactions
+        transactionPage={{ content: [], page: 1, size: 25, totalElements: 26, totalPages: 2 }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+      />
+    );
+
+    expect(screen.getByText("No scored transactions match this view")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
   it.each([false, undefined])("closes the whole page when read capability is %s even with a stale page", (capability) => {
     const retry = vi.fn();
     render(

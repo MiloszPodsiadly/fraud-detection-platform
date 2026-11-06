@@ -3,6 +3,8 @@ import { FraudTransactionWorkspacePage } from "../pages/FraudTransactionWorkspac
 export function FraudTransactionWorkspaceContainer({
   headingLabel = "Alert review queue",
   alertQueueState,
+  canReadAlerts,
+  hasLoaded,
   onRetryWorkspace,
   onPageChange,
   onPageSizeChange,
@@ -12,6 +14,8 @@ export function FraudTransactionWorkspaceContainer({
     <FraudTransactionWorkspacePage
       alertPage={alertQueueState.page}
       viewIdentity={alertQueueState.viewIdentity}
+      canReadAlerts={canReadAlerts}
+      hasLoaded={hasLoaded}
       isLoading={alertQueueState.isLoading}
       error={alertQueueState.error}
       onRetry={onRetryWorkspace}
