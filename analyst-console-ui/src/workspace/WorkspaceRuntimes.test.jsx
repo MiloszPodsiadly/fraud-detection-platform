@@ -165,7 +165,11 @@ describe("workspace runtime ownership", () => {
     renderRuntime(routeKey, {}, runtimeValue(), { ...runtimeProps(), onResult });
 
     await waitFor(() => expect(lastRuntimeResult(onResult)?.error?.message).toBe(
-      routeKey === "transactionScoring" ? "Scored transactions are temporarily unavailable." : `${routeKey} unavailable`
+      routeKey === "transactionScoring"
+        ? "Scored transactions are temporarily unavailable."
+        : routeKey === "fraudTransaction"
+          ? "Alerts are temporarily unavailable. Please retry."
+          : `${routeKey} unavailable`
     ));
   });
 

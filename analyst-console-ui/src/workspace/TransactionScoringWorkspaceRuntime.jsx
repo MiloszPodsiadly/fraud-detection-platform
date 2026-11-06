@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { TransactionScoringWorkspaceContainer } from "./TransactionScoringWorkspaceContainer.jsx";
 import { useScoredTransactionStream } from "./useScoredTransactionStream.js";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
@@ -7,19 +6,12 @@ import { createWorkspaceRuntimeResult } from "./workspaceRuntimeResult.js";
 export function TransactionScoringWorkspaceRuntime({
   route,
   sharedWorkspaceReadsEnabled,
-  setCounterValue,
   children
 }) {
   const { apiClient, canReadTransactions } = useWorkspaceRuntime();
   const transactionStreamState = useScoredTransactionStream({
     enabled: sharedWorkspaceReadsEnabled && canReadTransactions === true
   });
-
-  useEffect(() => {
-    if (!transactionStreamState.isLoading && !transactionStreamState.error) {
-      setCounterValue("transactions", transactionStreamState.page.totalElements);
-    }
-  }, [setCounterValue, transactionStreamState.error, transactionStreamState.isLoading, transactionStreamState.page.totalElements]);
 
   function changeTransactionPage(page) {
     transactionStreamState.setRequest((current) => ({ ...current, page: Math.min(Math.max(Number(page) || 0, 0), 1000) }));

@@ -106,7 +106,17 @@ describe("workspace data hooks", () => {
     ["unexpected response page", { content: [], totalElements: 0, totalPages: 0, page: 1, size: 10 }],
     ["unexpected response size", { content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 }],
     ["page total mismatch", { content: [], totalElements: 11, totalPages: 1, page: 0, size: 10 }],
-    ["content exceeds requested size", { content: Array.from({ length: 11 }, (_, index) => ({ alertId: `alert-${index}` })), totalElements: 11, totalPages: 2, page: 0, size: 10 }]
+    ["content exceeds requested size", { content: Array.from({ length: 11 }, (_, index) => ({ alertId: `alert-${index}` })), totalElements: 11, totalPages: 2, page: 0, size: 10 }],
+    ["array alert row", { content: [[]], totalElements: 1, totalPages: 1, page: 0, size: 10 }],
+    ["object alert reason", page([{ alertId: "alert-1", alertReason: { private: true } }], { size: 10 })],
+    ["object customer ID", page([{ alertId: "alert-1", customerId: { private: true } }], { size: 10 })],
+    ["invalid alert ID", page([{ alertId: " " }], { size: 10 })],
+    ["nonfinite fraud score", page([{ alertId: "alert-1", fraudScore: Infinity }], { size: 10 })],
+    ["out of range fraud score", page([{ alertId: "alert-1", fraudScore: 1.1 }], { size: 10 })],
+    ["invalid alert timestamp", page([{ alertId: "alert-1", alertTimestamp: "not-a-date" }], { size: 10 })],
+    ["impossible alert calendar date", page([{ alertId: "alert-1", alertTimestamp: "2026-02-30T12:00:00Z" }], { size: 10 })],
+    ["malformed risk enum", page([{ alertId: "alert-1", riskLevel: {} }], { size: 10 })],
+    ["unknown status enum", page([{ alertId: "alert-1", alertStatus: "PENDING" }], { size: 10 })]
   ])("rejects malformed alert page before publication: %s", async (_caseName, response) => {
     const apiClient = { listAlerts: vi.fn().mockResolvedValue(response) };
     const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient }));
@@ -122,6 +132,26 @@ describe("workspace data hooks", () => {
       size: 10
     });
     expect(result.current.error.message).toBe("Alerts are temporarily unavailable. Please retry.");
+  });
+
+  it("accepts nullable historical alert summary fields", async () => {
+    const historicalRow = {
+      alertId: "alert-historical",
+      transactionId: null,
+      customerId: null,
+      riskLevel: null,
+      fraudScore: null,
+      alertStatus: null,
+      alertReason: null,
+      alertTimestamp: null
+    };
+    listAlerts.mockResolvedValue(page([historicalRow], { totalElements: 1, size: 10 }));
+
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient: workspaceApiClient }));
+
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true));
+    expect(result.current.page.content).toEqual([historicalRow]);
+    expect(result.current.error).toBeNull();
   });
 
   it("does not fetch workspace data without an explicit apiClient", async () => {

@@ -6,8 +6,11 @@ import { FilterBar } from "../components/FilterBar.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { PaginationControls } from "../components/PaginationControls.jsx";
 
+const INITIAL_FILTERS = { query: "", riskLevel: "ALL", status: "ALL" };
+
 export function FraudTransactionWorkspacePage({
   alertPage,
+  viewIdentity,
   isLoading,
   error,
   onRetry,
@@ -16,12 +19,17 @@ export function FraudTransactionWorkspacePage({
   onOpenAlert,
   workspaceHeadingProps = {}
 }) {
-  const [filters, setFilters] = useState({
-    query: "",
-    riskLevel: "ALL",
-    status: "ALL"
-  });
-  const deferredQuery = useDeferredValue(filters.query);
+  const [filterState, setFilterState] = useState(() => ({ viewIdentity, filters: INITIAL_FILTERS }));
+  const filters = filterState.viewIdentity === viewIdentity ? filterState.filters : INITIAL_FILTERS;
+  const deferredSearch = useMemo(
+    () => ({ viewIdentity, query: filters.query }),
+    [filters.query, viewIdentity]
+  );
+  const deferredSearchState = useDeferredValue(deferredSearch);
+  const deferredQuery = deferredSearchState.viewIdentity === viewIdentity
+    ? deferredSearchState.query
+    : filters.query;
+  const updateFilters = (nextFilters) => setFilterState({ viewIdentity, filters: nextFilters });
   const filteredAlerts = useMemo(() => {
     const query = deferredQuery.trim().toLowerCase();
     return (alertPage.content || []).filter((alert) => {
@@ -46,7 +54,7 @@ export function FraudTransactionWorkspacePage({
         </div>
       </div>
 
-      <FilterBar filters={filters} onChange={setFilters} />
+      <FilterBar filters={filters} onChange={updateFilters} />
 
       {isLoading && <LoadingPanel label="Loading fraud alerts..." />}
       {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
@@ -57,18 +65,18 @@ export function FraudTransactionWorkspacePage({
         />
       )}
       {!isLoading && !error && filteredAlerts.length > 0 && (
-        <>
-          <AlertTable alerts={filteredAlerts} onOpenAlert={onOpenAlert} />
-          <PaginationControls
-            label="alerts"
-            page={alertPage.page}
-            size={alertPage.size}
-            totalPages={alertPage.totalPages}
-            totalElements={alertPage.totalElements}
-            onPageChange={onAlertPageChange}
-            onSizeChange={onAlertPageSizeChange}
-          />
-        </>
+        <AlertTable alerts={filteredAlerts} onOpenAlert={onOpenAlert} />
+      )}
+      {!isLoading && !error && (alertPage.totalPages > 1 || alertPage.totalElements > 0) && (
+        <PaginationControls
+          label="alerts"
+          page={alertPage.page}
+          size={alertPage.size}
+          totalPages={alertPage.totalPages}
+          totalElements={alertPage.totalElements}
+          onPageChange={onAlertPageChange}
+          onSizeChange={onAlertPageSizeChange}
+        />
       )}
     </section>
   );

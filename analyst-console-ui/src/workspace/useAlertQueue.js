@@ -12,6 +12,15 @@ const INITIAL_ALERT_PAGE = {
 const INITIAL_ALERT_REQUEST = { page: 0, size: 10 };
 const INVALID_ALERT_PAGE = "INVALID_ALERT_PAGE";
 const ALERT_PAGE_UNAVAILABLE_MESSAGE = "Alerts are temporarily unavailable. Please retry.";
+const ALERT_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
+const ALERT_STATUSES = new Set(["OPEN", "IN_REVIEW", "ESCALATED", "RESOLVED", "CLOSED"]);
+const ALERT_SECURITY_ERROR_CODES = new Set(["session_expired", "auth_provider_error"]);
+const ALERT_SECURITY_REASONS = new Set([
+  "insufficient_authority",
+  "missing_credentials",
+  "invalid_demo_auth",
+  "invalid_jwt"
+]);
 
 export function useAlertQueue({ enabled = true, session, authProvider, apiClient } = {}) {
   const runtime = useOptionalWorkspaceRuntime();
@@ -26,6 +35,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
     authProvider: effectiveAuthProvider,
     resetKey
   }), [authProvider, effectiveApiClient, effectiveAuthProvider, effectiveSession, enabled, resetKey, session]);
+  const viewIdentity = useMemo(() => ({}), [owner]);
   const [requestState, setRequestState] = useState(() => ({ owner, request: INITIAL_ALERT_REQUEST }));
   const request = requestState.owner === owner ? requestState.request : INITIAL_ALERT_REQUEST;
   const identity = useMemo(() => ({ owner, request }), [owner, request]);
@@ -101,10 +111,13 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
       if (!isCurrent() || isAbortError(apiError)) {
         return null;
       }
-      const safeError = apiError instanceof SyntaxError || apiError?.message === INVALID_ALERT_PAGE
-        ? new Error(ALERT_PAGE_UNAVAILABLE_MESSAGE)
-        : apiError;
-      setState({ identity: current, page: INITIAL_ALERT_PAGE, isLoading: false, error: safeError, hasLoaded: false });
+      setState({
+        identity: current,
+        page: INITIAL_ALERT_PAGE,
+        isLoading: false,
+        error: safeAlertQueueError(apiError),
+        hasLoaded: false
+      });
       return null;
     } finally {
       if (isCurrent()) {
@@ -132,6 +145,7 @@ export function useAlertQueue({ enabled = true, session, authProvider, apiClient
   const ownsState = state.identity === identity;
   return {
     page: ownsState && canRequest ? state.page : INITIAL_ALERT_PAGE,
+    viewIdentity,
     request,
     isLoading: canRequest && (!ownsState || state.isLoading),
     error: ownsState && canRequest ? state.error : null,
@@ -156,7 +170,7 @@ function isValidAlertPage(value, request) {
   return isRecord(value)
     && Array.isArray(value.content)
     && value.content.length <= request.size
-    && value.content.every(isRecord)
+    && value.content.every(isValidAlertSummary)
     && Number.isSafeInteger(value.totalElements) && value.totalElements >= 0
     && Number.isSafeInteger(value.totalPages) && value.totalPages >= 0
     && Number.isSafeInteger(value.page) && value.page === request.page
@@ -164,6 +178,83 @@ function isValidAlertPage(value, request) {
     && value.totalPages === Math.ceil(value.totalElements / request.size);
 }
 
+function isValidAlertSummary(value) {
+  if (!isRecord(value) || typeof value.alertId !== "string" || !value.alertId.trim()) {
+    return false;
+  }
+
+  return isOptionalString(value.transactionId)
+    && isOptionalString(value.customerId)
+    && isOptionalString(value.alertReason)
+    && isOptionalEnum(value.riskLevel, ALERT_RISK_LEVELS)
+    && isOptionalEnum(value.alertStatus, ALERT_STATUSES)
+    && isOptionalFraudScore(value.fraudScore)
+    && isOptionalAlertTimestamp(value.alertTimestamp);
+}
+
+function isOptionalString(value) {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isOptionalEnum(value, validValues) {
+  return value === undefined || value === null || (typeof value === "string" && validValues.has(value));
+}
+
+function isOptionalFraudScore(value) {
+  return value === undefined || value === null
+    || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1);
+}
+
+function isOptionalAlertTimestamp(value) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
+  if (!match) {
+    return false;
+  }
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , , offsetHourText, offsetMinuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offsetHour = Number(offsetHourText || 0);
+  const offsetMinute = Number(offsetMinuteText || 0);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  return month >= 1 && month <= 12
+    && day >= 1 && day <= daysInMonth[month - 1]
+    && hour <= 23 && minute <= 59 && second <= 59
+    && offsetHour <= 18 && offsetMinute <= 59 && (offsetHour < 18 || offsetMinute === 0)
+    && Number.isFinite(new Date(value).getTime());
+}
+
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeAlertQueueError(apiError) {
+  const safeError = new Error(ALERT_PAGE_UNAVAILABLE_MESSAGE);
+  if (Number.isInteger(apiError?.status) && apiError.status >= 400 && apiError.status <= 599) {
+    safeError.status = apiError.status;
+  }
+  if (ALERT_SECURITY_ERROR_CODES.has(apiError?.error)) {
+    safeError.error = apiError.error;
+  }
+  const safeReasons = Array.isArray(apiError?.details)
+    ? apiError.details.slice(0, 16).filter((detail) => typeof detail === "string"
+      && detail.startsWith("reason:")
+      && ALERT_SECURITY_REASONS.has(detail.slice("reason:".length))).slice(0, 4)
+    : [];
+  if (safeReasons.length > 0) {
+    safeError.details = safeReasons;
+  }
+  return safeError;
 }

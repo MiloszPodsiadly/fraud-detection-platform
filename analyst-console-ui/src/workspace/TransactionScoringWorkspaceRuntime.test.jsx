@@ -6,6 +6,7 @@ import { availableDetail } from "../transactions/transactionRiskIntelligenceFixt
 import { WorkspaceRuntimeProvider } from "./WorkspaceRuntimeProvider.jsx";
 import { WorkspaceDashboardShell } from "./WorkspaceDashboardShell.jsx";
 import { WORKSPACE_ROUTE_REGISTRY } from "./WorkspaceRouteRegistry.jsx";
+import { useWorkspaceCounters } from "./useWorkspaceCounters.js";
 
 const provider = {
   kind: "demo",
@@ -13,6 +14,9 @@ const provider = {
 };
 const noOp = () => {};
 const route = WORKSPACE_ROUTE_REGISTRY.transactionScoring;
+const alertRoute = WORKSPACE_ROUTE_REGISTRY.fraudTransaction;
+const AlertRuntime = alertRoute.Runtime;
+const PRIVATE_ALERT_DIAGNOSTIC = "customer-55931 Bearer eyJhbGciOiJIUzI1NiJ9 internal-alerts.private \\n at FraudQueueService.java:612 cursor-secret-7f2";
 
 afterEach(() => {
   cleanup();
@@ -30,6 +34,25 @@ describe("transaction scoring read boundary with real provider, API client, hook
 
     await act(async () => pending.resolve(jsonResponse(listPage("a", {}, 0))));
     expect(await screen.findByRole("link", { name: "Transactions 0" })).toBeInTheDocument();
+  });
+
+  it("keeps the Transactions navigation count global while the stream is filtered", async () => {
+    const transport = installTransport({
+      list: (call) => {
+        if (call.params.size === "1") return jsonResponse(listPage("a", call.params, 12400));
+        return jsonResponse(listPage("a", call.params, call.params.query ? 72 : 12400));
+      }
+    });
+    render(<StatefulWorkspaceShell currentSession={counterSession("a")} frames={[]} />);
+
+    expect(await screen.findByRole("link", { name: "Transactions 12400" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "narrowed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Transactions 12400" })).toBeInTheDocument();
+    expect(transport.calls.filter((call) => call.kind === "list" && call.params.size === "1")).toHaveLength(1);
+    expect(transport.calls.filter((call) => call.kind === "list" && call.params.size === "25" && call.params.query === "narrowed")).toHaveLength(1);
   });
 
   it("does not let a saved runtime refresh call the next owner's transaction client", async () => {
@@ -68,6 +91,217 @@ describe("transaction scoring read boundary with real provider, API client, hook
     expect(await screen.findByRole("link", { name: "Alerts 0" })).toBeInTheDocument();
   });
 
+  it("resets Alert Queue filter drafts synchronously across owner and capability switches", async () => {
+    const pendingA = deferred();
+    const pendingB = deferred();
+    let aReads = 0;
+    const transport = installTransport({
+      detail: (call) => {
+        if (call.owner === "a") {
+          aReads += 1;
+          if (aReads === 1) return jsonResponse(alertPage("a", "customer-a-private-97f2"));
+          if (aReads === 2) return pendingA.promise;
+          return jsonResponse(alertPage("a-return", "customer-a-return"));
+        }
+        return pendingB.promise;
+      }
+    });
+    const frames = [];
+    const sessionA = { ...session("a"), authorities: [AUTHORITIES.ALERT_READ] };
+    const { rerender } = render(
+      <StatefulWorkspaceShell currentSession={sessionA} frames={frames} initialWorkspacePage="fraudTransaction" />
+    );
+
+    expect(await screen.findByText("private-reason-a")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-a-private-97f2" } });
+    fireEvent.change(screen.getByLabelText("Risk"), { target: { value: "HIGH" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "OPEN" } });
+    expect(screen.getByLabelText("Search")).toHaveValue("customer-a-private-97f2");
+    expect(screen.getByLabelText("Risk")).toHaveValue("HIGH");
+    expect(screen.getByLabelText("Status")).toHaveValue("OPEN");
+
+    fireEvent.change(screen.getByLabelText("Page size"), { target: { value: "25" } });
+    await waitFor(() => expect(transport.calls.filter((call) => call.owner === "a" && call.kind === "detail")).toHaveLength(2));
+    expect(screen.getByLabelText("Search")).toHaveValue("customer-a-private-97f2");
+
+    frames.length = 0;
+    const sessionB = { ...sessionA, issuer: "b", subject: "subject-b", roles: ["REVIEWER"] };
+    rerender(
+      <StatefulWorkspaceShell currentSession={sessionB} frames={frames} initialWorkspacePage="fraudTransaction" />
+    );
+
+    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+    expect(frames.some((frame) => frame.text.includes("customer-a-private-97f2"))).toBe(false);
+    await waitFor(() => expect(transport.calls.some((call) => call.owner === "b" && call.kind === "detail")).toBe(true));
+
+    await act(async () => pendingA.resolve(jsonResponse(alertPage("a-late", "customer-a-private-97f2"))));
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(screen.queryByText("private-reason-a-late")).not.toBeInTheDocument();
+    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+
+    await act(async () => pendingB.resolve(jsonResponse(alertPage("b", "customer-b"))));
+    expect(await screen.findByText("private-reason-b")).toBeInTheDocument();
+    frames.length = 0;
+    rerender(
+      <StatefulWorkspaceShell currentSession={sessionA} frames={frames} initialWorkspacePage="fraudTransaction" />
+    );
+
+    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(await screen.findByText("private-reason-a-return")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-a-return" } });
+    fireEvent.change(screen.getByLabelText("Risk"), { target: { value: "LOW" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "ESCALATED" } });
+    const deniedA = { ...sessionA, authorities: [AUTHORITIES.FRAUD_CASE_READ] };
+
+    frames.length = 0;
+    rerender(
+      <StatefulWorkspaceShell currentSession={deniedA} frames={frames} initialWorkspacePage="fraudTransaction" />
+    );
+    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+
+    frames.length = 0;
+    rerender(
+      <StatefulWorkspaceShell currentSession={{ ...sessionA, authorities: [] }} frames={frames} initialWorkspacePage="fraudTransaction" />
+    );
+    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+
+    frames.length = 0;
+    rerender(
+      <StatefulWorkspaceShell currentSession={sessionA} frames={frames} initialWorkspacePage="fraudTransaction" />
+    );
+    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+  });
+
+  it("fences one A-to-B-to-A lifecycle across alerts, transactions, counters, details, and callbacks", async () => {
+    const pendingAAlerts = deferred();
+    const pendingBTransactions = deferred();
+    const calls = [];
+    let holdNextBTransactionRefresh = false;
+    const fetchTransport = vi.fn((url, options) => {
+      const parsed = new URL(url, "http://localhost");
+      const owner = options.headers["X-Test-Owner"];
+      const path = parsed.pathname;
+      const params = Object.fromEntries(parsed.searchParams);
+      calls.push({ owner, path, params, signal: options.signal });
+
+      if (path.endsWith("/alerts")) {
+        if (owner === "a" && params.size === "25") return pendingAAlerts.promise;
+        return Promise.resolve(jsonResponse(alertPage(owner)));
+      }
+      if (path.endsWith("/scored")) {
+        if (params.size === "1") {
+          return Promise.resolve(jsonResponse(listPage(owner, params, owner === "a" ? 12400 : 9800)));
+        }
+        if (owner === "b" && params.query === "txn-b-filter" && holdNextBTransactionRefresh) {
+          holdNextBTransactionRefresh = false;
+          return pendingBTransactions.promise;
+        }
+        return Promise.resolve(jsonResponse(listPage(owner, params, owner === "a" ? 731 : 72)));
+      }
+      if (path.includes("/transactions/scored/")) {
+        const transactionId = path.split("/").at(-1);
+        return Promise.resolve(jsonResponse(detailFor(owner, transactionId)));
+      }
+      if (path.endsWith("/feedback")) return Promise.resolve(jsonResponse({}, 404));
+      return Promise.resolve(jsonResponse({}, 404));
+    });
+    vi.stubGlobal("fetch", fetchTransport);
+    const frames = [];
+    const sessionA = counterSession("a");
+    const sessionB = counterSession("b");
+    const { rerender } = render(
+      <IntegratedWorkspaceHarness currentSession={sessionA} workspacePage="fraudTransaction" frames={frames} />
+    );
+
+    expect(await screen.findByText("private-reason-a")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("global-transactions")).toHaveTextContent("12400"));
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "private-a-filter" } });
+    fireEvent.change(screen.getByLabelText("Risk"), { target: { value: "HIGH" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "OPEN" } });
+    fireEvent.change(screen.getByLabelText("Page size"), { target: { value: "25" } });
+    await waitFor(() => expect(calls.some((call) => call.owner === "a" && call.path.endsWith("/alerts") && call.params.size === "25")).toBe(true));
+    const pendingAAlertCall = calls.find((call) => call.owner === "a" && call.path.endsWith("/alerts") && call.params.size === "25");
+    expect(screen.getByLabelText("Search")).toHaveValue("private-a-filter");
+
+    frames.length = 0;
+    rerender(<IntegratedWorkspaceHarness currentSession={sessionB} workspacePage="fraudTransaction" frames={frames} />);
+    expectAlertFilterFrames(frames, { Search: "", Risk: "ALL", Status: "ALL" });
+    expect(frames.some((frame) => frame.text.includes("private-reason-a") || frame.text.includes("private-a-filter"))).toBe(false);
+    expect(pendingAAlertCall.signal.aborted).toBe(true);
+    expect(await screen.findByText("private-reason-b")).toBeInTheDocument();
+    await act(async () => pendingAAlerts.resolve(jsonResponse({ ...alertPage("a-late"), size: 25 })));
+    expect(screen.queryByText("private-reason-a-late")).not.toBeInTheDocument();
+
+    frames.length = 0;
+    rerender(<IntegratedWorkspaceHarness currentSession={sessionB} workspacePage="transactionScoring" frames={frames} />);
+    expect(await screen.findByText("Merchant b")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("global-transactions")).toHaveTextContent("9800"));
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "txn-b-filter" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("txn-b")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(await screen.findByRole("region", { name: "Merchant Investigation" })).toHaveTextContent("merchant-b");
+    const savedRefreshB = frames.at(-1).result.refreshWorkspace;
+    holdNextBTransactionRefresh = true;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(calls.some((call) => call.owner === "b" && call.path.endsWith("/scored") && call.params.query === "txn-b-filter" && call.signal && !call.signal.aborted)).toBe(true));
+    const pendingBTransactionCall = calls.filter((call) => call.owner === "b" && call.path.endsWith("/scored") && call.params.query === "txn-b-filter").at(-1);
+
+    frames.length = 0;
+    rerender(<IntegratedWorkspaceHarness currentSession={sessionA} workspacePage="transactionScoring" frames={frames} />);
+    expect(await screen.findByText("Merchant a")).toBeInTheDocument();
+    expect(pendingBTransactionCall.signal.aborted).toBe(true);
+    expect(frames.every((frame) => !frame.text.includes("Merchant b") && !frame.text.includes("txn-b-filter"))).toBe(true);
+    await act(async () => pendingBTransactions.resolve(jsonResponse(listPage("b-late", { page: "0", size: "25" }, 2, "txn-b-late"))));
+    expect(screen.queryByText("txn-b-late")).not.toBeInTheDocument();
+    const aTransactionCallsBeforeStaleRefresh = calls.filter((call) => call.owner === "a" && call.path.endsWith("/scored") && call.params.size === "25").length;
+    await act(async () => { await savedRefreshB(); });
+    expect(calls.filter((call) => call.owner === "a" && call.path.endsWith("/scored") && call.params.size === "25")).toHaveLength(aTransactionCallsBeforeStaleRefresh);
+    await waitFor(() => expect(screen.getByTestId("global-transactions")).toHaveTextContent("12400"));
+
+    const deniedA = { ...sessionA, authorities: [AUTHORITIES.ALERT_READ] };
+    rerender(<IntegratedWorkspaceHarness currentSession={deniedA} workspacePage="transactionScoring" frames={frames} />);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByTestId("global-transactions")).toHaveTextContent("Unavailable");
+
+    rerender(<IntegratedWorkspaceHarness currentSession={sessionA} workspacePage="fraudTransaction" frames={frames} />);
+    expect(await screen.findByText("private-reason-a")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(screen.getByLabelText("Risk")).toHaveValue("ALL");
+    expect(screen.getByLabelText("Status")).toHaveValue("ALL");
+    await waitFor(() => expect(screen.getByTestId("global-transactions")).toHaveTextContent("12400"));
+  });
+
+  it("preserves Alert Queue filter drafts across a same-owner manual refresh", async () => {
+    const pendingRefresh = deferred();
+    let alertReads = 0;
+    const transport = installTransport({
+      detail: () => (++alertReads === 1
+        ? jsonResponse(alertPage("a", "customer-a"))
+        : pendingRefresh.promise)
+    });
+    const frames = [];
+    render(<AlertWorkspaceRuntime currentSession={{ ...session("a"), authorities: [AUTHORITIES.ALERT_READ] }} frames={frames} />);
+
+    expect(await screen.findByText("private-reason-a")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-a" } });
+    fireEvent.change(screen.getByLabelText("Risk"), { target: { value: "HIGH" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "OPEN" } });
+
+    const refreshWorkspace = frames.at(-1).result.refreshWorkspace;
+    frames.length = 0;
+    await act(async () => { await refreshWorkspace(); });
+    await waitFor(() => expect(transport.calls.filter((call) => call.kind === "detail")).toHaveLength(2));
+    expectAlertFilterFrames(frames, { Search: "customer-a", Risk: "HIGH", Status: "OPEN" });
+
+    await act(async () => pendingRefresh.resolve(jsonResponse(alertPage("a-refreshed", "customer-a"))));
+    expect(await screen.findByText("private-reason-a-refreshed")).toBeInTheDocument();
+    expectAlertFilterFrames(frames, { Search: "customer-a", Risk: "HIGH", Status: "OPEN" });
+  });
+
   it.each([
     ["HTTP 204", () => new Response(null, { status: 204 })],
     ["HTTP 200 JSON null", () => jsonResponse(null)],
@@ -75,6 +309,15 @@ describe("transaction scoring read boundary with real provider, API client, hook
     ["null content", () => jsonResponse({ content: null, totalElements: 0, totalPages: 0, page: 0, size: 10 })],
     ["non-array content", () => jsonResponse({ content: {}, totalElements: 0, totalPages: 0, page: 0, size: 10 })],
     ["null alert row", () => jsonResponse({ content: [null], totalElements: 1, totalPages: 1, page: 0, size: 10 })],
+    ["array alert row", () => malformedAlertResponse([])],
+    ["object alert reason", () => malformedAlertResponse({ alertReason: { private: "private malformed row detail" } })],
+    ["object customer ID", () => malformedAlertResponse({ customerId: { private: "private malformed row detail" } })],
+    ["invalid alert ID", () => malformedAlertResponse({ alertId: " " })],
+    ["invalid fraud score", () => malformedAlertResponse({ fraudScore: 1.1 })],
+    ["invalid alert timestamp", () => malformedAlertResponse({ alertTimestamp: "not-a-date" })],
+    ["impossible alert timestamp", () => malformedAlertResponse({ alertTimestamp: "2026-02-30T12:00:00Z" })],
+    ["malformed risk enum", () => malformedAlertResponse({ riskLevel: {} })],
+    ["unknown status enum", () => malformedAlertResponse({ alertStatus: "PENDING" })],
     ["wrong response page", () => jsonResponse({ content: [], totalElements: 0, totalPages: 0, page: 1, size: 10 })],
     ["wrong response size", () => jsonResponse({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 })]
   ])("fails closed on %s through the real alert workspace", async (_caseName, responseFactory) => {
@@ -101,12 +344,98 @@ describe("transaction scoring read boundary with real provider, API client, hook
       expect(screen.queryByRole("link", { name: "Alerts 0" })).not.toBeInTheDocument();
       expect(screen.queryByText("No alerts on this loaded page match the local filters.")).not.toBeInTheDocument();
       expect(screen.queryByText("private malformed backend detail")).not.toBeInTheDocument();
+      expect(document.body.textContent).not.toContain("private malformed row detail");
       expect(transport.calls.some((call) => call.path.endsWith("/alerts"))).toBe(true);
       fireEvent.click(screen.getByRole("button", { name: "Try again" }));
       await waitFor(() => expect(transport.calls.filter((call) => call.path.endsWith("/alerts"))).toHaveLength(2));
       expect(screen.getByRole("alert")).toHaveTextContent("Alerts are temporarily unavailable. Please retry.");
     } finally {
       consoleError.mockRestore();
+    }
+  });
+
+  it("renders historical alert summaries with nullable optional fields", async () => {
+    const historicalRow = {
+      alertId: "alert-historical",
+      transactionId: null,
+      customerId: null,
+      riskLevel: null,
+      fraudScore: null,
+      alertStatus: null,
+      alertReason: null,
+      alertTimestamp: null
+    };
+    installTransport({ detail: () => jsonResponse({ ...alertPage("historical"), content: [historicalRow] }) });
+
+    render(
+      <RenderFailureBoundary>
+        <StatefulWorkspaceShell
+          currentSession={{ ...session("a"), authorities: [AUTHORITIES.ALERT_READ] }}
+          frames={[]}
+          initialWorkspacePage="fraudTransaction"
+        />
+      </RenderFailureBoundary>
+    );
+
+    expect(await screen.findByText("UNKNOWN")).toBeInTheDocument();
+    expect(screen.getByText("N/A")).toBeInTheDocument();
+    expect(screen.getByText("Not available")).toBeInTheDocument();
+    expect(screen.queryByTestId("render-failure")).not.toBeInTheDocument();
+    expect(screen.queryByText("null")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["expired session", () => privateApiFailure(401, "session_expired", ["reason:invalid_jwt"]), "Session expired"],
+    ["generic unauthorized response", () => privateApiFailure(401, "private-auth-code", ["private detail"]), "Session required"],
+    ["insufficient authority", () => privateApiFailure(403, "private-forbidden-code", ["reason:insufficient_authority"]), "Access denied"],
+    ["not found", () => privateApiFailure(404), "Unable to load data"],
+    ["rate limit", () => privateApiFailure(429), "Unable to load data"],
+    ["server failure", () => privateApiFailure(500), "Unable to load data"],
+    ["service unavailable", () => privateApiFailure(503), "Unable to load data"],
+    ["malformed JSON", () => new Response("{malformed", { headers: { "Content-Type": "application/json" } }), "Unable to load data"],
+    ["network failure", () => Promise.reject(new TypeError(PRIVATE_ALERT_DIAGNOSTIC)), "Unable to load data"]
+  ])("sanitizes Alert Queue %s failures and keeps retry available", async (_caseName, responseFactory, expectedHeading) => {
+    const transport = installTransport({ detail: () => responseFactory() });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      render(
+        <RenderFailureBoundary>
+          <StatefulWorkspaceShell
+            currentSession={{ ...session("a"), authorities: [AUTHORITIES.ALERT_READ] }}
+            frames={[]}
+            initialWorkspacePage="fraudTransaction"
+          />
+        </RenderFailureBoundary>
+      );
+
+      expect(await screen.findByRole("heading", { name: expectedHeading })).toBeInTheDocument();
+      expect(screen.queryByTestId("render-failure")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+      const renderedDom = document.body.innerHTML;
+      for (const secret of ["customer-55931", "eyJhbGciOiJIUzI1NiJ9", "internal-alerts.private", "FraudQueueService.java:612", "cursor-secret-7f2"]) {
+        expect(renderedDom).not.toContain(secret);
+      }
+      const consoleOutput = JSON.stringify([
+        ...consoleError.mock.calls,
+        ...consoleWarn.mock.calls,
+        ...consoleLog.mock.calls
+      ]);
+      expect(consoleOutput).not.toContain("customer-55931");
+      expect(consoleOutput).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+      expect(consoleOutput).not.toContain("internal-alerts.private");
+      expect(consoleOutput).not.toContain("FraudQueueService.java:612");
+      expect(consoleOutput).not.toContain("cursor-secret-7f2");
+
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      await waitFor(() => expect(transport.calls.filter((call) => call.path.endsWith("/alerts"))).toHaveLength(2));
+      expect(screen.getByRole("heading", { name: expectedHeading })).toBeInTheDocument();
+    } finally {
+      consoleError.mockRestore();
+      consoleWarn.mockRestore();
+      consoleLog.mockRestore();
     }
   });
 
@@ -413,7 +742,11 @@ describe("transaction scoring read boundary with real provider, API client, hook
 
   it("does not retain the old transaction counter in the real dashboard shell's first new-session commit", async () => {
     const next = deferred();
-    installTransport({ list: (call) => call.owner === "a" ? jsonResponse(listPage("a", call.params)) : next.promise });
+    installTransport({
+      list: (call) => call.owner === "a"
+        ? jsonResponse(listPage("a", call.params, call.params.size === "1" ? 9404 : 731))
+        : next.promise
+    });
     const frames = [];
     function shell(currentSession) {
       return (
@@ -426,12 +759,12 @@ describe("transaction scoring read boundary with real provider, API client, hook
     }
     const { rerender } = render(shell(session("a")));
     expect(await screen.findByText("Merchant a")).toBeInTheDocument();
-    await waitFor(() => expect(document.querySelector(".workspaceTabActive")).toHaveTextContent("731"));
+    await waitFor(() => expect(document.querySelector(".workspaceTabActive")).toHaveTextContent("9404"));
     frames.length = 0;
     rerender(shell(session("b")));
     expect(frames.length).toBeGreaterThan(0);
     for (const text of frames) {
-      expect(text).not.toContain("731");
+      expect(text).not.toContain("9404");
       expect(text).not.toContain("Merchant a");
     }
   });
@@ -490,7 +823,7 @@ describe("transaction scoring read boundary with real provider, API client, hook
       expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("9101");
       expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("9202");
       expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("9303");
-      expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("731");
+      expect(screen.getByRole("navigation", { name: "Analyst workspace sections" })).toHaveTextContent("9404");
     });
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     await waitFor(() => expect(transport.calls.some((call) => call.owner === "a" && call.kind === "detail")).toBe(true));
@@ -612,15 +945,80 @@ function StatefulWorkspaceShell({ currentSession, frames, initialWorkspacePage =
   );
 }
 
-function WorkspaceLifecycleCommitProbe({ frames, children }) {
+function AlertWorkspaceRuntime({ currentSession, frames }) {
+  return (
+    <WorkspaceRuntimeProvider session={currentSession} authProvider={provider}>
+      <AlertRuntime
+        route={alertRoute}
+        sharedWorkspaceReadsEnabled
+        setCounterValue={noOp}
+        onOpenAlert={noOp}
+      >
+        {(result) => <WorkspaceRuntimeCommitProbe result={result} frames={frames} />}
+      </AlertRuntime>
+    </WorkspaceRuntimeProvider>
+  );
+}
+
+function IntegratedWorkspaceHarness({ currentSession, workspacePage, frames }) {
+  return (
+    <WorkspaceRuntimeProvider session={currentSession} authProvider={provider}>
+      <IntegratedWorkspaceRuntime workspacePage={workspacePage} frames={frames} />
+    </WorkspaceRuntimeProvider>
+  );
+}
+
+function IntegratedWorkspaceRuntime({ workspacePage, frames }) {
+  const counters = useWorkspaceCounters({
+    enabled: true,
+    includeAlerts: false,
+    includeFraudCases: false,
+    includeSuspiciousTransactions: false,
+    includeTransactions: true
+  });
+  const routeForWorkspace = WORKSPACE_ROUTE_REGISTRY[workspacePage];
+  const Runtime = routeForWorkspace.Runtime;
+
+  return (
+    <>
+      <output data-testid="global-transactions">{counters.counters.transactions ?? "Unavailable"}</output>
+      <Runtime
+        route={routeForWorkspace}
+        sharedWorkspaceReadsEnabled
+        setCounterValue={counters.setCounterValue}
+        onOpenAlert={noOp}
+      >
+        {(result) => <WorkspaceRuntimeCommitProbe result={result} frames={frames} />}
+      </Runtime>
+    </>
+  );
+}
+
+function WorkspaceRuntimeCommitProbe({ result, frames }) {
   const ref = useRef(null);
   useLayoutEffect(() => {
-    frames.push({
-      text: ref.current.textContent,
-      inputs: Array.from(ref.current.querySelectorAll("input")).map((node) => node.value)
-    });
+    frames.push({ ...workspaceFrame(ref.current), result });
   });
+  return <div ref={ref}>{result.workspaceContent}</div>;
+}
+
+function WorkspaceLifecycleCommitProbe({ frames, children }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => { frames.push(workspaceFrame(ref.current)); });
   return <div ref={ref}>{children}</div>;
+}
+
+function workspaceFrame(root) {
+  return {
+    text: root.textContent,
+    inputs: Array.from(root.querySelectorAll("input")).map((node) => node.value),
+    controls: Object.fromEntries(Array.from(root.querySelectorAll("label")).flatMap((label) => {
+      const control = label.querySelector("input, select");
+      if (!control) return [];
+      const name = label.childNodes[0]?.textContent?.trim();
+      return name ? [[name, control.value]] : [];
+    }))
+  };
 }
 
 function expectNoA(frames) {
@@ -645,6 +1043,13 @@ function expectCommittedFramesHaveNoOwnerA(frames) {
       expect(frame.text).not.toContain(value);
       expect(frame.inputs).not.toContain(value);
     }
+  }
+}
+
+function expectAlertFilterFrames(frames, expected) {
+  expect(frames.length).toBeGreaterThan(0);
+  for (const frame of frames) {
+    expect(frame.controls).toMatchObject(expected);
   }
 }
 
@@ -809,22 +1214,33 @@ function listPage(owner, params = {}, total = owner === "a" ? 731 : 2, transacti
   };
 }
 
-function alertPage(owner) {
+function alertPage(owner, customerId = `customer-${owner}`) {
   return {
     content: [{
       alertId: `alert-${owner}`,
       alertReason: `private-reason-${owner}`,
       alertStatus: "OPEN",
-      customerId: `customer-${owner}`,
+      customerId,
       fraudScore: 0.8,
       riskLevel: "HIGH",
-      transactionId: `transaction-${owner}`
+      transactionId: `transaction-${owner}`,
+      alertTimestamp: "2026-04-20T09:00:10Z"
     }],
     page: 0,
     size: 10,
     totalElements: 1,
     totalPages: 1
   };
+}
+
+function malformedAlertResponse(row) {
+  const validRow = alertPage("malformed").content[0];
+  const invalidRow = Array.isArray(row) ? row : { ...validRow, ...row };
+  return jsonResponse({ ...alertPage("malformed"), content: [invalidRow] });
+}
+
+function privateApiFailure(status, error = "PRIVATE_BACKEND_CODE", details = [PRIVATE_ALERT_DIAGNOSTIC]) {
+  return jsonResponse({ error, message: PRIVATE_ALERT_DIAGNOSTIC, details }, status);
 }
 
 function detailFor(owner, transactionId) {

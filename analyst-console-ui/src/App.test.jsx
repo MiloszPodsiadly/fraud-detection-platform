@@ -774,7 +774,7 @@ describe("App", () => {
     await waitFor(() => expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
-    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(transactionStreamRequestCount()).toBe(2));
     expect(getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(2);
     expect(listFraudCaseWorkQueue).toHaveBeenCalledTimes(1);
   });
@@ -812,17 +812,15 @@ describe("App", () => {
     const firstTransactions = deferred();
     const secondTransactions = deferred();
     listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
-    listScoredTransactions
-      .mockReturnValueOnce(firstTransactions.promise)
-      .mockReturnValueOnce(secondTransactions.promise);
+    mockTransactionStreamResponses(firstTransactions, secondTransactions);
 
     render(<App />);
 
     fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
-    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(transactionStreamRequestCount()).toBe(1));
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-123" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(transactionStreamRequestCount()).toBe(2));
 
     secondTransactions.resolve(transactionPage("txn-new"));
     await screen.findByText("txn-new");
@@ -843,17 +841,15 @@ describe("App", () => {
     const firstTransactions = deferred();
     const secondTransactions = deferred();
     listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
-    listScoredTransactions
-      .mockReturnValueOnce(firstTransactions.promise)
-      .mockReturnValueOnce(secondTransactions.promise);
+    mockTransactionStreamResponses(firstTransactions, secondTransactions);
 
     render(<App />);
 
     fireEvent.click(screen.getByRole("link", { name: "Transaction Scoring" }));
-    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(transactionStreamRequestCount()).toBe(1));
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "customer-123" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    await waitFor(() => expect(listScoredTransactions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(transactionStreamRequestCount()).toBe(2));
 
     secondTransactions.resolve(transactionPage("txn-new"));
     await screen.findByText("txn-new");
@@ -1066,6 +1062,21 @@ function transactionPage(transactionId) {
     page: 0,
     size: 25
   };
+}
+
+function mockTransactionStreamResponses(first, second) {
+  let streamRequestCount = 0;
+  listScoredTransactions.mockImplementation(({ size }) => {
+    if (size === 1) {
+      return Promise.resolve(transactionPage("txn-global-counter"));
+    }
+    streamRequestCount += 1;
+    return streamRequestCount === 1 ? first.promise : second.promise;
+  });
+}
+
+function transactionStreamRequestCount() {
+  return listScoredTransactions.mock.calls.filter(([request]) => request.size !== 1).length;
 }
 
 function summary(totalFraudCases) {

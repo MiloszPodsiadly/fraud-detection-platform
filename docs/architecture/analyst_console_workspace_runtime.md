@@ -24,7 +24,7 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - Fraud alert and transaction reads live in their route-specific runtime components, `FraudTransactionWorkspaceRuntime` and `TransactionScoringWorkspaceRuntime`.
 - Governance advisory queue and audit wiring live in `GovernanceWorkspaceRuntime`; audit analytics reads live in `ReportsWorkspaceRuntime`.
 - Detail-page routing lives in `WorkspaceDetailRouter`.
-- Refresh routing is isolated in `useWorkspaceRefreshController`; governance audit writes are isolated in `useGovernanceAuditWorkflow`.
+- `WorkspaceDashboardShell` composes `createWorkspaceRefreshHandler` from `workspaceRefreshContract`; refresh notices are handled by `useWorkspaceRefreshNotice`. Governance audit writes are isolated in `useGovernanceAuditWorkflow`.
 - API client and raw-fetch guardrails remain mandatory.
 
 ## Runtime Boundary, Not Security Boundary

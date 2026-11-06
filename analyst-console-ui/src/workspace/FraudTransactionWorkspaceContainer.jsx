@@ -11,6 +11,7 @@ export function FraudTransactionWorkspaceContainer({
   return (
     <FraudTransactionWorkspacePage
       alertPage={alertQueueState.page}
+      viewIdentity={alertQueueState.viewIdentity}
       isLoading={alertQueueState.isLoading}
       error={alertQueueState.error}
       onRetry={onRetryWorkspace}

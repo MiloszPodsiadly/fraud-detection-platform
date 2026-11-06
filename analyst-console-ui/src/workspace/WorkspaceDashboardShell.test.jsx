@@ -7,6 +7,7 @@ import { WorkspaceDashboardShell } from "./WorkspaceDashboardShell.jsx";
 import { WorkspaceRuntimeContext } from "./useWorkspaceRuntime.js";
 
 const shellSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "WorkspaceDashboardShell.jsx"), "utf8");
+const architectureSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../../docs/architecture/analyst_console_workspace_runtime.md"), "utf8");
 const shadowDashboardSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../components/ShadowPerformanceDashboard.jsx"), "utf8");
 const shadowRuntimeSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ShadowPerformanceWorkspaceRuntime.jsx"), "utf8");
 const shadowContainerSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ShadowPerformanceWorkspaceContainer.jsx"), "utf8");
@@ -24,6 +25,12 @@ describe("WorkspaceDashboardShell composition", () => {
     expect(shellSource).toContain("createWorkspaceRefreshHandler");
     expect(shellSource).not.toContain("function refreshDashboard");
     expect(shellSource).not.toContain("refreshWorkspaceDashboard");
+  });
+
+  it("documents the current dashboard refresh ownership", () => {
+    expect(architectureSource).toContain("`WorkspaceDashboardShell` composes `createWorkspaceRefreshHandler`");
+    expect(architectureSource).toContain("refresh notices are handled by `useWorkspaceRefreshNotice`");
+    expect(architectureSource).toContain("Governance audit writes are isolated in `useGovernanceAuditWorkflow`");
   });
 
   it("keeps workspace-specific runtime hooks out of the shell", () => {
@@ -83,8 +90,7 @@ describe("WorkspaceDashboardShell composition", () => {
     ].join("\n");
 
     expect(shellSource).toContain("useWorkspaceCounters");
-    expect(shellSource).toContain('const workspaceCountersForRoute = activeRoute.key === "transactionScoring"');
-    expect(shellSource).toContain("transactions: navigationState.transactionPage?.totalElements ?? null");
+    expect(shellSource).not.toContain("transactions: navigationState.transactionPage?.totalElements");
     expect(shellSource).toContain("alerts: navigationState.alertPage?.totalElements ?? null");
     expect(shellSource).toContain("workspaceCounters={workspaceCountersForRoute}");
     expect(shellSource).toContain("workspaceCountersStatus={workspaceCounterState}");
