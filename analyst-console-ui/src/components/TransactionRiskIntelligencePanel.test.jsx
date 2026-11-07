@@ -255,7 +255,7 @@ describe("TransactionRiskIntelligencePanel", () => {
       labelSource: "ANALYST_REVIEW",
       feedbackStatus: "RECORDED",
       createdAt: "2026-11-07T10:00:00Z",
-      createdBy: "analyst-b",
+      createdBy: "<img src=x onerror=alert(1)> analyst-token-42",
       decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
       notesPresent: false,
       scoringOccurrenceRelation: "PRIOR"
@@ -295,7 +295,8 @@ describe("TransactionRiskIntelligencePanel", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Feedback record found" })).toBeInTheDocument());
 
     expect(screen.getByText("This feedback belongs to a prior scoring occurrence and does not cover the current scoring.")).toBeInTheDocument();
-    expect(screen.getByText("analyst-b")).toBeInTheDocument();
+    expect(screen.getByText("<img src=x onerror=alert(1)> analyst-token-42")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Feedback recorded" })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.map(([, options]) => options.method || "GET")).toEqual(["GET", "POST", "GET"]);

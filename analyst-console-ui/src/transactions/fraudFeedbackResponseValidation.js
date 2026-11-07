@@ -2,7 +2,6 @@ import { isCanonicalUtcTimestamp } from "../engineIntelligence/engineIntelligenc
 import {
   ANALYST_DECISIONS,
   FRAUD_FEEDBACK_LABELS,
-  containsUnsafeFeedbackContent,
   isValidFraudFeedbackDecisionLabelPair,
   isValidFraudFeedbackReasonCodes
 } from "./fraudFeedbackValidation.js";
@@ -128,9 +127,8 @@ function isValidFeedbackId(value) {
 }
 
 function isValidActor(value) {
-  return isBoundedText(160)(value)
-    && !/[\u0000-\u001f\u007f]/.test(value)
-    && !containsUnsafeFeedbackContent(value);
+  return isBoundedText(512)(value)
+    && !/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(value);
 }
 
 function isBoundedText(maxLength) {

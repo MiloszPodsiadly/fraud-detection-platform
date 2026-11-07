@@ -105,10 +105,6 @@ export function isValidFraudFeedbackReasonCodes(label, reasonCodes) {
       && LABEL_REASON_CODE_MAP[label].has(code.trim()));
 }
 
-export function containsUnsafeFeedbackContent(value) {
-  return containsUnsafeTerm(value);
-}
-
 export function validateFraudFeedbackRequest(request) {
   if (!request || typeof request !== "object" || Array.isArray(request)) {
     return invalid("INVALID_FEEDBACK_REQUEST");

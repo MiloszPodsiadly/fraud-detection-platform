@@ -19,7 +19,11 @@ describe("fraud feedback response validation", () => {
     ["unknown reason code", { decisionReasonCodes: ["UNKNOWN_REASON"] }],
     ["mismatched reason code", { decisionReasonCodes: ["ANALYST_CONFIRMED_LEGITIMATE"] }],
     ["excessive reason codes", { decisionReasonCodes: Array(11).fill("ANALYST_CONFIRMED_FRAUD") }],
-    ["unsafe actor content", { createdBy: "analyst-password-1" }],
+    ["empty actor", { createdBy: "" }],
+    ["whitespace-only actor", { createdBy: "   " }],
+    ["non-string actor", { createdBy: 42 }],
+    ["actor with a control character", { createdBy: "analyst\u0085id" }],
+    ["actor with a bidi override", { createdBy: "analyst\u202e-id" }],
     ["missing required field", { feedbackStatus: undefined }],
     ["unrecognized response property", { notes: "private note" }]
   ])("rejects %s", (_name, overrides) => {
@@ -28,6 +32,15 @@ describe("fraud feedback response validation", () => {
 
   it("accepts the canonical backend response", () => {
     expect(isValidFraudFeedbackResponse(validFeedback(), TRANSACTION_ID)).toBe(true);
+  });
+
+  it.each([
+    "analyst-token-42",
+    "analyst-password-42",
+    "analyst-secret-42",
+    "<img src=x onerror=alert(1)>"
+  ])("accepts a bounded backend actor identifier as text: %s", (createdBy) => {
+    expect(isValidFraudFeedbackResponse({ ...validFeedback(), createdBy }, TRANSACTION_ID)).toBe(true);
   });
 
   it.each(["PRIOR", "UNKNOWN"])("accepts legacy %s feedback with nullable optional snapshots", (relation) => {
