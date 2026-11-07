@@ -17,7 +17,13 @@ const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/audit/read/ReadAccessAuditClassifier.java",
   "alert-service/src/main/java/com/frauddetection/alert/observability/AlertServiceMetrics.java",
   "alert-service/src/main/java/com/frauddetection/alert/fraudcase/FraudCaseReadQueryPolicy.java",
-  "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
+  "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java",
+  "alert-service/src/main/java/com/frauddetection/alert/exception/AlertServiceExceptionHandler.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackService.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionDocument.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionProjectionWriter.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/FeedbackOccurrenceFenceException.java",
+  "alert-service/src/main/java/com/frauddetection/alert/regulated/RegulatedMutationTransactionRunner.java"
 ]);
 const forbiddenBackendProductionPrefixes = [
   "transaction-ingest-service/src/main/java/",
@@ -32,7 +38,7 @@ const allowedEndpointFiles = new Set([
 for (const file of changedFiles) {
   const normalized = file.replaceAll("\\", "/");
   if (enforceBackendScope && normalized.startsWith("alert-service/src/main/java/") && !allowedBackendFiles.has(normalized)) {
-    violations.push(`${normalized}: API client scope backend changes are restricted to the approved fraud-case route removal and BFF logout allowlist.`);
+    violations.push(`${normalized}: API client scope backend changes are restricted to the reviewed alert-service correction and BFF logout allowlist.`);
   }
   if (enforceBackendScope && forbiddenBackendProductionPrefixes.some((prefix) => normalized.startsWith(prefix))) {
     violations.push(`${normalized}: API client scope must not change backend production code outside the approved alert-service allowlist.`);

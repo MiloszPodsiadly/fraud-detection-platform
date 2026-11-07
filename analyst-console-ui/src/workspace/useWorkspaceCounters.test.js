@@ -6,6 +6,38 @@ const listAlerts = vi.fn();
 const getFraudCaseWorkQueueSummary = vi.fn();
 const getSuspiciousTransactionSummary = vi.fn();
 const listScoredTransactions = vi.fn();
+const COUNTER_TEST_API_CLIENT = {
+  listAlerts,
+  getFraudCaseWorkQueueSummary,
+  getSuspiciousTransactionSummary,
+  listScoredTransactions
+};
+const MISSING_COUNTER_VALUE = Symbol("missing counter value");
+const WORKSPACE_COUNTER_NAMES = ["alerts", "fraudCases", "suspiciousTransactions", "transactions"];
+const INVALID_COUNTER_VALUES = [
+  ["null", null],
+  ["missing property", MISSING_COUNTER_VALUE],
+  ["negative integer", -7],
+  ["fractional number", 3.14],
+  ["numeric string", "42"],
+  ["object", { value: 42 }],
+  ["array", []],
+  ["NaN", Number.NaN],
+  ["infinity", Number.POSITIVE_INFINITY],
+  ["unsafe integer", Number.MAX_SAFE_INTEGER + 1],
+  ["large exponent", 1e30]
+];
+const VALID_COUNTER_VALUES = [
+  ["zero", 0],
+  ["positive integer", 42],
+  ["largest safe integer", Number.MAX_SAFE_INTEGER]
+];
+const INVALID_COUNTER_CASES = WORKSPACE_COUNTER_NAMES.flatMap((counterName) => INVALID_COUNTER_VALUES.map(
+  ([description, value]) => [counterName, description, value]
+));
+const VALID_COUNTER_CASES = WORKSPACE_COUNTER_NAMES.flatMap((counterName) => VALID_COUNTER_VALUES.map(
+  ([description, value]) => [counterName, description, value]
+));
 
 describe("useWorkspaceCounters", () => {
   beforeEach(() => {
@@ -35,6 +67,118 @@ describe("useWorkspaceCounters", () => {
       status: "ALL"
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result.current.degraded).toBe(false);
+  });
+
+  it.each(INVALID_COUNTER_CASES)("rejects %s payloads with %s values", async (counterName, _description, value) => {
+    counterReader(counterName).mockResolvedValueOnce(counterPayload(counterName, value));
+    const { result } = renderHook(() => useWorkspaceCounters(counterOptions(counterName)));
+
+    await waitFor(() => {
+      expect(counterReader(counterName)).toHaveBeenCalledTimes(1);
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.counters[counterName]).toBeNull();
+    expect(result.current.degraded).toBe(true);
+    expect(result.current.stale).toBe(false);
+    expect(result.current.errorByCounter).toEqual({ [counterName]: invalidCounterMessage(counterName) });
+    expect(result.current.lastRefreshedAt).toBeNull();
+  });
+
+  it.each(VALID_COUNTER_CASES)("accepts %s payloads with valid %s values", async (counterName, _description, value) => {
+    counterReader(counterName).mockResolvedValueOnce(counterPayload(counterName, value));
+    const { result } = renderHook(() => useWorkspaceCounters(counterOptions(counterName)));
+
+    await waitFor(() => expect(result.current.counters[counterName]).toBe(value));
+
+    expect(result.current.degraded).toBe(false);
+    expect(result.current.stale).toBe(false);
+    expect(result.current.errorByCounter).toEqual({});
+    expect(result.current.lastRefreshedAt).not.toBeNull();
+  });
+
+  it.each(WORKSPACE_COUNTER_NAMES)("rejects invalid public setter values for %s", async (counterName) => {
+    counterReader(counterName).mockResolvedValueOnce(counterPayload(counterName, 42));
+    const { result } = renderHook(() => useWorkspaceCounters(counterOptions(counterName)));
+    await waitFor(() => expect(result.current.counters[counterName]).toBe(42));
+
+    await act(async () => {
+      for (const [, value] of INVALID_COUNTER_VALUES) {
+        if (value !== MISSING_COUNTER_VALUE) result.current.setCounterValue(counterName, value);
+      }
+    });
+
+    expect(result.current.counters[counterName]).toBe(42);
+    expect(result.current.degraded).toBe(false);
+    expect(result.current.stale).toBe(false);
+    expect(result.current.errorByCounter).toEqual({});
+  });
+
+  it.each(WORKSPACE_COUNTER_NAMES)("retains only a valid stale %s value after malformed refresh data", async (counterName) => {
+    const reader = counterReader(counterName);
+    reader.mockResolvedValueOnce(counterPayload(counterName, 42));
+    const { result } = renderHook(() => useWorkspaceCounters(counterOptions(counterName)));
+    await waitFor(() => expect(result.current.counters[counterName]).toBe(42));
+    const lastRefreshedAt = result.current.lastRefreshedAt;
+    reader.mockResolvedValueOnce(counterPayload(counterName, { value: 42 }));
+
+    await act(async () => { await result.current.refresh(); });
+
+    expect(result.current.counters[counterName]).toBe(42);
+    expect(result.current.degraded).toBe(true);
+    expect(result.current.stale).toBe(true);
+    expect(result.current.errorByCounter).toEqual({ [counterName]: invalidCounterMessage(counterName) });
+    expect(result.current.lastRefreshedAt).toBe(lastRefreshedAt);
+  });
+
+  it("recovers from malformed counter data after a valid refresh", async () => {
+    listAlerts.mockResolvedValueOnce(counterPayload("alerts", MISSING_COUNTER_VALUE));
+    listAlerts.mockResolvedValueOnce(counterPayload("alerts", 42));
+    const { result } = renderHook(() => useWorkspaceCounters(counterOptions("alerts")));
+
+    await waitFor(() => expect(result.current.degraded).toBe(true));
+    expect(result.current.counters.alerts).toBeNull();
+    expect(result.current.lastRefreshedAt).toBeNull();
+
+    await act(async () => { await result.current.refresh(); });
+
+    expect(result.current.counters.alerts).toBe(42);
+    expect(result.current.degraded).toBe(false);
+    expect(result.current.stale).toBe(false);
+    expect(result.current.errorByCounter).toEqual({});
+    expect(result.current.lastRefreshedAt).not.toBeNull();
+  });
+
+  it("does not revive a malformed counter value across an A-to-B-to-A owner transition", async () => {
+    const malformedA = deferred();
+    const validB = deferred();
+    const validReturnA = deferred();
+    listAlerts
+      .mockReturnValueOnce(malformedA.promise)
+      .mockReturnValueOnce(validB.promise)
+      .mockReturnValueOnce(validReturnA.promise);
+    const { result, rerender } = renderHook(({ resetKey }) => useWorkspaceCounters({
+      ...counterOptions("alerts"),
+      workspaceSessionResetKey: resetKey
+    }), { initialProps: { resetKey: "owner-a" } });
+
+    await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(1));
+    await act(async () => malformedA.resolve(counterPayload("alerts", Number.MAX_SAFE_INTEGER + 1)));
+    await waitFor(() => expect(result.current.degraded).toBe(true));
+    expect(result.current.counters.alerts).toBeNull();
+    expect(result.current.degraded).toBe(true);
+
+    rerender({ resetKey: "owner-b" });
+    await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(2));
+    expect(result.current.counters.alerts).toBeNull();
+    await act(async () => validB.resolve(counterPayload("alerts", 7)));
+    await waitFor(() => expect(result.current.counters.alerts).toBe(7));
+
+    rerender({ resetKey: "owner-a" });
+    await waitFor(() => expect(listAlerts).toHaveBeenCalledTimes(3));
+    expect(result.current.counters.alerts).toBeNull();
+    await act(async () => validReturnA.resolve(counterPayload("alerts", 3)));
+    await waitFor(() => expect(result.current.counters.alerts).toBe(3));
   });
 
   it("loads the global fraud case counter without mounting the fraud case work queue", async () => {
@@ -306,6 +450,112 @@ describe("useWorkspaceCounters", () => {
     expect(result.current.counters).toEqual(counters({ alerts: 10, transactions: 20 }));
   });
 
+  it("fences saved callbacks and late results through a key-only A-B-A owner transition", async () => {
+    const oldARefresh = deferred();
+    const bRequest = deferred();
+    const newARequest = deferred();
+    const client = {
+      listAlerts: vi.fn()
+        .mockResolvedValueOnce(page(3))
+        .mockReturnValueOnce(oldARefresh.promise)
+        .mockReturnValueOnce(bRequest.promise)
+        .mockReturnValueOnce(newARequest.promise)
+    };
+    const options = {
+      enabled: true,
+      apiClient: client,
+      includeFraudCases: false,
+      includeSuspiciousTransactions: false,
+      includeTransactions: false,
+      canReadAlerts: true
+    };
+    const { result, rerender } = renderHook(({ resetKey }) => useWorkspaceCounters({
+      ...options,
+      workspaceSessionResetKey: resetKey
+    }), { initialProps: { resetKey: "owner-a" } });
+
+    await waitFor(() => expect(result.current.counters.alerts).toBe(3));
+    const savedARefresh = result.current.refresh;
+    const savedASetter = result.current.setCounterValue;
+    rerender({ resetKey: "owner-a" });
+    expect(client.listAlerts).toHaveBeenCalledTimes(1);
+
+    await act(async () => { void result.current.refresh(); });
+    await waitFor(() => expect(client.listAlerts).toHaveBeenCalledTimes(2));
+    const oldASignal = client.listAlerts.mock.calls[1][1].signal;
+
+    rerender({ resetKey: "owner-b" });
+    expect(result.current.counters).toEqual(counters());
+    expect(result.current.degraded).toBe(false);
+    expect(result.current.stale).toBe(false);
+    expect(result.current.errorByCounter).toEqual({});
+    expect(result.current.lastRefreshedAt).toBeNull();
+    expect(oldASignal.aborted).toBe(true);
+    await waitFor(() => expect(client.listAlerts).toHaveBeenCalledTimes(3));
+    const savedBRefresh = result.current.refresh;
+    const savedBSetter = result.current.setCounterValue;
+
+    savedASetter("alerts", 9991);
+    await act(async () => { await savedARefresh(); });
+    expect(client.listAlerts).toHaveBeenCalledTimes(3);
+    expect(result.current.counters.alerts).toBeNull();
+
+    rerender({ resetKey: "owner-a" });
+    await waitFor(() => expect(client.listAlerts).toHaveBeenCalledTimes(4));
+    const newASignal = client.listAlerts.mock.calls[3][1].signal;
+    expect(newASignal.aborted).toBe(false);
+    savedBSetter("alerts", 9992);
+    await act(async () => { await savedBRefresh(); });
+    expect(client.listAlerts).toHaveBeenCalledTimes(4);
+
+    await act(async () => {
+      oldARefresh.resolve(page(1));
+      bRequest.resolve(page(2));
+      await Promise.all([oldARefresh.promise, bRequest.promise]);
+    });
+    expect(result.current.counters.alerts).toBeNull();
+
+    await act(async () => {
+      newARequest.resolve(page(7));
+      await newARequest.promise;
+    });
+    await waitFor(() => expect(result.current.counters.alerts).toBe(7));
+  });
+
+  it("treats an explicit API client replacement as an owner change with a stable reset key", async () => {
+    const next = deferred();
+    const firstClient = { listAlerts: vi.fn().mockResolvedValue(page(4)) };
+    const secondClient = { listAlerts: vi.fn().mockReturnValue(next.promise) };
+    const { result, rerender } = renderHook(({ client }) => useWorkspaceCounters({
+      enabled: true,
+      apiClient: client,
+      workspaceSessionResetKey: "stable-key",
+      includeFraudCases: false,
+      includeSuspiciousTransactions: false,
+      includeTransactions: false,
+      canReadAlerts: true
+    }), { initialProps: { client: firstClient } });
+
+    await waitFor(() => expect(result.current.counters.alerts).toBe(4));
+    const savedRefresh = result.current.refresh;
+    const savedSetter = result.current.setCounterValue;
+    rerender({ client: secondClient });
+
+    expect(result.current.counters).toEqual(counters());
+    expect(result.current.lastRefreshedAt).toBeNull();
+    await waitFor(() => expect(secondClient.listAlerts).toHaveBeenCalledTimes(1));
+    savedSetter("alerts", 9993);
+    await act(async () => { await savedRefresh(); });
+    expect(firstClient.listAlerts).toHaveBeenCalledTimes(1);
+    expect(result.current.counters.alerts).toBeNull();
+
+    await act(async () => {
+      next.resolve(page(8));
+      await next.promise;
+    });
+    await waitFor(() => expect(result.current.counters.alerts).toBe(8));
+  });
+
   it("does not mark aborted counter requests fresh", async () => {
     listAlerts.mockRejectedValue(new DOMException("aborted", "AbortError"));
     listScoredTransactions.mockRejectedValue(new DOMException("aborted", "AbortError"));
@@ -351,6 +601,48 @@ describe("useWorkspaceCounters", () => {
     expect(result.current.errorByCounter.alerts).toBe("alerts unavailable");
   });
 });
+
+function counterOptions(counterName) {
+  return {
+    enabled: true,
+    apiClient: COUNTER_TEST_API_CLIENT,
+    includeAlerts: counterName === "alerts",
+    includeFraudCases: counterName === "fraudCases",
+    includeSuspiciousTransactions: counterName === "suspiciousTransactions",
+    includeTransactions: counterName === "transactions",
+    canReadAlerts: counterName === "alerts",
+    canReadFraudCases: counterName === "fraudCases",
+    canReadSuspiciousTransactions: counterName === "suspiciousTransactions",
+    canReadTransactions: counterName === "transactions"
+  };
+}
+
+function counterReader(counterName) {
+  switch (counterName) {
+    case "alerts": return listAlerts;
+    case "fraudCases": return getFraudCaseWorkQueueSummary;
+    case "suspiciousTransactions": return getSuspiciousTransactionSummary;
+    case "transactions": return listScoredTransactions;
+    default: throw new Error(`Unknown counter: ${counterName}`);
+  }
+}
+
+function counterPayload(counterName, value) {
+  if (value === MISSING_COUNTER_VALUE) return {};
+  switch (counterName) {
+    case "alerts":
+    case "transactions": return page(value);
+    case "fraudCases": return { totalFraudCases: value };
+    case "suspiciousTransactions": return { totalSuspiciousTransactions: value };
+    default: throw new Error(`Unknown counter: ${counterName}`);
+  }
+}
+
+function invalidCounterMessage(counterName) {
+  return counterName === "suspiciousTransactions"
+    ? "Summary temporarily unavailable"
+    : "Counter response is invalid";
+}
 
 function apiClient() {
   return {

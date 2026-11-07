@@ -12,6 +12,7 @@ import com.frauddetection.common.events.model.LocationInfo;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 @Document(collection = "alerts")
+@CompoundIndex(name = "alerts_timestamp_id_idx", def = "{'alertTimestamp': -1, '_id': -1}")
 public class AlertDocument {
 
     /*

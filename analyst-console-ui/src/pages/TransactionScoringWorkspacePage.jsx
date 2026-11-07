@@ -6,27 +6,42 @@ import { PaginationControls } from "../components/PaginationControls.jsx";
 import { TransactionMonitorTable } from "../components/TransactionMonitorTable.jsx";
 import { TransactionRiskIntelligencePanel } from "../components/TransactionRiskIntelligencePanel.jsx";
 
+const INITIAL_FILTER_REQUEST = { query: "", riskLevel: "ALL", status: "ALL" };
+const ALERT_RECOMMENDATION_FILTERS = [
+  ["ALL", "All"],
+  ["LEGITIMATE", "No review recommendation"],
+  ["SUSPICIOUS", "Review recommended"]
+];
+
 export function TransactionScoringWorkspacePage({
   transactionPage,
-  transactionPageRequest = { query: "", riskLevel: "ALL", status: "ALL" },
+  transactionPageRequest = INITIAL_FILTER_REQUEST,
   isLoading,
+  isStale = false,
   error,
   onRetry,
+  onRefreshTransactions,
   onTransactionFiltersChange = () => {},
   onTransactionPageChange,
   onTransactionPageSizeChange,
   apiClient,
-  canReadTransactions = true,
+  canReadTransactions,
+  viewIdentity,
   workspaceHeadingProps = {}
 }) {
-  const transactions = transactionPage.content || [];
-  const [expandedTransactionId, setExpandedTransactionId] = useState(null);
+  const canRead = canReadTransactions === true;
+  const transactions = canRead && Array.isArray(transactionPage?.content) ? transactionPage.content : [];
+  const [selection, setSelection] = useState({ viewIdentity, transactionId: null });
+  const expandedTransactionId = canRead && selection.viewIdentity === viewIdentity
+    && transactions.some((transaction) => transaction.transactionId === selection.transactionId)
+    ? selection.transactionId : null;
 
   useEffect(() => {
-    if (expandedTransactionId && !transactions.some((transaction) => transaction.transactionId === expandedTransactionId)) {
-      setExpandedTransactionId(null);
+    if (selection.transactionId && (!canRead || selection.viewIdentity !== viewIdentity
+      || !transactions.some((transaction) => transaction.transactionId === selection.transactionId))) {
+      setSelection({ viewIdentity, transactionId: null });
     }
-  }, [expandedTransactionId, transactions]);
+  }, [canRead, selection, transactions, viewIdentity]);
 
   return (
     <section className="panel" id="transaction-stream" aria-labelledby="transaction-stream-title">
@@ -38,78 +53,95 @@ export function TransactionScoringWorkspacePage({
             Recent scored transactions include both legitimate traffic and suspicious cases.
           </p>
         </div>
-        <button className="secondaryButton" type="button" onClick={onRetry}>
+        <button className="secondaryButton" type="button" onClick={canRead ? onRetry : undefined} disabled={!canRead || isLoading}>
           Refresh
         </button>
       </div>
 
-      <TransactionMonitorFilters
-        request={transactionPageRequest}
-        onApply={onTransactionFiltersChange}
-      />
-
-      {isLoading && <LoadingPanel label="Loading scored transactions..." />}
-      {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
-      {!isLoading && !error && transactions.length === 0 && (
-        <EmptyState
-          title="No scored transactions match this view"
-          message="Adjust filters or generate synthetic traffic to populate transaction monitoring."
-        />
+      {!canRead && (
+        <EmptyState title="Transaction reads unavailable" message="Transaction read access is not available in this runtime." />
       )}
-      {!isLoading && !error && transactions.length > 0 && (
+      {canRead && (
         <>
-          <TransactionMonitorTable
-            transactions={transactions}
-            expandedTransactionId={expandedTransactionId}
-            onToggleTransaction={setExpandedTransactionId}
-            renderTransactionDetail={(transaction, detailPanelId) => (
-              <TransactionRiskIntelligencePanel
-                transactionId={transaction.transactionId}
-                apiClient={apiClient}
-                enabled={canReadTransactions === true}
-                panelId={detailPanelId}
+          <TransactionMonitorFilters
+            request={transactionPageRequest}
+            viewIdentity={viewIdentity}
+            onApply={onTransactionFiltersChange}
+          />
+          {isLoading && <LoadingPanel label={isStale ? "Refreshing scored transactions; showing the last loaded results." : "Loading scored transactions..."} />}
+          {!isLoading && error && transactions.length === 0 && <ErrorState error={error} onRetry={onRetry} />}
+          {!isLoading && error && transactions.length > 0 && (
+            <div className="formError" role="alert">
+              <p>Refresh failed. Previously loaded results are shown and may be out of date.</p>
+              <button className="secondaryButton compactButton" type="button" onClick={onRetry}>Retry refresh</button>
+            </div>
+          )}
+          {!isLoading && !error && transactions.length === 0 && (
+            <EmptyState
+              title="No scored transactions match this view"
+              message="Adjust filters or generate synthetic traffic to populate transaction monitoring."
+            />
+          )}
+          {transactions.length > 0 && (
+            <TransactionMonitorTable
+              transactions={transactions}
+              expandedTransactionId={expandedTransactionId}
+              onToggleTransaction={(transactionId) => setSelection({ viewIdentity, transactionId })}
+              renderTransactionDetail={(transaction, detailPanelId) => (
+                <TransactionRiskIntelligencePanel
+                  transactionId={transaction.transactionId}
+                  scoringOccurrenceToken={transaction.scoringOccurrenceToken}
+                  apiClient={apiClient}
+                  onRefreshTransactions={onRefreshTransactions}
+                  enabled={canReadTransactions === true}
+                  panelId={detailPanelId}
+                />
+              )}
+            />
+          )}
+          {!isLoading && !error && transactionPage.page < transactionPage.totalPages
+            && (transactionPage.totalPages > 1 || transactionPage.totalElements > 0) && (
+              <PaginationControls
+                page={transactionPage.page}
+                size={transactionPage.size}
+                totalPages={transactionPage.totalPages}
+                totalElements={transactionPage.totalElements}
+                totalElementsCapped={transactionPage.totalElementsCapped === true}
+                label={transactionPage.totalElementsCapped === true
+                  ? "filtered matches"
+                  : hasAppliedTransactionFilters(transactionPageRequest) ? "filtered scored transactions" : "scored transactions"}
+                totalLabel="total"
+                onPageChange={onTransactionPageChange}
+                onSizeChange={onTransactionPageSizeChange}
               />
-            )}
-          />
-          <PaginationControls
-            page={transactionPage.page}
-            size={transactionPage.size}
-            totalPages={transactionPage.totalPages}
-            totalElements={transactionPage.totalElements}
-            label={hasAppliedTransactionFilters(transactionPageRequest) ? "filtered scored transactions" : "scored transactions"}
-            totalLabel={hasAppliedTransactionFilters(transactionPageRequest) ? "capped" : "total"}
-            onPageChange={onTransactionPageChange}
-            onSizeChange={onTransactionPageSizeChange}
-          />
+          )}
         </>
       )}
     </section>
   );
 }
 
-function TransactionMonitorFilters({ request, onApply }) {
-  const [draft, setDraft] = useState(() => editableTransactionRequest(request));
-  const [validationError, setValidationError] = useState(null);
+function TransactionMonitorFilters({ request, viewIdentity, onApply }) {
+  const [draftState, setDraftState] = useState(() => ({
+    request, viewIdentity, draft: editableTransactionRequest(request), error: null
+  }));
+  const ownsDraft = draftState.request === request && draftState.viewIdentity === viewIdentity;
+  const draft = ownsDraft ? draftState.draft : editableTransactionRequest(request);
+  const validationError = ownsDraft ? draftState.error : null;
   const draftChanged = !sameTransactionRequest(draft, editableTransactionRequest(request));
 
-  useEffect(() => {
-    setDraft(editableTransactionRequest(request));
-    setValidationError(null);
-  }, [request]);
-
   function updateField(field, value) {
-    setDraft((current) => ({ ...current, [field]: value }));
-    setValidationError(null);
+    setDraftState({ request, viewIdentity, draft: { ...draft, [field]: value }, error: null });
   }
 
   function applyFilters() {
     const query = draft.query.trim();
     if (query && query.length < 3) {
-      setValidationError("Use at least 3 characters or clear search.");
+      setDraftState({ request, viewIdentity, draft, error: "Use at least 3 characters or clear search." });
       return;
     }
     if (query.length > 128) {
-      setValidationError("Search query must be 128 characters or less.");
+      setDraftState({ request, viewIdentity, draft, error: "Search query must be 128 characters or less." });
       return;
     }
     onApply({
@@ -126,8 +158,7 @@ function TransactionMonitorFilters({ request, onApply }) {
       riskLevel: "ALL",
       status: "ALL"
     };
-    setDraft(nextRequest);
-    setValidationError(null);
+    setDraftState({ request, viewIdentity, draft: nextRequest, error: null });
     onApply({
       ...request,
       ...nextRequest,
@@ -156,10 +187,10 @@ function TransactionMonitorFilters({ request, onApply }) {
           </select>
         </label>
         <label>
-          Classification
+          Alert recommendation
           <select value={draft.status} onChange={(event) => updateField("status", event.target.value)}>
-            {["ALL", "LEGITIMATE", "SUSPICIOUS"].map((status) => (
-              <option key={status} value={status}>{status}</option>
+            {ALERT_RECOMMENDATION_FILTERS.map(([status, label]) => (
+              <option key={status} value={status}>{label}</option>
             ))}
           </select>
         </label>
@@ -170,7 +201,9 @@ function TransactionMonitorFilters({ request, onApply }) {
           <span className="tag">Backend-filtered stream</span>
           {request.query ? <span className="tag">Search filter set</span> : <span className="tag">No search query</span>}
           {request.riskLevel && request.riskLevel !== "ALL" && <span className="tag">Risk: {request.riskLevel}</span>}
-          {request.status && request.status !== "ALL" && <span className="tag">Classification: {request.status}</span>}
+          {request.status && request.status !== "ALL" && (
+            <span className="tag">Alert recommendation: {alertRecommendationFilterLabel(request.status)}</span>
+          )}
         </div>
         <div className="workQueueToolbarActions">
           <button className="secondaryButton compactButton" type="button" onClick={applyFilters} disabled={!draftChanged}>
@@ -191,6 +224,10 @@ function editableTransactionRequest(request = {}) {
     riskLevel: request.riskLevel || "ALL",
     status: request.status || request.classification || "ALL"
   };
+}
+
+function alertRecommendationFilterLabel(status) {
+  return ALERT_RECOMMENDATION_FILTERS.find(([value]) => value === status)?.[1] || status;
 }
 
 function sameTransactionRequest(left, right) {

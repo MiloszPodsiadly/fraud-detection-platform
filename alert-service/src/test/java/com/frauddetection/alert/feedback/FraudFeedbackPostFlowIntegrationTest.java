@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
@@ -18,6 +19,8 @@ import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidato
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
+import com.frauddetection.alert.persistence.FeedbackOccurrenceFenceException;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
@@ -50,6 +53,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -88,6 +92,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 class FraudFeedbackPostFlowIntegrationTest {
 
+    private static final ScoringOccurrenceOwnership DEFAULT_OCCURRENCE = ScoringOccurrenceOwnership.authoritative(
+            "event-1",
+            Instant.parse("2026-06-25T09:00:01Z"),
+            "a".repeat(64)
+    );
+    private static final String DEFAULT_OCCURRENCE_TOKEN = ScoringOccurrenceToken.from(DEFAULT_OCCURRENCE);
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -113,6 +124,9 @@ class FraudFeedbackPostFlowIntegrationTest {
     private RegulatedMutationTransactionRunner transactionRunner;
 
     @MockitoBean
+    private ScoredTransactionProjectionWriter projectionWriter;
+
+    @MockitoBean
     private AlertServiceMetrics alertServiceMetrics;
 
     private final List<FraudFeedbackRecord> savedRecords = new ArrayList<>();
@@ -121,7 +135,8 @@ class FraudFeedbackPostFlowIntegrationTest {
     void setUp() {
         savedRecords.clear();
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
-        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.REQUIRED);
+        when(transactionRunner.isTransactionManagerConfigured()).thenReturn(true);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenReturn(supportedV2EngineIntelligenceReadModel());
@@ -149,6 +164,7 @@ class FraudFeedbackPostFlowIntegrationTest {
                 .andExpect(jsonPath("$.feedbackStatus").value("RECORDED"))
                 .andExpect(jsonPath("$.createdBy").value("analyst-1"))
                 .andExpect(jsonPath("$.notesPresent").value(true))
+                .andExpect(jsonPath("$.scoringOccurrenceRelation").value("CURRENT"))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -194,10 +210,137 @@ class FraudFeedbackPostFlowIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequest()))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_ALREADY_RECORDED"));
+                .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_ALREADY_RECORDED"))
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_FEEDBACK_ALREADY_RECORDED"));
 
         verify(repository, never()).save(any());
         verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postForPreviouslyViewedOccurrenceReturnsSafeConflictWithoutWriteOrAudit() throws Exception {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction(
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-2",
+                        Instant.parse("2026-06-25T09:00:02Z"),
+                        "b".repeat(64)
+                )
+        ));
+
+        String body = mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"))
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body).doesNotContain("event-1", "event-2", "a".repeat(64), "b".repeat(64), "sourceEventFingerprint");
+        assertThat(savedRecords).isEmpty();
+        verify(repository, never()).existsByTransactionId("txn-1");
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postGenericConflictReturnsStableGenericReason() throws Exception {
+        org.mockito.Mockito.doThrow(new ResponseStatusException(
+                        org.springframework.http.HttpStatus.CONFLICT,
+                        "SCORED_TRANSACTION_CONFLICT"
+                ))
+                .when(transactionRunner).runLocalCommit(any());
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.details[0]").value("reason:CONFLICT"));
+
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postTypedStaleFenceOutcomeKeepsTheExisting409Contract() throws Exception {
+        org.mockito.Mockito.doThrow(new FeedbackOccurrenceFenceException(
+                        FeedbackOccurrenceFenceException.Reason.OCCURRENCE_CHANGED
+                ))
+                .when(projectionWriter).fenceFeedbackOccurrence("txn-1", DEFAULT_OCCURRENCE);
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"))
+                .andExpect(jsonPath("$.details.length()").value(1))
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"));
+
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postTypedFenceUnavailableOutcomeKeepsTheExisting503Contract() throws Exception {
+        org.mockito.Mockito.doThrow(new FeedbackOccurrenceFenceException(
+                        FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE
+                ))
+                .when(projectionWriter).fenceFeedbackOccurrence("txn-1", DEFAULT_OCCURRENCE);
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("Service Unavailable"))
+                .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE"))
+                .andExpect(jsonPath("$.details.length()").value(0));
+
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postUnknownCommitOutcomeReturnsOnlyTheAllowlisted503Reason() throws Exception {
+        org.mockito.Mockito.doThrow(new ResponseStatusException(
+                        org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                        "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"
+                ))
+                .when(transactionRunner).runLocalCommit(any());
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("Service Unavailable"))
+                .andExpect(jsonPath("$.details.length()").value(1))
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"));
+
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postGeneric503DoesNotReceiveAnUncertainCommitReason() throws Exception {
+        org.mockito.Mockito.doThrow(new ResponseStatusException(
+                        org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                        "FRAUD_FEEDBACK_MONGO_TRANSACTION_UNAVAILABLE"
+                ))
+                .when(transactionRunner).runLocalCommit(any());
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("Service Unavailable"))
+                .andExpect(jsonPath("$.details.length()").value(0));
     }
 
     @Test
@@ -217,7 +360,7 @@ class FraudFeedbackPostFlowIntegrationTest {
     }
 
     @Test
-    void postOutboxPersistenceFailureReturns503AndCompensatesSavedFeedback() throws Exception {
+    void postOutboxPersistenceFailureReturns503WithoutManualCleanup() throws Exception {
         doThrow(new IllegalStateException("outbox unavailable"))
                 .when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
 
@@ -229,7 +372,7 @@ class FraudFeedbackPostFlowIntegrationTest {
                 .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE"));
 
         assertThat(savedRecords).hasSize(1);
-        verify(repository).deleteById(savedRecords.getFirst().getFeedbackId());
+        verify(repository, never()).deleteById(savedRecords.getFirst().getFeedbackId());
     }
 
     @Test
@@ -255,9 +398,10 @@ class FraudFeedbackPostFlowIntegrationTest {
                                 {
                                   "analystDecision": "MARKED_FRAUD",
                                   "feedbackLabel": "CONFIRMED_LEGITIMATE",
-                                  "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"]
+                                  "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"],
+                                  "scoringOccurrenceToken": "%s"
                                 }
-                                """))
+                                """.formatted(DEFAULT_OCCURRENCE_TOKEN)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH"));
 
@@ -294,9 +438,10 @@ class FraudFeedbackPostFlowIntegrationTest {
                 {
                   "analystDecision": "MARKED_FRAUD",
                   "feedbackLabel": "CONFIRMED_FRAUD",
-                  "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"]
+                  "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"],
+                  "scoringOccurrenceToken": "%s"
                 }
-                """;
+                """.formatted(DEFAULT_OCCURRENCE_TOKEN);
     }
 
     private String validRequestWithNotes() {
@@ -305,12 +450,17 @@ class FraudFeedbackPostFlowIntegrationTest {
                   "analystDecision": "MARKED_FRAUD",
                   "feedbackLabel": "CONFIRMED_FRAUD",
                   "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"],
-                  "notes": "Customer confirmed fraud"
+                  "notes": "Customer confirmed fraud",
+                  "scoringOccurrenceToken": "%s"
                 }
-                """;
+                """.formatted(DEFAULT_OCCURRENCE_TOKEN);
     }
 
     private ScoredTransaction scoredTransaction() {
+        return scoredTransaction(DEFAULT_OCCURRENCE);
+    }
+
+    private ScoredTransaction scoredTransaction(ScoringOccurrenceOwnership ownership) {
         return new ScoredTransaction(
                 "txn-1",
                 "customer-1",
@@ -334,11 +484,7 @@ class FraudFeedbackPostFlowIntegrationTest {
                         List.of(),
                         AnalystRecommendationNonDecisioning.advisoryOnly()
                 ),
-                ScoringOccurrenceOwnership.authoritative(
-                        "event-1",
-                        Instant.parse("2026-06-25T09:00:01Z"),
-                        "a".repeat(64)
-                ),
+                ownership,
                 com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
     }

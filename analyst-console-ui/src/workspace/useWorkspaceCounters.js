@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isAbortError } from "../api/alertsApi.js";
 import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
@@ -46,20 +46,69 @@ export function useWorkspaceCounters({
   const effectiveCanReadTransactions = canReadTransactions !== undefined
     ? canReadTransactions
     : runtime?.canReadTransactions;
-  const [state, setState] = useState(INITIAL_STATE);
+  const owner = useMemo(() => ({
+    apiClient: effectiveApiClient,
+    resetKey: effectiveResetKey,
+    enabled: Boolean(enabled && effectiveApiClient)
+  }), [effectiveApiClient, effectiveResetKey, enabled]);
+  const capabilities = useMemo(() => ({
+    canReadAlerts: effectiveCanReadAlerts,
+    canReadFraudCases: effectiveCanReadFraudCases,
+    canReadSuspiciousTransactions: effectiveCanReadSuspiciousTransactions,
+    canReadTransactions: effectiveCanReadTransactions
+  }), [
+    effectiveCanReadAlerts,
+    effectiveCanReadFraudCases,
+    effectiveCanReadSuspiciousTransactions,
+    effectiveCanReadTransactions
+  ]);
+  const [ownedState, setOwnedState] = useState(() => ({ owner, value: INITIAL_STATE }));
+  const currentOwnerRef = useRef(null);
+  const currentCapabilitiesRef = useRef(capabilities);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
-  const resetKeyRef = useRef(effectiveResetKey);
-  const clearState = useCallback(() => {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    requestSeqRef.current += 1;
-    setState(INITIAL_STATE);
-  }, []);
+  const state = useMemo(() => ownedState.owner === owner
+    ? redactUnavailableCounterState(ownedState.value, capabilities)
+    : INITIAL_STATE, [capabilities, owner, ownedState]);
+
+  const writeState = useCallback((update) => {
+    setOwnedState((current) => {
+      if (currentOwnerRef.current !== owner) {
+        return current;
+      }
+      const currentValue = current.owner === owner ? current.value : INITIAL_STATE;
+      return {
+        owner,
+        value: typeof update === "function" ? update(currentValue) : update
+      };
+    });
+  }, [owner]);
+
+  useLayoutEffect(() => {
+    currentOwnerRef.current = owner;
+    return () => {
+      if (currentOwnerRef.current === owner) {
+        currentOwnerRef.current = null;
+      }
+      requestSeqRef.current += 1;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+    };
+  }, [owner]);
+
+  useLayoutEffect(() => {
+    currentCapabilitiesRef.current = capabilities;
+    return () => {
+      requestSeqRef.current += 1;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+    };
+  }, [capabilities]);
 
   const refresh = useCallback(async () => {
-    if (!enabled || !effectiveApiClient) {
-      clearState();
+    if (currentOwnerRef.current !== owner
+        || currentCapabilitiesRef.current !== capabilities
+        || !owner.enabled) {
       return;
     }
 
@@ -68,34 +117,38 @@ export function useWorkspaceCounters({
     abortControllerRef.current = abortController;
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
-    setState((current) => ({ ...current, isLoading: true }));
+    const isCurrentRequest = () => currentOwnerRef.current === owner
+      && currentCapabilitiesRef.current === capabilities
+      && requestSeqRef.current === requestSeq
+      && !abortController.signal.aborted;
+    writeState((current) => ({ ...current, isLoading: true }));
 
     const requests = buildCounterRequests({
-      apiClient: effectiveApiClient,
+      apiClient: owner.apiClient,
       signal: abortController.signal,
       includeAlerts,
       includeFraudCases,
       includeSuspiciousTransactions,
       includeTransactions,
-      canReadAlerts: effectiveCanReadAlerts,
-      canReadFraudCases: effectiveCanReadFraudCases,
-      canReadSuspiciousTransactions: effectiveCanReadSuspiciousTransactions,
-      canReadTransactions: effectiveCanReadTransactions
+      canReadAlerts: capabilities.canReadAlerts,
+      canReadFraudCases: capabilities.canReadFraudCases,
+      canReadSuspiciousTransactions: capabilities.canReadSuspiciousTransactions,
+      canReadTransactions: capabilities.canReadTransactions
     });
 
     if (requests.length === 0) {
-      if (requestSeqRef.current === requestSeq) {
-        setState((current) => ({
+      if (isCurrentRequest()) {
+        writeState((current) => ({
           ...current,
           counters: clearUnavailableCounters(current.counters, {
             includeAlerts,
             includeFraudCases,
             includeSuspiciousTransactions,
             includeTransactions,
-            canReadAlerts: effectiveCanReadAlerts,
-            canReadFraudCases: effectiveCanReadFraudCases,
-            canReadSuspiciousTransactions: effectiveCanReadSuspiciousTransactions,
-            canReadTransactions: effectiveCanReadTransactions
+            canReadAlerts: capabilities.canReadAlerts,
+            canReadFraudCases: capabilities.canReadFraudCases,
+            canReadSuspiciousTransactions: capabilities.canReadSuspiciousTransactions,
+            canReadTransactions: capabilities.canReadTransactions
           }),
           isLoading: false,
           errorByCounter: {},
@@ -103,76 +156,117 @@ export function useWorkspaceCounters({
           stale: false
         }));
       }
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
       return;
     }
 
     const results = await Promise.allSettled(requests.map((request) => request.promise));
-    if (requestSeqRef.current !== requestSeq || abortController.signal.aborted) {
+    if (!isCurrentRequest()) {
       return;
     }
 
-    setState((current) => reduceCounterResults(current, requests, results, {
+    writeState((current) => reduceCounterResults(current, requests, results, {
       includeAlerts,
       includeFraudCases,
       includeSuspiciousTransactions,
       includeTransactions,
-      canReadAlerts: effectiveCanReadAlerts,
-      canReadFraudCases: effectiveCanReadFraudCases,
-      canReadSuspiciousTransactions: effectiveCanReadSuspiciousTransactions,
-      canReadTransactions: effectiveCanReadTransactions
+      canReadAlerts: capabilities.canReadAlerts,
+      canReadFraudCases: capabilities.canReadFraudCases,
+      canReadSuspiciousTransactions: capabilities.canReadSuspiciousTransactions,
+      canReadTransactions: capabilities.canReadTransactions
     }));
     if (abortControllerRef.current === abortController) {
       abortControllerRef.current = null;
     }
   }, [
-    clearState,
-    effectiveApiClient,
-    effectiveCanReadAlerts,
-    effectiveCanReadFraudCases,
-    effectiveCanReadSuspiciousTransactions,
-    effectiveCanReadTransactions,
-    enabled,
+    owner,
+    capabilities,
     includeAlerts,
     includeFraudCases,
     includeSuspiciousTransactions,
-    includeTransactions
+    includeTransactions,
+    writeState
   ]);
 
   useEffect(() => {
-    if (!enabled || !effectiveApiClient) {
-      clearState();
+    if (!owner.enabled) {
       return;
     }
-    if (resetKeyRef.current !== effectiveResetKey) {
-      resetKeyRef.current = effectiveResetKey;
-      clearState();
-    }
-    refresh();
+    void refresh();
     return () => {
-      abortControllerRef.current?.abort();
       requestSeqRef.current += 1;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
     };
-  }, [clearState, effectiveApiClient, effectiveResetKey, enabled, refresh]);
+  }, [owner.enabled, refresh]);
 
   const setCounterValue = useCallback((counterName, value) => {
-    if (!Object.hasOwn(INITIAL_COUNTERS, counterName)) {
+    if (!Object.hasOwn(INITIAL_COUNTERS, counterName)
+        || currentOwnerRef.current !== owner
+        || currentCapabilitiesRef.current !== capabilities
+        || !owner.enabled
+        || !ownerCanReadCounter(capabilities, counterName)) {
       return;
     }
-    setState((current) => ({
+    if (!isValidWorkspaceCounterValue(value)) {
+      return;
+    }
+    writeState((current) => ({
       ...current,
       counters: {
         ...current.counters,
-        [counterName]: value ?? current.counters[counterName]
+        [counterName]: value
       },
       ...counterRecovered(current, counterName)
     }));
-  }, []);
+  }, [capabilities, owner, writeState]);
 
   return useMemo(() => ({
     ...state,
     refresh,
     setCounterValue
   }), [refresh, setCounterValue, state]);
+}
+
+export function isValidWorkspaceCounterValue(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function ownerCanReadCounter(capabilities, counterName) {
+  switch (counterName) {
+    case "alerts":
+      return capabilities.canReadAlerts === true;
+    case "fraudCases":
+      return capabilities.canReadFraudCases === true;
+    case "suspiciousTransactions":
+      return capabilities.canReadSuspiciousTransactions === true;
+    case "transactions":
+      return capabilities.canReadTransactions === true;
+    default:
+      return false;
+  }
+}
+
+function redactUnavailableCounterState(state, capabilities) {
+  const counters = clearUnavailableCounters(state.counters, {
+    includeAlerts: true,
+    includeFraudCases: true,
+    includeSuspiciousTransactions: true,
+    includeTransactions: true,
+    ...capabilities
+  });
+  const errorByCounter = Object.fromEntries(Object.entries(state.errorByCounter)
+    .filter(([counterName]) => ownerCanReadCounter(capabilities, counterName)));
+  const degraded = Object.keys(errorByCounter).length > 0;
+  return {
+    ...state,
+    counters,
+    errorByCounter,
+    degraded,
+    stale: degraded && state.stale
+  };
 }
 
 function buildCounterRequests({
@@ -240,7 +334,11 @@ function reduceCounterResults(current, requests, results, authorityState) {
     const result = results[index];
     if (result.status === "fulfilled") {
       try {
-        counters[request.name] = request.readValue(result.value) ?? counters[request.name];
+        const value = request.readValue(result.value);
+        if (!isValidWorkspaceCounterValue(value)) {
+          throw new Error("Counter response is invalid");
+        }
+        counters[request.name] = value;
         hasSuccessfulRefresh = true;
       } catch (error) {
         hasNonAbortFailure = true;
@@ -307,10 +405,11 @@ function readSuspiciousTransactionSummaryTotal(summary) {
 
 function recordCounterFailure(errorByCounter, counterName, reason, current, counters) {
   errorByCounter[counterName] = counterFailureMessage(counterName, reason);
-  if (current.counters[counterName] !== null && current.counters[counterName] !== undefined) {
+  if (isValidWorkspaceCounterValue(current.counters[counterName])) {
     counters[counterName] = current.counters[counterName];
     return true;
   }
+  counters[counterName] = null;
   return false;
 }
 

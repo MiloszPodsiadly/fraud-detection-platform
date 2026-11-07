@@ -9,6 +9,7 @@ public record ValidatedFraudFeedback(
         AnalystDecision analystDecision,
         FraudFeedbackLabel feedbackLabel,
         List<String> decisionReasonCodes,
-        String notes
+        String notes,
+        String scoringOccurrenceToken
 ) {
 }

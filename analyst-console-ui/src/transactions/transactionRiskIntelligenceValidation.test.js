@@ -40,6 +40,134 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail()).valid).toBe(true);
   });
 
+  it.each(["A".repeat(64), "a".repeat(63), "a".repeat(65), null, {}])(
+    "rejects invalid scoring occurrence token %s",
+    (scoringOccurrenceToken) => {
+      expect(validateTransactionRiskIntelligenceDetail(detail({ scoringOccurrenceToken }))).toMatchObject({
+        valid: false,
+        reason: "INVALID_SCORING_OCCURRENCE_TOKEN"
+      });
+    }
+  );
+
+  it("accepts bounded merchant display context", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      merchantInfo: { merchantId: "merchant-1", merchantName: "Market", channel: "ECOMMERCE" }
+    })).valid).toBe(true);
+  });
+
+  it.each([
+    { merchantName: "Market", attributes: { sentinel: "private" } },
+    { merchantName: "Market", cardPresent: true },
+    { merchantName: "Market", nested: { value: "private" } }
+  ])("rejects unbounded merchant display context %#", (merchantInfo) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ merchantInfo }))).toMatchObject({
+      valid: false,
+      reason: "INVALID_DETAIL_MERCHANT_INFO"
+    });
+  });
+
+  it.each(["A".repeat(64), "a".repeat(63), "a".repeat(65), null, {}])(
+    "rejects invalid scoring occurrence token %s",
+    (scoringOccurrenceToken) => {
+      expect(validateTransactionRiskIntelligenceDetail(detail({ scoringOccurrenceToken }))).toMatchObject({
+        valid: false,
+        reason: "INVALID_SCORING_OCCURRENCE_TOKEN"
+      });
+    }
+  );
+
+  it.each(["LOW", "MEDIUM", "HIGH", "CRITICAL"])("accepts top-level risk level %s", (riskLevel) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ riskLevel })).valid).toBe(true);
+  });
+
+  it.each([null, undefined])("accepts historical optional top-level fields when set to %s", (value) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      riskLevel: value,
+      correlationId: value,
+      customerId: value,
+      fraudScore: value
+    })).valid).toBe(true);
+  });
+
+  it("accepts missing historical optional top-level fields", () => {
+    const value = detail();
+    delete value.riskLevel;
+    delete value.correlationId;
+    delete value.customerId;
+    delete value.fraudScore;
+
+    expect(validateTransactionRiskIntelligenceDetail(value).valid).toBe(true);
+  });
+
+  it.each([
+    ["riskLevel", { value: "HIGH" }],
+    ["riskLevel", []],
+    ["riskLevel", "NOT_A_RISK_LEVEL"],
+    ["riskLevel", 5],
+    ["riskLevel", true],
+    ["correlationId", { value: "corr-1" }],
+    ["correlationId", []],
+    ["correlationId", true],
+    ["correlationId", 7],
+    ["correlationId", "bad\u0001id"],
+    ["customerId", { value: "customer-1" }],
+    ["customerId", []],
+    ["customerId", true],
+    ["customerId", "bad\u0001id"],
+    ["fraudScore", "0.91"],
+    ["fraudScore", "NaN"],
+    ["fraudScore", {}],
+    ["fraudScore", []],
+    ["fraudScore", true],
+    ["fraudScore", Number.NaN],
+    ["fraudScore", Number.POSITIVE_INFINITY],
+    ["fraudScore", Number.NEGATIVE_INFINITY],
+    ["fraudScore", -0.01],
+    ["fraudScore", 1.01]
+  ])("rejects malformed top-level %s value %s", (field, value) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ [field]: value })).valid).toBe(false);
+  });
+
+  it.each(["correlationId", "customerId"])("accepts a bounded safe %s string", (field) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ [field]: `${field}-1` })).valid).toBe(true);
+  });
+
+  it.each([0, 1, 0.91])("accepts valid nullable fraud score %s", (fraudScore) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ fraudScore })).valid).toBe(true);
+  });
+
+  it.each([true, false, null, undefined])("accepts legacy optional alertRecommended value %s", (alertRecommended) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ alertRecommended })).valid).toBe(true);
+  });
+
+  it.each(["false", "true", 0, 1, {}, []])("rejects malformed alertRecommended value %s", (alertRecommended) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ alertRecommended }))).toMatchObject({
+      valid: false,
+      reason: "INVALID_DETAIL_ALERT_RECOMMENDED"
+    });
+  });
+
+  it("accepts missing alertRecommended for older detail payloads", () => {
+    const value = detail();
+    delete value.alertRecommended;
+
+    expect(validateTransactionRiskIntelligenceDetail(value).valid).toBe(true);
+  });
+
+  it.each([null, { amount: null }, { amount: 0, currency: "PLN" }, { amount: "-12.50", currency: "USD" }])(
+    "accepts an optional MoneyResponse amount %s",
+    (transactionAmount) => {
+      expect(validateTransactionRiskIntelligenceDetail(detail({ transactionAmount })).valid).toBe(true);
+    }
+  );
+
+  it("rejects malformed MoneyResponse amounts in detail", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      transactionAmount: { amount: "0x10", currency: "USD" }
+    }))).toMatchObject({ valid: false, reason: "INVALID_DETAIL_TRANSACTION_AMOUNT" });
+  });
+
   it("accepts shared three-engine golden fixture", () => {
     const result = validateTransactionRiskIntelligenceDetail(detail({
       engineIntelligence: {
@@ -387,6 +515,30 @@ describe("transactionRiskIntelligenceValidation", () => {
     })).valid).toBe(valid);
   });
 
+  it.each([
+    "2026-06-18T10:00:00Z",
+    "2026-06-18T10:00:00.123456789Z",
+    "2026-06-18T12:00:00+02:00"
+  ])("accepts valid scored detail timestamps %s", (timestamp) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      transactionTimestamp: timestamp,
+      scoredAt: timestamp
+    })).valid).toBe(true);
+  });
+
+  it.each([
+    "2026-02-30T10:00:00Z",
+    "2026-06-18T10:00:00",
+    "2026-06-18T10:00:00+18:01",
+    "not-a-date",
+    1_797_000_000_000
+  ])("rejects malformed scored detail timestamps %s", (timestamp) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ scoredAt: timestamp }))).toMatchObject({
+      valid: false,
+      reason: "INVALID_DETAIL_TIMESTAMP"
+    });
+  });
+
   it.each(stringBoundaryCases().filter(({ maxLength }) => maxLength === 128))("applies shared bounded-string matrix to transactionId $caseId", ({ value, valid }) => {
     expect(validateTransactionRiskIntelligenceDetail(detail({ transactionId: value })).valid).toBe(valid);
   });
@@ -535,6 +687,15 @@ describe("transactionRiskIntelligenceValidation", () => {
     }))).toMatchObject({ valid: false, reason: "UNSAFE_DETAIL_RESPONSE" });
   });
 
+  it("keeps rejecting unsafe field names nested inside transaction merchant attributes", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      merchantInfo: {
+        merchantName: "Northwind Books",
+        attributes: { privateMetadata: { Secret: "must-not-be-accepted" } }
+      }
+    }))).toMatchObject({ valid: false, reason: "UNSAFE_DETAIL_RESPONSE" });
+  });
+
   it("rejects contradictory comparison values", () => {
     const comparison = {
       comparisonType: "RULES_VS_ML",
@@ -596,6 +757,7 @@ function detail(overrides = {}) {
     correlationId: "corr-1",
     transactionTimestamp: "2026-06-18T10:00:00Z",
     scoredAt: "2026-06-18T10:00:01Z",
+    scoringOccurrenceToken: "a".repeat(64),
     fraudScore: 0.91,
     riskLevel: "CRITICAL",
     alertRecommended: true,

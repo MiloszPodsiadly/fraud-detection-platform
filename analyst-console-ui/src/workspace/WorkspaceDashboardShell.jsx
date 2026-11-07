@@ -47,7 +47,7 @@ export function WorkspaceDashboardShell({
     enabled: workspaceCountersEnabled,
     includeAlerts: activeRoute.key !== "fraudTransaction",
     includeFraudCases: activeRoute.key !== "analyst",
-    includeTransactions: activeRoute.key !== "transactionScoring"
+    includeTransactions: true
   });
   const { refresh: refreshWorkspaceCounters, setCounterValue } = workspaceCounterState;
 
@@ -88,6 +88,9 @@ export function WorkspaceDashboardShell({
           invalidWorkspaceRoute,
           resolvedRoute
         });
+        const workspaceCountersForRoute = activeRoute.key === "fraudTransaction"
+          ? { ...workspaceCounterState.counters, alerts: navigationState.alertPage?.totalElements ?? null }
+          : workspaceCounterState.counters;
 
         if ((selectedAlertId || selectedFraudCaseId || selectedLinkedAlertContext) && apiClient) {
           return (
@@ -127,7 +130,7 @@ export function WorkspaceDashboardShell({
               canReadPolicySecurity
             })}
             showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}
-            workspaceCounters={workspaceCounterState.counters}
+            workspaceCounters={workspaceCountersForRoute}
             workspaceCountersStatus={workspaceCounterState}
             canReadFraudCases={canReadFraudCases}
             canReadAlerts={canReadAlerts}
@@ -143,7 +146,6 @@ export function WorkspaceDashboardShell({
             isFraudCaseSummaryLoading={navigationState.isFraudCaseSummaryLoading
               || (activeRoute.key !== "analyst" && workspaceCounterState.isLoading && workspaceCounterState.counters.fraudCases == null)}
             onWorkspaceChange={navigateWorkspace}
-            transactionPage={navigationState.transactionPage}
             advisoryQueue={navigationState.advisoryQueue}
             governanceAnalytics={navigationState.governanceAnalytics}
             sessionState={sessionState}

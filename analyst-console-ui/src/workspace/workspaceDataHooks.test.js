@@ -17,7 +17,7 @@ const getSuspiciousTransaction = vi.fn();
 describe("workspace data hooks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    listAlerts.mockResolvedValue(page([]));
+    listAlerts.mockResolvedValue(page([], { size: 10 }));
     listScoredTransactions.mockResolvedValue(page([]));
     listSuspiciousTransactions.mockResolvedValue(suspiciousSlice([]));
     getSuspiciousTransaction.mockResolvedValue(suspiciousTransaction({ suspiciousTransactionId: "suspicious-1" }));
@@ -40,12 +40,151 @@ describe("workspace data hooks", () => {
   });
 
   it("loads alert queue when enabled", async () => {
-    listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1 }));
+    listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1, size: 10 }));
 
     const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient: workspaceApiClient }));
 
     await waitFor(() => expect(result.current.page.content).toEqual([{ alertId: "alert-1" }]));
     expect(result.current.page.totalElements).toBe(1);
+  });
+
+  it("accepts a coherent final page where the returned rows end at the declared total", async () => {
+    const firstPageRows = Array.from({ length: 10 }, (_, index) => ({ alertId: `alert-${index}` }));
+    const finalPageRows = Array.from({ length: 5 }, (_, index) => ({ alertId: `alert-${index + 10}` }));
+    const apiClient = {
+      listAlerts: vi.fn()
+        .mockResolvedValueOnce({ content: firstPageRows, totalElements: 15, totalPages: 2, page: 0, size: 10 })
+        .mockResolvedValueOnce({ content: finalPageRows, totalElements: 15, totalPages: 2, page: 1, size: 10 })
+    };
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient }));
+
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true));
+    act(() => result.current.setRequest({ page: 1, size: 10 }));
+    await waitFor(() => expect(result.current.page.page).toBe(1));
+
+    expect(result.current.page.content).toEqual(finalPageRows);
+    expect(result.current.page.totalElements).toBe(15);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("accepts an empty page zero for a genuinely empty alert queue", async () => {
+    const apiClient = {
+      listAlerts: vi.fn().mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 })
+    };
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient }));
+
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true));
+    expect(result.current.page).toEqual({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
+    expect(result.current.error).toBeNull();
+  });
+
+  it("does not let a saved alert refresh cross an owner transition", async () => {
+    const ownerAClient = { listAlerts: vi.fn().mockResolvedValue(page([{ alertId: "alert-a" }], { size: 10 })) };
+    const ownerBClient = { listAlerts: vi.fn().mockResolvedValue(page([{ alertId: "alert-b" }], { size: 10 })) };
+    const ownerA = {
+      enabled: true,
+      apiClient: ownerAClient,
+      session: { userId: "same-analyst", issuer: "issuer-a", subject: "subject-a", authorities: ["ALERT_READ"] },
+      authProvider: { kind: "oidc", issuer: "issuer-a" }
+    };
+    const ownerB = {
+      ...ownerA,
+      apiClient: ownerBClient,
+      session: { userId: "same-analyst", issuer: "issuer-b", subject: "subject-b", authorities: [] },
+      authProvider: { kind: "oidc", issuer: "issuer-b" }
+    };
+    const { result, rerender } = renderHook((props) => useAlertQueue(props), { initialProps: ownerA });
+    await waitFor(() => expect(result.current.page.content[0]?.alertId).toBe("alert-a"));
+    const savedRefreshA = result.current.refresh;
+
+    rerender(ownerB);
+    await waitFor(() => expect(result.current.page.content[0]?.alertId).toBe("alert-b"));
+    const savedRefreshB = result.current.refresh;
+
+    let staleBResult;
+    await act(async () => { staleBResult = await savedRefreshA(); });
+    expect(staleBResult).toBeNull();
+    expect(ownerBClient.listAlerts).toHaveBeenCalledTimes(1);
+
+    let freshBResult;
+    await act(async () => { freshBResult = await savedRefreshB(); });
+    expect(freshBResult.content[0].alertId).toBe("alert-b");
+    expect(ownerBClient.listAlerts).toHaveBeenCalledTimes(2);
+
+    rerender(ownerA);
+    await waitFor(() => expect(result.current.page.content[0]?.alertId).toBe("alert-a"));
+    const freshRefreshA = result.current.refresh;
+    let staleAResult;
+    await act(async () => { staleAResult = await savedRefreshA(); });
+    expect(staleAResult).toBeNull();
+    expect(ownerAClient.listAlerts).toHaveBeenCalledTimes(2);
+
+    let currentAResult;
+    await act(async () => { currentAResult = await freshRefreshA(); });
+    expect(currentAResult.content[0].alertId).toBe("alert-a");
+    expect(ownerAClient.listAlerts).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["null response", null],
+    ["missing page envelope", {}],
+    ["null content", { content: null, totalElements: 0, totalPages: 0, page: 0, size: 10 }],
+    ["non-array content", { content: {}, totalElements: 0, totalPages: 0, page: 0, size: 10 }],
+    ["null alert row", { content: [null], totalElements: 1, totalPages: 1, page: 0, size: 10 }],
+    ["negative total", { content: [], totalElements: -1, totalPages: 0, page: 0, size: 10 }],
+    ["fractional page index", { content: [], totalElements: 0, totalPages: 0, page: 0.5, size: 10 }],
+    ["unexpected response page", { content: [], totalElements: 0, totalPages: 0, page: 1, size: 10 }],
+    ["unexpected response size", { content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 }],
+    ["page total mismatch", { content: [], totalElements: 11, totalPages: 1, page: 0, size: 10 }],
+    ["more rows than declared total", { content: [{ alertId: "alert-1" }, { alertId: "alert-2" }], totalElements: 1, totalPages: 1, page: 0, size: 10 }],
+    ["rows with zero total", { content: [{ alertId: "alert-1" }], totalElements: 0, totalPages: 0, page: 0, size: 10 }],
+    ["page offset plus rows exceeds total", { content: Array.from({ length: 6 }, (_, index) => ({ alertId: `alert-${index}` })), totalElements: 15, totalPages: 2, page: 1, size: 10 }],
+    ["content exceeds requested size", { content: Array.from({ length: 11 }, (_, index) => ({ alertId: `alert-${index}` })), totalElements: 11, totalPages: 2, page: 0, size: 10 }],
+    ["array alert row", { content: [[]], totalElements: 1, totalPages: 1, page: 0, size: 10 }],
+    ["object alert reason", page([{ alertId: "alert-1", alertReason: { private: true } }], { size: 10 })],
+    ["object customer ID", page([{ alertId: "alert-1", customerId: { private: true } }], { size: 10 })],
+    ["invalid alert ID", page([{ alertId: " " }], { size: 10 })],
+    ["nonfinite fraud score", page([{ alertId: "alert-1", fraudScore: Infinity }], { size: 10 })],
+    ["out of range fraud score", page([{ alertId: "alert-1", fraudScore: 1.1 }], { size: 10 })],
+    ["invalid alert timestamp", page([{ alertId: "alert-1", alertTimestamp: "not-a-date" }], { size: 10 })],
+    ["impossible alert calendar date", page([{ alertId: "alert-1", alertTimestamp: "2026-02-30T12:00:00Z" }], { size: 10 })],
+    ["malformed risk enum", page([{ alertId: "alert-1", riskLevel: {} }], { size: 10 })],
+    ["unknown status enum", page([{ alertId: "alert-1", alertStatus: "PENDING" }], { size: 10 })]
+  ])("rejects malformed alert page before publication: %s", async (_caseName, response) => {
+    const apiClient = { listAlerts: vi.fn().mockResolvedValue(response) };
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient }));
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    expect(result.current.hasLoaded).toBe(false);
+    expect(result.current.page).toMatchObject({
+      content: [],
+      totalElements: 0,
+      totalPages: 0,
+      page: 0,
+      size: 10
+    });
+    expect(result.current.error.message).toBe("Alerts are temporarily unavailable. Please retry.");
+  });
+
+  it("accepts nullable historical alert summary fields", async () => {
+    const historicalRow = {
+      alertId: "alert-historical",
+      transactionId: null,
+      customerId: null,
+      riskLevel: null,
+      fraudScore: null,
+      alertStatus: null,
+      alertReason: null,
+      alertTimestamp: null
+    };
+    listAlerts.mockResolvedValue(page([historicalRow], { totalElements: 1, size: 10 }));
+
+    const { result } = renderHook(() => useAlertQueue({ enabled: true, apiClient: workspaceApiClient }));
+
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true));
+    expect(result.current.page.content).toEqual([historicalRow]);
+    expect(result.current.error).toBeNull();
   });
 
   it("does not fetch workspace data without an explicit apiClient", async () => {
@@ -83,7 +222,7 @@ describe("workspace data hooks", () => {
   });
 
   it("clears alert queue state when disabled after data was loaded", async () => {
-    listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1 }));
+    listAlerts.mockResolvedValue(page([{ alertId: "alert-1" }], { totalElements: 1, size: 10 }));
     const apiClient = workspaceApiClient;
     const { result, rerender } = renderHook(({ enabled }) => useAlertQueue({ enabled, apiClient }), {
       initialProps: { enabled: true }
@@ -186,12 +325,13 @@ describe("workspace data hooks", () => {
   });
 
   it("keeps scored transaction data isolated across apiClient session switch", async () => {
+    const authProvider = { kind: "demo" };
     const first = deferred();
     const second = deferred();
     const apiClientA = { ...workspaceApiClient, listScoredTransactions: vi.fn().mockReturnValue(first.promise) };
     const apiClientB = { ...workspaceApiClient, listScoredTransactions: vi.fn().mockReturnValue(second.promise) };
     const { result, rerender } = renderHook(
-      ({ session, apiClient }) => useScoredTransactionStream({ enabled: true, session, authProvider: { kind: "demo" }, apiClient }),
+      ({ session, apiClient }) => useScoredTransactionStream({ enabled: true, session, authProvider, apiClient }),
       { initialProps: { session: { userId: "user-a" }, apiClient: apiClientA } }
     );
     await waitFor(() => expect(apiClientA.listScoredTransactions).toHaveBeenCalledTimes(1));
@@ -400,6 +540,7 @@ function page(content, overrides = {}) {
     totalPages: 1,
     page: 0,
     size: 25,
+    totalElementsCapped: false,
     ...overrides
   };
 }

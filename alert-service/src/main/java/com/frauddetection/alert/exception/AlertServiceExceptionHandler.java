@@ -503,9 +503,29 @@ public class AlertServiceExceptionHandler {
         HttpStatus httpStatus = HttpStatus.resolve(status);
         String error = httpStatus == null ? exception.getStatusCode().toString() : httpStatus.getReasonPhrase();
         String reason = exception.getReason() == null ? error : exception.getReason();
+        List<String> details = feedbackReasonDetails(status, reason);
         return ResponseEntity.status(exception.getStatusCode()).body(
-                new ApiErrorResponse(Instant.now(), status, error, reason, List.of())
+                new ApiErrorResponse(Instant.now(), status, error, reason, details)
         );
+    }
+
+    private String feedbackConflictReason(String reason) {
+        return switch (reason) {
+            case "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED",
+                 "FRAUD_FEEDBACK_ALREADY_RECORDED" -> reason;
+            default -> "CONFLICT";
+        };
+    }
+
+    private List<String> feedbackReasonDetails(int status, String reason) {
+        if (status == HttpStatus.CONFLICT.value()) {
+            return List.of("reason:" + feedbackConflictReason(reason));
+        }
+        if (status == HttpStatus.SERVICE_UNAVAILABLE.value()
+                && "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN".equals(reason)) {
+            return List.of("reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN");
+        }
+        return List.of();
     }
 
     @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})

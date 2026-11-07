@@ -17,10 +17,10 @@ export function FraudTransactionWorkspaceRuntime({
   });
 
   useEffect(() => {
-    if (canReadAlerts === true) {
+    if (canReadAlerts === true && alertQueueState.hasLoaded && !alertQueueState.error) {
       setCounterValue("alerts", alertQueueState.page.totalElements);
     }
-  }, [alertQueueState.page.totalElements, canReadAlerts, setCounterValue]);
+  }, [alertQueueState.error, alertQueueState.hasLoaded, alertQueueState.page.totalElements, canReadAlerts, setCounterValue]);
 
   function changeAlertPage(page) {
     alertQueueState.setRequest((current) => ({ ...current, page }));
@@ -39,6 +39,8 @@ export function FraudTransactionWorkspaceRuntime({
       <FraudTransactionWorkspaceContainer
         headingLabel={route.heading.label}
         alertQueueState={alertQueueState}
+        canReadAlerts={canReadAlerts}
+        hasLoaded={alertQueueState.hasLoaded}
         onRetryWorkspace={refreshWorkspace}
         onPageChange={changeAlertPage}
         onPageSizeChange={changeAlertPageSize}
@@ -46,7 +48,9 @@ export function FraudTransactionWorkspaceRuntime({
       />
     ),
     navigationState: {
-      alertPage: alertQueueState.page
+      alertPage: alertQueueState.hasLoaded && !alertQueueState.error
+        ? alertQueueState.page
+        : null
     },
     detailRouterState: {
       alertQueueState

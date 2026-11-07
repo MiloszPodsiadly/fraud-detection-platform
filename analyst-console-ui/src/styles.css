@@ -1881,9 +1881,9 @@ button:focus-visible,
   font-weight: 800;
 }
 
-.classificationClear {
-  background: rgba(63, 123, 85, 0.13);
-  color: var(--green);
+.classificationNeutral {
+  background: rgba(92, 100, 96, 0.14);
+  color: #59625e;
 }
 
 .classificationReview {

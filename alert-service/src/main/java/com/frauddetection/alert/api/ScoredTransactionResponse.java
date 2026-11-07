@@ -12,10 +12,11 @@ public record ScoredTransactionResponse(
         Instant transactionTimestamp,
         Instant scoredAt,
         MoneyResponse transactionAmount,
-        MerchantInfoResponse merchantInfo,
+        ScoredMerchantInfoResponse merchantInfo,
         Double fraudScore,
         RiskLevel riskLevel,
         Boolean alertRecommended,
-        List<String> reasonCodes
+        List<String> reasonCodes,
+        String scoringOccurrenceToken
 ) {
 }

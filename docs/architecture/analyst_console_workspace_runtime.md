@@ -21,10 +21,10 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - New business workflow logic belongs in workspace-specific containers or hooks, not in the shell.
 - `AlertsListPage` renders the current workspace presentation surfaces and should not receive new workflow responsibilities.
 - Analyst workspace reads live in `useAnalystWorkspaceRuntime`.
-- Alert and transaction workspace reads live in `useTransactionWorkspaceRuntime`.
-- Governance advisory, analytics, and audit workflow wiring live in `useGovernanceWorkspaceRuntime`.
+- Fraud alert and transaction reads live in their route-specific runtime components, `FraudTransactionWorkspaceRuntime` and `TransactionScoringWorkspaceRuntime`.
+- Governance advisory queue and audit wiring live in `GovernanceWorkspaceRuntime`; audit analytics reads live in `ReportsWorkspaceRuntime`.
 - Detail-page routing lives in `WorkspaceDetailRouter`.
-- Refresh routing is isolated in `useWorkspaceRefreshController`; governance audit writes are isolated in `useGovernanceAuditWorkflow`.
+- `WorkspaceDashboardShell` composes `createWorkspaceRefreshHandler` from `workspaceRefreshContract`; refresh notices are handled by `useWorkspaceRefreshNotice`. Governance audit writes are isolated in `useGovernanceAuditWorkflow`.
 - API client and raw-fetch guardrails remain mandatory.
 
 ## Runtime Boundary, Not Security Boundary
@@ -88,7 +88,7 @@ Governance advisory read intentionally follows the current backend authorization
 
 ## Workspace Composition
 
-`WorkspaceDashboardShell` composes the runtime hooks, `WorkspaceDetailRouter` owns detail-page routing, and
+`WorkspaceDashboardShell` selects the active route runtime through `WorkspaceRouteRegistry`, `WorkspaceDetailRouter` owns detail-page routing, and
 `AlertsListPage` renders the current workspace surfaces.
 Additional workflow logic must stay in workspace-specific hooks or containers instead of accumulating in the shell.
 

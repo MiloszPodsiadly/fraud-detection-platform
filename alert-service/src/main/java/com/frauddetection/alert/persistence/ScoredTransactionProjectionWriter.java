@@ -64,6 +64,35 @@ public class ScoredTransactionProjectionWriter {
         throw new IllegalStateException("SCORING_OCCURRENCE_ADMISSION_INDETERMINATE");
     }
 
+    public void fenceFeedbackOccurrence(String transactionId, ScoringOccurrenceOwnership ownership) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.hasResource(mongoTemplate.getMongoDatabaseFactory())) {
+            throw new FeedbackOccurrenceFenceException(FeedbackOccurrenceFenceException.Reason.TRANSACTION_REQUIRED);
+        }
+        Query currentOccurrence = new Query(new Criteria().andOperator(
+                Criteria.where("_id").is(transactionId),
+                Criteria.where("sourceEventId").is(ownership.sourceEventId()),
+                Criteria.where("sourceEventCreatedAt").is(ownership.sourceEventCreatedAt().toString()),
+                Criteria.where("sourceEventCreatedAtEpochSecond").is(ownership.sourceEventCreatedAt().getEpochSecond()),
+                Criteria.where("sourceEventCreatedAtNano").is(ownership.sourceEventCreatedAt().getNano()),
+                Criteria.where("sourceEventFingerprint").is(ownership.sourceEventFingerprint())
+        ));
+        UpdateResult result = mongoTemplate.updateFirst(
+                currentOccurrence,
+                new Update().inc("feedbackWriteFenceVersion", 1L),
+                ScoredTransactionDocument.class
+        );
+        if (!result.wasAcknowledged() || result.getMatchedCount() > 1 || result.getModifiedCount() > 1) {
+            throw new FeedbackOccurrenceFenceException(FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE);
+        }
+        if (result.getMatchedCount() == 0) {
+            throw new FeedbackOccurrenceFenceException(FeedbackOccurrenceFenceException.Reason.OCCURRENCE_CHANGED);
+        }
+        if (result.getModifiedCount() != 1) {
+            throw new FeedbackOccurrenceFenceException(FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE);
+        }
+    }
+
     private UpdateResult replaceOlder(ScoredTransactionDocument candidate) {
         return mongoTemplate.updateFirst(
                 olderOccurrenceQuery(candidate),

@@ -50,6 +50,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -60,6 +61,8 @@ import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -143,6 +146,67 @@ class AlertControllerTest {
                 .doesNotContain("cust-1", "txn-1", "customerIds", "transactionIds", "narrative");
         org.assertj.core.api.Assertions.assertThat(objectMapper.writeValueAsString(event.getValue()))
                 .doesNotContain("customerIds", "transactionIds", "narrative");
+    }
+
+    @Test
+    void alertListSortsByTimestampAndUniqueAlertId() throws Exception {
+        when(alertManagementUseCase.listAlerts(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/v1/alerts").queryParam("page", "0").queryParam("size", "10"))
+                .andExpect(status().isOk());
+
+        org.mockito.ArgumentCaptor<Pageable> pageable = org.mockito.ArgumentCaptor.forClass(Pageable.class);
+        verify(alertManagementUseCase).listAlerts(pageable.capture());
+        org.assertj.core.api.Assertions.assertThat(pageable.getValue().getSort().stream())
+                .extracting(Sort.Order::getProperty, Sort.Order::getDirection)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("alertTimestamp", Sort.Direction.DESC),
+                        org.assertj.core.groups.Tuple.tuple("alertId", Sort.Direction.DESC)
+                );
+    }
+
+    @Test
+    void alertListRejectsInvalidOrDeepPageBeforeCallingTheService() throws Exception {
+        for (String page : List.of("-1", "1001", "2147483648")) {
+            mockMvc.perform(get("/api/v1/alerts").queryParam("page", page).queryParam("size", "10"))
+                    .andExpect(status().isBadRequest());
+        }
+        for (String size : List.of("0", "101")) {
+            mockMvc.perform(get("/api/v1/alerts").queryParam("page", "0").queryParam("size", size))
+                    .andExpect(status().isBadRequest());
+        }
+
+        verifyNoInteractions(alertManagementUseCase);
+    }
+
+    @Test
+    void alertListAcceptsFirstAndMaximumPages() throws Exception {
+        when(alertManagementUseCase.listAlerts(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/v1/alerts").queryParam("page", "0").queryParam("size", "100"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/alerts").queryParam("page", "1000").queryParam("size", "100"))
+                .andExpect(status().isOk());
+
+        org.mockito.ArgumentCaptor<Pageable> pageable = org.mockito.ArgumentCaptor.forClass(Pageable.class);
+        verify(alertManagementUseCase, org.mockito.Mockito.times(2)).listAlerts(pageable.capture());
+        org.assertj.core.api.Assertions.assertThat(pageable.getAllValues())
+                .extracting(Pageable::getPageNumber)
+                .containsExactly(0, 1000);
+        org.assertj.core.api.Assertions.assertThat(pageable.getAllValues())
+                .extracting(Pageable::getPageSize)
+                .containsExactly(100, 100);
+    }
+
+    @Test
+    void alertDetailKeepsTheExistingMerchantInfoContract() throws Exception {
+        when(alertManagementUseCase.getAlert("alert-1")).thenReturn(sampleAlert());
+
+        mockMvc.perform(get("/api/v1/alerts/alert-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.merchantInfo.merchantId").value("m-1"))
+                .andExpect(jsonPath("$.merchantInfo.cardPresent").value(false))
+                .andExpect(jsonPath("$.merchantInfo.attributes.legacyAttribute").value("legacy-value"));
     }
 
     @Test
@@ -479,7 +543,8 @@ class AlertControllerTest {
                 "High-risk transaction flagged for review.",
                 List.of("DEVICE_NOVELTY"),
                 new Money(new BigDecimal("100.00"), "USD"),
-                new MerchantInfo("m-1", "Merchant", "5411", "Groceries", "US", "ECOMMERCE", false, Map.of()),
+                new MerchantInfo("m-1", "Merchant", "5411", "Groceries", "US", "ECOMMERCE", false,
+                        Map.of("legacyAttribute", "legacy-value")),
                 new DeviceInfo("d-1", "fp-1", "203.0.113.2", "Mozilla", "IOS", "SAFARI", false, false, false, Map.of()),
                 new LocationInfo("US", "CA", "San Francisco", "94105", 37.7, -122.4, "America/Los_Angeles", false),
                 new CustomerContext("cust-1", "acct-1", "STANDARD", "example.com", 500, true, true, "US", "USD", List.of("d-1"), Map.of()),

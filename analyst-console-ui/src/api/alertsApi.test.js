@@ -1318,7 +1318,9 @@ describe("alertsApi auth headers", () => {
     const feedback = {
       analystDecision: "MARKED_FRAUD",
       feedbackLabel: "CONFIRMED_FRAUD",
-      decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD"]
+      scoringOccurrenceToken: "a".repeat(64),
+      decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD"],
+      notes: null
     };
 
     await createFraudFeedback("txn-1", feedback);
@@ -1333,6 +1335,61 @@ describe("alertsApi auth headers", () => {
     );
   });
 
+  it.each([
+    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED",
+    "FRAUD_FEEDBACK_ALREADY_RECORDED",
+    "CONFLICT"
+  ])("preserves the backend conflict reason %s from an HTTP response", async (reasonCode) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      error: "Conflict",
+      message: "Request conflict.",
+      details: [`reason:${reasonCode}`]
+    }, 409));
+
+    await expect(createFraudFeedback("txn-1", {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: "a".repeat(64),
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notes: null
+    })).rejects.toMatchObject({ status: 409, reasonCode });
+  });
+
+  it("preserves only the structured unknown-commit reason from an HTTP 503", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      error: "Service Unavailable",
+      message: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN",
+      details: ["reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"]
+    }, 503));
+
+    await expect(createFraudFeedback("txn-1", {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: "a".repeat(64),
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notes: null
+    })).rejects.toMatchObject({
+      status: 503,
+      error: "Service Unavailable",
+      reasonCode: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"
+    });
+  });
+
+  it("does not infer an unknown commit from a generic 503 message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      error: "Service Unavailable",
+      message: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"
+    }, 503));
+
+    await expect(createFraudFeedback("txn-1", {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: "a".repeat(64),
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notes: null
+    })).rejects.toMatchObject({ status: 503, reasonCode: null });
+  });
+
   it.each([400, 401, 403, 404, 503])("propagates scored transaction detail %s errors", async (status) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       error: `E${status}`,
@@ -1344,6 +1401,17 @@ describe("alertsApi auth headers", () => {
       status,
       message: expect.stringContaining(`status ${status}`)
     });
+  });
+
+  it("rejects invalid fraud feedback before making a request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ feedbackId: "feedback-1" }));
+
+    await expect(createFraudFeedback("txn-1", {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD"]
+    })).rejects.toMatchObject({ status: 400, error: "INVALID_SCORING_OCCURRENCE_TOKEN" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects invalid scored transaction detail identifiers without a request", async () => {
@@ -2412,6 +2480,7 @@ function scoredTransactionDetail(overrides = {}) {
     correlationId: "corr-1",
     transactionTimestamp: "2026-06-18T10:00:00Z",
     scoredAt: "2026-06-18T10:00:01Z",
+    scoringOccurrenceToken: "a".repeat(64),
     fraudScore: 0.91,
     riskLevel: "CRITICAL",
     alertRecommended: true,

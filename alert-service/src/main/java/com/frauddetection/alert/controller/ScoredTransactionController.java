@@ -1,8 +1,7 @@
 package com.frauddetection.alert.controller;
 
-import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.api.ScoredTransactionDetailResponse;
-import com.frauddetection.alert.api.ScoredTransactionResponse;
+import com.frauddetection.alert.api.ScoredTransactionPageResponse;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
@@ -10,6 +9,7 @@ import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ScoredTransactionSearchCriteria;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
+import com.frauddetection.alert.service.ScoredTransactionSearchResult;
 import com.frauddetection.alert.service.ScoredTransactionSearchValidationException;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import org.springframework.data.domain.PageRequest;
@@ -51,7 +51,7 @@ public class ScoredTransactionController {
     }
 
     @GetMapping("/scored")
-    public PagedResponse<ScoredTransactionResponse> listScoredTransactions(
+    public ScoredTransactionPageResponse listScoredTransactions(
             @RequestParam MultiValueMap<String, String> rawParams
     ) {
         ScoredTransactionSearchCriteria criteria;
@@ -72,14 +72,19 @@ public class ScoredTransactionController {
             throw exception;
         }
         String filterBucket = searchPolicy.filterBucket(criteria);
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "scoredAt"));
-        var result = runSearch(pageable, criteria, filterBucket);
-        return new PagedResponse<>(
+        var pageable = PageRequest.of(page, size, Sort.by(
+                Sort.Order.desc("scoredAt"),
+                Sort.Order.desc("transactionId")
+        ));
+        var searchResult = runSearch(pageable, criteria, filterBucket);
+        var result = searchResult.page();
+        return new ScoredTransactionPageResponse(
                 result.getContent().stream().map(responseMapper::toResponse).toList(),
                 result.getTotalElements(),
                 result.getTotalPages(),
                 result.getNumber(),
-                result.getSize()
+                result.getSize(),
+                searchResult.totalElementsCapped()
         );
     }
 
@@ -103,7 +108,7 @@ public class ScoredTransactionController {
         }
     }
 
-    private org.springframework.data.domain.Page<com.frauddetection.alert.domain.ScoredTransaction> runSearch(
+    private ScoredTransactionSearchResult runSearch(
             org.springframework.data.domain.Pageable pageable,
             ScoredTransactionSearchCriteria criteria,
             String filterBucket
@@ -111,7 +116,10 @@ public class ScoredTransactionController {
         try {
             var result = criteria.hasFilters()
                     ? transactionMonitoringUseCase.listScoredTransactions(pageable, criteria)
-                    : transactionMonitoringUseCase.listScoredTransactions(pageable);
+                    : new ScoredTransactionSearchResult(
+                            transactionMonitoringUseCase.listScoredTransactions(pageable),
+                            false
+                    );
             metrics.recordScoredTransactionSearchRequest("success", filterBucket);
             metrics.recordScoredTransactionSearchPageSize(pageable.getPageSize());
             return result;

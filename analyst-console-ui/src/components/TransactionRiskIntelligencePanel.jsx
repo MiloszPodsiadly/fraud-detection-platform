@@ -12,6 +12,8 @@ import {
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
 import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
+import { merchantDisplayValue } from "../transactions/merchantDisplay.js";
+import { alertRecommendationPresentation } from "../transactions/alertRecommendationPresentation.js";
 
 const STATUS_COPY = {
   AVAILABLE: "Engine Intelligence is available for this transaction.",
@@ -20,17 +22,33 @@ const STATUS_COPY = {
   DEGRADED: "Engine Intelligence is available with limitations. Review the warnings section for diagnostic constraints."
 };
 
+const MERCHANT_DISPLAY_FIELDS = [
+  ["Merchant name", "merchantName"],
+  ["Merchant ID", "merchantId"],
+  ["Merchant category code", "merchantCategoryCode"],
+  ["Merchant category", "merchantCategory"],
+  ["Channel", "channel"],
+  ["Acquiring country", "acquiringCountryCode"]
+];
+
 export function TransactionRiskIntelligencePanel({
   transactionId,
+  scoringOccurrenceToken,
   enabled = true,
   apiClient,
+  onRefreshTransactions,
   panelId
 }) {
   const shouldFetch = Boolean(enabled && transactionId);
   const safePanelId = panelId || transactionRiskIntelligencePanelId(transactionId);
   const titleId = `${safePanelId}-title`;
+  const expectedOccurrenceToken = typeof scoringOccurrenceToken === "string"
+    && /^[0-9a-f]{64}$/.test(scoringOccurrenceToken) ? scoringOccurrenceToken : null;
+  const [reviewConfirmation, setReviewConfirmation] = useState(() => ({ token: expectedOccurrenceToken, confirmed: true }));
+  const requiresOccurrenceReview = reviewConfirmation.token !== expectedOccurrenceToken || !reviewConfirmation.confirmed;
   const { detail, isLoading, error } = useScoredTransactionDetail({
     transactionId,
+    expectedScoringOccurrenceToken: expectedOccurrenceToken,
     enabled: shouldFetch,
     apiClient
   });
@@ -47,17 +65,33 @@ export function TransactionRiskIntelligencePanel({
       {enabled && !transactionId && <p className="emptyStateMessage">No transaction selected.</p>}
       {shouldFetch && isLoading && <p className="loadingText">Loading transaction risk intelligence...</p>}
       {shouldFetch && !isLoading && error && (
-        <p className="formError">{errorMessage(error)}</p>
+        error.code === "SCORING_OCCURRENCE_CHANGED" ? (
+          <div className="formError" role="alert">
+            <p>The scored transaction changed after this row was loaded. Refresh the transaction list to review the current occurrence.</p>
+            {typeof onRefreshTransactions === "function" && (
+              <button className="secondaryButton compactButton" type="button" onClick={onRefreshTransactions}>
+                Refresh scored transactions
+              </button>
+            )}
+          </div>
+        ) : <p className="formError">{errorMessage(error)}</p>
       )}
       {shouldFetch && !isLoading && !error && detail && (
-        <TransactionRiskIntelligenceDetail detail={detail} apiClient={apiClient} />
+        <TransactionRiskIntelligenceDetail
+          detail={detail}
+          apiClient={apiClient}
+          onRefreshTransactions={onRefreshTransactions}
+          requiresOccurrenceReview={requiresOccurrenceReview}
+          onConfirmOccurrenceReview={() => setReviewConfirmation({ token: expectedOccurrenceToken, confirmed: true })}
+        />
       )}
     </section>
   );
 }
 
-function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
+function TransactionRiskIntelligenceDetail({ detail, apiClient, onRefreshTransactions, requiresOccurrenceReview, onConfirmOccurrenceReview }) {
   const intelligence = detail.engineIntelligence;
+  const alertRecommendation = alertRecommendationPresentation(detail.alertRecommended);
   return (
     <>
       <section className="detailSection" aria-label="Transaction Summary">
@@ -69,11 +103,13 @@ function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
           <Field label="Scored at" value={formatDateTime(detail.scoredAt)} />
           <Field label="Fraud score" value={formatScore(detail.fraudScore)} />
           <Field label="Risk level" value={detail.riskLevel || "Not available"} />
-          <Field label="Alert recommendation flag" value={detail.alertRecommended ? "Present" : "Not present"} />
+          <Field label="Alert recommendation flag" value={alertRecommendation.label} />
           <Field label="Reason codes" value={listText(detail.reasonCodes)} />
         </dl>
         <p className="sectionCopy">alertRecommended is a scored transaction field, not a final payment decision.</p>
       </section>
+
+      <MerchantInvestigationSection merchantInfo={detail.merchantInfo} />
 
       <section className={`detailSection transactionRiskStatus transactionRiskStatus${statusClass(intelligence.status)}`} aria-label="Engine Intelligence Status">
         <h4>Engine Intelligence Status</h4>
@@ -87,11 +123,45 @@ function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
 
       <ComparisonSummary comparison={intelligence.comparison} />
       <AnalystRecommendationPanel recommendation={detail.analystRecommendation} />
-      <AnalystFeedbackSection transactionId={detail.transactionId} apiClient={apiClient} />
+      <AnalystFeedbackSection
+        transactionId={detail.transactionId}
+        scoringOccurrenceToken={detail.scoringOccurrenceToken}
+        apiClient={apiClient}
+        onRefreshTransactions={onRefreshTransactions}
+        requiresOccurrenceReview={requiresOccurrenceReview}
+        onConfirmOccurrenceReview={onConfirmOccurrenceReview}
+      />
       <EngineResults engines={intelligence.engines} />
       <DiagnosticSignals diagnosticSignals={intelligence.diagnosticSignals} />
       <Warnings warnings={intelligence.warnings} />
     </>
+  );
+}
+
+function MerchantInvestigationSection({ merchantInfo }) {
+  const merchantFields = MERCHANT_DISPLAY_FIELDS.map(([label, key]) => [label, merchantDisplayValue(merchantInfo, key)])
+    .filter(([, value]) => value !== null);
+  const hasMerchantContext = merchantFields.length > 0;
+
+  return (
+    <section className="detailSection" aria-label="Merchant Investigation">
+      <h4>Merchant Investigation</h4>
+      <p className="sectionCopy">
+        Merchant details supplied with this transaction are context only. They do not establish independently verified merchant identity or merchant risk.
+      </p>
+      {hasMerchantContext ? (
+        <dl>
+          {merchantFields.map(([label, value]) => (
+            <Field key={label} label={label} value={value} />
+          ))}
+        </dl>
+      ) : (
+        <p className="emptyStateMessage">No displayable transaction merchant details are available.</p>
+      )}
+      <p className="sectionCopy">
+        Verified Merchant Risk history is not provided by this transaction detail. The current implementation does not connect an independently admitted merchant evidence source. Absence of evidence is not evidence of low risk.
+      </p>
+    </section>
   );
 }
 
@@ -126,7 +196,7 @@ const FEEDBACK_OPTIONS = [
   }
 ];
 
-function AnalystFeedbackSection({ transactionId, apiClient }) {
+function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClient, onRefreshTransactions, requiresOccurrenceReview, onConfirmOccurrenceReview }) {
   const {
     feedback,
     isLoading,
@@ -135,8 +205,11 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
     canCreateFeedback = true,
     submitState,
     submitError,
+    reconciliationState,
+    reconciliationError,
+    checkRecordedFeedback,
     submit
-  } = useFraudFeedback({ transactionId, enabled: Boolean(transactionId), apiClient });
+  } = useFraudFeedback({ transactionId, scoringOccurrenceToken, enabled: Boolean(transactionId), apiClient });
   const [selectedLabel, setSelectedLabel] = useState("CONFIRMED_FRAUD");
   const [notes, setNotes] = useState("");
   const selectedOption = FEEDBACK_OPTIONS.find((option) => option.feedbackLabel === selectedLabel) || FEEDBACK_OPTIONS[0];
@@ -146,11 +219,14 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
     submit({
       analystDecision: selectedOption.analystDecision,
       feedbackLabel: selectedOption.feedbackLabel,
+      scoringOccurrenceToken,
       decisionReasonCodes: [selectedOption.reasonCode],
-        notes: notes.trim() === "" ? null : notes.trim()
-      });
+      notes: notes.trim() === "" ? null : notes.trim()
+    });
   };
   const feedbackRuntimeAvailable = canReadFeedback && canCreateFeedback;
+  const hasScoringOccurrenceToken = typeof scoringOccurrenceToken === "string"
+    && /^[0-9a-f]{64}$/.test(scoringOccurrenceToken);
 
   return (
     <section className="detailSection analystFeedbackSection" aria-label="Analyst Feedback">
@@ -161,13 +237,74 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
         change thresholds.
       </p>
       {!canReadFeedback && <p className="emptyStateMessage">Analyst feedback is not available in this runtime.</p>}
+      {canReadFeedback && requiresOccurrenceReview && (
+        <div className="summaryCard" role="status">
+          <p className="sectionCopy">Scoring changed while this transaction was expanded. Review the current scoring before recording feedback.</p>
+          <button className="secondaryButton compactButton" type="button" onClick={onConfirmOccurrenceReview}>
+            I reviewed the current scoring
+          </button>
+        </div>
+      )}
       {canReadFeedback && isLoading && <p className="loadingText">Loading analyst feedback...</p>}
       {canReadFeedback && !isLoading && error && <p className="formError">{feedbackErrorMessage(error)}</p>}
-      {canReadFeedback && !isLoading && !error && feedback && <ExistingFeedback feedback={feedback} />}
-      {canReadFeedback && !canCreateFeedback && !isLoading && !error && !feedback && (
-        <p className="emptyStateMessage">Analyst feedback is not available in this runtime.</p>
+      {canReadFeedback && !isLoading && !error && feedback && (
+        <ExistingFeedback feedback={feedback} reconciled={submitState === "reconciled"} />
       )}
-      {feedbackRuntimeAvailable && !isLoading && !error && !feedback && (
+      {canReadFeedback && submitState === "submitting" && !isLoading && !feedback && (
+        <p className="loadingText" role="status">Feedback submission is in progress...</p>
+      )}
+      {canReadFeedback && submitState === "duplicate" && !isLoading && !error && !feedback && (
+        <p className="sectionCopy" role="status">Feedback already exists for this transaction.</p>
+      )}
+      {canReadFeedback && submitState === "outcome-unknown" && !feedback && (
+        <div className="summaryCard" role="status">
+          <p className="sectionCopy">
+            The server may have recorded this feedback, but its response was not confirmed. Check the recorded feedback before taking any further action.
+          </p>
+          {reconciliationState === "checking" && (
+            <p className="loadingText">Checking recorded feedback...</p>
+          )}
+          {reconciliationState === "not-found" && (
+            <p className="sectionCopy">No record is visible yet. The earlier write outcome is still unknown; check again later.</p>
+          )}
+          {reconciliationState === "unresolved" && (
+            <p className="sectionCopy">The recorded feedback could not be confirmed. Do not submit again yet; check again later.</p>
+          )}
+          {reconciliationState === "access-blocked" && (
+            <p className="sectionCopy">Feedback status cannot be checked with the current access. The write outcome remains unknown.</p>
+          )}
+          {reconciliationState !== "checking" && reconciliationState !== "access-blocked" && (
+            <button
+              className="secondaryButton compactButton"
+              type="button"
+              onClick={() => { void checkRecordedFeedback(); }}
+            >
+              Check recorded feedback
+            </button>
+          )}
+        </div>
+      )}
+      {canReadFeedback && !canCreateFeedback && !isLoading && !error && !feedback && (
+        submitState !== "outcome-unknown" && submitState !== "duplicate" && submitState !== "submitting" &&
+        <p className="emptyStateMessage">
+          {hasScoringOccurrenceToken
+            ? "Analyst feedback is not available in this runtime."
+            : "Refresh transaction details before recording feedback."}
+        </p>
+      )}
+      {feedbackRuntimeAvailable && submitState === "stale-occurrence" && (
+        <div className="formError" role="alert">
+          <p>Scoring changed after review. Refresh the transaction list and review the current occurrence before recording feedback.</p>
+          {typeof onRefreshTransactions === "function" && (
+            <button className="secondaryButton compactButton" type="button" onClick={onRefreshTransactions}>
+              Refresh scored transactions
+            </button>
+          )}
+        </div>
+      )}
+      {feedbackRuntimeAvailable && !requiresOccurrenceReview && submitState !== "stale-occurrence"
+        && submitState !== "outcome-unknown"
+        && !isLoading && !error && !feedback && (
         <form className="analystFeedbackForm" onSubmit={onSubmit}>
           <fieldset disabled={submitState === "submitting"}>
             <legend>Review outcome</legend>
@@ -209,19 +346,26 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
   );
 }
 
-function ExistingFeedback({ feedback }) {
+function ExistingFeedback({ feedback, reconciled = false }) {
+  const relationCopy = feedback.scoringOccurrenceRelation === "CURRENT"
+    ? "This feedback snapshot matched the scoring occurrence when checked."
+    : feedback.scoringOccurrenceRelation === "PRIOR"
+      ? "This feedback belongs to a prior scoring occurrence and does not cover the current scoring."
+      : "The scoring occurrence for this historical feedback could not be verified.";
   return (
     <article className="summaryCard">
-      <h5>Feedback recorded</h5>
+      <h5>{reconciled ? "Feedback record found" : "Feedback recorded"}</h5>
       <dl>
         <Field label="Feedback label" value={feedback.feedbackLabel} />
         <Field label="Analyst decision" value={feedback.analystDecision} />
         <Field label="Label source" value={feedback.labelSource} />
         <Field label="Status" value={feedback.feedbackStatus} />
+        {feedback.createdBy && <Field label="Created by" value={feedback.createdBy} />}
         <Field label="Created at" value={formatDateTime(feedback.createdAt)} />
         <Field label="Reason codes" value={listText(feedback.decisionReasonCodes)} />
         <Field label="Notes" value={feedback.notesPresent ? "Present" : "None"} />
       </dl>
+      <p className="sectionCopy">{relationCopy}</p>
       <p className="sectionCopy">One active feedback record is already present for this transaction.</p>
     </article>
   );
@@ -360,8 +504,11 @@ function feedbackErrorMessage(error) {
   if (error?.status === 404) {
     return "Scored transaction or feedback was not found.";
   }
-  if (error?.status === 409) {
+  if (error?.status === 409 && error?.reasonCode === "FRAUD_FEEDBACK_ALREADY_RECORDED") {
     return "Feedback already exists for this transaction.";
+  }
+  if (error?.status === 409) {
+    return "Feedback could not be recorded because transaction state changed. Refresh the transaction list and review the current scoring.";
   }
   if (error?.status === 503) {
     return "Analyst feedback is temporarily unavailable.";

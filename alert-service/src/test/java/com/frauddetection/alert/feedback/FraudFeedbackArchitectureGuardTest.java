@@ -14,6 +14,9 @@ class FraudFeedbackArchitectureGuardTest {
 
     private static final Path FEEDBACK_MAIN = Path.of("src/main/java/com/frauddetection/alert/feedback");
     private static final Path AUDIT_OUTBOX_MAIN = Path.of("src/main/java/com/frauddetection/alert/audit/outbox");
+    private static final Path PROJECTION_WRITER = Path.of(
+            "src/main/java/com/frauddetection/alert/persistence/ScoredTransactionProjectionWriter.java"
+    );
     private static final List<String> FORBIDDEN_IMPLEMENTATION_TOKENS = List.of(
             "approvePayment",
             "declinePayment",
@@ -49,6 +52,15 @@ class FraudFeedbackArchitectureGuardTest {
         String source = source();
 
         assertThat(source).doesNotContain(FORBIDDEN_IMPLEMENTATION_TOKENS);
+    }
+
+    @Test
+    void scoredTransactionProjectionWriterUsesTypedPersistenceOutcomesWithoutHttpCoupling() throws IOException {
+        String writer = Files.readString(PROJECTION_WRITER);
+
+        assertThat(writer)
+                .contains("FeedbackOccurrenceFenceException")
+                .doesNotContain("org.springframework.http", "ResponseStatusException", "HttpStatus");
     }
 
     @Test

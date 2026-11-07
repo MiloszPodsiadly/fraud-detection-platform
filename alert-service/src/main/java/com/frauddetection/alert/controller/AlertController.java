@@ -55,10 +55,13 @@ public class AlertController {
     @AuditedSensitiveRead(category = ReadAccessEndpointCategory.ALERT_LIST,
             resourceType = ReadAccessResourceType.ALERT)
     public PagedResponse<AlertSummaryResponse> listAlerts(
-            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "0") @Min(0) @Max(1000) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
     ) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "alertTimestamp"));
+        var pageable = PageRequest.of(page, size, Sort.by(
+                Sort.Order.desc("alertTimestamp"),
+                Sort.Order.desc("alertId")
+        ));
         var result = alertManagementUseCase.listAlerts(pageable);
         return new PagedResponse<>(
                 result.getContent().stream().map(alertResponseMapper::toSummary).toList(),

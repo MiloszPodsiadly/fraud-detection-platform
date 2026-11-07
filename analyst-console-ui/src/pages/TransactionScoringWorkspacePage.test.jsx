@@ -3,16 +3,44 @@ import { describe, expect, it, vi } from "vitest";
 import { TransactionScoringWorkspacePage } from "./TransactionScoringWorkspacePage.jsx";
 
 vi.mock("../components/TransactionRiskIntelligencePanel.jsx", () => ({
-  TransactionRiskIntelligencePanel: ({ transactionId, enabled, panelId }) => (
-    <section id={panelId} aria-label="Mock transaction risk intelligence">Risk intelligence for {transactionId}; enabled: {String(enabled)}</section>
+  TransactionRiskIntelligencePanel: ({ transactionId, enabled, panelId, onRefreshTransactions }) => (
+    <section id={panelId} aria-label="Mock transaction risk intelligence">
+      Risk intelligence for {transactionId}; enabled: {String(enabled)}
+      {typeof onRefreshTransactions === "function" && (
+        <button type="button" onClick={onRefreshTransactions}>Refresh transaction list from detail</button>
+      )}
+    </section>
   ),
   transactionRiskIntelligencePanelId: (transactionId) => `transaction-risk-intelligence-${String(transactionId).replace(/[^A-Za-z0-9_-]+/g, "-")}`
 }));
 
 describe("TransactionScoringWorkspacePage", () => {
+  it("passes the workspace refresh callback to the expanded detail panel", () => {
+    const refreshWorkspace = vi.fn();
+    render(
+      <TransactionScoringWorkspacePage
+        canReadTransactions
+        transactionPage={{ content: [transaction("txn-1")], page: 0, size: 25, totalPages: 1, totalElements: 1 }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onRefreshTransactions={refreshWorkspace}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh transaction list from detail" }));
+
+    expect(refreshWorkspace).toHaveBeenCalledTimes(1);
+  });
+
   it("integrates Transaction Risk Intelligence into one expanded scored transaction row with aria wiring", () => {
     render(
       <TransactionScoringWorkspacePage
+        canReadTransactions
         transactionPage={{
           content: [
             transaction("txn-1"),
@@ -56,6 +84,7 @@ describe("TransactionScoringWorkspacePage", () => {
   it("keeps the details button keyboard reachable and closes when selected transaction disappears", () => {
     const { rerender } = render(
       <TransactionScoringWorkspacePage
+        canReadTransactions
         transactionPage={{
           content: [
             transaction("txn-1"),
@@ -93,6 +122,7 @@ describe("TransactionScoringWorkspacePage", () => {
 
     rerender(
       <TransactionScoringWorkspacePage
+        canReadTransactions
         transactionPage={{
           content: [transaction("txn-1")],
           page: 0,
@@ -112,7 +142,95 @@ describe("TransactionScoringWorkspacePage", () => {
     expect(screen.queryByRole("region", { name: "Mock transaction risk intelligence" })).not.toBeInTheDocument();
   });
 
-  it("passes disabled detail read gate when transaction reads are not enabled", () => {
+  it("uses recommendation wording while keeping the existing backend filter values", () => {
+    const onTransactionFiltersChange = vi.fn();
+    render(
+      <TransactionScoringWorkspacePage
+        transactionPage={{ content: [], page: 0, size: 25, totalPages: 0, totalElements: 0 }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionFiltersChange={onTransactionFiltersChange}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+        canReadTransactions
+      />
+    );
+
+    const filter = screen.getByLabelText("Alert recommendation");
+    expect(screen.getByRole("option", { name: "No review recommendation" })).toHaveValue("LEGITIMATE");
+    expect(screen.getByRole("option", { name: "Review recommended" })).toHaveValue("SUSPICIOUS");
+
+    fireEvent.change(filter, { target: { value: "LEGITIMATE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(onTransactionFiltersChange).toHaveBeenCalledWith(expect.objectContaining({
+      status: "LEGITIMATE",
+      page: 0
+    }));
+  });
+
+  it("keeps pagination controls available for an empty page with valid navigation metadata", () => {
+    render(
+      <TransactionScoringWorkspacePage
+        canReadTransactions
+        transactionPage={{ content: [], page: 1, size: 25, totalElements: 26, totalPages: 2 }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+      />
+    );
+
+    expect(screen.getByText("No scored transactions match this view")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
+  it("labels capped filtered totals as a display limit", () => {
+    render(
+      <TransactionScoringWorkspacePage
+        canReadTransactions
+        transactionPage={{ content: [], page: 0, size: 25, totalElements: 10_000, totalPages: 400, totalElementsCapped: true }}
+        transactionPageRequest={{ page: 0, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+      />
+    );
+
+    expect(screen.getByText("10,000+")).toBeInTheDocument();
+    expect(screen.getByText("filtered matches (display limit)")).toBeInTheDocument();
+  });
+
+  it("labels exact filtered totals as exact", () => {
+    render(
+      <TransactionScoringWorkspacePage
+        canReadTransactions
+        transactionPage={{ content: [], page: 0, size: 25, totalElements: 82, totalPages: 4, totalElementsCapped: false }}
+        transactionPageRequest={{ page: 0, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+      />
+    );
+
+    expect(screen.getByText("82")).toBeInTheDocument();
+    expect(screen.getByText("total filtered scored transactions")).toBeInTheDocument();
+  });
+
+  it.each([false, undefined])("closes the whole page when read capability is %s even with a stale page", (capability) => {
+    const retry = vi.fn();
     render(
       <TransactionScoringWorkspacePage
         transactionPage={{
@@ -124,17 +242,23 @@ describe("TransactionScoringWorkspacePage", () => {
         }}
         isLoading={false}
         error={null}
-        onRetry={vi.fn()}
+        onRetry={retry}
         onTransactionPageChange={vi.fn()}
         onTransactionPageSizeChange={vi.fn()}
         apiClient={{ getScoredTransactionDetail: vi.fn() }}
-        canReadTransactions={false}
+        canReadTransactions={capability}
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
-
-    expect(screen.getByRole("region", { name: "Mock transaction risk intelligence" })).toHaveTextContent("enabled: false");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Details" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Search")).not.toBeInTheDocument();
+    expect(screen.queryByText("txn-1")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Page size")).not.toBeInTheDocument();
+    expect(screen.getByText("Transaction reads unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(retry).not.toHaveBeenCalled();
   });
 });
 

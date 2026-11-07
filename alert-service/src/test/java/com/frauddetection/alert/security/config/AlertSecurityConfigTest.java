@@ -123,6 +123,7 @@ import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.AlertManagementUseCase;
 import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
 import com.frauddetection.alert.service.ScoredTransactionSearchCriteria;
+import com.frauddetection.alert.service.ScoredTransactionSearchResult;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelController;
@@ -824,7 +825,7 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
 
         when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class), any(ScoredTransactionSearchCriteria.class)))
-                .thenReturn(new PageImpl<>(List.of()));
+                .thenReturn(new ScoredTransactionSearchResult(new PageImpl<>(List.of()), false));
 
         mockMvc.perform(get("/api/v1/transactions/scored")
                         .queryParam("query", "customer-123")

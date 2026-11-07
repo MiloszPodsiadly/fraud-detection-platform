@@ -3,6 +3,7 @@ export function PaginationControls({
   size,
   totalPages,
   totalElements,
+  totalElementsCapped = false,
   label = "transactions",
   totalLabel = "total",
   pageSizeOptions = [10, 25, 50, 100],
@@ -16,8 +17,8 @@ export function PaginationControls({
   return (
     <div className="paginationBar">
       <div>
-        <strong>{totalElements}</strong>
-        <span> {totalLabel} {label}</span>
+        <strong>{totalElementsCapped ? `${totalElements.toLocaleString()}+` : totalElements.toLocaleString()}</strong>
+        <span> {totalElementsCapped ? `${label} (display limit)` : `${totalLabel} ${label}`}</span>
       </div>
       <div className="paginationActions">
         <label className="pageSizeControl">

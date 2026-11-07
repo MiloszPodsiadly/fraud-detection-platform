@@ -7,15 +7,19 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
 import com.frauddetection.alert.feedback.assembly.FraudFeedbackRecordAssembler;
 import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnapshotter;
 import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
 import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.feedback.validation.ValidatedFraudFeedback;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
+import com.frauddetection.alert.persistence.FeedbackOccurrenceFenceException;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
+import com.mongodb.MongoException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -33,6 +37,7 @@ public class FraudFeedbackService {
     private final CurrentAnalystUser currentAnalystUser;
     private final WriteActionAuditOutboxService auditOutboxService;
     private final RegulatedMutationTransactionRunner transactionRunner;
+    private final ScoredTransactionProjectionWriter projectionWriter;
     private final FraudFeedbackRequestValidator requestValidator;
     private final FraudFeedbackRecordAssembler recordAssembler;
     private final EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter;
@@ -47,6 +52,7 @@ public class FraudFeedbackService {
             CurrentAnalystUser currentAnalystUser,
             WriteActionAuditOutboxService auditOutboxService,
             RegulatedMutationTransactionRunner transactionRunner,
+            ScoredTransactionProjectionWriter projectionWriter,
             FraudFeedbackRequestValidator requestValidator,
             FraudFeedbackRecordAssembler recordAssembler,
             EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter,
@@ -59,6 +65,7 @@ public class FraudFeedbackService {
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,
+                projectionWriter,
                 requestValidator,
                 recordAssembler,
                 engineIntelligenceSnapshotter,
@@ -74,6 +81,7 @@ public class FraudFeedbackService {
             CurrentAnalystUser currentAnalystUser,
             WriteActionAuditOutboxService auditOutboxService,
             RegulatedMutationTransactionRunner transactionRunner,
+            ScoredTransactionProjectionWriter projectionWriter,
             FraudFeedbackRequestValidator requestValidator,
             FraudFeedbackRecordAssembler recordAssembler,
             EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter,
@@ -86,6 +94,7 @@ public class FraudFeedbackService {
         this.currentAnalystUser = currentAnalystUser;
         this.auditOutboxService = auditOutboxService;
         this.transactionRunner = transactionRunner;
+        this.projectionWriter = projectionWriter;
         this.requestValidator = requestValidator;
         this.recordAssembler = recordAssembler;
         this.engineIntelligenceSnapshotter = engineIntelligenceSnapshotter;
@@ -99,14 +108,70 @@ public class FraudFeedbackService {
                 .map(principal -> principal.userId())
                 .filter(userId -> !userId.isBlank())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "FRAUD_FEEDBACK_ACTOR_REQUIRED"));
-        try {
-            FraudFeedbackRecord saved = transactionRunner.runLocalCommit(
-                    () -> createWithAuthoritativeSnapshot(transactionId, validated, actor)
-            );
-            return mapper.toResponse(saved);
-        } catch (DuplicateKeyException exception) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED", exception);
+        if (transactionRunner.mode() == RegulatedMutationTransactionMode.OFF
+                || !transactionRunner.isTransactionManagerConfigured()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED");
         }
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                FraudFeedbackRecord saved = transactionRunner.runLocalCommit(
+                        () -> createWithAuthoritativeSnapshot(transactionId, validated, actor)
+                );
+                return mapper.toResponse(saved, FraudFeedbackOccurrenceRelation.CURRENT);
+            } catch (DuplicateKeyException exception) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED", exception);
+            } catch (FeedbackOccurrenceFenceException exception) {
+                throw mapFenceException(exception);
+            } catch (RuntimeException exception) {
+                if (hasMongoErrorLabel(exception, "UnknownTransactionCommitResult")) {
+                    throw new ResponseStatusException(
+                            HttpStatus.SERVICE_UNAVAILABLE,
+                            "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN",
+                            exception
+                    );
+                }
+                if (hasMongoErrorLabel(exception, "TransientTransactionError")) {
+                    if (attempt == 0) {
+                        awaitTransactionConflictResolution(exception);
+                        continue;
+                    }
+                    throw new ResponseStatusException(
+                            HttpStatus.SERVICE_UNAVAILABLE,
+                            "FRAUD_FEEDBACK_TRANSACTION_RETRY_EXHAUSTED",
+                            exception
+                    );
+                }
+                if (containsMongoException(exception)) {
+                    throw new ResponseStatusException(
+                            HttpStatus.SERVICE_UNAVAILABLE,
+                            "FRAUD_FEEDBACK_MONGO_TRANSACTION_UNAVAILABLE",
+                            exception
+                    );
+                }
+                throw exception;
+            }
+        }
+        throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "FRAUD_FEEDBACK_TRANSACTION_RETRY_EXHAUSTED");
+    }
+
+    private ResponseStatusException mapFenceException(FeedbackOccurrenceFenceException exception) {
+        return switch (exception.reason()) {
+            case OCCURRENCE_CHANGED -> new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED",
+                    exception
+            );
+            case TRANSACTION_REQUIRED -> new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED",
+                    exception
+            );
+            case FENCE_UNAVAILABLE -> new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE",
+                    exception
+            );
+        };
     }
 
     private FraudFeedbackRecord createWithAuthoritativeSnapshot(
@@ -116,6 +181,13 @@ public class FraudFeedbackService {
     ) {
         ScoredTransaction transaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
         ScoringOccurrenceOwnership ownership = requireAuthoritativeOccurrence(transaction);
+        if (!ScoringOccurrenceToken.from(ownership).equals(validated.scoringOccurrenceToken())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"
+            );
+        }
+        projectionWriter.fenceFeedbackOccurrence(transaction.transactionId(), ownership);
         String boundedTransactionId = transaction.transactionId();
         if (repository.existsByTransactionId(boundedTransactionId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED");
@@ -152,8 +224,20 @@ public class FraudFeedbackService {
         ScoredTransaction transaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
         String boundedTransactionId = transaction.transactionId();
         return repository.findByTransactionId(boundedTransactionId)
-                .map(mapper::toResponse)
+                .map(record -> mapper.toResponse(record, occurrenceRelation(record, transaction)))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "FRAUD_FEEDBACK_NOT_FOUND"));
+    }
+
+    private FraudFeedbackOccurrenceRelation occurrenceRelation(FraudFeedbackRecord record, ScoredTransaction transaction) {
+        ScoringOccurrenceOwnership current = transaction == null ? null : transaction.scoringOccurrenceOwnership();
+        if (current == null) {
+            return FraudFeedbackOccurrenceRelation.UNKNOWN;
+        }
+        return record.scoringOccurrenceOwnership()
+                .map(saved -> saved.equals(current)
+                        ? FraudFeedbackOccurrenceRelation.CURRENT
+                        : FraudFeedbackOccurrenceRelation.PRIOR)
+                .orElse(FraudFeedbackOccurrenceRelation.UNKNOWN);
     }
 
     private void persistAuditIntent(FraudFeedbackRecord saved) {
@@ -186,7 +270,6 @@ public class FraudFeedbackService {
         try {
             persistAuditIntent(saved);
         } catch (RuntimeException outboxException) {
-            rollbackSavedFeedback(saved, outboxException);
             throw new ResponseStatusException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE",
@@ -196,14 +279,38 @@ public class FraudFeedbackService {
         return saved;
     }
 
-    private void rollbackSavedFeedback(FraudFeedbackRecord saved, RuntimeException auditException) {
-        if (transactionRunner != null && transactionRunner.mode() != RegulatedMutationTransactionMode.OFF) {
-            return;
+    private boolean hasMongoErrorLabel(Throwable exception, String label) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof MongoException mongoException && mongoException.hasErrorLabel(label)) {
+                return true;
+            }
+            current = current.getCause();
         }
+        return false;
+    }
+
+    private boolean containsMongoException(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof MongoException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private void awaitTransactionConflictResolution(RuntimeException exception) {
         try {
-            repository.deleteById(saved.getFeedbackId());
-        } catch (RuntimeException cleanupException) {
-            auditException.addSuppressed(cleanupException);
+            Thread.sleep(25L);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_TRANSACTION_RETRY_INTERRUPTED",
+                    exception
+            );
         }
     }
 

@@ -31,6 +31,8 @@ final class EngineIntelligenceSourceScanSupport {
             "analyst-console-ui/src/engineIntelligence/engineIntelligenceContractValidation.test.js",
             "analyst-console-ui/src/pages/FraudCaseDetailsPage.jsx",
             "analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx",
+            "analyst-console-ui/src/transactions/fraudFeedbackResponseValidation.js",
+            "analyst-console-ui/src/transactions/fraudFeedbackResponseValidation.test.js",
             "analyst-console-ui/src/transactions/transactionRiskIntelligenceScopeGuard.test.js",
             "analyst-console-ui/src/transactions/transactionRiskIntelligenceFixtures.js",
             "analyst-console-ui/src/transactions/transactionRiskIntelligenceValidation.js",

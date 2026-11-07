@@ -15,13 +15,16 @@ export function TransactionScoringWorkspaceContainer({
       transactionPage={transactionStreamState.page}
       transactionPageRequest={transactionStreamState.request}
       isLoading={transactionStreamState.isLoading}
+      isStale={transactionStreamState.isStale}
       error={transactionStreamState.error}
       onRetry={onRetryWorkspace}
+      onRefreshTransactions={onRetryWorkspace}
       onTransactionFiltersChange={onFiltersChange}
       onTransactionPageChange={onPageChange}
       onTransactionPageSizeChange={onPageSizeChange}
       apiClient={apiClient}
       canReadTransactions={canReadTransactions}
+      viewIdentity={transactionStreamState.viewIdentity}
       workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
   );

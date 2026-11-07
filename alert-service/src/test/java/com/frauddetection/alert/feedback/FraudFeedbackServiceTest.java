@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
@@ -18,6 +19,8 @@ import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnap
 import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
 import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
+import com.frauddetection.alert.persistence.FeedbackOccurrenceFenceException;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
@@ -44,6 +47,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
+import com.mongodb.MongoException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -65,6 +69,13 @@ import static org.mockito.Mockito.when;
 
 class FraudFeedbackServiceTest {
 
+    private static final ScoringOccurrenceOwnership DEFAULT_OCCURRENCE = ScoringOccurrenceOwnership.authoritative(
+            "event-1",
+            Instant.parse("2026-06-25T09:00:01Z"),
+            "a".repeat(64)
+    );
+    private static final String DEFAULT_OCCURRENCE_TOKEN = ScoringOccurrenceToken.from(DEFAULT_OCCURRENCE);
+
     private final FraudFeedbackRepository repository = mock(FraudFeedbackRepository.class);
     private final TransactionMonitoringUseCase transactionMonitoringUseCase = mock(TransactionMonitoringUseCase.class);
     private final EngineIntelligenceReadService engineIntelligenceReadService = mock(EngineIntelligenceReadService.class);
@@ -73,6 +84,7 @@ class FraudFeedbackServiceTest {
     private final CurrentAnalystUser currentAnalystUser = mock(CurrentAnalystUser.class);
     private final WriteActionAuditOutboxService auditOutboxService = mock(WriteActionAuditOutboxService.class);
     private final RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+    private final ScoredTransactionProjectionWriter projectionWriter = mock(ScoredTransactionProjectionWriter.class);
     private final List<FraudFeedbackRecord> savedRecords = new ArrayList<>();
     private FraudFeedbackService service;
 
@@ -80,7 +92,8 @@ class FraudFeedbackServiceTest {
     void setUp() {
         service = createService(new EngineIntelligenceResponseMapper());
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
-        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.REQUIRED);
+        when(transactionRunner.isTransactionManagerConfigured()).thenReturn(true);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenReturn(projectedEngineIntelligence());
@@ -107,6 +120,7 @@ class FraudFeedbackServiceTest {
         assertThat(response.createdAt()).isEqualTo(Instant.parse("2026-06-25T10:15:30Z"));
         assertThat(response.createdBy()).isEqualTo("analyst-1");
         assertThat(response.notesPresent()).isTrue();
+        assertThat(response.scoringOccurrenceRelation()).isEqualTo(FraudFeedbackOccurrenceRelation.CURRENT);
         assertThat(response.fraudScore()).isEqualTo(0.91d);
         assertThat(response.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
@@ -334,7 +348,157 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void auditOutboxFailureAfterSaveReturns503AndCompensatesSavedFeedback() {
+    void staleOccurrenceTokenReturnsConflictBeforeDuplicateLookupSnapshotOrWrite() {
+        ScoringOccurrenceOwnership laterOccurrence = ScoringOccurrenceOwnership.authoritative(
+                "event-2",
+                Instant.parse("2026-06-25T09:00:02Z"),
+                "b".repeat(64)
+        );
+
+        assertThatThrownBy(() -> service.create("txn-1", requestWithToken(ScoringOccurrenceToken.from(laterOccurrence))))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException response = (ResponseStatusException) exception;
+                    assertThat(response.getStatusCode().value()).isEqualTo(409);
+                    assertThat(response.getReason()).isEqualTo("FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED");
+                });
+
+        verify(repository, never()).existsByTransactionId("txn-1");
+        verify(engineIntelligenceReadService, never()).readForOccurrence(any(), any());
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void mapsTypedFenceOutcomesToExistingFeedbackHttpSemantics() {
+        assertFenceOutcomeMaps(
+                FeedbackOccurrenceFenceException.Reason.OCCURRENCE_CHANGED,
+                409,
+                "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"
+        );
+        assertFenceOutcomeMaps(
+                FeedbackOccurrenceFenceException.Reason.TRANSACTION_REQUIRED,
+                503,
+                "FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED"
+        );
+        assertFenceOutcomeMaps(
+                FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE,
+                503,
+                "FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE"
+        );
+    }
+
+    @Test
+    void currentOccurrenceTokenPersistsThatOccurrenceAndDuplicateDoesNotOverwrite() {
+        ScoringOccurrenceOwnership current = ScoringOccurrenceOwnership.authoritative(
+                "event-2",
+                Instant.parse("2026-06-25T09:00:02Z"),
+                "b".repeat(64)
+        );
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
+                .thenReturn(scoredTransaction(current, MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE));
+        CreateFraudFeedbackRequest currentRequest = requestWithToken(ScoringOccurrenceToken.from(current));
+
+        service.create("txn-1", currentRequest);
+        assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getSourceEventId()).isEqualTo("event-2");
+            assertThat(record.getSourceEventFingerprint()).isEqualTo("b".repeat(64));
+        });
+
+        when(repository.existsByTransactionId("txn-1")).thenReturn(true);
+        assertThatThrownBy(() -> service.create("txn-1", currentRequest))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> assertThat(((ResponseStatusException) exception).getReason())
+                        .isEqualTo("FRAUD_FEEDBACK_ALREADY_RECORDED"));
+        assertThat(savedRecords).hasSize(1);
+    }
+
+    @Test
+    void existingFeedbackRelationIsCurrentPriorOrUnknownWithoutGuessing() {
+        FraudFeedbackRecord current = record();
+        current.captureScoringOccurrence(DEFAULT_OCCURRENCE);
+        when(repository.findByTransactionId("txn-1")).thenReturn(Optional.of(current));
+        assertThat(service.get("txn-1").scoringOccurrenceRelation()).isEqualTo(FraudFeedbackOccurrenceRelation.CURRENT);
+
+        FraudFeedbackRecord prior = record();
+        prior.captureScoringOccurrence(ScoringOccurrenceOwnership.authoritative(
+                "event-prior",
+                Instant.parse("2026-06-25T09:00:00Z"),
+                "c".repeat(64)
+        ));
+        when(repository.findByTransactionId("txn-1")).thenReturn(Optional.of(prior));
+        assertThat(service.get("txn-1").scoringOccurrenceRelation()).isEqualTo(FraudFeedbackOccurrenceRelation.PRIOR);
+
+        FraudFeedbackRecord historical = record();
+        when(repository.findByTransactionId("txn-1")).thenReturn(Optional.of(historical));
+        assertThat(service.get("txn-1").scoringOccurrenceRelation()).isEqualTo(FraudFeedbackOccurrenceRelation.UNKNOWN);
+    }
+
+    @Test
+    void transactionModeOffFailsClosedBeforeReadingOrWritingFeedback() {
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED");
+                });
+
+        verify(transactionMonitoringUseCase, never()).getScoredTransaction(any());
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(projectionWriter, never()).fenceFeedbackOccurrence(any(), any());
+    }
+
+    @Test
+    void missingTransactionManagerFailsClosedBeforeReadingOrWritingFeedback() {
+        when(transactionRunner.isTransactionManagerConfigured()).thenReturn(false);
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED");
+                });
+
+        verify(transactionMonitoringUseCase, never()).getScoredTransaction(any());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void retriesOnceAfterMongoTransientTransactionAbort() {
+        org.mockito.Mockito.doThrow(new LabelledMongoException("TransientTransactionError"))
+                .doAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get())
+                .when(transactionRunner).runLocalCommit(any());
+
+        service.create("txn-1", request());
+
+        verify(transactionRunner, org.mockito.Mockito.times(2)).runLocalCommit(any());
+        verify(repository).save(any());
+    }
+
+    @Test
+    void doesNotRetryWhenMongoCommitOutcomeIsUnknown() {
+        org.mockito.Mockito.doThrow(new LabelledMongoException("UnknownTransactionCommitResult"))
+                .when(transactionRunner).runLocalCommit(any());
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN");
+                });
+
+        verify(transactionRunner).runLocalCommit(any());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void auditOutboxFailureReturns503WithoutManualFeedbackCleanup() {
         doThrow(new IllegalStateException("outbox unavailable"))
                 .when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
 
@@ -348,43 +512,7 @@ class FraudFeedbackServiceTest {
                 });
 
         assertThat(savedRecords).hasSize(1);
-        verify(repository).deleteById(savedRecords.getFirst().getFeedbackId());
-    }
-
-    @Test
-    void outboxFailureInTransactionModeDoesNotRunLocalCleanup() {
-        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.REQUIRED);
-        doThrow(new IllegalStateException("outbox unavailable"))
-                .when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
-
-        assertThatThrownBy(() -> service.create("txn-1", request()))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(exception -> {
-                    ResponseStatusException statusException = (ResponseStatusException) exception;
-                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
-                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE");
-                });
-
         verify(repository, never()).deleteById(any());
-    }
-
-    @Test
-    void outboxFailureSuppressesCleanupFailureOnOriginalOutboxException() {
-        IllegalStateException outboxFailure = new IllegalStateException("outbox unavailable");
-        IllegalStateException cleanupFailure = new IllegalStateException("cleanup unavailable");
-        doThrow(outboxFailure).when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
-        doThrow(cleanupFailure).when(repository).deleteById(any());
-
-        assertThatThrownBy(() -> service.create("txn-1", request()))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(exception -> {
-                    ResponseStatusException statusException = (ResponseStatusException) exception;
-                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
-                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE");
-                    assertThat(statusException.getCause()).isSameAs(outboxFailure);
-                    assertThat(statusException.getCause().getSuppressed()).containsExactly(cleanupFailure);
-                    assertThat(statusException.getMessage()).doesNotContain("Customer confirmed fraud");
-                });
     }
 
     @Test
@@ -435,10 +563,18 @@ class FraudFeedbackServiceTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 java.util.Collections.nCopies(11, "CODE"),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         );
 
         assertBadRequest(invalid, "FRAUD_FEEDBACK_REASON_CODES_TOO_MANY");
+    }
+
+    @Test
+    void rejectsMissingMalformedAndOversizedScoringOccurrenceTokens() {
+        assertBadRequest(requestWithToken(null), "FRAUD_FEEDBACK_SCORING_OCCURRENCE_TOKEN_INVALID");
+        assertBadRequest(requestWithToken("not-a-token"), "FRAUD_FEEDBACK_SCORING_OCCURRENCE_TOKEN_INVALID");
+        assertBadRequest(requestWithToken("a".repeat(65)), "FRAUD_FEEDBACK_SCORING_OCCURRENCE_TOKEN_INVALID");
     }
 
     @Test
@@ -447,13 +583,15 @@ class FraudFeedbackServiceTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 null,
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_REASON_CODES_REQUIRED");
         assertBadRequest(new CreateFraudFeedbackRequest(
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of(),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_REASON_CODES_REQUIRED");
     }
 
@@ -463,7 +601,8 @@ class FraudFeedbackServiceTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 java.util.Collections.nCopies(10, "ANALYST_CONFIRMED_FRAUD"),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ));
     }
 
@@ -493,7 +632,8 @@ class FraudFeedbackServiceTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("CUSTOMER_CONFIRMED_FRAUD", "ANALYST_CONFIRMED_FRAUD"),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ));
     }
 
@@ -557,19 +697,22 @@ class FraudFeedbackServiceTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("UNKNOWN_REASON"),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_REASON_CODE_UNKNOWN");
         assertBadRequest(new CreateFraudFeedbackRequest(
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("RANDOM_REASON"),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_REASON_CODE_UNKNOWN");
         assertBadRequest(new CreateFraudFeedbackRequest(
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("FRAUD_123"),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_REASON_CODE_UNKNOWN");
     }
 
@@ -579,7 +722,8 @@ class FraudFeedbackServiceTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("bad-code"),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_REASON_CODE_INVALID");
     }
 
@@ -589,7 +733,8 @@ class FraudFeedbackServiceTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("RAW_EVIDENCE"),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_REASON_CODE_UNSAFE");
     }
 
@@ -599,7 +744,8 @@ class FraudFeedbackServiceTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("CUSTOMER_CONFIRMED_FRAUD"),
-                "rawMlRequest was pasted"
+                "rawMlRequest was pasted",
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_NOTES_UNSAFE");
     }
 
@@ -748,6 +894,7 @@ class FraudFeedbackServiceTest {
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,
+                projectionWriter,
                 new FraudFeedbackRequestValidator(),
                 recordAssembler,
                 engineIntelligenceSnapshotter,
@@ -781,7 +928,8 @@ class FraudFeedbackServiceTest {
                 analystDecision,
                 feedbackLabel,
                 List.of(reasonCode),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ));
     }
 
@@ -794,7 +942,8 @@ class FraudFeedbackServiceTest {
                 analystDecision,
                 feedbackLabel,
                 List.of(reasonCode),
-                null
+                null,
+                DEFAULT_OCCURRENCE_TOKEN
         ), "FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH");
     }
 
@@ -813,7 +962,18 @@ class FraudFeedbackServiceTest {
                 decision,
                 label,
                 List.of(reasonCode),
-                "Customer confirmed fraud"
+                "Customer confirmed fraud",
+                DEFAULT_OCCURRENCE_TOKEN
+        );
+    }
+
+    private CreateFraudFeedbackRequest requestWithToken(String token) {
+        return new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                List.of("ANALYST_CONFIRMED_FRAUD"),
+                "Customer confirmed fraud",
+                token
         );
     }
 
@@ -826,6 +986,27 @@ class FraudFeedbackServiceTest {
                     assertThat(statusException.getReason())
                             .isEqualTo("FRAUD_FEEDBACK_ML_PREDICTION_EVIDENCE_UNAVAILABLE");
                 });
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never())
+                .createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    private void assertFenceOutcomeMaps(
+            FeedbackOccurrenceFenceException.Reason fenceReason,
+            int status,
+            String publicReason
+    ) {
+        doThrow(new FeedbackOccurrenceFenceException(fenceReason))
+                .when(projectionWriter).fenceFeedbackOccurrence("txn-1", DEFAULT_OCCURRENCE);
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException response = (ResponseStatusException) exception;
+                    assertThat(response.getStatusCode().value()).isEqualTo(status);
+                    assertThat(response.getReason()).isEqualTo(publicReason);
+                });
+        assertThat(savedRecords).isEmpty();
         verify(repository, never()).save(any());
         verify(auditOutboxService, never())
                 .createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
@@ -924,5 +1105,19 @@ class FraudFeedbackServiceTest {
         record.setCreatedAt(Instant.parse("2026-06-25T10:15:30Z"));
         record.setDecisionReasonCodes(List.of());
         return record;
+    }
+
+    private static final class LabelledMongoException extends MongoException {
+        private final String label;
+
+        private LabelledMongoException(String label) {
+            super("controlled transaction outcome");
+            this.label = label;
+        }
+
+        @Override
+        public boolean hasErrorLabel(String requestedLabel) {
+            return label.equals(requestedLabel);
+        }
     }
 }

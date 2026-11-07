@@ -1,7 +1,11 @@
 package com.frauddetection.alert.feedback;
 
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
+import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRecord;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRepository;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
@@ -17,7 +21,9 @@ import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidato
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
+import com.frauddetection.alert.persistence.FeedbackOccurrenceFenceException;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
@@ -34,12 +40,16 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.bson.Document;
+import com.mongodb.MongoException;
+import com.mongodb.client.result.UpdateResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -60,14 +70,24 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEWER;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Testcontainers
@@ -80,6 +100,8 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
     private static final String FINGERPRINT_B = "b".repeat(64);
     private static final Instant CREATED_A = Instant.parse("2026-10-05T10:00:00.000000100Z");
     private static final Instant CREATED_B = Instant.parse("2026-10-05T10:00:00.000000200Z");
+    private static final int KAFKA_RETRY_ATTEMPTS = 3;
+    private static final long KAFKA_RETRY_BACKOFF_MILLIS = 1_000L;
 
     @Container
     static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
@@ -91,18 +113,22 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
     private EngineIntelligenceProjectionRepository engineIntelligence;
     private MlPredictionEvidenceProjectionRepository evidence;
     private FraudFeedbackRepository feedback;
+    private ScoredTransactionProjectionWriter projectionWriter;
+    private WriteActionAuditOutboxRepository writeActionAuditOutbox;
 
     @BeforeEach
     void setUp() {
         String databaseName = "feedback_lineage_" + UUID.randomUUID().toString().replace("-", "");
         databaseFactory = new SimpleMongoClientDatabaseFactory(MONGO.getReplicaSetUrl(databaseName));
-        mongoTemplate = new MongoTemplate(databaseFactory);
+        mongoTemplate = spy(new MongoTemplate(databaseFactory));
         transactionTemplate = new TransactionTemplate(new MongoTransactionManager(databaseFactory));
         MongoRepositoryFactory repositories = new MongoRepositoryFactory(mongoTemplate);
         scoredTransactions = repositories.getRepository(ScoredTransactionRepository.class);
         engineIntelligence = repositories.getRepository(EngineIntelligenceProjectionRepository.class);
         evidence = repositories.getRepository(MlPredictionEvidenceProjectionRepository.class);
         feedback = repositories.getRepository(FraudFeedbackRepository.class);
+        writeActionAuditOutbox = repositories.getRepository(WriteActionAuditOutboxRepository.class);
+        projectionWriter = new ScoredTransactionProjectionWriter(mongoTemplate);
     }
 
     @AfterEach
@@ -116,7 +142,7 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
     }
 
     @Test
-    void feedbackKeepsOneAuthoritativeOccurrenceAcrossConcurrentRescore() throws Exception {
+    void concurrentNewOccurrenceWinsBeforeFeedbackFenceAndStaleFeedbackIsRejected() throws Exception {
         scoredTransactions.save(scoredTransaction(EVENT_A, CREATED_A, FINGERPRINT_A, 0.81d));
         engineIntelligence.save(projection(EVENT_A, CREATED_A, FINGERPRINT_A, "model-a"));
         evidence.save(evidence(EVENT_A, CREATED_A, "model-a"));
@@ -124,32 +150,283 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
 
         CountDownLatch occurrenceRead = new CountDownLatch(1);
         CountDownLatch allowFeedbackSnapshot = new CountDownLatch(1);
-        FraudFeedbackService service = service(occurrenceRead, allowFeedbackSnapshot);
+        WriteActionAuditOutboxService auditOutbox = mock(WriteActionAuditOutboxService.class);
+        FraudFeedbackService service = service(occurrenceRead, allowFeedbackSnapshot, auditOutbox);
 
         try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
             Future<FraudFeedbackResponse> created = executor.submit(() -> service.create(TRANSACTION_ID, request()));
             assertThat(occurrenceRead.await(10, TimeUnit.SECONDS)).isTrue();
 
-            scoredTransactions.save(scoredTransaction(EVENT_B, CREATED_B, FINGERPRINT_B, 0.97d));
+            transactionTemplate.execute(status -> projectionWriter.write(
+                    scoredTransaction(EVENT_B, CREATED_B, FINGERPRINT_B, 0.97d)
+            ));
             engineIntelligence.save(projection(EVENT_B, CREATED_B, FINGERPRINT_B, "model-b"));
             allowFeedbackSnapshot.countDown();
 
-            assertThat(created.get(10, TimeUnit.SECONDS).transactionId()).isEqualTo(TRANSACTION_ID);
+            assertThatThrownBy(() -> created.get(10, TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.ExecutionException.class)
+                    .satisfies(exception -> {
+                        Throwable cause = exception.getCause();
+                        assertThat(cause).isInstanceOf(ResponseStatusException.class);
+                        assertThat(((ResponseStatusException) cause).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                        assertThat(((ResponseStatusException) cause).getReason())
+                                .isEqualTo("FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED");
+                    });
+        }
+
+        assertThat(feedback.findByTransactionId(TRANSACTION_ID)).isEmpty();
+        assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_B);
+        assertThat(engineIntelligence.findById(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_B);
+        verify(auditOutbox, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void feedbackFenceWinsBeforeOverlappingRescoreAndCommitsOneFeedbackAndAudit() throws Exception {
+        scoredTransactions.save(scoredTransaction(EVENT_A, CREATED_A, FINGERPRINT_A, 0.81d));
+        engineIntelligence.save(projection(EVENT_A, CREATED_A, FINGERPRINT_A, "model-a"));
+        evidence.save(evidence(EVENT_A, CREATED_A, "model-a"));
+
+        CountDownLatch feedbackFenceAcquired = new CountDownLatch(1);
+        CountDownLatch allowFeedbackCommit = new CountDownLatch(1);
+        CountDownLatch rescoreMongoUpdateStarted = new CountDownLatch(1);
+        CountDownLatch rescoreMongoUpdateCompleted = new CountDownLatch(1);
+        AtomicReference<Thread> rescoreThread = new AtomicReference<>();
+        AtomicBoolean firstRescoreMongoUpdate = new AtomicBoolean();
+        AtomicReference<Throwable> overlappingMongoFailure = new AtomicReference<>();
+        AtomicReference<Throwable> transientRetryEvidence = new AtomicReference<>();
+        AtomicReference<String> overlappingMongoUpdate = new AtomicReference<>();
+        AtomicInteger rescoreDeliveryAttempts = new AtomicInteger();
+        ScoredTransactionProjectionWriter feedbackWriter = spy(projectionWriter);
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            feedbackFenceAcquired.countDown();
+            if (!allowFeedbackCommit.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out waiting to release fenced feedback transaction");
+            }
+            return null;
+        }).when(feedbackWriter).fenceFeedbackOccurrence(eq(TRANSACTION_ID), any(ScoringOccurrenceOwnership.class));
+        doAnswer(invocation -> {
+            boolean firstUpdate = Thread.currentThread() == rescoreThread.get()
+                    && firstRescoreMongoUpdate.compareAndSet(false, true);
+            if (firstUpdate) {
+                Update update = invocation.getArgument(1);
+                overlappingMongoUpdate.set(update.getUpdateObject().toString());
+                rescoreMongoUpdateStarted.countDown();
+            }
+            try {
+                return invocation.callRealMethod();
+            } catch (Throwable mongoFailure) {
+                if (firstUpdate && allowFeedbackCommit.getCount() > 0) {
+                    overlappingMongoFailure.set(mongoFailure);
+                }
+                throw mongoFailure;
+            } finally {
+                if (firstUpdate) {
+                    rescoreMongoUpdateCompleted.countDown();
+                }
+            }
+        }).when(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(ScoredTransactionDocument.class));
+
+        WriteActionAuditOutboxService auditOutbox = new WriteActionAuditOutboxService(writeActionAuditOutbox);
+        FraudFeedbackService feedbackService = service(
+                new CountDownLatch(1),
+                new CountDownLatch(0),
+                auditOutbox,
+                "analyst-1",
+                feedbackWriter
+        );
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<FraudFeedbackResponse> feedbackCommit = executor.submit(
+                    () -> feedbackService.create(TRANSACTION_ID, request())
+            );
+            Future<com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult> rescoreCommit;
+            try {
+                assertThat(feedbackFenceAcquired.await(10, TimeUnit.SECONDS))
+                        .as("feedback holds the occurrence fence before rescore starts")
+                        .isTrue();
+                rescoreCommit = executor.submit(() -> {
+                    rescoreThread.set(Thread.currentThread());
+                    return replayRescoreWithKafkaBoundedRetry(rescoreDeliveryAttempts, transientRetryEvidence);
+                });
+                assertThat(rescoreMongoUpdateStarted.await(10, TimeUnit.SECONDS))
+                        .as("rescore reaches the real scored-transaction Mongo update while feedback holds the fence")
+                        .isTrue();
+                assertThat(rescoreMongoUpdateCompleted.await(5, TimeUnit.SECONDS))
+                        .as("Mongo reports the overlapping write result before the feedback transaction is released")
+                        .isTrue();
+                assertThat(allowFeedbackCommit.getCount()).as("feedback transaction is still open").isPositive();
+                assertThat(overlappingMongoFailure.get())
+                        .as("real overlapping Mongo update fails with a transient transaction conflict")
+                        .isNotNull();
+                assertThat(hasMongoErrorLabel(overlappingMongoFailure.get(), "TransientTransactionError"))
+                        .as("overlapping Mongo update carries TransientTransactionError")
+                        .isTrue();
+                assertThat(overlappingMongoUpdate.get()).contains(EVENT_B);
+            } finally {
+                allowFeedbackCommit.countDown();
+            }
+
+            FraudFeedbackResponse created = feedbackCommit.get(15, TimeUnit.SECONDS);
+            com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult admission =
+                    rescoreCommit.get(15, TimeUnit.SECONDS);
+            assertThat(created.scoringOccurrenceRelation()).isEqualTo(FraudFeedbackOccurrenceRelation.CURRENT);
+            assertThat(admission.outcome()).isEqualTo(APPLIED_NEWER);
         }
 
         FraudFeedbackRecord saved = feedback.findByTransactionId(TRANSACTION_ID).orElseThrow();
+        assertThat(feedback.count()).isEqualTo(1L);
         assertThat(saved.getSourceEventId()).isEqualTo(EVENT_A);
         assertThat(saved.getSourceEventCreatedAt()).isEqualTo(CREATED_A);
-        assertThat(saved.getSourceEventCreatedAtText()).isEqualTo(CREATED_A.toString());
-        assertThat(saved.getSourceEventCreatedAtEpochSecond()).isEqualTo(CREATED_A.getEpochSecond());
-        assertThat(saved.getSourceEventCreatedAtNano()).isEqualTo(CREATED_A.getNano());
         assertThat(saved.getSourceEventFingerprint()).isEqualTo(FINGERPRINT_A);
-        assertThat(saved.getFraudScore()).isEqualTo(0.81d);
         assertThat(saved.getMlModelVersion()).isEqualTo("model-a");
         assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_B);
-        assertThat(engineIntelligence.findById(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_B);
-        assertThat(evidence.findById(saved.getSourceEventId()).orElseThrow().getModelVersion()).isEqualTo("model-a");
-        assertThat(evidence.findById(saved.getSourceEventId()).orElseThrow().getModelVersion()).isNotEqualTo("model-b");
+        assertThat(engineIntelligence.findById(TRANSACTION_ID).orElseThrow().scoringOccurrenceOwnership().sourceEventId()).isEqualTo(EVENT_B);
+        assertThat(evidence.findById(EVENT_B).orElseThrow().getSourceEventId()).isEqualTo(EVENT_B);
+        assertThat(feedbackService.get(TRANSACTION_ID).scoringOccurrenceRelation()).isEqualTo(FraudFeedbackOccurrenceRelation.PRIOR);
+        assertThat(writeActionAuditOutbox.findAll())
+                .singleElement()
+                .satisfies(audit -> {
+                    assertThat(audit.getAction()).isEqualTo(AuditAction.RECORD_FRAUD_FEEDBACK);
+                    assertThat(audit.getResourceId()).isEqualTo(saved.getFeedbackId());
+                    assertThat(audit.getIdempotencyKey())
+                            .isEqualTo("RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:" + saved.getFeedbackId());
+                });
+        assertThat(rescoreDeliveryAttempts.get()).isBetween(2, KAFKA_RETRY_ATTEMPTS);
+        assertThat(transientRetryEvidence.get())
+                .as("bounded Kafka replay records the transient Mongo failure as its retry source")
+                .isNotNull();
+        assertThat(hasMongoErrorLabel(transientRetryEvidence.get(), "TransientTransactionError")).isTrue();
+        assertThat(mongoExceptionWithErrorLabel(transientRetryEvidence.get(), "TransientTransactionError"))
+                .as("retry evidence comes from a MongoDB exception")
+                .isNotNull();
+    }
+
+    @Test
+    void feedbackMayCommitForAThenLaterRescoreMakesItPrior() {
+        scoredTransactions.save(scoredTransaction(EVENT_A, CREATED_A, FINGERPRINT_A, 0.81d));
+        engineIntelligence.save(projection(EVENT_A, CREATED_A, FINGERPRINT_A, "model-a"));
+        evidence.save(evidence(EVENT_A, CREATED_A, "model-a"));
+        WriteActionAuditOutboxService auditOutbox = mock(WriteActionAuditOutboxService.class);
+        FraudFeedbackService service = service(new CountDownLatch(1), new CountDownLatch(0), auditOutbox);
+
+        FraudFeedbackResponse created = service.create(TRANSACTION_ID, request());
+        transactionTemplate.execute(status -> projectionWriter.write(
+                scoredTransaction(EVENT_B, CREATED_B, FINGERPRINT_B, 0.97d)
+        ));
+
+        assertThat(created.scoringOccurrenceRelation()).isEqualTo(FraudFeedbackOccurrenceRelation.CURRENT);
+        assertThat(service.get(TRANSACTION_ID).scoringOccurrenceRelation()).isEqualTo(FraudFeedbackOccurrenceRelation.PRIOR);
+        assertThat(feedback.findByTransactionId(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_A);
+        assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_B);
+    }
+
+    @Test
+    void secondAnalystCannotReplaceFeedbackForTheSameTransaction() {
+        scoredTransactions.save(scoredTransaction(EVENT_A, CREATED_A, FINGERPRINT_A, 0.81d));
+        engineIntelligence.save(projection(EVENT_A, CREATED_A, FINGERPRINT_A, "model-a"));
+        evidence.save(evidence(EVENT_A, CREATED_A, "model-a"));
+        WriteActionAuditOutboxService firstAuditOutbox = mock(WriteActionAuditOutboxService.class);
+        WriteActionAuditOutboxService secondAuditOutbox = mock(WriteActionAuditOutboxService.class);
+        FraudFeedbackService firstAnalyst = service(
+                new CountDownLatch(1),
+                new CountDownLatch(0),
+                firstAuditOutbox,
+                "analyst-1"
+        );
+        FraudFeedbackService secondAnalyst = service(
+                new CountDownLatch(1),
+                new CountDownLatch(0),
+                secondAuditOutbox,
+                "analyst-2"
+        );
+
+        FraudFeedbackResponse created = firstAnalyst.create(TRANSACTION_ID, request());
+        assertThat(created.createdBy()).isEqualTo("analyst-1");
+        assertThatThrownBy(() -> secondAnalyst.create(TRANSACTION_ID, request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException conflict = (ResponseStatusException) exception;
+                    assertThat(conflict.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(conflict.getReason()).isEqualTo("FRAUD_FEEDBACK_ALREADY_RECORDED");
+                });
+
+        assertThat(feedback.findByTransactionId(TRANSACTION_ID)).isPresent();
+        assertThat(mongoTemplate.count(new org.springframework.data.mongodb.core.query.Query(), FraudFeedbackRecord.class)).isEqualTo(1L);
+        verify(firstAuditOutbox).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(secondAuditOutbox, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void staleReviewedOccurrenceIsRejectedWithoutFeedbackOrSuccessAudit() {
+        scoredTransactions.save(scoredTransaction(EVENT_B, CREATED_B, FINGERPRINT_B, 0.97d));
+        CountDownLatch occurrenceRead = new CountDownLatch(1);
+        WriteActionAuditOutboxService auditOutbox = mock(WriteActionAuditOutboxService.class);
+
+        assertThatThrownBy(() -> service(occurrenceRead, new CountDownLatch(0), auditOutbox)
+                .create(TRANSACTION_ID, request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException response = (ResponseStatusException) exception;
+                    assertThat(response.getStatusCode().value()).isEqualTo(409);
+                    assertThat(response.getReason()).isEqualTo("FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED");
+                });
+
+        assertThat(occurrenceRead.getCount()).isZero();
+        assertThat(feedback.findByTransactionId(TRANSACTION_ID)).isEmpty();
+        assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getFeedbackWriteFenceVersion()).isZero();
+        verify(auditOutbox, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void feedbackFenceFailsClosedWithoutAnActiveMongoTransaction() {
+        scoredTransactions.save(scoredTransaction(EVENT_A, CREATED_A, FINGERPRINT_A, 0.81d));
+
+        assertThatThrownBy(() -> projectionWriter.fenceFeedbackOccurrence(
+                TRANSACTION_ID,
+                new ScoringOccurrenceOwnership(EVENT_A, CREATED_A, FINGERPRINT_A)
+        ))
+                .isInstanceOf(FeedbackOccurrenceFenceException.class)
+                .satisfies(exception -> assertThat(((FeedbackOccurrenceFenceException) exception).reason())
+                        .isEqualTo(FeedbackOccurrenceFenceException.Reason.TRANSACTION_REQUIRED));
+
+        assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getFeedbackWriteFenceVersion()).isZero();
+    }
+
+    @Test
+    void feedbackFenceReportsTypedStaleOccurrenceInsideTheMongoTransaction() {
+        scoredTransactions.save(scoredTransaction(EVENT_B, CREATED_B, FINGERPRINT_B, 0.97d));
+
+        assertThatThrownBy(() -> transactionTemplate.execute(status -> {
+            projectionWriter.fenceFeedbackOccurrence(
+                    TRANSACTION_ID,
+                    new ScoringOccurrenceOwnership(EVENT_A, CREATED_A, FINGERPRINT_A)
+            );
+            return null;
+        }))
+                .isInstanceOf(FeedbackOccurrenceFenceException.class)
+                .satisfies(exception -> assertThat(((FeedbackOccurrenceFenceException) exception).reason())
+                        .isEqualTo(FeedbackOccurrenceFenceException.Reason.OCCURRENCE_CHANGED));
+
+        assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getFeedbackWriteFenceVersion()).isZero();
+    }
+
+    @Test
+    void feedbackFenceReportsTypedUnavailableForAnUnacknowledgedMongoUpdate() {
+        scoredTransactions.save(scoredTransaction(EVENT_A, CREATED_A, FINGERPRINT_A, 0.81d));
+        doReturn(UpdateResult.unacknowledged())
+                .when(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(ScoredTransactionDocument.class));
+
+        assertThatThrownBy(() -> transactionTemplate.execute(status -> {
+            projectionWriter.fenceFeedbackOccurrence(
+                    TRANSACTION_ID,
+                    new ScoringOccurrenceOwnership(EVENT_A, CREATED_A, FINGERPRINT_A)
+            );
+            return null;
+        }))
+                .isInstanceOf(FeedbackOccurrenceFenceException.class)
+                .satisfies(exception -> assertThat(((FeedbackOccurrenceFenceException) exception).reason())
+                        .isEqualTo(FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE));
     }
 
     @Test
@@ -181,11 +458,12 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
     void auditIntentFailureRollsBackFeedbackInRequiredMongoTransaction() {
         scoredTransactions.save(scoredTransaction(EVENT_A, CREATED_A, FINGERPRINT_A, 0.81d));
         engineIntelligence.save(projection(EVENT_A, CREATED_A, FINGERPRINT_A, "model-a"));
-        CountDownLatch occurrenceRead = new CountDownLatch(1);
-        CountDownLatch allowFeedbackSnapshot = new CountDownLatch(0);
-        WriteActionAuditOutboxService auditOutbox = mock(WriteActionAuditOutboxService.class);
-        doThrow(new IllegalStateException("audit unavailable"))
-                .when(auditOutbox)
+        evidence.save(evidence(EVENT_A, CREATED_A, "model-a"));
+        WriteActionAuditOutboxService auditOutbox = spy(new WriteActionAuditOutboxService(writeActionAuditOutbox));
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            throw new IllegalStateException("audit intent failed after persistence");
+        }).when(auditOutbox)
                 .createPendingAudit(
                         anyString(),
                         any(),
@@ -197,14 +475,21 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                         any()
                 );
 
-        assertThatThrownBy(() -> service(occurrenceRead, allowFeedbackSnapshot, auditOutbox)
+        assertThatThrownBy(() -> service(new CountDownLatch(1), new CountDownLatch(0), auditOutbox)
                 .create(TRANSACTION_ID, request()))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(exception -> assertThat(((ResponseStatusException) exception).getStatusCode())
                         .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
 
-        assertThat(occurrenceRead.getCount()).isZero();
         assertThat(feedback.findByTransactionId(TRANSACTION_ID)).isEmpty();
+        assertThat(writeActionAuditOutbox.findAll()).isEmpty();
+        assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getFeedbackWriteFenceVersion()).isZero();
+        assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_A);
+
+        assertThat(transactionTemplate.execute(status -> projectionWriter.write(
+                scoredTransaction(EVENT_B, CREATED_B, FINGERPRINT_B, 0.97d)
+        )).outcome()).isEqualTo(APPLIED_NEWER);
+        assertThat(scoredTransactions.findById(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_B);
     }
 
     private FraudFeedbackService service(
@@ -222,6 +507,25 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
             CountDownLatch occurrenceRead,
             CountDownLatch allowFeedbackSnapshot,
             WriteActionAuditOutboxService auditOutbox
+    ) {
+        return service(occurrenceRead, allowFeedbackSnapshot, auditOutbox, "analyst-1");
+    }
+
+    private FraudFeedbackService service(
+            CountDownLatch occurrenceRead,
+            CountDownLatch allowFeedbackSnapshot,
+            WriteActionAuditOutboxService auditOutbox,
+            String actor
+    ) {
+        return service(occurrenceRead, allowFeedbackSnapshot, auditOutbox, actor, projectionWriter);
+    }
+
+    private FraudFeedbackService service(
+            CountDownLatch occurrenceRead,
+            CountDownLatch allowFeedbackSnapshot,
+            WriteActionAuditOutboxService auditOutbox,
+            String actor,
+            ScoredTransactionProjectionWriter writer
     ) {
         ScoredTransactionDocumentMapper scoredTransactionMapper = new ScoredTransactionDocumentMapper();
         TransactionMonitoringUseCase monitoring = mock(TransactionMonitoringUseCase.class);
@@ -241,9 +545,10 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                 status -> invocation.<Supplier<?>>getArgument(0).get()
         ));
         when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.REQUIRED);
+        when(transactionRunner.isTransactionManagerConfigured()).thenReturn(true);
 
         CurrentAnalystUser currentUser = mock(CurrentAnalystUser.class);
-        when(currentUser.get()).thenReturn(Optional.of(new AnalystPrincipal("analyst-1", Set.of(), Set.of())));
+        when(currentUser.get()).thenReturn(Optional.of(new AnalystPrincipal(actor, Set.of(), Set.of())));
 
         EngineIntelligenceReadService engineIntelligenceReadService = new EngineIntelligenceReadService(
                 scoredTransactions,
@@ -265,12 +570,70 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                 currentUser,
                 auditOutbox,
                 transactionRunner,
+                writer,
                 new FraudFeedbackRequestValidator(),
                 recordAssembler,
                 engineIntelligenceSnapshotter,
                 mlPredictionEvidenceSnapshotter,
                 Clock.fixed(CREATED_A.plusSeconds(10), ZoneOffset.UTC)
         );
+    }
+
+    private com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult replayRescoreWithKafkaBoundedRetry(
+            AtomicInteger deliveryAttempts,
+            AtomicReference<Throwable> transientRetryEvidence
+    ) {
+        for (int attempt = 0; attempt < KAFKA_RETRY_ATTEMPTS; attempt++) {
+            deliveryAttempts.incrementAndGet();
+            try {
+                return transactionTemplate.execute(status -> {
+                    var admission = projectionWriter.write(
+                            scoredTransaction(EVENT_B, CREATED_B, FINGERPRINT_B, 0.97d)
+                    );
+                    engineIntelligence.save(projection(EVENT_B, CREATED_B, FINGERPRINT_B, "model-b"));
+                    evidence.save(evidence(EVENT_B, CREATED_B, "model-b"));
+                    return admission;
+                });
+            } catch (RuntimeException exception) {
+                if (!hasMongoErrorLabel(exception, "TransientTransactionError") || attempt == 2) {
+                    throw exception;
+                }
+                transientRetryEvidence.compareAndSet(null, exception);
+                awaitScoringRetryBackoff();
+            }
+        }
+        throw new IllegalStateException("SCORING_EVENT_REPLAY_ATTEMPTS_EXHAUSTED");
+    }
+
+    private static boolean hasMongoErrorLabel(Throwable exception, String label) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof MongoException mongoException && mongoException.hasErrorLabel(label)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static MongoException mongoExceptionWithErrorLabel(Throwable exception, String label) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof MongoException mongoException && mongoException.hasErrorLabel(label)) {
+                return mongoException;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private static void awaitScoringRetryBackoff() {
+        try {
+            Thread.sleep(KAFKA_RETRY_BACKOFF_MILLIS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("SCORING_EVENT_REPLAY_INTERRUPTED", interrupted);
+        }
     }
 
     private ScoredTransactionDocument scoredTransaction(
@@ -362,7 +725,8 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("ANALYST_CONFIRMED_FRAUD"),
-                null
+                null,
+                ScoringOccurrenceToken.from(new ScoringOccurrenceOwnership(EVENT_A, CREATED_A, FINGERPRINT_A))
         );
     }
 }

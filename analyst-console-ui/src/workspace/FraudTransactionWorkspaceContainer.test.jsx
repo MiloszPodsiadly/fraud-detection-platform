@@ -7,6 +7,8 @@ describe("FraudTransactionWorkspaceContainer", () => {
     const { container } = render(
       <FraudTransactionWorkspaceContainer
         alertQueueState={queueState(page())}
+        canReadAlerts
+        hasLoaded
         onRetryWorkspace={vi.fn()}
         onPageChange={vi.fn()}
         onPageSizeChange={vi.fn()}
@@ -24,6 +26,8 @@ describe("FraudTransactionWorkspaceContainer", () => {
     render(
       <FraudTransactionWorkspaceContainer
         alertQueueState={queueState({ content: [alert("alert-1")], totalElements: 20, totalPages: 2, page: 0, size: 10 })}
+        canReadAlerts
+        hasLoaded
         onRetryWorkspace={vi.fn()}
         onPageChange={vi.fn()}
         onPageSizeChange={vi.fn()}
@@ -44,7 +48,7 @@ function page() {
 }
 
 function queueState(pageValue) {
-  return { page: pageValue, isLoading: false, error: null };
+  return { page: pageValue, isLoading: false, error: null, hasLoaded: true };
 }
 
 function alert(alertId) {

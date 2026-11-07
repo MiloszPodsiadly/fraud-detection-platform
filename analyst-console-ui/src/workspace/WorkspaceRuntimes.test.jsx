@@ -164,7 +164,13 @@ describe("workspace runtime ownership", () => {
 
     renderRuntime(routeKey, {}, runtimeValue(), { ...runtimeProps(), onResult });
 
-    await waitFor(() => expect(lastRuntimeResult(onResult)?.error?.message).toBe(`${routeKey} unavailable`));
+    await waitFor(() => expect(lastRuntimeResult(onResult)?.error?.message).toBe(
+      routeKey === "transactionScoring"
+        ? "Scored transactions are temporarily unavailable."
+        : routeKey === "fraudTransaction"
+          ? "Alerts are temporarily unavailable. Please retry."
+          : `${routeKey} unavailable`
+    ));
   });
 
   it("promotion readiness failure does not hide shadow performance state", async () => {
@@ -295,6 +301,7 @@ function page(content, overrides = {}) {
     totalPages: 1,
     page: 0,
     size: 25,
+    totalElementsCapped: false,
     ...overrides
   };
 }

@@ -1,11 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { TransactionRiskIntelligencePanel } from "./TransactionRiskIntelligencePanel.jsx";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
 import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
+import { createAlertsApiClient } from "../api/alertsApi.js";
+import { createDemoAuthProvider } from "../auth/authProvider.js";
+import { normalizeSession } from "../auth/session.js";
+import { WorkspaceRuntimeProvider } from "../workspace/WorkspaceRuntimeProvider.jsx";
 import {
   absentDetail,
   availableDetail,
@@ -28,6 +32,10 @@ vi.mock("../transactions/useFraudFeedback.js", () => ({
 }));
 
 describe("TransactionRiskIntelligencePanel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     useScoredTransactionDetail.mockReturnValue({ detail: availableDetail(), isLoading: false, error: null });
     useFraudFeedback.mockReturnValue({
@@ -76,8 +84,405 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(within(summary).getByText("corr-available-1")).toBeInTheDocument();
     expect(within(summary).getByText("0.91")).toBeInTheDocument();
     expect(within(summary).getByText("Alert recommendation flag")).toBeInTheDocument();
-    expect(within(summary).getByText("Present")).toBeInTheDocument();
+    expect(within(summary).getByText("Review recommended")).toBeInTheDocument();
     expect(screen.getByText("alertRecommended is a scored transaction field, not a final payment decision.")).toBeInTheDocument();
+  });
+
+  it("renders missing transaction timestamps as unavailable", () => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ transactionTimestamp: null, scoredAt: null }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    const summary = screen.getByRole("region", { name: "Transaction Summary" });
+    expect(within(summary).getAllByText("Not available")).toHaveLength(2);
+  });
+
+  it.each([
+    ["true", true, "Review recommended", false],
+    ["false", false, "No review recommendation", false],
+    ["null", null, "Unknown", false],
+    ["undefined", undefined, "Unknown", false],
+    ["missing", undefined, "Unknown", true]
+  ])("renders the same alert recommendation policy for %s in detail", (_label, alertRecommended, expected, omit) => {
+    const detail = availableDetail();
+    if (omit) {
+      delete detail.alertRecommended;
+    } else {
+      detail.alertRecommended = alertRecommended;
+    }
+    useScoredTransactionDetail.mockReturnValue({
+      detail,
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    expect(within(screen.getByRole("region", { name: "Transaction Summary" })).getByText(expected)).toBeInTheDocument();
+  });
+
+  it("renders transaction merchant context separately from verified Merchant Risk history", () => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({
+        merchantInfo: {
+          merchantName: "Northwind Books",
+          merchantId: "merchant-17",
+          merchantCategoryCode: "5732",
+          merchantCategory: "Books",
+          channel: "ECOMMERCE",
+          acquiringCountryCode: "PL",
+          attributes: { privateMapValue: "must-not-render" }
+        }
+      }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
+    expect(within(merchant).getByText("Merchant name")).toBeInTheDocument();
+    expect(within(merchant).getByText("Northwind Books")).toBeInTheDocument();
+    expect(within(merchant).getByText("merchant-17")).toBeInTheDocument();
+    expect(within(merchant).getByText("5732")).toBeInTheDocument();
+    expect(within(merchant).getByText("Books")).toBeInTheDocument();
+    expect(within(merchant).getByText("ECOMMERCE")).toBeInTheDocument();
+    expect(within(merchant).getByText("PL")).toBeInTheDocument();
+    expect(merchant).toHaveTextContent("context only");
+    expect(merchant).toHaveTextContent("Verified Merchant Risk history is not provided by this transaction detail.");
+    expect(merchant).toHaveTextContent("Absence of evidence is not evidence of low risk.");
+    expect(merchant).not.toHaveTextContent("must-not-render");
+    expect(merchant).not.toHaveTextContent(/score|percentage|first-ever|prior observations/i);
+  });
+
+  it("trims a safe merchant name for transaction detail display", () => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ merchantInfo: { merchantName: "  Northwind Books  " } }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    expect(within(screen.getByRole("region", { name: "Merchant Investigation" }))
+      .getByText("Northwind Books")).toBeInTheDocument();
+  });
+
+  it("requires an explicit review when the expanded row reports a new scoring occurrence", () => {
+    const originalToken = "a".repeat(64);
+    const refreshedToken = "b".repeat(64);
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ scoringOccurrenceToken: originalToken }),
+      isLoading: false,
+      error: null
+    });
+    const { rerender } = renderPanel({ scoringOccurrenceToken: originalToken });
+
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ scoringOccurrenceToken: refreshedToken }),
+      isLoading: false,
+      error: null
+    });
+    rerender(<TransactionRiskIntelligencePanel
+      transactionId="txn-available-1"
+      scoringOccurrenceToken={refreshedToken}
+      apiClient={{}}
+    />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Scoring changed while this transaction was expanded.");
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "I reviewed the current scoring" }));
+    expect(screen.getByRole("button", { name: "Record feedback" })).toBeInTheDocument();
+    expect(useScoredTransactionDetail).toHaveBeenLastCalledWith(expect.objectContaining({
+      expectedScoringOccurrenceToken: refreshedToken
+    }));
+  });
+
+  it("keeps same-occurrence feedback drafts and clears them after a new occurrence loads", () => {
+    const originalToken = "a".repeat(64);
+    const refreshedToken = "b".repeat(64);
+    const apiClient = {};
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ scoringOccurrenceToken: originalToken }),
+      isLoading: false,
+      error: null
+    });
+    const { rerender } = renderPanel({ scoringOccurrenceToken: originalToken, apiClient });
+    fireEvent.click(screen.getByLabelText("Mark as confirmed legitimate"));
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Review notes for occurrence A" } });
+
+    rerender(<TransactionRiskIntelligencePanel
+      transactionId="txn-available-1"
+      scoringOccurrenceToken={originalToken}
+      apiClient={apiClient}
+    />);
+
+    expect(screen.getByLabelText("Mark as confirmed legitimate")).toBeChecked();
+    expect(screen.getByLabelText("Notes")).toHaveValue("Review notes for occurrence A");
+
+    useScoredTransactionDetail.mockReturnValue({ detail: null, isLoading: true, error: null });
+    rerender(<TransactionRiskIntelligencePanel
+      transactionId="txn-available-1"
+      scoringOccurrenceToken={refreshedToken}
+      apiClient={apiClient}
+    />);
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ scoringOccurrenceToken: refreshedToken }),
+      isLoading: false,
+      error: null
+    });
+    rerender(<TransactionRiskIntelligencePanel
+      transactionId="txn-available-1"
+      scoringOccurrenceToken={refreshedToken}
+      apiClient={apiClient}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "I reviewed the current scoring" }));
+    expect(screen.getByLabelText("Mark as confirmed fraud")).toBeChecked();
+    expect(screen.getByLabelText("Notes")).toHaveValue("");
+  });
+
+  it("reconciles an uncertain POST through the scoped API client's GET only", async () => {
+    const detail = availableDetail();
+    const recordedFeedback = {
+      feedbackId: "feedback-reconciled",
+      transactionId: detail.transactionId,
+      feedbackLabel: "CONFIRMED_FRAUD",
+      analystDecision: "MARKED_FRAUD",
+      labelSource: "ANALYST_REVIEW",
+      feedbackStatus: "RECORDED",
+      createdAt: "2026-11-07T10:00:00Z",
+      createdBy: "<img src=x onerror=alert(1)> analyst-token-42",
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notesPresent: false,
+      scoringOccurrenceRelation: "PRIOR"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonHttpResponse({
+        status: 404,
+        error: "Not Found",
+        message: "FRAUD_FEEDBACK_NOT_FOUND",
+        details: []
+      }, 404))
+      .mockResolvedValueOnce(jsonHttpResponse({
+        status: 503,
+        error: "Service Unavailable",
+        message: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN",
+        details: ["reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"]
+      }, 503))
+      .mockResolvedValueOnce(jsonHttpResponse(recordedFeedback));
+    const actualHook = await vi.importActual("../transactions/useFraudFeedback.js");
+    useFraudFeedback.mockImplementation(actualHook.useFraudFeedback);
+    const apiClient = createAlertsApiClient({ session: null, authProvider: createDemoAuthProvider() });
+
+    renderPanelWithRuntime({
+      transactionId: detail.transactionId,
+      scoringOccurrenceToken: detail.scoringOccurrenceToken,
+      apiClient
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Record feedback" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Record feedback" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check recorded feedback" })).toBeInTheDocument());
+
+    expect(screen.getByRole("status")).toHaveTextContent("The server may have recorded this feedback");
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check recorded feedback" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Feedback record found" })).toBeInTheDocument());
+
+    expect(screen.getByText("This feedback belongs to a prior scoring occurrence and does not cover the current scoring.")).toBeInTheDocument();
+    expect(screen.getByText("<img src=x onerror=alert(1)> analyst-token-42")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Feedback recorded" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.map(([, options]) => options.method || "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls[2][0]).toBe(`/api/v1/transactions/scored/${encodeURIComponent(detail.transactionId)}/feedback`);
+  });
+
+  it.each([
+    ["lost network response", () => Promise.reject(new TypeError("Failed to fetch"))],
+    ["unreadable success body", () => Promise.resolve({
+      ok: true,
+      status: 201,
+      json: () => Promise.reject(new SyntaxError("invalid JSON"))
+    })],
+    ["malformed success payload", () => Promise.resolve(jsonHttpResponse({ feedbackId: "untrusted" }, 201))],
+    ["502 gateway response", () => Promise.resolve(jsonHttpResponse({ error: "Bad Gateway", message: "gateway" }, 502))],
+    ["504 gateway response", () => Promise.resolve(jsonHttpResponse({ error: "Gateway Timeout", message: "timeout" }, 504))]
+  ])("reconciles an ambiguous %s POST through one explicit GET", async (_scenario, postTransport) => {
+    const detail = availableDetail();
+    const recordedFeedback = {
+      feedbackId: "feedback-after-lost-response",
+      transactionId: detail.transactionId,
+      feedbackLabel: "CONFIRMED_FRAUD",
+      analystDecision: "MARKED_FRAUD",
+      labelSource: "ANALYST_REVIEW",
+      feedbackStatus: "RECORDED",
+      createdAt: "2026-11-07T10:00:00Z",
+      createdBy: "analyst-b",
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notesPresent: false,
+      scoringOccurrenceRelation: "CURRENT"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonHttpResponse({ message: "not found" }, 404))
+      .mockImplementationOnce(postTransport)
+      .mockResolvedValueOnce(jsonHttpResponse(recordedFeedback));
+    const actualHook = await vi.importActual("../transactions/useFraudFeedback.js");
+    useFraudFeedback.mockImplementation(actualHook.useFraudFeedback);
+    const apiClient = createAlertsApiClient({ session: null, authProvider: createDemoAuthProvider() });
+
+    renderPanelWithRuntime({
+      transactionId: detail.transactionId,
+      scoringOccurrenceToken: detail.scoringOccurrenceToken,
+      apiClient
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Record feedback" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Record feedback" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check recorded feedback" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check recorded feedback" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Feedback record found" })).toBeInTheDocument());
+
+    expect(fetchMock.mock.calls.map(([, options]) => options.method || "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.filter(([, options]) => options.method === "POST")).toHaveLength(1);
+  });
+
+  it.each([
+    ["404", jsonHttpResponse({ message: "not found" }, 404), "No record is visible yet."],
+    ["500", jsonHttpResponse({ message: "FRAUD_FEEDBACK_ALREADY_RECORDED" }, 500), "The recorded feedback could not be confirmed."],
+    ["403", jsonHttpResponse({ message: "FRAUD_FEEDBACK_ALREADY_RECORDED" }, 403), "Feedback status cannot be checked with the current access."],
+    ["malformed 200", jsonHttpResponse({ transactionId: "txn-available-1" }), "The recorded feedback could not be confirmed."]
+  ])("keeps the actual API client's uncertain POST locked after reconciliation GET %s", async (_scenario, reconciliationResponse, expectedCopy) => {
+    const detail = availableDetail();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonHttpResponse({ message: "not found" }, 404))
+      .mockResolvedValueOnce(jsonHttpResponse({
+        status: 503,
+        error: "Service Unavailable",
+        message: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN",
+        details: ["reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"]
+      }, 503))
+      .mockResolvedValueOnce(reconciliationResponse);
+    const actualHook = await vi.importActual("../transactions/useFraudFeedback.js");
+    useFraudFeedback.mockImplementation(actualHook.useFraudFeedback);
+    const apiClient = createAlertsApiClient({ session: null, authProvider: createDemoAuthProvider() });
+
+    renderPanelWithRuntime({
+      transactionId: detail.transactionId,
+      scoringOccurrenceToken: detail.scoringOccurrenceToken,
+      apiClient
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Record feedback" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Record feedback" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check recorded feedback" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Check recorded feedback" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(expectedCopy));
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Feedback record found" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([, options]) => options.method || "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.filter(([, options]) => options.method === "POST")).toHaveLength(1);
+  });
+
+  it("shows a separate occurrence-changed error and refreshes the workspace list", () => {
+    const refreshTransactions = vi.fn();
+    useScoredTransactionDetail.mockReturnValue({
+      detail: null,
+      isLoading: false,
+      error: { code: "SCORING_OCCURRENCE_CHANGED" }
+    });
+
+    renderPanel({ onRefreshTransactions: refreshTransactions });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("The scored transaction changed after this row was loaded.");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh scored transactions" }));
+    expect(refreshTransactions).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the evidence limitation when merchant details are absent", () => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ merchantInfo: null }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
+    expect(merchant).toHaveTextContent("No displayable transaction merchant details are available.");
+    expect(merchant).toHaveTextContent("Verified Merchant Risk history is not provided by this transaction detail.");
+  });
+
+  it("omits malformed and unsafe merchant values while rendering HTML-looking text safely", () => {
+    const longMerchantId = "m".repeat(129);
+    const controlValue = "North\u0000wind";
+    const bidiValue = "North\u202ewind";
+    const htmlLookingName = "<script>merchant()</script>";
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({
+        merchantInfo: {
+          merchantName: htmlLookingName,
+          merchantId: longMerchantId,
+          merchantCategoryCode: controlValue,
+          merchantCategory: bidiValue,
+          channel: { label: "ONLINE" },
+          acquiringCountryCode: ["PL"],
+          attributes: {
+            nestedPii: { email: "private@example.test" },
+            tokenHint: "hidden-token",
+            unbounded: "x".repeat(10_000),
+            html: "<img src=x onerror=alert(1)>"
+          }
+        }
+      }),
+      isLoading: false,
+      error: null
+    });
+
+    const { container } = renderPanel();
+
+    const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
+    expect(within(merchant).getByText(htmlLookingName)).toBeInTheDocument();
+    expect(merchant.querySelector("script")).toBeNull();
+    expect(merchant.querySelector("img")).toBeNull();
+    expect(merchant).not.toHaveTextContent("Not supplied.");
+    expect(container.textContent).not.toContain(longMerchantId);
+    expect(container.textContent).not.toContain(controlValue);
+    expect(container.textContent).not.toContain(bidiValue);
+    expect(container.textContent).not.toContain("private@example.test");
+    expect(container.textContent).not.toContain("hidden-token");
+    expect(container.textContent).not.toContain("x".repeat(500));
+  });
+
+  it.each([
+    ["numeric fields", { merchantName: 42, merchantId: 17 }],
+    ["array fields", { merchantName: ["Northwind"], channel: ["ONLINE"] }],
+    ["only blocked strings", { merchantName: "x".repeat(129), merchantId: "blocked\u202e", channel: "bad\nchannel" }],
+    ["empty merchant record", {}],
+    ["missing merchant record", undefined],
+    ["non-record merchant data", ["Northwind"]],
+    ["primitive merchant data", "Northwind"]
+  ])("shows the neutral empty state for %s", (_caseName, merchantInfo) => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ merchantInfo }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    const merchant = screen.getByRole("region", { name: "Merchant Investigation" });
+    expect(merchant).toHaveTextContent("No displayable transaction merchant details are available.");
+    expect(merchant).not.toHaveTextContent("Northwind");
   });
 
   it("does not enable detail fetch when panel reads are disabled", () => {
@@ -89,6 +494,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     }));
     expect(screen.getByText("Transaction risk intelligence is not available without transaction read permission.")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Transaction Summary" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Merchant Investigation" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Diagnostic Boundary" })).toBeInTheDocument();
   });
 
@@ -214,6 +620,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     useScoredTransactionDetail.mockReturnValue({ detail: null, isLoading: true, error: null });
     const { rerender } = renderPanel();
     expect(screen.getByText("Loading transaction risk intelligence...")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Merchant Investigation" })).not.toBeInTheDocument();
 
     useScoredTransactionDetail.mockReturnValue({ detail: null, isLoading: false, error: null });
     rerender(<TransactionRiskIntelligencePanel transactionId="" apiClient={{}} />);
@@ -226,6 +633,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     });
     rerender(<TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} />);
     expect(screen.getByText("The transaction risk intelligence response is malformed or missing required safety fields.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Merchant Investigation" })).not.toBeInTheDocument();
   });
 
   it("renders analyst feedback form with boundary copy and neutral labels", () => {
@@ -271,6 +679,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     await waitFor(() => expect(submit).toHaveBeenCalledWith({
       analystDecision: "MARKED_FRAUD",
       feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: "a".repeat(64),
       decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
       notes: null
     }));
@@ -305,6 +714,7 @@ describe("TransactionRiskIntelligencePanel", () => {
         analystDecision: "MARKED_LEGITIMATE",
         labelSource: "ANALYST_REVIEW",
         feedbackStatus: "RECORDED",
+        scoringOccurrenceRelation: "PRIOR",
         createdAt: "2026-06-25T10:15:30Z",
         decisionReasonCodes: ["ANALYST_CONFIRMED_LEGITIMATE"],
         notesPresent: true,
@@ -325,6 +735,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(screen.getByText("Feedback recorded")).toBeInTheDocument();
     expect(within(feedbackRegion).getByText("Notes")).toBeInTheDocument();
     expect(within(feedbackRegion).getByText("Present")).toBeInTheDocument();
+    expect(within(feedbackRegion).getByText("This feedback belongs to a prior scoring occurrence and does not cover the current scoring.")).toBeInTheDocument();
     expect(screen.queryByText("Sensitive analyst note")).not.toBeInTheDocument();
     expect(screen.getByText("One active feedback record is already present for this transaction.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
@@ -363,7 +774,8 @@ describe("TransactionRiskIntelligencePanel", () => {
     [{ status: 401 }, "You do not have permission to read or record analyst feedback."],
     [{ status: 403 }, "You do not have permission to read or record analyst feedback."],
     [{ status: 404 }, "Scored transaction or feedback was not found."],
-    [{ status: 409 }, "Feedback already exists for this transaction."],
+    [{ status: 409, reasonCode: "FRAUD_FEEDBACK_ALREADY_RECORDED" }, "Feedback already exists for this transaction."],
+    [{ status: 409, reasonCode: "CONFLICT" }, "Feedback could not be recorded because transaction state changed. Refresh the transaction list and review the current scoring."],
     [{ status: 503 }, "Analyst feedback is temporarily unavailable."],
     [new Error("backend raw failure"), "Analyst feedback could not be loaded or recorded."]
   ])("renders safe analyst feedback error %#", (error, copy) => {
@@ -381,6 +793,28 @@ describe("TransactionRiskIntelligencePanel", () => {
     renderPanel();
 
     expect(screen.getByText(copy)).toBeInTheDocument();
+  });
+
+  it("shows a distinct stale scoring message after a feedback conflict", () => {
+    const refreshTransactions = vi.fn();
+    useFraudFeedback.mockReturnValue({
+      feedback: null,
+      isLoading: false,
+      error: null,
+      canReadFeedback: true,
+      canCreateFeedback: true,
+      submitState: "stale-occurrence",
+      submitError: { status: 409, error: "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED" },
+      submit: vi.fn()
+    });
+
+    renderPanel({ onRefreshTransactions: refreshTransactions });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Refresh the transaction list and review the current occurrence");
+    expect(screen.queryByText("Feedback already exists for this transaction.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh scored transactions" }));
+    expect(refreshTransactions).toHaveBeenCalledTimes(1);
   });
 
   it("does not render feedback form when runtime cannot read fraud feedback", () => {
@@ -427,10 +861,34 @@ function renderPanel(props = {}) {
   return render(<TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} {...props} />);
 }
 
+function renderPanelWithRuntime(props = {}) {
+  return render(
+    <WorkspaceRuntimeProvider
+      session={normalizeSession({
+        userId: "analyst-1",
+        actorId: "actor-1",
+        issuer: "issuer-1",
+        subject: "subject-1",
+        roles: ["ANALYST"]
+      })}
+      authProvider={{ kind: "oidc" }}
+    >
+      <TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} {...props} />
+    </WorkspaceRuntimeProvider>
+  );
+}
+
 function sharedEngineIntelligenceFixture(name) {
   return JSON.parse(readFileSync(resolve(
     process.cwd(),
     "../common-events/src/test/resources/fixtures/engine-intelligence",
     name
   ), "utf8"));
+}
+
+function jsonHttpResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
 }

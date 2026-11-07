@@ -9,6 +9,8 @@ import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -68,8 +70,8 @@ class TransactionMonitoringServiceSearchTest {
                 .mapToObj(index -> document("probe-" + index))
                 .toList();
         when(mongoTemplate.find(any(Query.class), eq(ScoredTransactionDocument.class)))
-                .thenReturn(List.of(document))
-                .thenReturn(countProbe);
+                .thenReturn(countProbe)
+                .thenReturn(List.of(document));
         when(mapper.toDomain(document)).thenReturn(domain);
 
         var result = service.listScoredTransactions(
@@ -77,14 +79,93 @@ class TransactionMonitoringServiceSearchTest {
                 new ScoredTransactionSearchCriteria("customer-1", null, null)
         );
 
-        assertThat(result.getContent()).containsExactly(domain);
-        assertThat(result.getTotalElements()).isEqualTo(ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT);
+        assertThat(result.page().getContent()).containsExactly(domain);
+        assertThat(result.page().getTotalElements()).isEqualTo(ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT);
+        assertThat(result.totalElementsCapped()).isTrue();
         verify(mongoTemplate, never()).count(any(Query.class), eq(ScoredTransactionDocument.class));
 
         ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
         verify(mongoTemplate, org.mockito.Mockito.times(2)).find(queryCaptor.capture(), eq(ScoredTransactionDocument.class));
-        Query countQuery = queryCaptor.getAllValues().get(1);
+        Query countQuery = queryCaptor.getAllValues().get(0);
         assertThat(countQuery.getLimit()).isEqualTo(ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT + 1);
+        Query contentQuery = queryCaptor.getAllValues().get(1);
+        assertThat(contentQuery.getSkip()).isZero();
+        assertThat(contentQuery.getLimit()).isEqualTo(25);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "1,1000,1,1000",
+            "25,399,25,9975",
+            "25,400,0,10000",
+            "25,401,0,10025",
+            "51,195,51,9945",
+            "51,196,4,9996",
+            "51,197,0,10047",
+            "100,99,100,9900",
+            "100,100,0,10000"
+    })
+    void filteredPagesNeverReadBeyondTheTenThousandRowWindow(
+            int size,
+            int pageNumber,
+            int expectedContentSize,
+            long expectedOffset
+    ) {
+        List<ScoredTransactionDocument> countProbe = IntStream
+                .range(0, ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT + 1)
+                .mapToObj(index -> document("probe-" + index))
+                .toList();
+        List<ScoredTransactionDocument> content = IntStream.range(0, expectedContentSize)
+                .mapToObj(index -> document("content-" + index))
+                .toList();
+        ScoredTransaction domain = domainTransaction();
+        when(mongoTemplate.find(any(Query.class), eq(ScoredTransactionDocument.class)))
+                .thenReturn(countProbe)
+                .thenReturn(content);
+        when(mapper.toDomain(any(ScoredTransactionDocument.class))).thenReturn(domain);
+
+        var result = service.listScoredTransactions(
+                PageRequest.of(pageNumber, size),
+                new ScoredTransactionSearchCriteria("customer-1", null, null)
+        );
+
+        assertThat(result.page().getContent()).hasSize(expectedContentSize);
+        assertThat(result.page().getTotalElements()).isEqualTo(10_000);
+        assertThat(result.page().getTotalPages()).isEqualTo((int) Math.ceil(10_000d / size));
+        assertThat(result.totalElementsCapped()).isTrue();
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate, org.mockito.Mockito.times(expectedContentSize == 0 ? 1 : 2))
+                .find(queryCaptor.capture(), eq(ScoredTransactionDocument.class));
+        if (expectedContentSize > 0) {
+            Query contentQuery = queryCaptor.getAllValues().get(1);
+            assertThat(contentQuery.getSkip()).isEqualTo(expectedOffset);
+            assertThat(contentQuery.getLimit()).isEqualTo(expectedContentSize);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "0,0,false",
+            "9999,9999,false",
+            "10000,10000,false",
+            "10001,10000,true",
+            "25000,10000,true"
+    })
+    void reportsExactAndCappedTotalsForBoundaryMatchCounts(int matches, long expectedTotal, boolean expectedCapped) {
+        int boundedProbeSize = Math.min(matches, ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT + 1);
+        List<ScoredTransactionDocument> probe = IntStream.range(0, boundedProbeSize)
+                .mapToObj(index -> document("probe-" + index))
+                .toList();
+        when(mongoTemplate.find(any(Query.class), eq(ScoredTransactionDocument.class))).thenReturn(probe);
+
+        var result = service.listScoredTransactions(
+                PageRequest.of(400, 25), new ScoredTransactionSearchCriteria("merchant", null, null)
+        );
+
+        assertThat(result.page().getContent()).isEmpty();
+        assertThat(result.page().getTotalElements()).isEqualTo(expectedTotal);
+        assertThat(result.totalElementsCapped()).isEqualTo(expectedCapped);
+        verify(mongoTemplate).find(any(Query.class), eq(ScoredTransactionDocument.class));
     }
 
     @Test
@@ -132,5 +213,14 @@ class TransactionMonitoringServiceSearchTest {
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         document.setTransactionId(transactionId);
         return document;
+    }
+
+    private ScoredTransaction domainTransaction() {
+        return new ScoredTransaction(
+                "txn-1", "customer-1", null, null, null, null, null, null, null, null,
+                List.of(), null, ScoringOccurrenceOwnership.authoritative(
+                        "event-1", Instant.parse("2026-06-18T10:00:01Z"), "a".repeat(64)
+                ), com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
+        );
     }
 }

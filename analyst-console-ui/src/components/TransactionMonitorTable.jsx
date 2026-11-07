@@ -2,6 +2,8 @@ import { Fragment } from "react";
 import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
 import { RiskBadge } from "./RiskBadge.jsx";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
+import { merchantDisplayValue } from "../transactions/merchantDisplay.js";
+import { alertRecommendationPresentation } from "../transactions/alertRecommendationPresentation.js";
 
 export function TransactionMonitorTable({
   transactions,
@@ -18,7 +20,7 @@ export function TransactionMonitorTable({
             <th>Transaction</th>
             <th>Merchant</th>
             <th>Amount</th>
-            <th>Classification</th>
+            <th>Alert recommendation</th>
             <th>Scored</th>
             <th className="numericCell">Score</th>
             <th>Detail</th>
@@ -28,6 +30,7 @@ export function TransactionMonitorTable({
           {transactions.map((transaction) => {
             const expanded = expandedTransactionId === transaction.transactionId;
             const detailPanelId = transactionRiskIntelligencePanelId(transaction.transactionId);
+            const recommendation = alertRecommendationPresentation(transaction.alertRecommended);
             return (
               <Fragment key={transaction.transactionId}>
                 <tr key={transaction.transactionId}>
@@ -37,13 +40,14 @@ export function TransactionMonitorTable({
                     <span>{transaction.customerId}</span>
                   </td>
                   <td>
-                    <strong>{transaction.merchantInfo?.merchantName || transaction.merchantInfo?.merchantId || "Unknown merchant"}</strong>
-                    <span>{transaction.merchantInfo?.channel || "Unknown channel"}</span>
+                    <strong>{merchantDisplayValue(transaction.merchantInfo, "merchantName")
+                      || merchantDisplayValue(transaction.merchantInfo, "merchantId") || "Unknown merchant"}</strong>
+                    <span>{merchantDisplayValue(transaction.merchantInfo, "channel") || "Unknown channel"}</span>
                   </td>
                   <td>{formatAmount(transaction.transactionAmount)}</td>
                   <td>
-                    <span className={`classificationPill ${transaction.alertRecommended ? "classificationReview" : "classificationClear"}`}>
-                      {transaction.alertRecommended ? "Suspicious" : "Legitimate"}
+                    <span className={`classificationPill ${recommendation.className}`}>
+                      {recommendation.label}
                     </span>
                   </td>
                   <td>{formatDateTime(transaction.scoredAt)}</td>

@@ -7,6 +7,7 @@ export function availableDetail(overrides = {}) {
     correlationId: "corr-available-1",
     transactionTimestamp: "2026-06-18T10:00:00Z",
     scoredAt: "2026-06-18T10:00:01Z",
+    scoringOccurrenceToken: "a".repeat(64),
     fraudScore: 0.91,
     riskLevel: "CRITICAL",
     alertRecommended: true,
