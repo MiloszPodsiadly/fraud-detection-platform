@@ -20,6 +20,7 @@ import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotte
 import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
+import com.frauddetection.alert.persistence.FeedbackOccurrenceFenceException;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
@@ -366,6 +367,25 @@ class FraudFeedbackServiceTest {
         verify(engineIntelligenceReadService, never()).readForOccurrence(any(), any());
         verify(repository, never()).save(any());
         verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void mapsTypedFenceOutcomesToExistingFeedbackHttpSemantics() {
+        assertFenceOutcomeMaps(
+                FeedbackOccurrenceFenceException.Reason.OCCURRENCE_CHANGED,
+                409,
+                "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"
+        );
+        assertFenceOutcomeMaps(
+                FeedbackOccurrenceFenceException.Reason.TRANSACTION_REQUIRED,
+                503,
+                "FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED"
+        );
+        assertFenceOutcomeMaps(
+                FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE,
+                503,
+                "FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE"
+        );
     }
 
     @Test
@@ -966,6 +986,27 @@ class FraudFeedbackServiceTest {
                     assertThat(statusException.getReason())
                             .isEqualTo("FRAUD_FEEDBACK_ML_PREDICTION_EVIDENCE_UNAVAILABLE");
                 });
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never())
+                .createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    private void assertFenceOutcomeMaps(
+            FeedbackOccurrenceFenceException.Reason fenceReason,
+            int status,
+            String publicReason
+    ) {
+        doThrow(new FeedbackOccurrenceFenceException(fenceReason))
+                .when(projectionWriter).fenceFeedbackOccurrence("txn-1", DEFAULT_OCCURRENCE);
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException response = (ResponseStatusException) exception;
+                    assertThat(response.getStatusCode().value()).isEqualTo(status);
+                    assertThat(response.getReason()).isEqualTo(publicReason);
+                });
+        assertThat(savedRecords).isEmpty();
         verify(repository, never()).save(any());
         verify(auditOutboxService, never())
                 .createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());

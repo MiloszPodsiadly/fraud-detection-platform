@@ -34,6 +34,8 @@ export function useFraudFeedback({
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
   const submitAbortControllerRef = useRef(null);
+  const uncertainTransactionIdRef = useRef(null);
+  const reconciliationInFlightRef = useRef(null);
 
   const cancel = useCallback(() => {
     requestSeqRef.current += 1;
@@ -41,6 +43,7 @@ export function useFraudFeedback({
     submitAbortControllerRef.current?.abort();
     abortControllerRef.current = null;
     submitAbortControllerRef.current = null;
+    reconciliationInFlightRef.current = null;
   }, []);
 
   useLayoutEffect(() => {
@@ -58,7 +61,7 @@ export function useFraudFeedback({
       return;
     }
     setState((previous) => {
-      const current = previous.owner === owner ? previous : initialState(owner);
+      const current = previous.owner === owner ? previous : stateForOwner(owner, uncertainTransactionIdRef.current);
       return { ...current, ...(typeof update === "function" ? update(current) : update), owner };
     });
   }, [owner]);
@@ -68,11 +71,12 @@ export function useFraudFeedback({
       return;
     }
     cancel();
-    setState(initialState(owner));
+    setState(stateForOwner(owner, uncertainTransactionIdRef.current));
   }, [cancel, owner]);
 
   const load = useCallback(async () => {
-    if (currentOwnerRef.current !== owner || !canReadFeedback) {
+    if (currentOwnerRef.current !== owner || !canReadFeedback
+        || uncertainTransactionIdRef.current === owner.transactionId) {
       return null;
     }
     abortControllerRef.current?.abort();
@@ -114,6 +118,9 @@ export function useFraudFeedback({
 
   const submit = useCallback(async (request) => {
     if (currentOwnerRef.current !== owner || !canCreateFeedback) {
+      return null;
+    }
+    if (uncertainTransactionIdRef.current === owner.transactionId) {
       return null;
     }
     const validation = validateFraudFeedbackRequest({
@@ -170,8 +177,16 @@ export function useFraudFeedback({
         && apiError?.reasonCode === "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED";
       const duplicate = apiError?.status === 409
         && apiError?.reasonCode === "FRAUD_FEEDBACK_ALREADY_RECORDED";
+      const outcomeUnknown = apiError?.status === 503
+        && apiError?.reasonCode === "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN";
+      if (outcomeUnknown) {
+        uncertainTransactionIdRef.current = owner.transactionId;
+      }
       updateState({
-        submitState: changedOccurrence ? "stale-occurrence" : (duplicate ? "duplicate" : "error"),
+        submitState: outcomeUnknown
+          ? "outcome-unknown"
+          : changedOccurrence ? "stale-occurrence" : (duplicate ? "duplicate" : "error"),
+        reconciliationState: outcomeUnknown ? "ready" : "idle",
         submitError: apiError
       });
       return null;
@@ -182,9 +197,78 @@ export function useFraudFeedback({
     }
   }, [canCreateFeedback, owner, state, updateState]);
 
+  const checkRecordedFeedback = useCallback(async () => {
+    if (currentOwnerRef.current !== owner || !canReadFeedback
+        || uncertainTransactionIdRef.current !== owner.transactionId) {
+      return null;
+    }
+    if (state.owner === owner && state.reconciliationState === "access-blocked") {
+      return null;
+    }
+    if (reconciliationInFlightRef.current?.owner === owner) {
+      return null;
+    }
+
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const sequence = ++requestSeqRef.current;
+    const request = { owner, controller, sequence };
+    reconciliationInFlightRef.current = request;
+    const isCurrent = () => currentOwnerRef.current === owner
+      && requestSeqRef.current === sequence
+      && !controller.signal.aborted;
+    updateState({ reconciliationState: "checking", reconciliationError: null });
+    try {
+      const nextFeedback = await owner.apiClient.getFraudFeedback(owner.transactionId, {
+        signal: controller.signal
+      });
+      if (!isCurrent()) {
+        return null;
+      }
+      if (!isValidFeedbackResponse(nextFeedback, owner.transactionId)) {
+        updateState({ reconciliationState: "unresolved", reconciliationError: "invalid-response", feedback: null });
+        return null;
+      }
+      uncertainTransactionIdRef.current = null;
+      updateState({
+        feedback: nextFeedback,
+        submitState: "reconciled",
+        reconciliationState: "resolved",
+        reconciliationError: null,
+        submitError: null
+      });
+      return nextFeedback;
+    } catch (apiError) {
+      if (!isCurrent() || isAbortError(apiError)) {
+        return null;
+      }
+      if (apiError?.status === 404) {
+        updateState({ reconciliationState: "not-found", reconciliationError: null, feedback: null });
+      } else if (apiError?.status === 401 || apiError?.status === 403) {
+        updateState({ reconciliationState: "access-blocked", reconciliationError: null, feedback: null });
+      } else {
+        updateState({ reconciliationState: "unresolved", reconciliationError: "unavailable", feedback: null });
+      }
+      return null;
+    } finally {
+      if (isCurrent()) {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
+        if (reconciliationInFlightRef.current === request) {
+          reconciliationInFlightRef.current = null;
+        }
+      }
+    }
+  }, [canReadFeedback, owner, state, updateState]);
+
   useEffect(() => {
     if (!canReadFeedback) {
       clear();
+      return undefined;
+    }
+    if (uncertainTransactionIdRef.current === owner.transactionId) {
       return undefined;
     }
     void load();
@@ -193,19 +277,22 @@ export function useFraudFeedback({
         cancel();
       }
     };
-  }, [canReadFeedback, cancel, clear, load]);
+  }, [canReadFeedback, cancel, clear, load, owner]);
 
   const ownsState = state.owner === owner && currentOwnerRef.current === owner;
-  const currentState = ownsState ? state : initialState(owner);
+  const currentState = ownsState ? state : stateForOwner(owner, uncertainTransactionIdRef.current);
   return {
     feedback: currentState.feedback,
     isLoading: canReadFeedback && (!ownsState || currentState.isLoading),
     error: currentState.error,
     canReadFeedback,
-    canCreateFeedback,
+    canCreateFeedback: canCreateFeedback && uncertainTransactionIdRef.current !== owner.transactionId,
     submitState: currentState.submitState,
     submitError: currentState.submitError,
+    reconciliationState: currentState.reconciliationState,
+    reconciliationError: currentState.reconciliationError,
     refresh: load,
+    checkRecordedFeedback,
     submit
   };
 }
@@ -217,8 +304,42 @@ function initialState(owner) {
     isLoading: false,
     error: null,
     submitState: "idle",
-    submitError: null
+    submitError: null,
+    reconciliationState: "idle",
+    reconciliationError: null
   };
+}
+
+function stateForOwner(owner, uncertainTransactionId) {
+  const state = initialState(owner);
+  if (owner?.transactionId && owner.transactionId === uncertainTransactionId) {
+    state.submitState = "outcome-unknown";
+    state.reconciliationState = "ready";
+  }
+  return state;
+}
+
+function isValidFeedbackResponse(feedback, transactionId) {
+  return feedback !== null
+    && typeof feedback === "object"
+    && !Array.isArray(feedback)
+    && feedback.transactionId === transactionId
+    && isBoundedText(feedback.feedbackId, 160)
+    && isBoundedText(feedback.feedbackLabel, 80)
+    && isBoundedText(feedback.analystDecision, 80)
+    && isBoundedText(feedback.labelSource, 80)
+    && isBoundedText(feedback.feedbackStatus, 80)
+    && typeof feedback.createdAt === "string"
+    && Number.isFinite(Date.parse(feedback.createdAt))
+    && Array.isArray(feedback.decisionReasonCodes)
+    && feedback.decisionReasonCodes.length <= 32
+    && feedback.decisionReasonCodes.every((reason) => isBoundedText(reason, 120))
+    && typeof feedback.notesPresent === "boolean"
+    && ["CURRENT", "PRIOR", "UNKNOWN"].includes(feedback.scoringOccurrenceRelation);
+}
+
+function isBoundedText(value, maxLength) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
 }
 
 function normalizeTransactionId(transactionId) {

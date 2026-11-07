@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { TransactionRiskIntelligencePanel } from "./TransactionRiskIntelligencePanel.jsx";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
 import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
+import { createAlertsApiClient } from "../api/alertsApi.js";
+import { createDemoAuthProvider } from "../auth/authProvider.js";
 import {
   absentDetail,
   availableDetail,
@@ -28,6 +30,10 @@ vi.mock("../transactions/useFraudFeedback.js", () => ({
 }));
 
 describe("TransactionRiskIntelligencePanel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     useScoredTransactionDetail.mockReturnValue({ detail: availableDetail(), isLoading: false, error: null });
     useFraudFeedback.mockReturnValue({
@@ -236,6 +242,60 @@ describe("TransactionRiskIntelligencePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "I reviewed the current scoring" }));
     expect(screen.getByLabelText("Mark as confirmed fraud")).toBeChecked();
     expect(screen.getByLabelText("Notes")).toHaveValue("");
+  });
+
+  it("reconciles an uncertain POST through the scoped API client's GET only", async () => {
+    const detail = availableDetail();
+    const recordedFeedback = {
+      feedbackId: "feedback-reconciled",
+      transactionId: detail.transactionId,
+      feedbackLabel: "CONFIRMED_FRAUD",
+      analystDecision: "MARKED_FRAUD",
+      labelSource: "ANALYST",
+      feedbackStatus: "RECORDED",
+      createdAt: "2026-11-07T10:00:00Z",
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notesPresent: false,
+      scoringOccurrenceRelation: "PRIOR"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonHttpResponse({
+        status: 404,
+        error: "Not Found",
+        message: "FRAUD_FEEDBACK_NOT_FOUND",
+        details: []
+      }, 404))
+      .mockResolvedValueOnce(jsonHttpResponse({
+        status: 503,
+        error: "Service Unavailable",
+        message: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN",
+        details: ["reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"]
+      }, 503))
+      .mockResolvedValueOnce(jsonHttpResponse(recordedFeedback));
+    const actualHook = await vi.importActual("../transactions/useFraudFeedback.js");
+    useFraudFeedback.mockImplementation(actualHook.useFraudFeedback);
+    const apiClient = createAlertsApiClient({ session: null, authProvider: createDemoAuthProvider() });
+
+    renderPanel({
+      transactionId: detail.transactionId,
+      scoringOccurrenceToken: detail.scoringOccurrenceToken,
+      apiClient
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Record feedback" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Record feedback" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check recorded feedback" })).toBeInTheDocument());
+
+    expect(screen.getByRole("status")).toHaveTextContent("The server may have recorded this feedback");
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check recorded feedback" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Feedback recorded" })).toBeInTheDocument());
+
+    expect(screen.getByText("This feedback belongs to a prior scoring occurrence and does not cover the current scoring.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.map(([, options]) => options.method || "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls[2][0]).toBe(`/api/v1/transactions/scored/${encodeURIComponent(detail.transactionId)}/feedback`);
   });
 
   it("shows a separate occurrence-changed error and refreshes the workspace list", () => {
@@ -712,4 +772,11 @@ function sharedEngineIntelligenceFixture(name) {
     "../common-events/src/test/resources/fixtures/engine-intelligence",
     name
   ), "utf8"));
+}
+
+function jsonHttpResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
 }

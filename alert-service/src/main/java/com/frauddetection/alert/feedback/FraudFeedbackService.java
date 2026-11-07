@@ -14,6 +14,7 @@ import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotte
 import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.feedback.validation.ValidatedFraudFeedback;
 import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
+import com.frauddetection.alert.persistence.FeedbackOccurrenceFenceException;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
@@ -119,6 +120,8 @@ public class FraudFeedbackService {
                 return mapper.toResponse(saved, FraudFeedbackOccurrenceRelation.CURRENT);
             } catch (DuplicateKeyException exception) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED", exception);
+            } catch (FeedbackOccurrenceFenceException exception) {
+                throw mapFenceException(exception);
             } catch (RuntimeException exception) {
                 if (hasMongoErrorLabel(exception, "UnknownTransactionCommitResult")) {
                     throw new ResponseStatusException(
@@ -149,6 +152,26 @@ public class FraudFeedbackService {
             }
         }
         throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "FRAUD_FEEDBACK_TRANSACTION_RETRY_EXHAUSTED");
+    }
+
+    private ResponseStatusException mapFenceException(FeedbackOccurrenceFenceException exception) {
+        return switch (exception.reason()) {
+            case OCCURRENCE_CHANGED -> new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED",
+                    exception
+            );
+            case TRANSACTION_REQUIRED -> new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED",
+                    exception
+            );
+            case FENCE_UNAVAILABLE -> new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE",
+                    exception
+            );
+        };
     }
 
     private FraudFeedbackRecord createWithAuthoritativeSnapshot(

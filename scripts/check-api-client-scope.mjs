@@ -22,6 +22,7 @@ const allowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackService.java",
   "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionDocument.java",
   "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionProjectionWriter.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/FeedbackOccurrenceFenceException.java",
   "alert-service/src/main/java/com/frauddetection/alert/regulated/RegulatedMutationTransactionRunner.java"
 ]);
 const forbiddenBackendProductionPrefixes = [

@@ -11,8 +11,6 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.springframework.web.server.ResponseStatusException;
-import org.springframework.http.HttpStatus;
 
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEW;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEWER;
@@ -69,10 +67,7 @@ public class ScoredTransactionProjectionWriter {
     public void fenceFeedbackOccurrence(String transactionId, ScoringOccurrenceOwnership ownership) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.hasResource(mongoTemplate.getMongoDatabaseFactory())) {
-            throw new ResponseStatusException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED"
-            );
+            throw new FeedbackOccurrenceFenceException(FeedbackOccurrenceFenceException.Reason.TRANSACTION_REQUIRED);
         }
         Query currentOccurrence = new Query(new Criteria().andOperator(
                 Criteria.where("_id").is(transactionId),
@@ -88,22 +83,13 @@ public class ScoredTransactionProjectionWriter {
                 ScoredTransactionDocument.class
         );
         if (!result.wasAcknowledged() || result.getMatchedCount() > 1 || result.getModifiedCount() > 1) {
-            throw new ResponseStatusException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE"
-            );
+            throw new FeedbackOccurrenceFenceException(FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE);
         }
         if (result.getMatchedCount() == 0) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"
-            );
+            throw new FeedbackOccurrenceFenceException(FeedbackOccurrenceFenceException.Reason.OCCURRENCE_CHANGED);
         }
         if (result.getModifiedCount() != 1) {
-            throw new ResponseStatusException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE"
-            );
+            throw new FeedbackOccurrenceFenceException(FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE);
         }
     }
 

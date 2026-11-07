@@ -20,6 +20,7 @@ import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
+import com.frauddetection.alert.persistence.FeedbackOccurrenceFenceException;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
@@ -250,7 +251,7 @@ class FraudFeedbackPostFlowIntegrationTest {
                         org.springframework.http.HttpStatus.CONFLICT,
                         "SCORED_TRANSACTION_CONFLICT"
                 ))
-                .when(projectionWriter).fenceFeedbackOccurrence("txn-1", DEFAULT_OCCURRENCE);
+                .when(transactionRunner).runLocalCommit(any());
 
         mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
                         .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
@@ -261,6 +262,85 @@ class FraudFeedbackPostFlowIntegrationTest {
 
         verify(repository, never()).save(any());
         verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postTypedStaleFenceOutcomeKeepsTheExisting409Contract() throws Exception {
+        org.mockito.Mockito.doThrow(new FeedbackOccurrenceFenceException(
+                        FeedbackOccurrenceFenceException.Reason.OCCURRENCE_CHANGED
+                ))
+                .when(projectionWriter).fenceFeedbackOccurrence("txn-1", DEFAULT_OCCURRENCE);
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"))
+                .andExpect(jsonPath("$.details.length()").value(1))
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"));
+
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postTypedFenceUnavailableOutcomeKeepsTheExisting503Contract() throws Exception {
+        org.mockito.Mockito.doThrow(new FeedbackOccurrenceFenceException(
+                        FeedbackOccurrenceFenceException.Reason.FENCE_UNAVAILABLE
+                ))
+                .when(projectionWriter).fenceFeedbackOccurrence("txn-1", DEFAULT_OCCURRENCE);
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("Service Unavailable"))
+                .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE"))
+                .andExpect(jsonPath("$.details.length()").value(0));
+
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postUnknownCommitOutcomeReturnsOnlyTheAllowlisted503Reason() throws Exception {
+        org.mockito.Mockito.doThrow(new ResponseStatusException(
+                        org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                        "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"
+                ))
+                .when(transactionRunner).runLocalCommit(any());
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("Service Unavailable"))
+                .andExpect(jsonPath("$.details.length()").value(1))
+                .andExpect(jsonPath("$.details[0]").value("reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"));
+
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postGeneric503DoesNotReceiveAnUncertainCommitReason() throws Exception {
+        org.mockito.Mockito.doThrow(new ResponseStatusException(
+                        org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                        "FRAUD_FEEDBACK_MONGO_TRANSACTION_UNAVAILABLE"
+                ))
+                .when(transactionRunner).runLocalCommit(any());
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("Service Unavailable"))
+                .andExpect(jsonPath("$.details.length()").value(0));
     }
 
     @Test

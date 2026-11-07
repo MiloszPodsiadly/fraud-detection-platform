@@ -205,6 +205,9 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
     canCreateFeedback = true,
     submitState,
     submitError,
+    reconciliationState,
+    reconciliationError,
+    checkRecordedFeedback,
     submit
   } = useFraudFeedback({ transactionId, scoringOccurrenceToken, enabled: Boolean(transactionId), apiClient });
   const [selectedLabel, setSelectedLabel] = useState("CONFIRMED_FRAUD");
@@ -245,7 +248,36 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
       {canReadFeedback && isLoading && <p className="loadingText">Loading analyst feedback...</p>}
       {canReadFeedback && !isLoading && error && <p className="formError">{feedbackErrorMessage(error)}</p>}
       {canReadFeedback && !isLoading && !error && feedback && <ExistingFeedback feedback={feedback} />}
+      {canReadFeedback && submitState === "outcome-unknown" && !feedback && (
+        <div className="summaryCard" role="status">
+          <p className="sectionCopy">
+            The server may have recorded this feedback, but its response was not confirmed. Check the recorded feedback before taking any further action.
+          </p>
+          {reconciliationState === "checking" && (
+            <p className="loadingText">Checking recorded feedback...</p>
+          )}
+          {reconciliationState === "not-found" && (
+            <p className="sectionCopy">No record is visible yet. The earlier write outcome is still unknown; check again later.</p>
+          )}
+          {reconciliationState === "unresolved" && (
+            <p className="sectionCopy">The recorded feedback could not be confirmed. Do not submit again yet; check again later.</p>
+          )}
+          {reconciliationState === "access-blocked" && (
+            <p className="sectionCopy">Feedback status cannot be checked with the current access. The write outcome remains unknown.</p>
+          )}
+          {reconciliationState !== "checking" && reconciliationState !== "access-blocked" && (
+            <button
+              className="secondaryButton compactButton"
+              type="button"
+              onClick={() => { void checkRecordedFeedback(); }}
+            >
+              Check recorded feedback
+            </button>
+          )}
+        </div>
+      )}
       {canReadFeedback && !canCreateFeedback && !isLoading && !error && !feedback && (
+        submitState !== "outcome-unknown" &&
         <p className="emptyStateMessage">
           {hasScoringOccurrenceToken
             ? "Analyst feedback is not available in this runtime."
@@ -263,6 +295,7 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
         </div>
       )}
       {feedbackRuntimeAvailable && !requiresOccurrenceReview && submitState !== "stale-occurrence"
+        && submitState !== "outcome-unknown"
         && !isLoading && !error && !feedback && (
         <form className="analystFeedbackForm" onSubmit={onSubmit}>
           <fieldset disabled={submitState === "submitting"}>

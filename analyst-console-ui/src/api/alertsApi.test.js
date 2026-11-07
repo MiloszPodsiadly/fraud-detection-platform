@@ -1355,6 +1355,41 @@ describe("alertsApi auth headers", () => {
     })).rejects.toMatchObject({ status: 409, reasonCode });
   });
 
+  it("preserves only the structured unknown-commit reason from an HTTP 503", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      error: "Service Unavailable",
+      message: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN",
+      details: ["reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"]
+    }, 503));
+
+    await expect(createFraudFeedback("txn-1", {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: "a".repeat(64),
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notes: null
+    })).rejects.toMatchObject({
+      status: 503,
+      error: "Service Unavailable",
+      reasonCode: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"
+    });
+  });
+
+  it("does not infer an unknown commit from a generic 503 message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      error: "Service Unavailable",
+      message: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"
+    }, 503));
+
+    await expect(createFraudFeedback("txn-1", {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: "a".repeat(64),
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notes: null
+    })).rejects.toMatchObject({ status: 503, reasonCode: null });
+  });
+
   it.each([400, 401, 403, 404, 503])("propagates scored transaction detail %s errors", async (status) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       error: `E${status}`,
