@@ -188,9 +188,13 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
 
         CountDownLatch feedbackFenceAcquired = new CountDownLatch(1);
         CountDownLatch allowFeedbackCommit = new CountDownLatch(1);
-        CountDownLatch rescoreReachedMongoUpdate = new CountDownLatch(1);
+        CountDownLatch rescoreMongoUpdateStarted = new CountDownLatch(1);
+        CountDownLatch rescoreMongoUpdateCompleted = new CountDownLatch(1);
         AtomicReference<Thread> rescoreThread = new AtomicReference<>();
-        AtomicBoolean rescoreEnteredWhileFeedbackOpen = new AtomicBoolean();
+        AtomicBoolean firstRescoreMongoUpdate = new AtomicBoolean();
+        AtomicReference<Throwable> overlappingMongoFailure = new AtomicReference<>();
+        AtomicReference<Throwable> transientRetryEvidence = new AtomicReference<>();
+        AtomicReference<String> overlappingMongoUpdate = new AtomicReference<>();
         AtomicInteger rescoreDeliveryAttempts = new AtomicInteger();
         ScoredTransactionProjectionWriter feedbackWriter = spy(projectionWriter);
         doAnswer(invocation -> {
@@ -202,11 +206,25 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
             return null;
         }).when(feedbackWriter).fenceFeedbackOccurrence(eq(TRANSACTION_ID), any(ScoringOccurrenceOwnership.class));
         doAnswer(invocation -> {
-            if (Thread.currentThread() == rescoreThread.get()) {
-                rescoreEnteredWhileFeedbackOpen.set(allowFeedbackCommit.getCount() > 0);
-                rescoreReachedMongoUpdate.countDown();
+            boolean firstUpdate = Thread.currentThread() == rescoreThread.get()
+                    && firstRescoreMongoUpdate.compareAndSet(false, true);
+            if (firstUpdate) {
+                Update update = invocation.getArgument(1);
+                overlappingMongoUpdate.set(update.getUpdateObject().toString());
+                rescoreMongoUpdateStarted.countDown();
             }
-            return invocation.callRealMethod();
+            try {
+                return invocation.callRealMethod();
+            } catch (Throwable mongoFailure) {
+                if (firstUpdate && allowFeedbackCommit.getCount() > 0) {
+                    overlappingMongoFailure.set(mongoFailure);
+                }
+                throw mongoFailure;
+            } finally {
+                if (firstUpdate) {
+                    rescoreMongoUpdateCompleted.countDown();
+                }
+            }
         }).when(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(ScoredTransactionDocument.class));
 
         WriteActionAuditOutboxService auditOutbox = new WriteActionAuditOutboxService(writeActionAuditOutbox);
@@ -222,15 +240,29 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
             Future<FraudFeedbackResponse> feedbackCommit = executor.submit(
                     () -> feedbackService.create(TRANSACTION_ID, request())
             );
-            assertThat(feedbackFenceAcquired.await(10, TimeUnit.SECONDS)).isTrue();
-
-            Future<com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult> rescoreCommit = executor.submit(() -> {
-                rescoreThread.set(Thread.currentThread());
-                return replayRescoreWithKafkaBoundedRetry(rescoreDeliveryAttempts);
-            });
+            Future<com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult> rescoreCommit;
             try {
-                assertThat(rescoreReachedMongoUpdate.await(10, TimeUnit.SECONDS)).isTrue();
-                assertThat(rescoreEnteredWhileFeedbackOpen).isTrue();
+                assertThat(feedbackFenceAcquired.await(10, TimeUnit.SECONDS))
+                        .as("feedback holds the occurrence fence before rescore starts")
+                        .isTrue();
+                rescoreCommit = executor.submit(() -> {
+                    rescoreThread.set(Thread.currentThread());
+                    return replayRescoreWithKafkaBoundedRetry(rescoreDeliveryAttempts, transientRetryEvidence);
+                });
+                assertThat(rescoreMongoUpdateStarted.await(10, TimeUnit.SECONDS))
+                        .as("rescore reaches the real scored-transaction Mongo update while feedback holds the fence")
+                        .isTrue();
+                assertThat(rescoreMongoUpdateCompleted.await(5, TimeUnit.SECONDS))
+                        .as("Mongo reports the overlapping write result before the feedback transaction is released")
+                        .isTrue();
+                assertThat(allowFeedbackCommit.getCount()).as("feedback transaction is still open").isPositive();
+                assertThat(overlappingMongoFailure.get())
+                        .as("real overlapping Mongo update fails with a transient transaction conflict")
+                        .isNotNull();
+                assertThat(hasMongoErrorLabel(overlappingMongoFailure.get(), "TransientTransactionError"))
+                        .as("overlapping Mongo update carries TransientTransactionError")
+                        .isTrue();
+                assertThat(overlappingMongoUpdate.get()).contains(EVENT_B);
             } finally {
                 allowFeedbackCommit.countDown();
             }
@@ -261,6 +293,13 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                             .isEqualTo("RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:" + saved.getFeedbackId());
                 });
         assertThat(rescoreDeliveryAttempts.get()).isBetween(2, KAFKA_RETRY_ATTEMPTS);
+        assertThat(transientRetryEvidence.get())
+                .as("bounded Kafka replay records the transient Mongo failure as its retry source")
+                .isNotNull();
+        assertThat(hasMongoErrorLabel(transientRetryEvidence.get(), "TransientTransactionError")).isTrue();
+        assertThat(mongoExceptionWithErrorLabel(transientRetryEvidence.get(), "TransientTransactionError"))
+                .as("retry evidence comes from a MongoDB exception")
+                .isNotNull();
     }
 
     @Test
@@ -541,7 +580,8 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
     }
 
     private com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult replayRescoreWithKafkaBoundedRetry(
-            AtomicInteger deliveryAttempts
+            AtomicInteger deliveryAttempts,
+            AtomicReference<Throwable> transientRetryEvidence
     ) {
         for (int attempt = 0; attempt < KAFKA_RETRY_ATTEMPTS; attempt++) {
             deliveryAttempts.incrementAndGet();
@@ -558,6 +598,7 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                 if (!hasMongoErrorLabel(exception, "TransientTransactionError") || attempt == 2) {
                     throw exception;
                 }
+                transientRetryEvidence.compareAndSet(null, exception);
                 awaitScoringRetryBackoff();
             }
         }
@@ -573,6 +614,17 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
             current = current.getCause();
         }
         return false;
+    }
+
+    private static MongoException mongoExceptionWithErrorLabel(Throwable exception, String label) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof MongoException mongoException && mongoException.hasErrorLabel(label)) {
+                return mongoException;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private static void awaitScoringRetryBackoff() {

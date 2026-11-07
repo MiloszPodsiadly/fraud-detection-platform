@@ -8,6 +8,7 @@ import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 import { createAlertsApiClient } from "../api/alertsApi.js";
 import { createDemoAuthProvider } from "../auth/authProvider.js";
+import { WorkspaceRuntimeProvider } from "../workspace/WorkspaceRuntimeProvider.jsx";
 import {
   absentDetail,
   availableDetail,
@@ -251,9 +252,10 @@ describe("TransactionRiskIntelligencePanel", () => {
       transactionId: detail.transactionId,
       feedbackLabel: "CONFIRMED_FRAUD",
       analystDecision: "MARKED_FRAUD",
-      labelSource: "ANALYST",
+      labelSource: "ANALYST_REVIEW",
       feedbackStatus: "RECORDED",
       createdAt: "2026-11-07T10:00:00Z",
+      createdBy: "analyst-b",
       decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
       notesPresent: false,
       scoringOccurrenceRelation: "PRIOR"
@@ -276,7 +278,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     useFraudFeedback.mockImplementation(actualHook.useFraudFeedback);
     const apiClient = createAlertsApiClient({ session: null, authProvider: createDemoAuthProvider() });
 
-    renderPanel({
+    renderPanelWithRuntime({
       transactionId: detail.transactionId,
       scoringOccurrenceToken: detail.scoringOccurrenceToken,
       apiClient
@@ -290,12 +292,103 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Check recorded feedback" }));
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Feedback recorded" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Feedback record found" })).toBeInTheDocument());
 
     expect(screen.getByText("This feedback belongs to a prior scoring occurrence and does not cover the current scoring.")).toBeInTheDocument();
+    expect(screen.getByText("analyst-b")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Feedback recorded" })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.map(([, options]) => options.method || "GET")).toEqual(["GET", "POST", "GET"]);
     expect(fetchMock.mock.calls[2][0]).toBe(`/api/v1/transactions/scored/${encodeURIComponent(detail.transactionId)}/feedback`);
+  });
+
+  it.each([
+    ["lost network response", () => Promise.reject(new TypeError("Failed to fetch"))],
+    ["unreadable success body", () => Promise.resolve({
+      ok: true,
+      status: 201,
+      json: () => Promise.reject(new SyntaxError("invalid JSON"))
+    })],
+    ["malformed success payload", () => Promise.resolve(jsonHttpResponse({ feedbackId: "untrusted" }, 201))],
+    ["502 gateway response", () => Promise.resolve(jsonHttpResponse({ error: "Bad Gateway", message: "gateway" }, 502))],
+    ["504 gateway response", () => Promise.resolve(jsonHttpResponse({ error: "Gateway Timeout", message: "timeout" }, 504))]
+  ])("reconciles an ambiguous %s POST through one explicit GET", async (_scenario, postTransport) => {
+    const detail = availableDetail();
+    const recordedFeedback = {
+      feedbackId: "feedback-after-lost-response",
+      transactionId: detail.transactionId,
+      feedbackLabel: "CONFIRMED_FRAUD",
+      analystDecision: "MARKED_FRAUD",
+      labelSource: "ANALYST_REVIEW",
+      feedbackStatus: "RECORDED",
+      createdAt: "2026-11-07T10:00:00Z",
+      createdBy: "analyst-b",
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notesPresent: false,
+      scoringOccurrenceRelation: "CURRENT"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonHttpResponse({ message: "not found" }, 404))
+      .mockImplementationOnce(postTransport)
+      .mockResolvedValueOnce(jsonHttpResponse(recordedFeedback));
+    const actualHook = await vi.importActual("../transactions/useFraudFeedback.js");
+    useFraudFeedback.mockImplementation(actualHook.useFraudFeedback);
+    const apiClient = createAlertsApiClient({ session: null, authProvider: createDemoAuthProvider() });
+
+    renderPanelWithRuntime({
+      transactionId: detail.transactionId,
+      scoringOccurrenceToken: detail.scoringOccurrenceToken,
+      apiClient
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Record feedback" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Record feedback" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check recorded feedback" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check recorded feedback" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Feedback record found" })).toBeInTheDocument());
+
+    expect(fetchMock.mock.calls.map(([, options]) => options.method || "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.filter(([, options]) => options.method === "POST")).toHaveLength(1);
+  });
+
+  it.each([
+    ["404", jsonHttpResponse({ message: "not found" }, 404), "No record is visible yet."],
+    ["500", jsonHttpResponse({ message: "FRAUD_FEEDBACK_ALREADY_RECORDED" }, 500), "The recorded feedback could not be confirmed."],
+    ["403", jsonHttpResponse({ message: "FRAUD_FEEDBACK_ALREADY_RECORDED" }, 403), "Feedback status cannot be checked with the current access."],
+    ["malformed 200", jsonHttpResponse({ transactionId: "txn-available-1" }), "The recorded feedback could not be confirmed."]
+  ])("keeps the actual API client's uncertain POST locked after reconciliation GET %s", async (_scenario, reconciliationResponse, expectedCopy) => {
+    const detail = availableDetail();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonHttpResponse({ message: "not found" }, 404))
+      .mockResolvedValueOnce(jsonHttpResponse({
+        status: 503,
+        error: "Service Unavailable",
+        message: "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN",
+        details: ["reason:FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN"]
+      }, 503))
+      .mockResolvedValueOnce(reconciliationResponse);
+    const actualHook = await vi.importActual("../transactions/useFraudFeedback.js");
+    useFraudFeedback.mockImplementation(actualHook.useFraudFeedback);
+    const apiClient = createAlertsApiClient({ session: null, authProvider: createDemoAuthProvider() });
+
+    renderPanelWithRuntime({
+      transactionId: detail.transactionId,
+      scoringOccurrenceToken: detail.scoringOccurrenceToken,
+      apiClient
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Record feedback" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Record feedback" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check recorded feedback" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Check recorded feedback" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(expectedCopy));
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Feedback record found" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([, options]) => options.method || "GET")).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.filter(([, options]) => options.method === "POST")).toHaveLength(1);
   });
 
   it("shows a separate occurrence-changed error and refreshes the workspace list", () => {
@@ -764,6 +857,24 @@ describe("TransactionRiskIntelligencePanel", () => {
 
 function renderPanel(props = {}) {
   return render(<TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} {...props} />);
+}
+
+function renderPanelWithRuntime(props = {}) {
+  return render(
+    <WorkspaceRuntimeProvider
+      session={{
+        userId: "analyst-1",
+        actorId: "actor-1",
+        issuer: "issuer-1",
+        subject: "subject-1",
+        roles: [],
+        authorities: ["transaction-monitor:read"]
+      }}
+      authProvider={{ kind: "oidc" }}
+    >
+      <TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} {...props} />
+    </WorkspaceRuntimeProvider>
+  );
 }
 
 function sharedEngineIntelligenceFixture(name) {

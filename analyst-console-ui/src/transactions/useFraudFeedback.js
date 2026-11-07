@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { isAbortError } from "../api/alertsApi.js";
 import { ApiError } from "../api/apiError.js";
 import { useOptionalWorkspaceRuntime } from "../workspace/useWorkspaceRuntime.js";
 import { validateFraudFeedbackRequest } from "./fraudFeedbackValidation.js";
+import { isValidFraudFeedbackResponse } from "./fraudFeedbackResponseValidation.js";
 
 export function useFraudFeedback({
   transactionId,
@@ -15,31 +16,54 @@ export function useFraudFeedback({
   const normalizedTransactionId = normalizeTransactionId(transactionId);
   const token = typeof scoringOccurrenceToken === "string" ? scoringOccurrenceToken : "";
   const runtimeReady = !runtime || (!runtime.sessionBootstrapPending && runtime.sessionState?.status === "authenticated");
-  const canReadFeedback = Boolean(enabled && runtimeReady && normalizedTransactionId
+  const ownerKey = feedbackOwnerKeyFor(runtime);
+  const writeCoordinator = runtime?.fraudFeedbackWriteCoordinator;
+  const subscribeToWrites = useCallback((listener) => (
+    typeof writeCoordinator?.subscribe === "function" ? writeCoordinator.subscribe(listener) : () => {}
+  ), [writeCoordinator]);
+  const getWriteStatus = useCallback(() => (
+    ownerKey && typeof writeCoordinator?.getStatus === "function"
+      ? writeCoordinator.getStatus(ownerKey, normalizedTransactionId)
+      : "unavailable"
+  ), [normalizedTransactionId, ownerKey, writeCoordinator]);
+  const writeStatus = useSyncExternalStore(subscribeToWrites, getWriteStatus, getWriteStatus);
+  const canReadFeedback = Boolean(enabled && runtimeReady && ownerKey && normalizedTransactionId
     && typeof effectiveApiClient?.getFraudFeedback === "function");
   const canCreateFeedback = Boolean(canReadFeedback && typeof effectiveApiClient?.createFraudFeedback === "function"
-    && /^[0-9a-f]{64}$/.test(token));
+    && /^[0-9a-f]{64}$/.test(token) && writeStatus === "idle");
   const owner = useMemo(() => ({
     enabled: Boolean(enabled && runtimeReady),
     transactionId: normalizedTransactionId,
     scoringOccurrenceToken: token,
+    ownerKey,
     apiClient: effectiveApiClient,
+    writeCoordinator,
     session: runtime?.session,
     authProvider: runtime?.authProvider,
     resetKey: runtime?.workspaceSessionResetKey,
     boundaryKey: runtime?.sessionOwnerBoundaryKey
-  }), [enabled, effectiveApiClient, normalizedTransactionId, runtime, runtimeReady, token]);
+  }), [enabled, effectiveApiClient, normalizedTransactionId, ownerKey, runtime, runtimeReady, token, writeCoordinator]);
   const [state, setState] = useState(() => initialState(null));
+  const stateRef = useRef(state);
   const currentOwnerRef = useRef(null);
   const requestSeqRef = useRef(0);
   const abortControllerRef = useRef(null);
   const submitAbortControllerRef = useRef(null);
-  const uncertainTransactionIdRef = useRef(null);
+  const inFlightWriteRef = useRef(null);
   const reconciliationInFlightRef = useRef(null);
 
   const cancel = useCallback(() => {
     requestSeqRef.current += 1;
     abortControllerRef.current?.abort();
+    const inFlightWrite = inFlightWriteRef.current;
+    if (inFlightWrite) {
+      inFlightWrite.coordinator.markUncertain(
+        inFlightWrite.ownerKey,
+        inFlightWrite.transactionId,
+        inFlightWrite.token
+      );
+      inFlightWriteRef.current = null;
+    }
     submitAbortControllerRef.current?.abort();
     abortControllerRef.current = null;
     submitAbortControllerRef.current = null;
@@ -47,36 +71,41 @@ export function useFraudFeedback({
   }, []);
 
   useLayoutEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useLayoutEffect(() => {
     currentOwnerRef.current = owner;
+    setState((previous) => previous.owner === owner ? previous : stateForOwner(owner, getWriteStatus()));
     return () => {
       if (currentOwnerRef.current === owner) {
         currentOwnerRef.current = null;
       }
       cancel();
     };
-  }, [cancel, owner]);
+  }, [cancel, getWriteStatus, owner]);
 
   const updateState = useCallback((update) => {
     if (currentOwnerRef.current !== owner) {
       return;
     }
     setState((previous) => {
-      const current = previous.owner === owner ? previous : stateForOwner(owner, uncertainTransactionIdRef.current);
+      const current = previous.owner === owner ? previous : stateForOwner(owner, getWriteStatus());
       return { ...current, ...(typeof update === "function" ? update(current) : update), owner };
     });
-  }, [owner]);
+  }, [getWriteStatus, owner]);
 
   const clear = useCallback(() => {
     if (currentOwnerRef.current !== owner) {
       return;
     }
     cancel();
-    setState(stateForOwner(owner, uncertainTransactionIdRef.current));
-  }, [cancel, owner]);
+    setState(stateForOwner(owner, getWriteStatus()));
+  }, [cancel, getWriteStatus, owner]);
 
   const load = useCallback(async () => {
     if (currentOwnerRef.current !== owner || !canReadFeedback
-        || uncertainTransactionIdRef.current === owner.transactionId) {
+        || owner.writeCoordinator.getStatus(owner.ownerKey, owner.transactionId) === "uncertain") {
       return null;
     }
     abortControllerRef.current?.abort();
@@ -92,6 +121,17 @@ export function useFraudFeedback({
         signal: controller.signal
       });
       if (!isCurrent()) {
+        return null;
+      }
+      if (!isValidFraudFeedbackResponse(nextFeedback, owner.transactionId)) {
+        updateState({
+          feedback: null,
+          error: new ApiError({
+            status: 502,
+            error: "INVALID_FEEDBACK_RESPONSE",
+            message: "Feedback response could not be validated."
+          })
+        });
         return null;
       }
       updateState({ feedback: nextFeedback, error: null });
@@ -117,10 +157,13 @@ export function useFraudFeedback({
   }, [canReadFeedback, owner, updateState]);
 
   const submit = useCallback(async (request) => {
-    if (currentOwnerRef.current !== owner || !canCreateFeedback) {
+    if (currentOwnerRef.current !== owner || !canReadFeedback
+        || typeof owner.writeCoordinator?.reserve !== "function"
+        || !/^[0-9a-f]{64}$/.test(owner.scoringOccurrenceToken)) {
       return null;
     }
-    if (uncertainTransactionIdRef.current === owner.transactionId) {
+    if (state.owner === owner && ([401, 403].includes(state.error?.status)
+        || state.error?.error === "INVALID_FEEDBACK_RESPONSE")) {
       return null;
     }
     const validation = validateFraudFeedbackRequest({
@@ -149,6 +192,24 @@ export function useFraudFeedback({
     if (currentState.feedback) {
       return null;
     }
+    const operationToken = owner.writeCoordinator.reserve(owner.ownerKey, owner.transactionId);
+    if (!operationToken) {
+      const currentStatus = owner.writeCoordinator.getStatus(owner.ownerKey, owner.transactionId);
+      if (currentStatus === "uncertain") {
+        updateState({ submitState: "outcome-unknown", reconciliationState: "ready", submitError: null });
+      } else if (currentStatus === "recorded") {
+        updateState({ submitState: "duplicate", submitError: null });
+      } else if (currentStatus === "in-flight") {
+        updateState({ submitState: "submitting", submitError: null });
+      } else {
+        updateState({ submitState: "error", submitError: new ApiError({
+          status: 503,
+          error: "Service Unavailable",
+          message: "Feedback submission is temporarily unavailable."
+        }) });
+      }
+      return null;
+    }
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     requestSeqRef.current += 1;
@@ -156,6 +217,12 @@ export function useFraudFeedback({
     const controller = new AbortController();
     submitAbortControllerRef.current = controller;
     const sequence = requestSeqRef.current;
+    inFlightWriteRef.current = {
+      coordinator: owner.writeCoordinator,
+      ownerKey: owner.ownerKey,
+      transactionId: owner.transactionId,
+      token: operationToken
+    };
     const isCurrent = () => currentOwnerRef.current === owner
       && requestSeqRef.current === sequence
       && !controller.signal.aborted;
@@ -167,27 +234,50 @@ export function useFraudFeedback({
       if (!isCurrent()) {
         return null;
       }
-      updateState({ feedback: created, submitState: "success", submitError: null });
-      return created;
-    } catch (apiError) {
-      if (!isCurrent() || isAbortError(apiError)) {
+      const outcome = classifyFeedbackWriteOutcome({ response: created, transactionId: owner.transactionId });
+      if (outcome === "uncertain") {
+        owner.writeCoordinator.markUncertain(owner.ownerKey, owner.transactionId, operationToken);
+        inFlightWriteRef.current = null;
+        updateState({
+          feedback: null,
+          submitState: "outcome-unknown",
+          reconciliationState: "ready",
+          submitError: null
+        });
         return null;
       }
+      if (inFlightWriteRef.current?.token === operationToken) {
+        inFlightWriteRef.current = null;
+      }
+      updateState({ feedback: created, submitState: "success", submitError: null });
+      owner.writeCoordinator.markRecorded(owner.ownerKey, owner.transactionId, operationToken);
+      return created;
+    } catch (apiError) {
+      if (!isCurrent()) {
+        return null;
+      }
+      const outcome = classifyFeedbackWriteOutcome({ error: apiError, transactionId: owner.transactionId });
       const changedOccurrence = apiError?.status === 409
         && apiError?.reasonCode === "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED";
       const duplicate = apiError?.status === 409
         && apiError?.reasonCode === "FRAUD_FEEDBACK_ALREADY_RECORDED";
-      const outcomeUnknown = apiError?.status === 503
-        && apiError?.reasonCode === "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN";
-      if (outcomeUnknown) {
-        uncertainTransactionIdRef.current = owner.transactionId;
+      if (outcome === "uncertain") {
+        owner.writeCoordinator.markUncertain(owner.ownerKey, owner.transactionId, operationToken);
+      } else if (duplicate) {
+        owner.writeCoordinator.markRecorded(owner.ownerKey, owner.transactionId, operationToken);
+      } else {
+        owner.writeCoordinator.release(owner.ownerKey, owner.transactionId, operationToken);
+      }
+      if (inFlightWriteRef.current?.token === operationToken) {
+        inFlightWriteRef.current = null;
       }
       updateState({
-        submitState: outcomeUnknown
+        feedback: null,
+        submitState: outcome === "uncertain"
           ? "outcome-unknown"
           : changedOccurrence ? "stale-occurrence" : (duplicate ? "duplicate" : "error"),
-        reconciliationState: outcomeUnknown ? "ready" : "idle",
-        submitError: apiError
+        reconciliationState: outcome === "uncertain" ? "ready" : "idle",
+        submitError: outcome === "uncertain" ? null : apiError
       });
       return null;
     } finally {
@@ -195,11 +285,11 @@ export function useFraudFeedback({
         submitAbortControllerRef.current = null;
       }
     }
-  }, [canCreateFeedback, owner, state, updateState]);
+  }, [canReadFeedback, owner, state, updateState]);
 
   const checkRecordedFeedback = useCallback(async () => {
     if (currentOwnerRef.current !== owner || !canReadFeedback
-        || uncertainTransactionIdRef.current !== owner.transactionId) {
+        || owner.writeCoordinator.getStatus(owner.ownerKey, owner.transactionId) !== "uncertain") {
       return null;
     }
     if (state.owner === owner && state.reconciliationState === "access-blocked") {
@@ -226,11 +316,10 @@ export function useFraudFeedback({
       if (!isCurrent()) {
         return null;
       }
-      if (!isValidFeedbackResponse(nextFeedback, owner.transactionId)) {
+      if (!isValidFraudFeedbackResponse(nextFeedback, owner.transactionId)) {
         updateState({ reconciliationState: "unresolved", reconciliationError: "invalid-response", feedback: null });
         return null;
       }
-      uncertainTransactionIdRef.current = null;
       updateState({
         feedback: nextFeedback,
         submitState: "reconciled",
@@ -238,6 +327,7 @@ export function useFraudFeedback({
         reconciliationError: null,
         submitError: null
       });
+      owner.writeCoordinator.markRecorded(owner.ownerKey, owner.transactionId);
       return nextFeedback;
     } catch (apiError) {
       if (!isCurrent() || isAbortError(apiError)) {
@@ -268,7 +358,8 @@ export function useFraudFeedback({
       clear();
       return undefined;
     }
-    if (uncertainTransactionIdRef.current === owner.transactionId) {
+    if (writeStatus === "uncertain" || writeStatus === "in-flight"
+        || (writeStatus === "recorded" && stateRef.current.owner === owner && stateRef.current.feedback)) {
       return undefined;
     }
     void load();
@@ -277,16 +368,18 @@ export function useFraudFeedback({
         cancel();
       }
     };
-  }, [canReadFeedback, cancel, clear, load, owner]);
+  }, [canReadFeedback, cancel, clear, load, owner, writeStatus]);
 
   const ownsState = state.owner === owner && currentOwnerRef.current === owner;
-  const currentState = ownsState ? state : stateForOwner(owner, uncertainTransactionIdRef.current);
+  const currentState = ownsState ? stateWithWriteStatus(state, writeStatus) : stateForOwner(owner, writeStatus);
   return {
     feedback: currentState.feedback,
-    isLoading: canReadFeedback && (!ownsState || currentState.isLoading),
+    isLoading: canReadFeedback && currentState.isLoading,
     error: currentState.error,
     canReadFeedback,
-    canCreateFeedback: canCreateFeedback && uncertainTransactionIdRef.current !== owner.transactionId,
+    canCreateFeedback: canCreateFeedback
+      && ![401, 403].includes(currentState.error?.status)
+      && currentState.error?.error !== "INVALID_FEEDBACK_RESPONSE",
     submitState: currentState.submitState,
     submitError: currentState.submitError,
     reconciliationState: currentState.reconciliationState,
@@ -310,36 +403,56 @@ function initialState(owner) {
   };
 }
 
-function stateForOwner(owner, uncertainTransactionId) {
+function stateForOwner(owner, writeStatus) {
   const state = initialState(owner);
-  if (owner?.transactionId && owner.transactionId === uncertainTransactionId) {
+  if (writeStatus === "uncertain") {
     state.submitState = "outcome-unknown";
     state.reconciliationState = "ready";
+  } else if (writeStatus === "in-flight") {
+    state.submitState = "submitting";
+  } else if (writeStatus === "recorded") {
+    state.submitState = "duplicate";
   }
   return state;
 }
 
-function isValidFeedbackResponse(feedback, transactionId) {
-  return feedback !== null
-    && typeof feedback === "object"
-    && !Array.isArray(feedback)
-    && feedback.transactionId === transactionId
-    && isBoundedText(feedback.feedbackId, 160)
-    && isBoundedText(feedback.feedbackLabel, 80)
-    && isBoundedText(feedback.analystDecision, 80)
-    && isBoundedText(feedback.labelSource, 80)
-    && isBoundedText(feedback.feedbackStatus, 80)
-    && typeof feedback.createdAt === "string"
-    && Number.isFinite(Date.parse(feedback.createdAt))
-    && Array.isArray(feedback.decisionReasonCodes)
-    && feedback.decisionReasonCodes.length <= 32
-    && feedback.decisionReasonCodes.every((reason) => isBoundedText(reason, 120))
-    && typeof feedback.notesPresent === "boolean"
-    && ["CURRENT", "PRIOR", "UNKNOWN"].includes(feedback.scoringOccurrenceRelation);
+function stateWithWriteStatus(state, writeStatus) {
+  if (writeStatus === "uncertain" && state.submitState !== "outcome-unknown") {
+    return { ...state, feedback: null, submitState: "outcome-unknown", reconciliationState: "ready" };
+  }
+  if (writeStatus === "in-flight" && state.submitState !== "submitting") {
+    return { ...state, submitState: "submitting" };
+  }
+  if (writeStatus === "recorded" && !state.feedback
+      && !["success", "reconciled", "duplicate"].includes(state.submitState)) {
+    return { ...state, submitState: "duplicate" };
+  }
+  return state;
 }
 
-function isBoundedText(value, maxLength) {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+function feedbackOwnerKeyFor(runtime) {
+  const session = runtime?.session;
+  const authProviderKind = runtime?.authProvider?.kind;
+  if (typeof session?.userId !== "string" || session.userId.trim() === ""
+      || typeof authProviderKind !== "string" || authProviderKind.trim() === ""
+      || typeof runtime?.sessionOwnerBoundaryKey !== "string" || runtime.sessionOwnerBoundaryKey.trim() === "") {
+    return null;
+  }
+  return JSON.stringify([runtime.sessionOwnerBoundaryKey, session.userId.trim()]);
+}
+
+function classifyFeedbackWriteOutcome({ error, response, transactionId }) {
+  if (!error) {
+    return isValidFraudFeedbackResponse(response, transactionId) ? "confirmed" : "uncertain";
+  }
+  if (error?.status === 503 && error?.reasonCode === "FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN") {
+    return "uncertain";
+  }
+  const status = error?.status;
+  if (!Number.isInteger(status) || status === 0 || status === 408 || status === 429 || status >= 500) {
+    return "uncertain";
+  }
+  return "rejected";
 }
 
 function normalizeTransactionId(transactionId) {

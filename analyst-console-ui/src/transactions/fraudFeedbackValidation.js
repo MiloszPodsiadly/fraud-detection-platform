@@ -88,6 +88,27 @@ const UNSAFE_TERMS = [
   ["authorize", "payment"].join("")
 ];
 
+export function isValidFraudFeedbackDecisionLabelPair(decision, label) {
+  return DECISION_SET.has(decision) && LABEL_SET.has(label)
+    && DECISION_LABEL_MAP[decision] === label;
+}
+
+export function isValidFraudFeedbackReasonCodes(label, reasonCodes) {
+  return LABEL_SET.has(label)
+    && Array.isArray(reasonCodes)
+    && reasonCodes.length > 0
+    && reasonCodes.length <= MAX_REASON_CODES
+    && reasonCodes.every((code) => isReasonCode(code)
+      && code.trim() === code
+      && !containsUnsafeTerm(code)
+      && REASON_CODE_SET.has(code.trim())
+      && LABEL_REASON_CODE_MAP[label].has(code.trim()));
+}
+
+export function containsUnsafeFeedbackContent(value) {
+  return containsUnsafeTerm(value);
+}
+
 export function validateFraudFeedbackRequest(request) {
   if (!request || typeof request !== "object" || Array.isArray(request)) {
     return invalid("INVALID_FEEDBACK_REQUEST");
@@ -98,7 +119,7 @@ export function validateFraudFeedbackRequest(request) {
   if (!LABEL_SET.has(request.feedbackLabel)) {
     return invalid("INVALID_FEEDBACK_LABEL");
   }
-  if (DECISION_LABEL_MAP[request.analystDecision] !== request.feedbackLabel) {
+  if (!isValidFraudFeedbackDecisionLabelPair(request.analystDecision, request.feedbackLabel)) {
     return invalid("FEEDBACK_DECISION_LABEL_MISMATCH");
   }
   const reasonCodes = request.decisionReasonCodes;

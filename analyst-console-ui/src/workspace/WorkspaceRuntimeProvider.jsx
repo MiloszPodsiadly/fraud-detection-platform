@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { createAlertsApiClient } from "../api/alertsApi.js";
 import { AUTHORITIES, MODEL_GOVERNANCE_READ_AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { MODEL_POLICY_AUTHORITIES as POLICY } from "../auth/modelPolicyAuthorities.js";
+import { createFraudFeedbackWriteCoordinator } from "./fraudFeedbackWriteCoordinator.js";
 import { WorkspaceRuntimeContext } from "./useWorkspaceRuntime.js";
 
 export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, sessionBootstrapPending = false,
@@ -22,6 +23,11 @@ export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, 
     () => sessionOwnerBoundaryKeyFor(session, authProvider),
     [authProvider, session]
   );
+  const fraudFeedbackWriteCoordinatorRef = useRef(null);
+  if (fraudFeedbackWriteCoordinatorRef.current === null) {
+    fraudFeedbackWriteCoordinatorRef.current = createFraudFeedbackWriteCoordinator();
+  }
+  const fraudFeedbackWriteCoordinator = fraudFeedbackWriteCoordinatorRef.current;
   const shadowPerformanceRead = authorityState(session, AUTHORITIES.SHADOW_PERFORMANCE_READ);
   const promotionReadinessRead = authorityState(session, AUTHORITIES.PROMOTION_READINESS_READ);
   const modelCardRead = authorityState(session, AUTHORITIES.MODEL_CARD_READ);
@@ -36,6 +42,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, 
     apiClient,
     workspaceSessionResetKey,
     sessionOwnerBoundaryKey,
+    fraudFeedbackWriteCoordinator,
     canReadAlerts: authorityState(session, AUTHORITIES.ALERT_READ),
     canReadFraudCases: authorityState(session, AUTHORITIES.FRAUD_CASE_READ),
     canReadTransactions: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
@@ -73,6 +80,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, 
     modelCardRead,
     modelShadowPerformanceRead,
     modelGovernanceRead,
+    fraudFeedbackWriteCoordinator,
     promotionReadinessRead,
     session,
     resolvedSessionState,

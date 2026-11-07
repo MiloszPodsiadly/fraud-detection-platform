@@ -247,7 +247,15 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
       )}
       {canReadFeedback && isLoading && <p className="loadingText">Loading analyst feedback...</p>}
       {canReadFeedback && !isLoading && error && <p className="formError">{feedbackErrorMessage(error)}</p>}
-      {canReadFeedback && !isLoading && !error && feedback && <ExistingFeedback feedback={feedback} />}
+      {canReadFeedback && !isLoading && !error && feedback && (
+        <ExistingFeedback feedback={feedback} reconciled={submitState === "reconciled"} />
+      )}
+      {canReadFeedback && submitState === "submitting" && !isLoading && !feedback && (
+        <p className="loadingText" role="status">Feedback submission is in progress...</p>
+      )}
+      {canReadFeedback && submitState === "duplicate" && !isLoading && !error && !feedback && (
+        <p className="sectionCopy" role="status">Feedback already exists for this transaction.</p>
+      )}
       {canReadFeedback && submitState === "outcome-unknown" && !feedback && (
         <div className="summaryCard" role="status">
           <p className="sectionCopy">
@@ -277,7 +285,7 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
         </div>
       )}
       {canReadFeedback && !canCreateFeedback && !isLoading && !error && !feedback && (
-        submitState !== "outcome-unknown" &&
+        submitState !== "outcome-unknown" && submitState !== "duplicate" && submitState !== "submitting" &&
         <p className="emptyStateMessage">
           {hasScoringOccurrenceToken
             ? "Analyst feedback is not available in this runtime."
@@ -338,7 +346,7 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
   );
 }
 
-function ExistingFeedback({ feedback }) {
+function ExistingFeedback({ feedback, reconciled = false }) {
   const relationCopy = feedback.scoringOccurrenceRelation === "CURRENT"
     ? "This feedback snapshot matched the scoring occurrence when checked."
     : feedback.scoringOccurrenceRelation === "PRIOR"
@@ -346,12 +354,13 @@ function ExistingFeedback({ feedback }) {
       : "The scoring occurrence for this historical feedback could not be verified.";
   return (
     <article className="summaryCard">
-      <h5>Feedback recorded</h5>
+      <h5>{reconciled ? "Feedback record found" : "Feedback recorded"}</h5>
       <dl>
         <Field label="Feedback label" value={feedback.feedbackLabel} />
         <Field label="Analyst decision" value={feedback.analystDecision} />
         <Field label="Label source" value={feedback.labelSource} />
         <Field label="Status" value={feedback.feedbackStatus} />
+        {feedback.createdBy && <Field label="Created by" value={feedback.createdBy} />}
         <Field label="Created at" value={formatDateTime(feedback.createdAt)} />
         <Field label="Reason codes" value={listText(feedback.decisionReasonCodes)} />
         <Field label="Notes" value={feedback.notesPresent ? "Present" : "None"} />
