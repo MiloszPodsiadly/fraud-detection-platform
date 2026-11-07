@@ -2,6 +2,7 @@ import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/apiError.js";
+import { normalizeSession } from "../auth/session.js";
 import { WorkspaceRuntimeProvider } from "../workspace/WorkspaceRuntimeProvider.jsx";
 import { useFraudFeedback } from "./useFraudFeedback.js";
 
@@ -507,14 +508,13 @@ function feedbackRequest() {
 }
 
 function feedbackSession(userId) {
-  return {
+  return normalizeSession({
     userId,
     actorId: `actor-${userId}`,
     issuer: "issuer-1",
     subject: `subject-${userId}`,
-    roles: [],
-    authorities: ["transaction-monitor:read"]
-  };
+    roles: ["ANALYST"]
+  });
 }
 
 function FeedbackProbe({ apiClient, token, onResult }) {

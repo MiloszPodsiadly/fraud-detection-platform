@@ -16,6 +16,8 @@ export function useFraudFeedback({
   const normalizedTransactionId = normalizeTransactionId(transactionId);
   const token = typeof scoringOccurrenceToken === "string" ? scoringOccurrenceToken : "";
   const runtimeReady = !runtime || (!runtime.sessionBootstrapPending && runtime.sessionState?.status === "authenticated");
+  const canReadFraudFeedback = runtime?.canReadFraudFeedback === true;
+  const canWriteFraudFeedback = runtime?.canWriteFraudFeedback === true;
   const ownerKey = feedbackOwnerKeyFor(runtime);
   const writeCoordinator = runtime?.fraudFeedbackWriteCoordinator;
   const subscribeToWrites = useCallback((listener) => (
@@ -27,9 +29,10 @@ export function useFraudFeedback({
       : "unavailable"
   ), [normalizedTransactionId, ownerKey, writeCoordinator]);
   const writeStatus = useSyncExternalStore(subscribeToWrites, getWriteStatus, getWriteStatus);
-  const canReadFeedback = Boolean(enabled && runtimeReady && ownerKey && normalizedTransactionId
+  const canReadFeedback = Boolean(enabled && runtimeReady && canReadFraudFeedback && ownerKey && normalizedTransactionId
     && typeof effectiveApiClient?.getFraudFeedback === "function");
-  const canCreateFeedback = Boolean(canReadFeedback && typeof effectiveApiClient?.createFraudFeedback === "function"
+  const canCreateFeedback = Boolean(canReadFeedback && canWriteFraudFeedback
+    && typeof effectiveApiClient?.createFraudFeedback === "function"
     && /^[0-9a-f]{64}$/.test(token) && writeStatus === "idle");
   const owner = useMemo(() => ({
     enabled: Boolean(enabled && runtimeReady),
@@ -157,7 +160,7 @@ export function useFraudFeedback({
   }, [canReadFeedback, owner, updateState]);
 
   const submit = useCallback(async (request) => {
-    if (currentOwnerRef.current !== owner || !canReadFeedback
+    if (currentOwnerRef.current !== owner || !canCreateFeedback
         || typeof owner.writeCoordinator?.reserve !== "function"
         || !/^[0-9a-f]{64}$/.test(owner.scoringOccurrenceToken)) {
       return null;
@@ -285,7 +288,7 @@ export function useFraudFeedback({
         submitAbortControllerRef.current = null;
       }
     }
-  }, [canReadFeedback, owner, state, updateState]);
+  }, [canCreateFeedback, owner, state, updateState]);
 
   const checkRecordedFeedback = useCallback(async () => {
     if (currentOwnerRef.current !== owner || !canReadFeedback

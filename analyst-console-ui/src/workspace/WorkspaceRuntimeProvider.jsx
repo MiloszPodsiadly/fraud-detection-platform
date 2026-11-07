@@ -11,6 +11,8 @@ export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, 
   const resolvedSessionState = sessionState || authProvider?.getSessionState?.(session) || {
     status: authenticated ? "authenticated" : "unauthenticated"
   };
+  const fraudFeedbackSessionResolved = authenticated && !sessionBootstrapPending
+    && resolvedSessionState.status === "authenticated";
   const apiClient = useMemo(
     () => (enabled && authenticated ? createAlertsApiClient({ session, authProvider }) : null),
     [authProvider, authenticated, enabled, session]
@@ -45,6 +47,10 @@ export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, 
     fraudFeedbackWriteCoordinator,
     canReadAlerts: authorityState(session, AUTHORITIES.ALERT_READ),
     canReadFraudCases: authorityState(session, AUTHORITIES.FRAUD_CASE_READ),
+    canReadFraudFeedback: fraudFeedbackSessionResolved
+      ? authorityState(session, AUTHORITIES.FRAUD_FEEDBACK_READ) : undefined,
+    canWriteFraudFeedback: fraudFeedbackSessionResolved
+      ? authorityState(session, AUTHORITIES.FRAUD_FEEDBACK_WRITE) : undefined,
     canReadTransactions: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
     canReadSuspiciousTransactions: authorityState(session, AUTHORITIES.SUSPICIOUS_TRANSACTION_READ),
     canReadModelGovernance: modelGovernanceRead,
@@ -81,6 +87,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, sessionState, 
     modelShadowPerformanceRead,
     modelGovernanceRead,
     fraudFeedbackWriteCoordinator,
+    fraudFeedbackSessionResolved,
     promotionReadinessRead,
     session,
     resolvedSessionState,

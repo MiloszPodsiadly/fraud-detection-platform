@@ -8,6 +8,7 @@ import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 import { createAlertsApiClient } from "../api/alertsApi.js";
 import { createDemoAuthProvider } from "../auth/authProvider.js";
+import { normalizeSession } from "../auth/session.js";
 import { WorkspaceRuntimeProvider } from "../workspace/WorkspaceRuntimeProvider.jsx";
 import {
   absentDetail,
@@ -863,14 +864,13 @@ function renderPanel(props = {}) {
 function renderPanelWithRuntime(props = {}) {
   return render(
     <WorkspaceRuntimeProvider
-      session={{
+      session={normalizeSession({
         userId: "analyst-1",
         actorId: "actor-1",
         issuer: "issuer-1",
         subject: "subject-1",
-        roles: [],
-        authorities: ["transaction-monitor:read"]
-      }}
+        roles: ["ANALYST"]
+      })}
       authProvider={{ kind: "oidc" }}
     >
       <TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} {...props} />

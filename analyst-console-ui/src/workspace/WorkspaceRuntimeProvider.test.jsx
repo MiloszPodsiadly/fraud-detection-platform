@@ -2,6 +2,7 @@ import { renderHook } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AUTHORITIES, normalizeSession } from "../auth/session.js";
 import { WorkspaceRuntimeProvider } from "./WorkspaceRuntimeProvider.jsx";
 import { useWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
@@ -41,6 +42,67 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadModelCard).toBe(false);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.runtimeStatus).toBe("ready");
+  });
+
+  it.each([
+    ["READ_ONLY_ANALYST", true, false],
+    ["ANALYST", true, true],
+    ["REVIEWER", true, true],
+    ["FRAUD_OPS_ADMIN", true, true]
+  ])("maps %s to fraud feedback capabilities", (role, canRead, canWrite) => {
+    const session = normalizeSession({ userId: "analyst-1", roles: [role] });
+    const { result } = renderHook(() => useWorkspaceRuntime(), {
+      wrapper: ({ children }) => (
+        <WorkspaceRuntimeProvider session={session} authProvider={{ kind: "oidc" }}>
+          {children}
+        </WorkspaceRuntimeProvider>
+      )
+    });
+
+    expect(result.current.canReadFraudFeedback).toBe(canRead);
+    expect(result.current.canWriteFraudFeedback).toBe(canWrite);
+    if (role === "FRAUD_OPS_ADMIN") {
+      expect(session.authorities).toContain(AUTHORITIES.AUDIT_VERIFY);
+      expect(session.authorities).toContain(AUTHORITIES.FRAUD_CASE_UPDATE);
+    }
+  });
+
+  it("does not infer fraud feedback access from transaction monitor read", () => {
+    const session = authenticatedSession({
+      authorities: [AUTHORITIES.TRANSACTION_MONITOR_READ]
+    });
+    const { result } = renderHook(() => useWorkspaceRuntime(), {
+      wrapper: ({ children }) => (
+        <WorkspaceRuntimeProvider session={session} authProvider={{ kind: "oidc" }}>
+          {children}
+        </WorkspaceRuntimeProvider>
+      )
+    });
+
+    expect(result.current.canReadTransactions).toBe(true);
+    expect(result.current.canReadFraudFeedback).toBe(false);
+    expect(result.current.canWriteFraudFeedback).toBe(false);
+  });
+
+  it.each([
+    ["session bootstrap pending", { sessionBootstrapPending: true }],
+    ["unresolved session state", { sessionState: { status: "loading" } }]
+  ])("fails closed while the %s", (_description, providerOverrides) => {
+    const session = normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] });
+    const { result } = renderHook(() => useWorkspaceRuntime(), {
+      wrapper: ({ children }) => (
+        <WorkspaceRuntimeProvider
+          session={session}
+          authProvider={{ kind: "oidc" }}
+          {...providerOverrides}
+        >
+          {children}
+        </WorkspaceRuntimeProvider>
+      )
+    });
+
+    expect(result.current.canReadFraudFeedback).toBeUndefined();
+    expect(result.current.canWriteFraudFeedback).toBeUndefined();
   });
 
   it("capabilities are frontend gating hints, not backend authorization enforcement", () => {
@@ -258,6 +320,8 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadModelCard).toBeUndefined();
     expect(result.current.canReadModelGovernance).toBeUndefined();
     expect(result.current.canWriteGovernanceAudit).toBeUndefined();
+    expect(result.current.canReadFraudFeedback).toBeUndefined();
+    expect(result.current.canWriteFraudFeedback).toBeUndefined();
   });
 
   it("keeps runtime disabled when provider is disabled even with an authenticated session", () => {
@@ -308,6 +372,8 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.apiClient).toBeNull();
     expect(result.current.canReadGovernanceAdvisories).toBeUndefined();
     expect(result.current.canWriteGovernanceAudit).toBeUndefined();
+    expect(result.current.canReadFraudFeedback).toBeUndefined();
+    expect(result.current.canWriteFraudFeedback).toBeUndefined();
     expect(result.current.runtimeStatus).toBe("disabled");
   });
 });
