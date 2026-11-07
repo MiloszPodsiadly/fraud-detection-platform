@@ -1174,7 +1174,7 @@ paths:
   /api/v1/transactions/scored/{transactionId}/feedback:
     post:
       summary: Record bounded analyst fraud feedback for one scored transaction
-      description: Records one active analyst review outcome for an existing scored transaction. Requires fraud-feedback:write. A 201 response means the feedback record and write-action audit outbox intent are durable; audit publication may occur later. This feedback is an analyst review outcome and future evaluation signal only. It is not certified legal ground truth, payment authorization, automatic approve, automatic decline, automatic block, case creation, workflow execution, scoring mutation, recommendation mutation, model retraining, model promotion, threshold recommendation, dataset export, or ML evaluation. Duplicate POST for a transaction with existing active feedback returns 409 and does not overwrite the original record.
+      description: Records one active analyst review outcome for an existing scored transaction. Requires fraud-feedback:write. The scoringOccurrenceToken returned with scored detail is a bounded concurrency precondition for the occurrence reviewed; it is not authentication. If the authoritative occurrence changed after review, the request returns FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED with 409 before feedback or success-audit writes. A 201 response means the feedback record and write-action audit outbox intent are durable; audit publication may occur later. This feedback is an analyst review outcome and future evaluation signal only. It is not certified legal ground truth, payment authorization, automatic approve, automatic decline, automatic block, case creation, workflow execution, scoring mutation, recommendation mutation, model retraining, model promotion, threshold recommendation, dataset export, or ML evaluation. Duplicate POST for a transaction with existing active feedback returns FRAUD_FEEDBACK_ALREADY_RECORDED with 409 and does not overwrite the original record.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -3129,8 +3129,9 @@ components:
         - size
         - totalElements
         - totalPages
+        - totalElementsCapped
       additionalProperties: false
-      description: Lightweight scored transaction list page. Items do not expose engineIntelligence diagnostics.
+      description: Lightweight scored transaction list page. Filtered results are limited to the first 10,000 matches; totalElementsCapped is true only when a bounded 10,001-match probe confirms more results exist.
       properties:
         content:
           type: array
@@ -3148,6 +3149,8 @@ components:
         totalPages:
           type: integer
           minimum: 0
+        totalElementsCapped:
+          type: boolean
     MoneyResponse:
       type: object
       additionalProperties: false
@@ -3183,6 +3186,29 @@ components:
           nullable: true
         attributes:
           $ref: "#/components/schemas/GenericObject"
+    ScoredMerchantInfoResponse:
+      type: object
+      additionalProperties: false
+      description: Bounded merchant display context supplied with a scored transaction; it is not independently verified merchant risk.
+      properties:
+        merchantId:
+          type: string
+          nullable: true
+        merchantName:
+          type: string
+          nullable: true
+        merchantCategoryCode:
+          type: string
+          nullable: true
+        merchantCategory:
+          type: string
+          nullable: true
+        channel:
+          type: string
+          nullable: true
+        acquiringCountryCode:
+          type: string
+          nullable: true
     ScoredTransactionResponse:
       type: object
       additionalProperties: false
@@ -3209,10 +3235,15 @@ components:
           format: date-time
           pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           nullable: true
+        scoringOccurrenceToken:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          nullable: true
+          description: Opaque, non-authenticating version precondition for the displayed scored occurrence. It does not expose the underlying occurrence identity.
         transactionAmount:
           $ref: "#/components/schemas/MoneyResponse"
         merchantInfo:
-          $ref: "#/components/schemas/MerchantInfoResponse"
+          $ref: "#/components/schemas/ScoredMerchantInfoResponse"
         fraudScore:
           type: number
           nullable: true
@@ -3235,6 +3266,7 @@ components:
         - transactionId
         - engineIntelligence
         - analystRecommendation
+        - scoringOccurrenceToken
       properties:
         transactionId:
           type: string
@@ -3259,7 +3291,7 @@ components:
         transactionAmount:
           $ref: "#/components/schemas/MoneyResponse"
         merchantInfo:
-          $ref: "#/components/schemas/MerchantInfoResponse"
+          $ref: "#/components/schemas/ScoredMerchantInfoResponse"
         fraudScore:
           type: number
           nullable: true
@@ -3278,6 +3310,12 @@ components:
           $ref: "#/components/schemas/EngineIntelligenceResponse"
         analystRecommendation:
           $ref: "#/components/schemas/AnalystRecommendationResult"
+        scoringOccurrenceToken:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[0-9a-f]{64}$"
+          description: Deterministic opaque concurrency precondition derived from the canonical scoring occurrence identity. It is not an authentication credential and does not expose source-event identity or fingerprint.
     FraudFeedbackLabel:
       type: string
       enum: [CONFIRMED_FRAUD, CONFIRMED_LEGITIMATE, INCONCLUSIVE, NEEDS_MORE_INFO]
@@ -3324,11 +3362,11 @@ components:
         MERCHANT_CONFIRMED, FALSE_POSITIVE_PATTERN, ANALYST_CONFIRMED_LEGITIMATE.
         INCONCLUSIVE reason codes: INSUFFICIENT_EVIDENCE, ANALYST_INCONCLUSIVE.
         NEEDS_MORE_INFO reason codes: NEEDS_CUSTOMER_CONTACT, INSUFFICIENT_EVIDENCE, ANALYST_NEEDS_MORE_INFO.
-        At least one reason code is required. Empty reason code lists return 400.
+        At least one reason code is required. Empty reason code lists return 400. scoringOccurrenceToken must come from the scored detail the analyst reviewed; an occurrence mismatch returns 409 before writes.
         400 validation failures include decision/label mismatch, missing reason codes
         FRAUD_FEEDBACK_REASON_CODES_REQUIRED, unknown reason code such as UNKNOWN_REASON, reason-code/label mismatch
         FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH, unsafe notes, too many reason codes, and invalid reason code format.
-      required: [analystDecision, feedbackLabel, decisionReasonCodes]
+      required: [analystDecision, feedbackLabel, decisionReasonCodes, scoringOccurrenceToken]
       properties:
         analystDecision:
           $ref: "#/components/schemas/AnalystDecision"
@@ -3346,6 +3384,12 @@ components:
           nullable: true
           maxLength: 500
           description: Optional bounded analyst-readable note. Notes are not used for ML training or dataset export, and unsafe raw or internal terms are rejected.
+        scoringOccurrenceToken:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[0-9a-f]{64}$"
+          description: Required concurrency precondition from the scored detail reviewed by the analyst; it does not authenticate the caller.
     FraudFeedbackResponse:
       type: object
       additionalProperties: false
@@ -3359,6 +3403,7 @@ components:
         - feedbackStatus
         - createdAt
         - notesPresent
+        - scoringOccurrenceRelation
       properties:
         feedbackId:
           type: string
@@ -3396,6 +3441,10 @@ components:
         notesPresent:
           type: boolean
           description: Bounded notes are stored internally for analyst context only, but raw notes are not exposed in feedback responses.
+        scoringOccurrenceRelation:
+          type: string
+          enum: [CURRENT, PRIOR, UNKNOWN]
+          description: Server-derived relation between the immutable feedback snapshot and the currently authoritative scoring occurrence. Historical records without trustworthy occurrence identity are UNKNOWN.
         fraudScore:
           type: number
           nullable: true

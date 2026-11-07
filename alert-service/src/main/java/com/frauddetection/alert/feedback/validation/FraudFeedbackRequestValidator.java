@@ -4,6 +4,7 @@ import com.frauddetection.alert.feedback.AnalystDecision;
 import com.frauddetection.alert.feedback.CreateFraudFeedbackRequest;
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
 import com.frauddetection.alert.feedback.FraudFeedbackReasonCode;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -55,11 +56,15 @@ public class FraudFeedbackRequestValidator {
         List<String> reasonCodes = validateReasonCodes(request.decisionReasonCodes());
         validateReasonCodesMatchLabel(request.feedbackLabel(), reasonCodes);
         String notes = validateNotes(request.notes());
+        if (!ScoringOccurrenceToken.isValid(request.scoringOccurrenceToken())) {
+            throw badRequest("FRAUD_FEEDBACK_SCORING_OCCURRENCE_TOKEN_INVALID");
+        }
         return new ValidatedFraudFeedback(
                 request.analystDecision(),
                 request.feedbackLabel(),
                 reasonCodes,
-                notes
+                notes,
+                request.scoringOccurrenceToken()
         );
     }
 

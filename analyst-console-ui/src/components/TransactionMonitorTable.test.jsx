@@ -20,6 +20,26 @@ describe("TransactionMonitorTable alert recommendation", () => {
     expect(within(row).getByText(label)).toHaveClass("classificationPill", style);
     expect(row).not.toHaveTextContent(/\bLegitimate\b|\bApproved\b|fraud decision|payment decision/i);
   });
+
+  it("trims a safe merchant name for transaction list display", () => {
+    const item = transaction();
+    item.merchantInfo.merchantName = "  Northwind Books  ";
+
+    render(<TransactionMonitorTable transactions={[item]} />);
+
+    const row = screen.getByRole("row", { name: /txn-tristate/ });
+    expect(within(row).getByText("Northwind Books")).toBeInTheDocument();
+  });
+
+  it("renders an invalid scored timestamp as unavailable without crashing", () => {
+    const item = transaction();
+    item.scoredAt = "2026-02-30T10:00:00Z";
+
+    render(<TransactionMonitorTable transactions={[item]} />);
+
+    const row = screen.getByRole("row", { name: /txn-tristate/ });
+    expect(within(row).getByText("Not available")).toBeInTheDocument();
+  });
 });
 
 function transaction() {

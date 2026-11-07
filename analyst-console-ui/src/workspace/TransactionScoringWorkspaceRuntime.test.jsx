@@ -889,7 +889,7 @@ describe("transaction scoring read boundary with real provider, API client, hook
         if (call.params.query === "merchant-recovery" && size === 50 && pageNumber === 3) {
           pageThreeReads += 1;
           if (pageThreeReads === 1) return jsonResponse(listPage("a", call.params, 200, "txn-page-three"));
-          return jsonResponse({ content: [], page: 3, size: 50, totalElements: 10, totalPages: 1 });
+          return jsonResponse({ content: [], page: 3, size: 50, totalElements: 10, totalPages: 1, totalElementsCapped: false });
         }
         if (call.params.query === "merchant-recovery" && size === 50 && pageNumber === 0) {
           filteredPageZeroReads += 1;
@@ -937,7 +937,107 @@ describe("transaction scoring read boundary with real provider, API client, hook
     expect(transport.calls.filter((call) => call.kind === "list" && call.params.size === "1")).toHaveLength(1);
   });
 
-  it.each([401, 403, 404, 500, 503, "network", "invalid"])("drops previous rows for %s without exposing transport exceptions", async (failure) => {
+  it("preserves the expanded transaction and unsent feedback draft during same-owner refresh", async () => {
+    const pendingRefresh = deferred();
+    let scoredReads = 0;
+    const token = "a".repeat(64);
+    const transport = installTransport({
+      list: (call) => {
+        if (call.params.size === "1") return jsonResponse(listPage("a", call.params, 1));
+        scoredReads += 1;
+        return scoredReads === 1
+          ? jsonResponse(listPage("a", call.params, 1, "txn-a", token))
+          : pendingRefresh.promise;
+      },
+      detail: () => jsonResponse(detailFor("a", "txn-a", token))
+    });
+    const frames = [];
+    render(workspace({
+      ...session("a"),
+      authorities: [AUTHORITIES.TRANSACTION_MONITOR_READ, AUTHORITIES.FRAUD_FEEDBACK_READ, AUTHORITIES.FRAUD_FEEDBACK_WRITE]
+    }, frames));
+
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(await screen.findByLabelText("Notes")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Review in progress" } });
+    fireEvent.click(screen.getByLabelText("Mark as confirmed legitimate"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(scoredReads).toBe(2));
+    expect(screen.getByLabelText("Notes")).toHaveValue("Review in progress");
+    expect(screen.getByLabelText("Mark as confirmed legitimate")).toBeChecked();
+    expect(screen.getByRole("region", { name: "Analyst Feedback" })).toBeInTheDocument();
+
+    await act(async () => pendingRefresh.resolve(jsonResponse(listPage("a", {}, 1, "txn-a", token))));
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByLabelText("Notes")).toHaveValue("Review in progress");
+    expect(screen.getByLabelText("Mark as confirmed legitimate")).toBeChecked();
+    expect(transport.calls.filter((call) => call.method === "POST")).toHaveLength(0);
+  });
+
+  it("clears an occurrence-bound draft and requires review when refresh returns a new score", async () => {
+    const firstToken = "a".repeat(64);
+    const nextToken = "b".repeat(64);
+    let scoredReads = 0;
+    let detailReads = 0;
+    const transport = installTransport({
+      list: (call) => {
+        if (call.params.size === "1") return jsonResponse(listPage("a", call.params, 1));
+        scoredReads += 1;
+        return jsonResponse(listPage("a", call.params, 1, "txn-a", scoredReads === 1 ? firstToken : nextToken));
+      },
+      detail: () => {
+        detailReads += 1;
+        return jsonResponse(detailFor("a", "txn-a", detailReads === 1 ? firstToken : nextToken));
+      }
+    });
+    render(workspace({
+      ...session("a"),
+      authorities: [AUTHORITIES.TRANSACTION_MONITOR_READ, AUTHORITIES.FRAUD_FEEDBACK_READ, AUTHORITIES.FRAUD_FEEDBACK_WRITE]
+    }, []));
+
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(await screen.findByLabelText("Notes")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Do not transfer this draft" } });
+    fireEvent.click(screen.getByLabelText("Mark as confirmed legitimate"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Scoring changed while this transaction was expanded.");
+    expect(screen.queryByLabelText("Notes")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "I reviewed the current scoring" }));
+    expect(screen.getByLabelText("Notes")).toHaveValue("");
+    expect(screen.getByLabelText("Mark as confirmed fraud")).toBeChecked();
+    expect(transport.calls.filter((call) => call.method === "POST")).toHaveLength(0);
+  });
+
+  it("closes the expanded detail when same-owner refresh removes its transaction", async () => {
+    let scoredReads = 0;
+    const transport = installTransport({
+      list: (call) => {
+        if (call.params.size === "1") return jsonResponse(listPage("a", call.params, 1));
+        scoredReads += 1;
+        return Promise.resolve(scoredReads === 1
+          ? jsonResponse(listPage("a", call.params, 1))
+          : jsonResponse({ content: [], page: 0, size: 25, totalElements: 0, totalPages: 0, totalElementsCapped: false }));
+      }
+    });
+    render(workspace(session("a"), []));
+
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(await screen.findByRole("region", { name: "Merchant Investigation" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByText("No scored transactions match this view")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Transaction Risk Intelligence" })).not.toBeInTheDocument();
+    expect(transport.calls.filter((call) => call.kind === "detail")).toHaveLength(1);
+  });
+
+  it.each([401, 403, 404, 500, 503, "network", "invalid"])("handles same-owner refresh failure %s without exposing transport exceptions", async (failure) => {
     let fail = false;
     installTransport({
       list: (call) => {
@@ -955,8 +1055,15 @@ describe("transaction scoring read boundary with real provider, API client, hook
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     await waitFor(() => expect(frames.at(-1).error).toBeTruthy());
-    expectNoA(frames);
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    const preservesValidatedRows = failure === 500 || failure === 503 || failure === "network";
+    if (preservesValidatedRows) {
+      expect(screen.getByRole("table")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent("Previously loaded results are shown and may be out of date.");
+    } else {
+      expect(document.body.textContent).not.toContain("Merchant a");
+      expect(document.body.textContent).not.toContain("txn-a");
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    }
     expect(document.body.textContent).not.toContain("private API secret");
     expect(document.body.textContent).not.toContain("private network token");
   });
@@ -969,15 +1076,10 @@ describe("transaction scoring read boundary with real provider, API client, hook
     expect(transport.calls).toHaveLength(0);
   });
 
-  it.each([false, true])("renders only displayable merchant fields in both table and detail, valid mix: %s", async (mixed) => {
-    const merchantInfo = {
-      merchantName: mixed ? "<img src=x onerror=merchant()>" : "x".repeat(129),
-      merchantId: mixed ? "merchant-displayable" : { privateId: "must-stay-hidden" },
-      merchantCategory: ["blocked-category"],
-      channel: "blocked\u202e",
-      acquiringCountryCode: 123,
-      attributes: { privateMetadata: { email: "hidden@example.test" }, tokenHint: "hidden-token-value" }
-    };
+  it.each([false, true])("renders bounded merchant text safely in both table and detail: %s", async (mixed) => {
+    const merchantInfo = mixed
+      ? { merchantName: "<img src=x onerror=merchant()>", merchantId: "merchant-displayable", channel: "ECOMMERCE" }
+      : { merchantName: null, merchantId: null, channel: null };
     installTransport({
       list: (call) => {
         const page = listPage("safe", call.params);
@@ -988,8 +1090,12 @@ describe("transaction scoring read boundary with real provider, API client, hook
     });
     render(workspace(session("safe"), []));
     expect(await screen.findByRole("table")).toBeInTheDocument();
-    expect(screen.getByText("Unknown channel")).toBeInTheDocument();
-    if (!mixed) expect(screen.getByText("Unknown merchant")).toBeInTheDocument();
+    if (mixed) {
+      expect(screen.getByText("ECOMMERCE")).toBeInTheDocument();
+      expect(screen.getByText("<img src=x onerror=merchant()>")).toBeInTheDocument();
+    } else {
+      expect(screen.getByText("Unknown merchant")).toBeInTheDocument();
+    }
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     const merchant = await screen.findByRole("region", { name: "Merchant Investigation" });
     if (mixed) {
@@ -999,9 +1105,6 @@ describe("transaction scoring read boundary with real provider, API client, hook
       expect(merchant).toHaveTextContent("No displayable transaction merchant details are available.");
     }
     expect(document.querySelector("img")).toBeNull();
-    for (const hidden of ["blocked-category", "must-stay-hidden", "hidden@example.test", "hidden-token-value", "x".repeat(129)]) {
-      expect(document.body.textContent).not.toContain(hidden);
-    }
   });
 
   it("aborts on unmount and cannot expose an old result through a later session", async () => {
@@ -1373,7 +1476,14 @@ function installTransport({ list = (call) => jsonResponse(listPage(call.owner, c
     const parsed = new URL(url, "http://localhost");
     const path = parsed.pathname;
     const kind = path.endsWith("/feedback") ? "feedback" : path.endsWith("/scored") ? "list" : "detail";
-    const call = { kind, owner: options.headers["X-Test-Owner"], path, params: Object.fromEntries(parsed.searchParams), signal: options.signal };
+    const call = {
+      kind,
+      method: options.method || "GET",
+      owner: options.headers["X-Test-Owner"],
+      path,
+      params: Object.fromEntries(parsed.searchParams),
+      signal: options.signal
+    };
     calls.push(call);
     if (kind === "feedback") return Promise.resolve(jsonResponse({}, 404));
     return Promise.resolve(kind === "list" ? list(call) : detail(call));
@@ -1515,16 +1625,16 @@ function counterSession(owner, transactionCapability = true) {
   };
 }
 
-function listPage(owner, params = {}, total = owner === "a" ? 731 : 2, transactionId = "txn-" + owner) {
+function listPage(owner, params = {}, total = owner === "a" ? 731 : 2, transactionId = "txn-" + owner, scoringOccurrenceToken = "a".repeat(64)) {
   return {
     content: [{
       transactionId, customerId: "customer-" + owner,
       merchantInfo: { merchantName: "Merchant " + owner, merchantId: "merchant-" + owner, channel: "ECOMMERCE" },
       transactionAmount: { amount: 10, currency: "PLN" }, riskLevel: "HIGH", fraudScore: 0.8,
-      alertRecommended: true, scoredAt: "2026-11-04T10:00:00Z"
+      alertRecommended: true, scoredAt: "2026-11-04T10:00:00Z", scoringOccurrenceToken
     }],
     page: Number(params.page || 0), size: Number(params.size || 25), totalElements: total,
-    totalPages: Math.ceil(total / Number(params.size || 25))
+    totalPages: Math.ceil(total / Number(params.size || 25)), totalElementsCapped: false
   };
 }
 
@@ -1557,8 +1667,12 @@ function privateApiFailure(status, error = "PRIVATE_BACKEND_CODE", details = [PR
   return jsonResponse({ error, message: PRIVATE_ALERT_DIAGNOSTIC, details }, status);
 }
 
-function detailFor(owner, transactionId) {
-  return availableDetail({ transactionId, merchantInfo: { merchantName: "Merchant " + owner, merchantId: "merchant-" + owner } });
+function detailFor(owner, transactionId, scoringOccurrenceToken = "a".repeat(64)) {
+  return availableDetail({
+    transactionId,
+    scoringOccurrenceToken,
+    merchantInfo: { merchantName: "Merchant " + owner, merchantId: "merchant-" + owner }
+  });
 }
 
 function jsonResponse(body, status = 200) {

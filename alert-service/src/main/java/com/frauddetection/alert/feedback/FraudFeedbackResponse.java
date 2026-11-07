@@ -41,7 +41,8 @@ public record FraudFeedbackResponse(
         AnalystRecommendation analystRecommendation,
         String analystRecommendationVersion,
         Instant analystRecommendationGeneratedAt,
-        List<String> analystRecommendationReasonCodes
+        List<String> analystRecommendationReasonCodes,
+        FraudFeedbackOccurrenceRelation scoringOccurrenceRelation
 ) {
     public FraudFeedbackResponse {
         decisionReasonCodes = immutable(decisionReasonCodes);

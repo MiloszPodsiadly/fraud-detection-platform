@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { validateFraudFeedbackRequest } from "./fraudFeedbackValidation.js";
 
+const SCORING_OCCURRENCE_TOKEN = "a".repeat(64);
+
 describe("fraudFeedbackValidation", () => {
   it("accepts bounded analyst feedback request", () => {
     expect(validateFraudFeedbackRequest({
       analystDecision: "MARKED_FRAUD",
       feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: SCORING_OCCURRENCE_TOKEN,
       decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD"],
       notes: "Customer confirmed fraud"
     })).toMatchObject({ valid: true });
@@ -29,7 +32,8 @@ describe("fraudFeedbackValidation", () => {
     ["inconclusive decision with legitimate label", { analystDecision: "MARKED_INCONCLUSIVE", feedbackLabel: "CONFIRMED_LEGITIMATE" }, "FEEDBACK_DECISION_LABEL_MISMATCH"],
     ["more info decision with fraud label", { analystDecision: "REQUESTED_MORE_INFO", feedbackLabel: "CONFIRMED_FRAUD" }, "FEEDBACK_DECISION_LABEL_MISMATCH"]
   ])("rejects %s", (_name, request, reason) => {
-    expect(validateFraudFeedbackRequest(request)).toEqual({ valid: false, reason });
+    expect(validateFraudFeedbackRequest({ scoringOccurrenceToken: SCORING_OCCURRENCE_TOKEN, ...request }))
+      .toEqual({ valid: false, reason });
   });
 
   it.each([
@@ -41,6 +45,7 @@ describe("fraudFeedbackValidation", () => {
     expect(validateFraudFeedbackRequest({
       analystDecision,
       feedbackLabel,
+      scoringOccurrenceToken: SCORING_OCCURRENCE_TOKEN,
       decisionReasonCodes: [reasonCode]
     })).toMatchObject({ valid: true });
   });
@@ -49,6 +54,7 @@ describe("fraudFeedbackValidation", () => {
     expect(validateFraudFeedbackRequest({
       analystDecision: "MARKED_FRAUD",
       feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: SCORING_OCCURRENCE_TOKEN,
       decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD", "ANALYST_CONFIRMED_FRAUD"]
     })).toMatchObject({ valid: true });
   });
@@ -57,6 +63,7 @@ describe("fraudFeedbackValidation", () => {
     expect(validateFraudFeedbackRequest({
       analystDecision: "MARKED_LEGITIMATE",
       feedbackLabel: "CONFIRMED_LEGITIMATE",
+      scoringOccurrenceToken: SCORING_OCCURRENCE_TOKEN,
       decisionReasonCodes: ["CUSTOMER_CONFIRMED_LEGITIMATE", "ANALYST_CONFIRMED_LEGITIMATE"]
     })).toMatchObject({ valid: true });
   });
@@ -70,6 +77,7 @@ describe("fraudFeedbackValidation", () => {
     expect(validateFraudFeedbackRequest({
       analystDecision,
       feedbackLabel,
+      scoringOccurrenceToken: SCORING_OCCURRENCE_TOKEN,
       decisionReasonCodes: [reasonCode]
     })).toMatchObject({ valid: true });
   });
@@ -86,4 +94,16 @@ describe("fraudFeedbackValidation", () => {
       decisionReasonCodes: [reasonCode]
     })).toEqual({ valid: false, reason: "REASON_CODE_LABEL_MISMATCH" });
   });
+
+  it.each([undefined, null, "A".repeat(64), "a".repeat(63), "a".repeat(65)])(
+    "rejects invalid scoring occurrence token %s",
+    (scoringOccurrenceToken) => {
+      expect(validateFraudFeedbackRequest({
+        analystDecision: "MARKED_FRAUD",
+        feedbackLabel: "CONFIRMED_FRAUD",
+        decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+        scoringOccurrenceToken
+      })).toEqual({ valid: false, reason: "INVALID_SCORING_OCCURRENCE_TOKEN" });
+    }
+  );
 });

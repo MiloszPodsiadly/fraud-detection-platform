@@ -17,6 +17,7 @@ export function TransactionScoringWorkspacePage({
   transactionPage,
   transactionPageRequest = INITIAL_FILTER_REQUEST,
   isLoading,
+  isStale = false,
   error,
   onRetry,
   onTransactionFiltersChange = () => {},
@@ -51,7 +52,7 @@ export function TransactionScoringWorkspacePage({
             Recent scored transactions include both legitimate traffic and suspicious cases.
           </p>
         </div>
-        <button className="secondaryButton" type="button" onClick={canRead ? onRetry : undefined} disabled={!canRead}>
+        <button className="secondaryButton" type="button" onClick={canRead ? onRetry : undefined} disabled={!canRead || isLoading}>
           Refresh
         </button>
       </div>
@@ -66,15 +67,21 @@ export function TransactionScoringWorkspacePage({
             viewIdentity={viewIdentity}
             onApply={onTransactionFiltersChange}
           />
-          {isLoading && <LoadingPanel label="Loading scored transactions..." />}
-          {!isLoading && error && <ErrorState error={error} onRetry={onRetry} />}
+          {isLoading && <LoadingPanel label={isStale ? "Refreshing scored transactions; showing the last loaded results." : "Loading scored transactions..."} />}
+          {!isLoading && error && transactions.length === 0 && <ErrorState error={error} onRetry={onRetry} />}
+          {!isLoading && error && transactions.length > 0 && (
+            <div className="formError" role="alert">
+              <p>Refresh failed. Previously loaded results are shown and may be out of date.</p>
+              <button className="secondaryButton compactButton" type="button" onClick={onRetry}>Retry refresh</button>
+            </div>
+          )}
           {!isLoading && !error && transactions.length === 0 && (
             <EmptyState
               title="No scored transactions match this view"
               message="Adjust filters or generate synthetic traffic to populate transaction monitoring."
             />
           )}
-          {!isLoading && !error && transactions.length > 0 && (
+          {transactions.length > 0 && (
             <TransactionMonitorTable
               transactions={transactions}
               expandedTransactionId={expandedTransactionId}
@@ -82,6 +89,7 @@ export function TransactionScoringWorkspacePage({
               renderTransactionDetail={(transaction, detailPanelId) => (
                 <TransactionRiskIntelligencePanel
                   transactionId={transaction.transactionId}
+                  scoringOccurrenceToken={transaction.scoringOccurrenceToken}
                   apiClient={apiClient}
                   enabled={canReadTransactions === true}
                   panelId={detailPanelId}
@@ -96,8 +104,11 @@ export function TransactionScoringWorkspacePage({
                 size={transactionPage.size}
                 totalPages={transactionPage.totalPages}
                 totalElements={transactionPage.totalElements}
-                label={hasAppliedTransactionFilters(transactionPageRequest) ? "filtered scored transactions" : "scored transactions"}
-                totalLabel={hasAppliedTransactionFilters(transactionPageRequest) ? "capped" : "total"}
+                totalElementsCapped={transactionPage.totalElementsCapped === true}
+                label={transactionPage.totalElementsCapped === true
+                  ? "filtered matches"
+                  : hasAppliedTransactionFilters(transactionPageRequest) ? "filtered scored transactions" : "scored transactions"}
+                totalLabel="total"
                 onPageChange={onTransactionPageChange}
                 onSizeChange={onTransactionPageSizeChange}
               />

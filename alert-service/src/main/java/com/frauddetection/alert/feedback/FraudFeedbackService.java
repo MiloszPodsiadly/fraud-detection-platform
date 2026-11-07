@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
 import com.frauddetection.alert.feedback.assembly.FraudFeedbackRecordAssembler;
 import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnapshotter;
 import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
@@ -103,7 +104,7 @@ public class FraudFeedbackService {
             FraudFeedbackRecord saved = transactionRunner.runLocalCommit(
                     () -> createWithAuthoritativeSnapshot(transactionId, validated, actor)
             );
-            return mapper.toResponse(saved);
+            return mapper.toResponse(saved, FraudFeedbackOccurrenceRelation.CURRENT);
         } catch (DuplicateKeyException exception) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED", exception);
         }
@@ -116,6 +117,12 @@ public class FraudFeedbackService {
     ) {
         ScoredTransaction transaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
         ScoringOccurrenceOwnership ownership = requireAuthoritativeOccurrence(transaction);
+        if (!ScoringOccurrenceToken.from(ownership).equals(validated.scoringOccurrenceToken())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"
+            );
+        }
         String boundedTransactionId = transaction.transactionId();
         if (repository.existsByTransactionId(boundedTransactionId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED");
@@ -152,8 +159,20 @@ public class FraudFeedbackService {
         ScoredTransaction transaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
         String boundedTransactionId = transaction.transactionId();
         return repository.findByTransactionId(boundedTransactionId)
-                .map(mapper::toResponse)
+                .map(record -> mapper.toResponse(record, occurrenceRelation(record, transaction)))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "FRAUD_FEEDBACK_NOT_FOUND"));
+    }
+
+    private FraudFeedbackOccurrenceRelation occurrenceRelation(FraudFeedbackRecord record, ScoredTransaction transaction) {
+        ScoringOccurrenceOwnership current = transaction == null ? null : transaction.scoringOccurrenceOwnership();
+        if (current == null) {
+            return FraudFeedbackOccurrenceRelation.UNKNOWN;
+        }
+        return record.scoringOccurrenceOwnership()
+                .map(saved -> saved.equals(current)
+                        ? FraudFeedbackOccurrenceRelation.CURRENT
+                        : FraudFeedbackOccurrenceRelation.PRIOR)
+                .orElse(FraudFeedbackOccurrenceRelation.UNKNOWN);
     }
 
     private void persistAuditIntent(FraudFeedbackRecord saved) {

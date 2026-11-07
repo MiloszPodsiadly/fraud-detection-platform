@@ -201,7 +201,7 @@ describe("App", () => {
       };
     });
     listAlerts.mockResolvedValue({ content: [], totalElements: 1, totalPages: 1, page: 0, size: 10 });
-    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25, totalElementsCapped: false });
     refreshSession.mockResolvedValue(authenticatedSession());
     providerState.value = {
       ...providerState.value,
@@ -251,7 +251,7 @@ describe("App", () => {
       getRequestHeaders: () => ({ Authorization: "Bearer account-b-token" })
     };
     listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
-    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25, totalElementsCapped: false });
 
     render(<App />);
 
@@ -297,7 +297,7 @@ describe("App", () => {
       getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
     };
     listAlerts.mockResolvedValue({ content: [], totalElements: 1, totalPages: 1, page: 0, size: 10 });
-    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25, totalElementsCapped: false });
 
     render(<App />);
 
@@ -330,7 +330,7 @@ describe("App", () => {
         .mockReturnValue({ Authorization: "Bearer token-new" })
     };
     listAlerts.mockResolvedValue({ content: [], totalElements: 1, totalPages: 1, page: 0, size: 10 });
-    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 3, totalPages: 1, page: 0, size: 25, totalElementsCapped: false });
 
     render(<App />);
 
@@ -354,7 +354,7 @@ describe("App", () => {
       getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
     };
     listAlerts.mockRejectedValue(new Error("alerts counter unavailable"));
-    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 9, totalPages: 1, page: 0, size: 25 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 9, totalPages: 1, page: 0, size: 25, totalElementsCapped: false });
 
     render(<App />);
 
@@ -372,7 +372,7 @@ describe("App", () => {
       beginLogout: vi.fn().mockResolvedValue(undefined)
     };
     listAlerts.mockRejectedValue(new Error("alerts counter unavailable"));
-    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 9, totalPages: 1, page: 0, size: 25 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 9, totalPages: 1, page: 0, size: 25, totalElementsCapped: false });
 
     render(<App />);
 
@@ -392,7 +392,7 @@ describe("App", () => {
       getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
     };
     listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
-    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25, totalElementsCapped: false });
 
     render(<App />);
 
@@ -411,7 +411,7 @@ describe("App", () => {
       getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
     };
     listAlerts.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 10 });
-    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25 });
+    listScoredTransactions.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, page: 0, size: 25, totalElementsCapped: false });
 
     render(<App />);
 
@@ -1060,7 +1060,8 @@ function transactionPage(transactionId) {
     totalElements: 1,
     totalPages: 1,
     page: 0,
-    size: 25
+    size: 25,
+    totalElementsCapped: false
   };
 }
 

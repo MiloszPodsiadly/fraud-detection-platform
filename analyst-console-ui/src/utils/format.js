@@ -1,4 +1,5 @@
 import { isValidMoneyResponse } from "../transactions/moneyResponse.js";
+import { isValidScoredTransactionTimestamp } from "../transactions/scoredTransactionTimestamp.js";
 
 export function formatDateTime(value) {
   if (!value) {
@@ -23,6 +24,9 @@ export function formatDateTime(value) {
 function hasPossibleIsoCalendarDate(value) {
   if (typeof value !== "string") {
     return true;
+  }
+  if (/^\d{4}-\d{2}-\d{2}T/.test(value) && !isValidScoredTransactionTimestamp(value)) {
+    return false;
   }
   const match = /^(\d{4})-(\d{2})-(\d{2})(?:T|$)/.exec(value);
   if (!match) {

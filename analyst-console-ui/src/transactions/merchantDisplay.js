@@ -12,7 +12,13 @@ export function merchantDisplayValue(merchantInfo, field) {
     return null;
   }
   const value = merchantInfo[field];
-  return typeof value === "string" && value.length > 0 && value.length <= MAX_MERCHANT_DISPLAY_LENGTH
-    && value.trim() === value && !CONTROL_CHARACTERS.test(value) && !BIDI_CONTROLS.test(value)
-    ? value : null;
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_MERCHANT_DISPLAY_LENGTH
+    || CONTROL_CHARACTERS.test(value) || BIDI_CONTROLS.test(value)) {
+    return null;
+  }
+  if (field === "merchantName") {
+    const normalizedName = value.trim();
+    return normalizedName.length > 0 ? normalizedName : null;
+  }
+  return value.trim() === value ? value : null;
 }

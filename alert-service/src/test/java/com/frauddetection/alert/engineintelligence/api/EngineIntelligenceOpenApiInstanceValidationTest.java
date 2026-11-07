@@ -7,8 +7,8 @@ import com.frauddetection.alert.api.EngineIntelligenceEngineResponse;
 import com.frauddetection.alert.api.EngineIntelligenceEngineStatusResponse;
 import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
-import com.frauddetection.alert.api.MerchantInfoResponse;
 import com.frauddetection.alert.api.MoneyResponse;
+import com.frauddetection.alert.api.ScoredMerchantInfoResponse;
 import com.frauddetection.alert.api.ScoredTransactionDetailResponse;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceDiagnosticSignalProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProjection;
@@ -464,13 +464,14 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 Instant.parse("2026-06-18T10:00:00Z"),
                 Instant.parse("2026-06-18T10:00:01Z"),
                 new MoneyResponse(new BigDecimal("100.00"), "USD"),
-                new MerchantInfoResponse("merchant-1", "Store", "5411", "GROCERY", "US", "ECOMMERCE", false, Map.of()),
+                new ScoredMerchantInfoResponse("merchant-1", "Store", "5411", "GROCERY", "ECOMMERCE", "US"),
                 0.91d,
                 RiskLevel.CRITICAL,
                 true,
                 List.of("HIGH_VELOCITY"),
                 engineIntelligence,
-                analystRecommendation()
+                analystRecommendation(),
+                "b".repeat(64)
         );
     }
 

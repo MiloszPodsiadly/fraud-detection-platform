@@ -164,6 +164,44 @@ describe("TransactionScoringWorkspacePage", () => {
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
   });
 
+  it("labels capped filtered totals as an upper bound", () => {
+    render(
+      <TransactionScoringWorkspacePage
+        canReadTransactions
+        transactionPage={{ content: [], page: 0, size: 25, totalElements: 10_000, totalPages: 400, totalElementsCapped: true }}
+        transactionPageRequest={{ page: 0, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+      />
+    );
+
+    expect(screen.getByText("Up to 10,000")).toBeInTheDocument();
+    expect(screen.getByText("filtered matches")).toBeInTheDocument();
+  });
+
+  it("labels exact filtered totals as exact", () => {
+    render(
+      <TransactionScoringWorkspacePage
+        canReadTransactions
+        transactionPage={{ content: [], page: 0, size: 25, totalElements: 82, totalPages: 4, totalElementsCapped: false }}
+        transactionPageRequest={{ page: 0, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+      />
+    );
+
+    expect(screen.getByText("82")).toBeInTheDocument();
+    expect(screen.getByText("total filtered scored transactions")).toBeInTheDocument();
+  });
+
   it.each([false, undefined])("closes the whole page when read capability is %s even with a stale page", (capability) => {
     const retry = vi.fn();
     render(

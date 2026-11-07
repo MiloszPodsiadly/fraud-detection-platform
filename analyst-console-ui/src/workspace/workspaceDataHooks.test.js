@@ -540,6 +540,7 @@ function page(content, overrides = {}) {
     totalPages: 1,
     page: 0,
     size: 25,
+    totalElementsCapped: false,
     ...overrides
   };
 }

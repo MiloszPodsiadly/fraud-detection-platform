@@ -6,6 +6,7 @@ import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -14,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 
 @Document(collection = "scored_transactions")
+@CompoundIndex(name = "scored_transactions_scored_at_id_idx", def = "{'scoredAt': -1, '_id': -1}")
 public class ScoredTransactionDocument {
 
     @Id

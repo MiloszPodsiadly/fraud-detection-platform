@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isAbortError } from "../api/apiErrors.js";
 import { isValidMoneyResponse } from "../transactions/moneyResponse.js";
+import { isValidScoredTransactionTimestamp } from "../transactions/scoredTransactionTimestamp.js";
 import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 const INITIAL_TRANSACTION_PAGE = {
-  content: [], totalElements: 0, totalPages: 0, page: 0, size: 25
+  content: [], totalElements: 0, totalPages: 0, page: 0, size: 25, totalElementsCapped: false
 };
 const INITIAL_TRANSACTION_REQUEST = {
   page: 0, size: 25, query: "", riskLevel: "ALL", status: "ALL"
@@ -29,6 +30,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
   const request = requestState.owner === owner ? requestState.request : INITIAL_TRANSACTION_REQUEST;
   const identity = useMemo(() => ({ owner, request }), [owner, request]);
   const [state, setState] = useState({ identity: null, page: INITIAL_TRANSACTION_PAGE, isLoading: false, error: null });
+  const stateRef = useRef(state);
   const currentIdentityRef = useRef(null);
   const activeRequestRef = useRef(null);
   const requestSeqRef = useRef(0);
@@ -48,6 +50,10 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
     };
   }, [cancel, identity]);
 
+  useLayoutEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   const setRequest = useCallback((update) => {
     if (currentIdentityRef.current?.owner !== owner || !owner.enabled || !owner.apiClient) {
       return;
@@ -59,7 +65,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
     });
   }, [owner]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ preserveCurrentPage = false } = {}) => {
     const current = currentIdentityRef.current;
     if (current?.owner !== owner || !owner.enabled || !owner.apiClient) {
       return null;
@@ -68,9 +74,12 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
     const controller = new AbortController();
     const sequence = ++requestSeqRef.current;
     activeRequestRef.current = { identity: current, controller, sequence };
+    const previousState = stateRef.current;
+    const canPreservePage = preserveCurrentPage && previousState.identity === current;
+    const previousPage = canPreservePage ? previousState.page : INITIAL_TRANSACTION_PAGE;
     const isCurrent = () => currentIdentityRef.current === current
       && requestSeqRef.current === sequence && !controller.signal.aborted;
-    setState({ identity: current, page: INITIAL_TRANSACTION_PAGE, isLoading: true, error: null });
+    setState({ identity: current, page: previousPage, isLoading: true, error: null, isStale: canPreservePage });
     try {
       const nextPage = await current.owner.apiClient.listScoredTransactions(current.request, { signal: controller.signal });
       if (!isCurrent()) {
@@ -83,13 +92,23 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
         setRequest({ ...current.request, page: 0 });
         return null;
       }
-      setState({ identity: current, page: nextPage, isLoading: false, error: null });
+      setState({ identity: current, page: nextPage, isLoading: false, error: null, isStale: false });
       return nextPage;
     } catch (apiError) {
       if (!isCurrent() || isAbortError(apiError)) {
         return null;
       }
-      setState({ identity: current, page: INITIAL_TRANSACTION_PAGE, isLoading: false, error: safeReadError(apiError) });
+      const status = apiError?.status;
+      const transientFailure = status == null || status === 408 || status === 429 || status >= 500;
+      const retainValidatedPage = canPreservePage && transientFailure
+        && apiError?.message !== "INVALID_SCORED_TRANSACTION_PAGE";
+      setState({
+        identity: current,
+        page: retainValidatedPage ? previousPage : INITIAL_TRANSACTION_PAGE,
+        isLoading: false,
+        error: safeReadError(apiError),
+        isStale: retainValidatedPage
+      });
       return null;
     } finally {
       if (isCurrent()) {
@@ -120,6 +139,7 @@ export function useScoredTransactionStream({ enabled = true, session, authProvid
     request,
     isLoading: canRequest && (!ownsState || state.isLoading),
     error: ownsState && canRequest ? state.error : null,
+    isStale: ownsState && canRequest ? state.isStale === true : false,
     viewIdentity,
     setRequest,
     refresh
@@ -144,14 +164,24 @@ function validPage(value, request) {
   if (!isRecord(value)) {
     return false;
   }
+  const offset = request.page * request.size;
+  const filtered = Boolean(request.query)
+    || request.riskLevel !== "ALL"
+    || request.status !== "ALL";
+  const capped = value.totalElementsCapped === true;
   if (!Array.isArray(value.content)
+    || !Number.isSafeInteger(offset)
     || value.content.length > request.size
     || !Number.isSafeInteger(value.page) || value.page !== request.page
     || !Number.isSafeInteger(value.size) || value.size !== request.size
     || !Number.isSafeInteger(value.totalElements) || value.totalElements < 0
     || !Number.isSafeInteger(value.totalPages) || value.totalPages < 0
+    || typeof value.totalElementsCapped !== "boolean"
+    || (filtered && value.totalElements > 10_000)
+    || (capped && (!filtered || value.totalElements !== 10_000))
+    || (filtered && offset >= 10_000 && value.content.length > 0)
     || value.totalPages !== Math.ceil(value.totalElements / request.size)
-    || (value.content.length > 0 && value.totalElements < request.page * request.size + value.content.length)
+    || (value.content.length > 0 && value.totalElements < offset + value.content.length)
     || !value.content.every(validRow)) {
     return false;
   }
@@ -168,6 +198,7 @@ function validRow(row) {
   return isRecord(row)
     && typeof row.transactionId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(row.transactionId)
     && optionalText(row.customerId)
+    && validMerchantInfo(row.merchantInfo)
     && (row.riskLevel == null || ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(row.riskLevel))
     && (row.fraudScore == null || (
       typeof row.fraudScore === "number"
@@ -176,8 +207,24 @@ function validRow(row) {
       && row.fraudScore <= 1
     ))
     && (row.alertRecommended == null || typeof row.alertRecommended === "boolean")
-    && (row.scoredAt == null || (optionalText(row.scoredAt) && Number.isFinite(Date.parse(row.scoredAt))))
+    && (row.scoringOccurrenceToken == null
+      || (typeof row.scoringOccurrenceToken === "string" && /^[0-9a-f]{64}$/.test(row.scoringOccurrenceToken)))
+    && (row.scoredAt == null || isValidScoredTransactionTimestamp(row.scoredAt))
     && isValidMoneyResponse(row.transactionAmount);
+}
+
+function validMerchantInfo(value) {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  const allowedKeys = [
+    "merchantId", "merchantName", "merchantCategoryCode", "merchantCategory", "channel", "acquiringCountryCode"
+  ];
+  return Object.keys(value).every((key) => allowedKeys.includes(key))
+    && allowedKeys.every((key) => optionalText(value[key]));
 }
 
 function isRecord(value) {

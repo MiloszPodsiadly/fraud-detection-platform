@@ -66,25 +66,46 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
     }
 
     @Override
-    public Page<ScoredTransaction> listScoredTransactions(Pageable pageable, ScoredTransactionSearchCriteria criteria) {
+    public ScoredTransactionSearchResult listScoredTransactions(Pageable pageable, ScoredTransactionSearchCriteria criteria) {
         if (criteria == null || !criteria.hasFilters()) {
-            return listScoredTransactions(pageable);
+            return new ScoredTransactionSearchResult(listScoredTransactions(pageable), false);
         }
 
-        Query query = buildQuery(criteria).with(pageable);
-        List<ScoredTransaction> content = mongoTemplate.find(query, ScoredTransactionDocument.class).stream()
-                .map(mapper::toDomain)
-                .toList();
-        long total = cappedTotal(criteria);
-        return new PageImpl<>(content, pageable, total);
+        SearchCount searchCount = cappedTotal(criteria);
+        long offset = (long) pageable.getPageNumber() * pageable.getPageSize();
+        List<ScoredTransaction> content = offset >= ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT
+                ? List.of()
+                : findFilteredPage(criteria, pageable, (int) Math.min(
+                        pageable.getPageSize(),
+                        ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT - offset
+                ));
+        Page<ScoredTransaction> page = new PageImpl<>(content, pageable, searchCount.totalElements());
+        return new ScoredTransactionSearchResult(page, searchCount.capped());
     }
 
-    private long cappedTotal(ScoredTransactionSearchCriteria criteria) {
+    private List<ScoredTransaction> findFilteredPage(
+            ScoredTransactionSearchCriteria criteria,
+            Pageable pageable,
+            int boundedPageSize
+    ) {
+        Query query = buildQuery(criteria).with(pageable).limit(boundedPageSize);
+        return mongoTemplate.find(query, ScoredTransactionDocument.class).stream()
+                .map(mapper::toDomain)
+                .toList();
+    }
+
+    private SearchCount cappedTotal(ScoredTransactionSearchCriteria criteria) {
         Query countProbe = buildQuery(criteria)
                 .limit(ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT + 1);
         countProbe.fields().include("_id");
         int boundedCount = mongoTemplate.find(countProbe, ScoredTransactionDocument.class).size();
-        return Math.min(boundedCount, ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT);
+        return new SearchCount(
+                Math.min(boundedCount, ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT),
+                boundedCount > ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT
+        );
+    }
+
+    private record SearchCount(long totalElements, boolean capped) {
     }
 
     private Query buildQuery(ScoredTransactionSearchCriteria criteria) {

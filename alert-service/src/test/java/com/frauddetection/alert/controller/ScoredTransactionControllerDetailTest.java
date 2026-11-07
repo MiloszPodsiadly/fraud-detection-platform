@@ -2,6 +2,7 @@ package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
@@ -15,6 +16,7 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ScoredTransactionNotFoundException;
 import com.frauddetection.alert.service.ScoredTransactionReadValidationException;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
+import com.frauddetection.alert.service.ScoredTransactionSearchResult;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
@@ -26,6 +28,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -42,12 +45,14 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -77,6 +82,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 class ScoredTransactionControllerDetailTest {
 
+    private static final String EXPECTED_SCORING_OCCURRENCE_TOKEN = ScoringOccurrenceToken.from(
+            ScoringOccurrenceOwnership.authoritative(
+                    "event-txn-1",
+                    Instant.parse("2026-06-18T10:00:01Z"),
+                    "a".repeat(64)
+            )
+    );
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -99,6 +112,7 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value("txn-1"))
                 .andExpect(jsonPath("$.fraudScore").value(0.91d))
+                .andExpect(jsonPath("$.scoringOccurrenceToken").value(EXPECTED_SCORING_OCCURRENCE_TOKEN))
                 .andExpect(jsonPath("$.engineIntelligence.status").value("DEGRADED"))
                 .andExpect(jsonPath("$.engineIntelligence.contractVersion").value(2))
                 .andExpect(jsonPath("$.engineIntelligence.comparison.agreementStatus").value("PARTIAL"))
@@ -118,6 +132,8 @@ class ScoredTransactionControllerDetailTest {
                 "rawMlRequest",
                 "rawMlResponse",
                 "rawEvidence",
+                "sourceEventFingerprint",
+                "a".repeat(64),
                 "groundTruth",
                 "trainingLabel",
                 "finalDecision",
@@ -259,9 +275,86 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].transactionId").value("txn-1"))
                 .andExpect(jsonPath("$.content[0].engineIntelligence").doesNotExist())
-                .andExpect(jsonPath("$.content[0].analystRecommendation").doesNotExist());
+                .andExpect(jsonPath("$.content[0].analystRecommendation").doesNotExist())
+                .andExpect(jsonPath("$.content[0].scoringOccurrenceToken").value(EXPECTED_SCORING_OCCURRENCE_TOKEN))
+                .andExpect(jsonPath("$.totalElementsCapped").value(false));
 
         verify(engineIntelligenceReadService, org.mockito.Mockito.never()).read(any());
+    }
+
+    @Test
+    void scoredListUsesTimestampAndUniqueTransactionIdSortKeys() throws Exception {
+        when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/v1/transactions/scored"))
+                .andExpect(status().isOk());
+
+        org.mockito.ArgumentCaptor<Pageable> pageable = org.mockito.ArgumentCaptor.forClass(Pageable.class);
+        verify(transactionMonitoringUseCase).listScoredTransactions(pageable.capture());
+        assertThat(pageable.getValue().getSort().stream())
+                .extracting(Sort.Order::getProperty, Sort.Order::getDirection)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("scoredAt", Sort.Direction.DESC),
+                        org.assertj.core.groups.Tuple.tuple("transactionId", Sort.Direction.DESC)
+                );
+    }
+
+    @Test
+    void filteredListReportsWhetherTheBoundedTotalProbeFoundMoreMatches() throws Exception {
+        var pageable = org.springframework.data.domain.PageRequest.of(0, 25);
+        var capped = new ScoredTransactionSearchResult(
+                new PageImpl<>(List.of(scoredTransaction("txn-capped")), pageable, 10_000), true
+        );
+        var exact = new ScoredTransactionSearchResult(
+                new PageImpl<>(List.of(scoredTransaction("txn-exact")), pageable, 10_000), false
+        );
+        when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class), any()))
+                .thenReturn(capped)
+                .thenReturn(exact);
+
+        mockMvc.perform(get("/api/v1/transactions/scored").queryParam("query", "merchant"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(10_000))
+                .andExpect(jsonPath("$.totalElementsCapped").value(true));
+        mockMvc.perform(get("/api/v1/transactions/scored").queryParam("query", "merchant"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(10_000))
+                .andExpect(jsonPath("$.totalElementsCapped").value(false));
+    }
+
+    @Test
+    void scoredListAndDetailOmitUnreviewedMerchantAttributes() throws Exception {
+        MerchantInfo merchantInfo = new MerchantInfo(
+                "merchant-1", "Market", "5411", "Grocery", "PL", "ECOMMERCE", true,
+                Map.of("opaqueSentinel", "PRIVATE_MERCHANT_ATTRIBUTE_SENTINEL",
+                        "nested", Map.of("rawDetail", "NESTED_MERCHANT_SENTINEL"))
+        );
+        ScoredTransaction transaction = scoredTransactionWithMerchant("txn-merchant", merchantInfo);
+        when(transactionMonitoringUseCase.listScoredTransactions(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(transaction)));
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-merchant")).thenReturn(transaction);
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-merchant"), any()))
+                .thenReturn(EngineIntelligenceReadModel.notProjected("txn-merchant"));
+
+        String listJson = mockMvc.perform(get("/api/v1/transactions/scored"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].merchantInfo.merchantId").value("merchant-1"))
+                .andExpect(jsonPath("$.content[0].merchantInfo.merchantName").value("Market"))
+                .andExpect(jsonPath("$.content[0].merchantInfo.channel").value("ECOMMERCE"))
+                .andReturn().getResponse().getContentAsString();
+        String detailJson = mockMvc.perform(get("/api/v1/transactions/scored/txn-merchant"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.merchantInfo.merchantId").value("merchant-1"))
+                .andExpect(jsonPath("$.merchantInfo.merchantCategoryCode").value("5411"))
+                .andExpect(jsonPath("$.merchantInfo.acquiringCountryCode").value("PL"))
+                .andReturn().getResponse().getContentAsString();
+
+        for (String json : List.of(listJson, detailJson)) {
+            assertThat(json).doesNotContain(
+                    "attributes", "cardPresent", "PRIVATE_MERCHANT_ATTRIBUTE_SENTINEL", "NESTED_MERCHANT_SENTINEL"
+            );
+        }
     }
 
     @Test
@@ -304,6 +397,10 @@ class ScoredTransactionControllerDetailTest {
     }
 
     private ScoredTransaction scoredTransaction(String transactionId, Money transactionAmount) {
+        return scoredTransaction(transactionId, transactionAmount, null);
+    }
+
+    private ScoredTransaction scoredTransaction(String transactionId, Money transactionAmount, MerchantInfo merchantInfo) {
         return new ScoredTransaction(
                 transactionId,
                 "customer-1",
@@ -311,7 +408,7 @@ class ScoredTransactionControllerDetailTest {
                 Instant.parse("2026-06-18T10:00:00Z"),
                 Instant.parse("2026-06-18T10:00:01Z"),
                 transactionAmount,
-                null,
+                merchantInfo,
                 0.91d,
                 RiskLevel.CRITICAL,
                 true,
@@ -324,6 +421,10 @@ class ScoredTransactionControllerDetailTest {
                 ),
                 com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
+    }
+
+    private ScoredTransaction scoredTransactionWithMerchant(String transactionId, MerchantInfo merchantInfo) {
+        return scoredTransaction(transactionId, null, merchantInfo);
     }
 
     private ScoredTransaction scoredTransactionWithoutRecommendation(String transactionId) {

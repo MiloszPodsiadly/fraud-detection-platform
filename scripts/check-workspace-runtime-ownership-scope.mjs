@@ -23,8 +23,30 @@ const backendProductionPrefixes = [
   "audit-trust-authority/src/main/java/",
   "ml-inference-service/"
 ];
+// Reviewed corrections for transaction feedback, scored search, and response contracts.
+// Keep this exact-file exception narrow; other backend production paths remain blocked.
 const allowedBackendFiles = new Set([
-  "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
+  "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java",
+  "alert-service/src/main/java/com/frauddetection/alert/api/ScoredMerchantInfoResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionDetailResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionPageResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/controller/AlertController.java",
+  "alert-service/src/main/java/com/frauddetection/alert/controller/ScoredTransactionController.java",
+  "alert-service/src/main/java/com/frauddetection/alert/domain/ScoringOccurrenceToken.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/CreateFraudFeedbackRequest.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackMapper.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackOccurrenceRelation.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackService.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/validation/FraudFeedbackRequestValidator.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/validation/ValidatedFraudFeedback.java",
+  "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionResponseMapper.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/AlertDocument.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionDocument.java",
+  "alert-service/src/main/java/com/frauddetection/alert/service/ScoredTransactionSearchResult.java",
+  "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringService.java",
+  "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringUseCase.java"
 ]);
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js"

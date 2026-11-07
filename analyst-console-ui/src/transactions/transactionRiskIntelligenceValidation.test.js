@@ -40,6 +40,43 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail()).valid).toBe(true);
   });
 
+  it.each(["A".repeat(64), "a".repeat(63), "a".repeat(65), null, {}])(
+    "rejects invalid scoring occurrence token %s",
+    (scoringOccurrenceToken) => {
+      expect(validateTransactionRiskIntelligenceDetail(detail({ scoringOccurrenceToken }))).toMatchObject({
+        valid: false,
+        reason: "INVALID_SCORING_OCCURRENCE_TOKEN"
+      });
+    }
+  );
+
+  it("accepts bounded merchant display context", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      merchantInfo: { merchantId: "merchant-1", merchantName: "Market", channel: "ECOMMERCE" }
+    })).valid).toBe(true);
+  });
+
+  it.each([
+    { merchantName: "Market", attributes: { sentinel: "private" } },
+    { merchantName: "Market", cardPresent: true },
+    { merchantName: "Market", nested: { value: "private" } }
+  ])("rejects unbounded merchant display context %#", (merchantInfo) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ merchantInfo }))).toMatchObject({
+      valid: false,
+      reason: "INVALID_DETAIL_MERCHANT_INFO"
+    });
+  });
+
+  it.each(["A".repeat(64), "a".repeat(63), "a".repeat(65), null, {}])(
+    "rejects invalid scoring occurrence token %s",
+    (scoringOccurrenceToken) => {
+      expect(validateTransactionRiskIntelligenceDetail(detail({ scoringOccurrenceToken }))).toMatchObject({
+        valid: false,
+        reason: "INVALID_SCORING_OCCURRENCE_TOKEN"
+      });
+    }
+  );
+
   it.each(["LOW", "MEDIUM", "HIGH", "CRITICAL"])("accepts top-level risk level %s", (riskLevel) => {
     expect(validateTransactionRiskIntelligenceDetail(detail({ riskLevel })).valid).toBe(true);
   });
@@ -478,6 +515,30 @@ describe("transactionRiskIntelligenceValidation", () => {
     })).valid).toBe(valid);
   });
 
+  it.each([
+    "2026-06-18T10:00:00Z",
+    "2026-06-18T10:00:00.123456789Z",
+    "2026-06-18T12:00:00+02:00"
+  ])("accepts valid scored detail timestamps %s", (timestamp) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      transactionTimestamp: timestamp,
+      scoredAt: timestamp
+    })).valid).toBe(true);
+  });
+
+  it.each([
+    "2026-02-30T10:00:00Z",
+    "2026-06-18T10:00:00",
+    "2026-06-18T10:00:00+18:01",
+    "not-a-date",
+    1_797_000_000_000
+  ])("rejects malformed scored detail timestamps %s", (timestamp) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ scoredAt: timestamp }))).toMatchObject({
+      valid: false,
+      reason: "INVALID_DETAIL_TIMESTAMP"
+    });
+  });
+
   it.each(stringBoundaryCases().filter(({ maxLength }) => maxLength === 128))("applies shared bounded-string matrix to transactionId $caseId", ({ value, valid }) => {
     expect(validateTransactionRiskIntelligenceDetail(detail({ transactionId: value })).valid).toBe(valid);
   });
@@ -696,6 +757,7 @@ function detail(overrides = {}) {
     correlationId: "corr-1",
     transactionTimestamp: "2026-06-18T10:00:00Z",
     scoredAt: "2026-06-18T10:00:01Z",
+    scoringOccurrenceToken: "a".repeat(64),
     fraudScore: 0.91,
     riskLevel: "CRITICAL",
     alertRecommended: true,

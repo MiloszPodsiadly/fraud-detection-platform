@@ -6,6 +6,7 @@ import { isValidPromotionReviewReadinessReport } from "../governance/promotionRe
 import { isValidModelCard } from "../governance/modelCardValidation.js";
 import { isValidExactModelShadowPerformance } from "../governance/exactModelShadowPerformanceValidation.js";
 import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
+import { validateFraudFeedbackRequest } from "../transactions/fraudFeedbackValidation.js";
 
 export { isAbortError } from "./apiErrors.js";
 
@@ -428,10 +429,18 @@ function createFraudFeedbackWithRequest(request, transactionId, feedback, { sign
       message: "Invalid scored transaction identifier."
     }));
   }
+  const validation = validateFraudFeedbackRequest(feedback);
+  if (!validation.valid) {
+    return Promise.reject(new ApiError({
+      status: 400,
+      error: validation.reason,
+      message: "Feedback request is invalid."
+    }));
+  }
   return request(`/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}/feedback`, {
     method: "POST",
     signal,
-    body: JSON.stringify(feedback)
+    body: JSON.stringify(validation.request)
   });
 }
 

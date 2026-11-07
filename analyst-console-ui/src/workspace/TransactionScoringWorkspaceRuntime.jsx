@@ -30,7 +30,7 @@ export function TransactionScoringWorkspaceRuntime({
   }
 
   function refreshWorkspace() {
-    transactionStreamState.refresh();
+    transactionStreamState.refresh({ preserveCurrentPage: true });
   }
 
   return children(createWorkspaceRuntimeResult({

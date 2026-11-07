@@ -172,7 +172,8 @@ class FraudFeedbackControllerTest {
                 null,
                 null,
                 null,
-                List.of()
+                List.of(),
+                FraudFeedbackOccurrenceRelation.UNKNOWN
         );
     }
 }

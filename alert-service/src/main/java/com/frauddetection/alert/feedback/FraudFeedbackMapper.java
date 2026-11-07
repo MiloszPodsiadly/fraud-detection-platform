@@ -14,6 +14,13 @@ import java.util.List;
 public class FraudFeedbackMapper {
 
     public FraudFeedbackResponse toResponse(FraudFeedbackRecord record) {
+        return toResponse(record, FraudFeedbackOccurrenceRelation.UNKNOWN);
+    }
+
+    public FraudFeedbackResponse toResponse(
+            FraudFeedbackRecord record,
+            FraudFeedbackOccurrenceRelation scoringOccurrenceRelation
+    ) {
         EngineIntelligenceComparisonSnapshot comparison = comparisonSnapshot(record);
         return new FraudFeedbackResponse(
                 record.getFeedbackId(),
@@ -43,7 +50,8 @@ public class FraudFeedbackMapper {
                 record.getAnalystRecommendation(),
                 record.getAnalystRecommendationVersion(),
                 record.getAnalystRecommendationGeneratedAt(),
-                immutable(record.getAnalystRecommendationReasonCodes())
+                immutable(record.getAnalystRecommendationReasonCodes()),
+                scoringOccurrenceRelation == null ? FraudFeedbackOccurrenceRelation.UNKNOWN : scoringOccurrenceRelation
         );
     }
 

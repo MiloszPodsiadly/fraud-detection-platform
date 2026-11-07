@@ -43,7 +43,8 @@ class EngineIntelligenceOpenApiContractTest {
                 .containsKeys(
                         "EngineIntelligenceResponse",
                         "EngineIntelligenceEngineResponse",
-                        "EngineIntelligenceDiagnosticSignalResponse"
+                        "EngineIntelligenceDiagnosticSignalResponse",
+                        "ScoredMerchantInfoResponse"
                 );
     }
 
@@ -96,10 +97,13 @@ class EngineIntelligenceOpenApiContractTest {
                 "required:",
                 "- engineIntelligence",
                 "- analystRecommendation",
+                "- scoringOccurrenceToken",
                 "engineIntelligence:",
                 "$ref: \"#/components/schemas/EngineIntelligenceResponse\"",
                 "analystRecommendation:",
-                "$ref: \"#/components/schemas/AnalystRecommendationResult\""
+                "$ref: \"#/components/schemas/AnalystRecommendationResult\"",
+                "scoringOccurrenceToken:",
+                "pattern: \"^[0-9a-f]{64}$\""
         );
     }
 
@@ -108,8 +112,14 @@ class EngineIntelligenceOpenApiContractTest {
         assertThat(scoredTransactionListPath()).contains("$ref: \"#/components/schemas/PagedScoredTransactionResponse\"");
         assertThat(pagedScoredTransactionSchema()).contains(
                 "Lightweight scored transaction list page",
-                "$ref: \"#/components/schemas/ScoredTransactionResponse\""
+                "$ref: \"#/components/schemas/ScoredTransactionResponse\"",
+                "totalElementsCapped:",
+                "type: boolean"
         );
+        assertThat(scoredTransactionSchema()).contains("$ref: \"#/components/schemas/ScoredMerchantInfoResponse\"");
+        assertThat(scoredTransactionDetailSchema()).contains("$ref: \"#/components/schemas/ScoredMerchantInfoResponse\"");
+        assertThat(scoredMerchantInfoSchema()).contains("additionalProperties: false", "merchantName:", "channel:")
+                .doesNotContain("attributes:", "cardPresent:");
         assertThat(scoredTransactionSchema()).contains("Engine intelligence diagnostics and analyst recommendation details are intentionally omitted")
                 .contains("analyst recommendation details are intentionally omitted")
                 .doesNotContain("engineIntelligence:", "analystRecommendation:");
@@ -513,6 +523,12 @@ class EngineIntelligenceOpenApiContractTest {
         String openApi = openApi();
         int schemaStart = openApi.indexOf("    PagedScoredTransactionResponse:");
         return openApi.substring(schemaStart, openApi.indexOf("\n    MoneyResponse:", schemaStart));
+    }
+
+    private String scoredMerchantInfoSchema() throws Exception {
+        String openApi = openApi();
+        int schemaStart = openApi.indexOf("    ScoredMerchantInfoResponse:");
+        return openApi.substring(schemaStart, openApi.indexOf("\n    ScoredTransactionResponse:", schemaStart));
     }
 
     private String publicEngineIntelligenceSchema() throws Exception {

@@ -3,7 +3,10 @@ package com.frauddetection.alert.mapper;
 import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.api.ScoredTransactionDetailResponse;
 import com.frauddetection.alert.api.ScoredTransactionResponse;
+import com.frauddetection.alert.api.ScoredMerchantInfoResponse;
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
+import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.springframework.stereotype.Component;
 
@@ -24,11 +27,14 @@ public class ScoredTransactionResponseMapper {
                 transaction.transactionTimestamp(),
                 transaction.scoredAt(),
                 alertResponseMapper.toMoneyResponse(transaction.transactionAmount()),
-                alertResponseMapper.toMerchantInfoResponse(transaction.merchantInfo()),
+                toScoredMerchantInfoResponse(transaction.merchantInfo()),
                 transaction.fraudScore(),
                 transaction.riskLevel(),
                 transaction.alertRecommended(),
-                transaction.reasonCodes()
+                transaction.reasonCodes(),
+                transaction.scoringOccurrenceOwnership() == null
+                        ? null
+                        : ScoringOccurrenceToken.from(transaction.scoringOccurrenceOwnership())
         );
     }
 
@@ -43,13 +49,16 @@ public class ScoredTransactionResponseMapper {
                 transaction.transactionTimestamp(),
                 transaction.scoredAt(),
                 alertResponseMapper.toMoneyResponse(transaction.transactionAmount()),
-                alertResponseMapper.toMerchantInfoResponse(transaction.merchantInfo()),
+                toScoredMerchantInfoResponse(transaction.merchantInfo()),
                 transaction.fraudScore(),
                 transaction.riskLevel(),
                 transaction.alertRecommended(),
                 transaction.reasonCodes(),
                 engineIntelligence,
-                analystRecommendation(transaction)
+                analystRecommendation(transaction),
+                transaction.scoringOccurrenceOwnership() == null
+                        ? null
+                        : ScoringOccurrenceToken.from(transaction.scoringOccurrenceOwnership())
         );
     }
 
@@ -57,5 +66,19 @@ public class ScoredTransactionResponseMapper {
         return transaction.analystRecommendation() == null
                 ? AnalystRecommendationResult.absent()
                 : transaction.analystRecommendation();
+    }
+
+    private ScoredMerchantInfoResponse toScoredMerchantInfoResponse(MerchantInfo merchantInfo) {
+        if (merchantInfo == null) {
+            return null;
+        }
+        return new ScoredMerchantInfoResponse(
+                merchantInfo.merchantId(),
+                merchantInfo.merchantName(),
+                merchantInfo.merchantCategoryCode(),
+                merchantInfo.merchantCategory(),
+                merchantInfo.channel(),
+                merchantInfo.acquiringCountryCode()
+        );
     }
 }

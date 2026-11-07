@@ -80,6 +80,19 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(screen.getByText("alertRecommended is a scored transaction field, not a final payment decision.")).toBeInTheDocument();
   });
 
+  it("renders missing transaction timestamps as unavailable", () => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ transactionTimestamp: null, scoredAt: null }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    const summary = screen.getByRole("region", { name: "Transaction Summary" });
+    expect(within(summary).getAllByText("Not available")).toHaveLength(2);
+  });
+
   it.each([
     ["true", true, "Review recommended", false],
     ["false", false, "No review recommendation", false],
@@ -136,6 +149,49 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(merchant).toHaveTextContent("Absence of evidence is not evidence of low risk.");
     expect(merchant).not.toHaveTextContent("must-not-render");
     expect(merchant).not.toHaveTextContent(/score|percentage|first-ever|prior observations/i);
+  });
+
+  it("trims a safe merchant name for transaction detail display", () => {
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ merchantInfo: { merchantName: "  Northwind Books  " } }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel();
+
+    expect(within(screen.getByRole("region", { name: "Merchant Investigation" }))
+      .getByText("Northwind Books")).toBeInTheDocument();
+  });
+
+  it("requires an explicit review when the expanded row reports a new scoring occurrence", () => {
+    const originalToken = "a".repeat(64);
+    const refreshedToken = "b".repeat(64);
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ scoringOccurrenceToken: originalToken }),
+      isLoading: false,
+      error: null
+    });
+    const { rerender } = renderPanel({ scoringOccurrenceToken: originalToken });
+
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ scoringOccurrenceToken: refreshedToken }),
+      isLoading: false,
+      error: null
+    });
+    rerender(<TransactionRiskIntelligencePanel
+      transactionId="txn-available-1"
+      scoringOccurrenceToken={refreshedToken}
+      apiClient={{}}
+    />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Scoring changed while this transaction was expanded.");
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "I reviewed the current scoring" }));
+    expect(screen.getByRole("button", { name: "Record feedback" })).toBeInTheDocument();
+    expect(useScoredTransactionDetail).toHaveBeenLastCalledWith(expect.objectContaining({
+      expectedScoringOccurrenceToken: refreshedToken
+    }));
   });
 
   it("keeps the evidence limitation when merchant details are absent", () => {
@@ -409,6 +465,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     await waitFor(() => expect(submit).toHaveBeenCalledWith({
       analystDecision: "MARKED_FRAUD",
       feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: "a".repeat(64),
       decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
       notes: null
     }));
@@ -443,6 +500,7 @@ describe("TransactionRiskIntelligencePanel", () => {
         analystDecision: "MARKED_LEGITIMATE",
         labelSource: "ANALYST_REVIEW",
         feedbackStatus: "RECORDED",
+        scoringOccurrenceRelation: "PRIOR",
         createdAt: "2026-06-25T10:15:30Z",
         decisionReasonCodes: ["ANALYST_CONFIRMED_LEGITIMATE"],
         notesPresent: true,
@@ -463,6 +521,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(screen.getByText("Feedback recorded")).toBeInTheDocument();
     expect(within(feedbackRegion).getByText("Notes")).toBeInTheDocument();
     expect(within(feedbackRegion).getByText("Present")).toBeInTheDocument();
+    expect(within(feedbackRegion).getByText("This feedback belongs to a prior scoring occurrence and does not cover the current scoring.")).toBeInTheDocument();
     expect(screen.queryByText("Sensitive analyst note")).not.toBeInTheDocument();
     expect(screen.getByText("One active feedback record is already present for this transaction.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
@@ -519,6 +578,24 @@ describe("TransactionRiskIntelligencePanel", () => {
     renderPanel();
 
     expect(screen.getByText(copy)).toBeInTheDocument();
+  });
+
+  it("shows a distinct stale scoring message after a feedback conflict", () => {
+    useFraudFeedback.mockReturnValue({
+      feedback: null,
+      isLoading: false,
+      error: null,
+      canReadFeedback: true,
+      canCreateFeedback: true,
+      submitState: "stale-occurrence",
+      submitError: { status: 409, error: "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED" },
+      submit: vi.fn()
+    });
+
+    renderPanel();
+
+    expect(screen.getByText("Scoring changed after review. Refresh transaction details and review the current scoring before retrying.")).toBeInTheDocument();
+    expect(screen.queryByText("Feedback already exists for this transaction.")).not.toBeInTheDocument();
   });
 
   it("does not render feedback form when runtime cannot read fraud feedback", () => {

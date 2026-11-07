@@ -141,6 +141,38 @@ describe("useScoredTransactionStream ownership", () => {
     expect(result.current.page.content).toEqual([]);
   });
 
+  it("requires the exact-versus-capped total metadata", async () => {
+    const response = page("missing-cap-indicator");
+    delete response.totalElementsCapped;
+    const { result } = renderStream(readContext({ listScoredTransactions: vi.fn().mockResolvedValue(response) }));
+
+    await waitFor(() => expect(result.current.error?.message).toBe("The scored transaction response is malformed."));
+    expect(result.current.page.content).toEqual([]);
+  });
+
+  it.each([
+    ["canonical UTC timestamp", "2026-11-07T10:00:00Z", true],
+    ["fractional Instant timestamp", "2026-11-07T10:00:00.123456789Z", true],
+    ["historical explicit offset", "2026-11-07T12:00:00+02:00", true],
+    ["missing timezone", "2026-11-07T10:00:00", false],
+    ["impossible calendar day", "2026-02-30T10:00:00Z", false],
+    ["invalid timezone offset", "2026-11-07T10:00:00+18:01", false],
+    ["overflow timestamp", "999999-11-07T10:00:00Z", false],
+    ["malformed type", 1_798_000_000_000, false]
+  ])("validates scored timestamp %s", async (_caseName, scoredAt, valid) => {
+    const response = page("timestamp");
+    response.content[0].scoredAt = scoredAt;
+    const { result } = renderStream(readContext({ listScoredTransactions: vi.fn().mockResolvedValue(response) }));
+
+    if (valid) {
+      await waitFor(() => expect(result.current.page.content).toHaveLength(1));
+      expect(result.current.error).toBeNull();
+    } else {
+      await waitFor(() => expect(result.current.error?.message).toBe("The scored transaction response is malformed."));
+      expect(result.current.page.content).toEqual([]);
+    }
+  });
+
   it("recovers a page that shrank to zero rows and does not loop when page zero is empty", async () => {
     const requests = [];
     const apiClient = {
@@ -236,6 +268,7 @@ describe("useScoredTransactionStream ownership", () => {
       size: 25,
       totalElements: 10_000,
       totalPages: 400,
+      totalElementsCapped: true,
       content: []
     });
     const apiClient = {
@@ -250,6 +283,44 @@ describe("useScoredTransactionStream ownership", () => {
     await waitFor(() => expect(result.current.page.page).toBe(399));
     expect(result.current.error).toBeNull();
     expect(result.current.page.totalElements).toBe(10_000);
+  });
+
+  it("recovers an out-of-window capped page once and returns to page zero", async () => {
+    const apiClient = {
+      listScoredTransactions: vi.fn((request) => Promise.resolve(request.page === 400
+        ? scoredResponse({ page: 400, size: 25, totalElements: 10_000, totalPages: 400, totalElementsCapped: true })
+        : request.query
+          ? scoredResponse({ page: 0, size: request.size, totalElements: 10_000, totalPages: 400, totalElementsCapped: true })
+          : scoredResponse({ page: 0, size: request.size, totalElements: 0, totalPages: 0 })))
+    };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(1));
+    act(() => result.current.setRequest({ page: 400, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" }));
+    await waitFor(() => expect(result.current.page.page).toBe(0));
+
+    expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(3);
+    expect(apiClient.listScoredTransactions.mock.calls.map(([request]) => request.page)).toEqual([0, 400, 0]);
+  });
+
+  it("fails closed when rows or malformed cap metadata escape the filtered window", async () => {
+    const malformedResponses = [
+      [400, scoredResponse({ page: 400, size: 25, totalElements: 10_000, totalPages: 400, totalElementsCapped: true,
+        content: [page("out-of-window").content[0]] })],
+      [0, scoredResponse({ totalElements: 9_999, totalElementsCapped: "true" })],
+      [0, scoredResponse({ totalElements: 9_999, totalElementsCapped: true })]
+    ];
+
+    for (const [requestedPage, payload] of malformedResponses) {
+      const apiClient = { listScoredTransactions: vi.fn((request) => Promise.resolve(request.query
+        ? payload
+        : scoredResponse({ page: 0, size: 25, totalElements: 0, totalPages: 0 }))) };
+      const { result } = renderStream(readContext(apiClient));
+      await waitFor(() => expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(1));
+      act(() => result.current.setRequest({ page: requestedPage, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" }));
+      await waitFor(() => expect(result.current.error?.message).toBe("The scored transaction response is malformed."));
+      expect(result.current.page.content).toEqual([]);
+    }
   });
 
   it("rejects saved refresh callbacks after owner transitions but keeps fresh callbacks active", async () => {
@@ -329,6 +400,32 @@ describe("useScoredTransactionStream ownership", () => {
       await waitFor(() => expect(result.current.error).toBeTruthy());
       expect(result.current.page.content).toEqual([]);
       expect(result.current.isLoading).toBe(false);
+    }
+  );
+
+  it.each([
+    { attributes: { privateMetadata: "sentinel" } },
+    { cardPresent: true },
+    { arbitraryExtension: "sentinel" }
+  ])("rejects scored merchant payloads outside the display allowlist: %s", async (merchantInfo) => {
+    const response = page("merchant");
+    response.content[0].merchantInfo = { merchantName: "Market", ...merchantInfo };
+    const apiClient = { listScoredTransactions: vi.fn().mockResolvedValue(response) };
+    const { result } = renderStream(readContext(apiClient));
+
+    await waitFor(() => expect(result.current.error?.message).toBe("The scored transaction response is malformed."));
+    expect(result.current.page.content).toEqual([]);
+  });
+
+  it.each(["A".repeat(64), "a".repeat(63), "raw-fingerprint", {}])(
+    "rejects invalid list scoring occurrence tokens %#",
+    async (scoringOccurrenceToken) => {
+      const response = page("invalid-occurrence");
+      response.content[0].scoringOccurrenceToken = scoringOccurrenceToken;
+      const { result } = renderStream(readContext({ listScoredTransactions: vi.fn().mockResolvedValue(response) }));
+
+      await waitFor(() => expect(result.current.error?.message).toBe("The scored transaction response is malformed."));
+      expect(result.current.page.content).toEqual([]);
     }
   );
 
@@ -521,13 +618,13 @@ function readContext(apiClient) {
 function page(name, request = {}) {
   const response = {
     content: [{ transactionId: "txn-" + name, customerId: "customer-" + name, merchantInfo: { merchantName: "Merchant " + name } }],
-    totalElements: 73, page: 0, size: 25, ...request
+    totalElements: 73, page: 0, size: 25, totalElementsCapped: false, ...request
   };
   return { ...response, totalPages: Math.ceil(response.totalElements / response.size) };
 }
 
-function scoredResponse({ content = [], page: pageNumber = 0, size = 25, totalElements = 0, totalPages = Math.ceil(totalElements / size) }) {
-  return { content, page: pageNumber, size, totalElements, totalPages };
+function scoredResponse({ content = [], page: pageNumber = 0, size = 25, totalElements = 0, totalPages = Math.ceil(totalElements / size), totalElementsCapped = false }) {
+  return { content, page: pageNumber, size, totalElements, totalPages, totalElementsCapped };
 }
 
 function deferred() {

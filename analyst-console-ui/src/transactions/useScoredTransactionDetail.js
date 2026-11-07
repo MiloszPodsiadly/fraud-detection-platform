@@ -5,6 +5,7 @@ import { validateTransactionRiskIntelligenceDetail } from "./transactionRiskInte
 
 export function useScoredTransactionDetail({
   transactionId,
+  expectedScoringOccurrenceToken,
   enabled = true,
   session,
   authProvider,
@@ -15,8 +16,10 @@ export function useScoredTransactionDetail({
   const effectiveSession = session !== undefined ? session : runtime?.session;
   const effectiveAuthProvider = authProvider !== undefined ? authProvider : runtime?.authProvider;
   const normalizedTransactionId = normalizeTransactionId(transactionId);
+  const expectedToken = typeof expectedScoringOccurrenceToken === "string" ? expectedScoringOccurrenceToken : null;
   const requestIdentity = useMemo(() => ({
     transactionId: normalizedTransactionId,
+    expectedScoringOccurrenceToken: expectedToken,
     enabled: Boolean(enabled),
     apiClient: effectiveApiClient,
     session: effectiveSession,
@@ -26,6 +29,7 @@ export function useScoredTransactionDetail({
     effectiveAuthProvider,
     effectiveSession,
     enabled,
+    expectedToken,
     normalizedTransactionId
   ]);
   const [requestState, setRequestState] = useState({
@@ -81,7 +85,9 @@ export function useScoredTransactionDetail({
       }
       const validation = validateTransactionRiskIntelligenceDetail(nextDetail);
       const responseTransactionId = validation.valid ? normalizeTransactionId(nextDetail.transactionId) : null;
-      if (!validation.valid || responseTransactionId !== identity.transactionId) {
+      if (!validation.valid || responseTransactionId !== identity.transactionId
+        || (identity.expectedScoringOccurrenceToken !== null
+          && nextDetail.scoringOccurrenceToken !== identity.expectedScoringOccurrenceToken)) {
         const validationError = new Error("INVALID_TRANSACTION_RISK_INTELLIGENCE_RESPONSE");
         validationError.code = validation.valid ? "TRANSACTION_ID_MISMATCH" : validation.reason;
         setRequestState({ identity, detail: null, isLoading: true, error: validationError });

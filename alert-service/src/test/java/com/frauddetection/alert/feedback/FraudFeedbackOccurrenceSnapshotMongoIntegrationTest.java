@@ -1,6 +1,7 @@
 package com.frauddetection.alert.feedback;
 
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProjection;
@@ -68,6 +69,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Testcontainers
@@ -150,6 +153,26 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
         assertThat(engineIntelligence.findById(TRANSACTION_ID).orElseThrow().getSourceEventId()).isEqualTo(EVENT_B);
         assertThat(evidence.findById(saved.getSourceEventId()).orElseThrow().getModelVersion()).isEqualTo("model-a");
         assertThat(evidence.findById(saved.getSourceEventId()).orElseThrow().getModelVersion()).isNotEqualTo("model-b");
+    }
+
+    @Test
+    void staleReviewedOccurrenceIsRejectedWithoutFeedbackOrSuccessAudit() {
+        scoredTransactions.save(scoredTransaction(EVENT_B, CREATED_B, FINGERPRINT_B, 0.97d));
+        CountDownLatch occurrenceRead = new CountDownLatch(1);
+        WriteActionAuditOutboxService auditOutbox = mock(WriteActionAuditOutboxService.class);
+
+        assertThatThrownBy(() -> service(occurrenceRead, new CountDownLatch(0), auditOutbox)
+                .create(TRANSACTION_ID, request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException response = (ResponseStatusException) exception;
+                    assertThat(response.getStatusCode().value()).isEqualTo(409);
+                    assertThat(response.getReason()).isEqualTo("FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED");
+                });
+
+        assertThat(occurrenceRead.getCount()).isZero();
+        assertThat(feedback.findByTransactionId(TRANSACTION_ID)).isEmpty();
+        verify(auditOutbox, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -362,7 +385,8 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                 AnalystDecision.MARKED_FRAUD,
                 FraudFeedbackLabel.CONFIRMED_FRAUD,
                 List.of("ANALYST_CONFIRMED_FRAUD"),
-                null
+                null,
+                ScoringOccurrenceToken.from(new ScoringOccurrenceOwnership(EVENT_A, CREATED_A, FINGERPRINT_A))
         );
     }
 }

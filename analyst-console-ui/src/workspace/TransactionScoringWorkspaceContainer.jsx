@@ -15,6 +15,7 @@ export function TransactionScoringWorkspaceContainer({
       transactionPage={transactionStreamState.page}
       transactionPageRequest={transactionStreamState.request}
       isLoading={transactionStreamState.isLoading}
+      isStale={transactionStreamState.isStale}
       error={transactionStreamState.error}
       onRetry={onRetryWorkspace}
       onTransactionFiltersChange={onFiltersChange}

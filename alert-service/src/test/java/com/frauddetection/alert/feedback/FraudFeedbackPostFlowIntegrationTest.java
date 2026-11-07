@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.domain.ScoringOccurrenceToken;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
@@ -88,6 +89,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 class FraudFeedbackPostFlowIntegrationTest {
 
+    private static final ScoringOccurrenceOwnership DEFAULT_OCCURRENCE = ScoringOccurrenceOwnership.authoritative(
+            "event-1",
+            Instant.parse("2026-06-25T09:00:01Z"),
+            "a".repeat(64)
+    );
+    private static final String DEFAULT_OCCURRENCE_TOKEN = ScoringOccurrenceToken.from(DEFAULT_OCCURRENCE);
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -149,6 +157,7 @@ class FraudFeedbackPostFlowIntegrationTest {
                 .andExpect(jsonPath("$.feedbackStatus").value("RECORDED"))
                 .andExpect(jsonPath("$.createdBy").value("analyst-1"))
                 .andExpect(jsonPath("$.notesPresent").value(true))
+                .andExpect(jsonPath("$.scoringOccurrenceRelation").value("CURRENT"))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -196,6 +205,33 @@ class FraudFeedbackPostFlowIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_ALREADY_RECORDED"));
 
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void postForPreviouslyViewedOccurrenceReturnsSafeConflictWithoutWriteOrAudit() throws Exception {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction(
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-2",
+                        Instant.parse("2026-06-25T09:00:02Z"),
+                        "b".repeat(64)
+                )
+        ));
+
+        String body = mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
+                        .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequest()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body).doesNotContain("event-1", "event-2", "a".repeat(64), "b".repeat(64), "sourceEventFingerprint");
+        assertThat(savedRecords).isEmpty();
+        verify(repository, never()).existsByTransactionId("txn-1");
         verify(repository, never()).save(any());
         verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
     }
@@ -255,9 +291,10 @@ class FraudFeedbackPostFlowIntegrationTest {
                                 {
                                   "analystDecision": "MARKED_FRAUD",
                                   "feedbackLabel": "CONFIRMED_LEGITIMATE",
-                                  "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"]
+                                  "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"],
+                                  "scoringOccurrenceToken": "%s"
                                 }
-                                """))
+                                """.formatted(DEFAULT_OCCURRENCE_TOKEN)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH"));
 
@@ -294,9 +331,10 @@ class FraudFeedbackPostFlowIntegrationTest {
                 {
                   "analystDecision": "MARKED_FRAUD",
                   "feedbackLabel": "CONFIRMED_FRAUD",
-                  "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"]
+                  "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"],
+                  "scoringOccurrenceToken": "%s"
                 }
-                """;
+                """.formatted(DEFAULT_OCCURRENCE_TOKEN);
     }
 
     private String validRequestWithNotes() {
@@ -305,12 +343,17 @@ class FraudFeedbackPostFlowIntegrationTest {
                   "analystDecision": "MARKED_FRAUD",
                   "feedbackLabel": "CONFIRMED_FRAUD",
                   "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"],
-                  "notes": "Customer confirmed fraud"
+                  "notes": "Customer confirmed fraud",
+                  "scoringOccurrenceToken": "%s"
                 }
-                """;
+                """.formatted(DEFAULT_OCCURRENCE_TOKEN);
     }
 
     private ScoredTransaction scoredTransaction() {
+        return scoredTransaction(DEFAULT_OCCURRENCE);
+    }
+
+    private ScoredTransaction scoredTransaction(ScoringOccurrenceOwnership ownership) {
         return new ScoredTransaction(
                 "txn-1",
                 "customer-1",
@@ -334,11 +377,7 @@ class FraudFeedbackPostFlowIntegrationTest {
                         List.of(),
                         AnalystRecommendationNonDecisioning.advisoryOnly()
                 ),
-                ScoringOccurrenceOwnership.authoritative(
-                        "event-1",
-                        Instant.parse("2026-06-25T09:00:01Z"),
-                        "a".repeat(64)
-                ),
+                ownership,
                 com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
     }

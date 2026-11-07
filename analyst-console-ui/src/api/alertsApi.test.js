@@ -1318,7 +1318,9 @@ describe("alertsApi auth headers", () => {
     const feedback = {
       analystDecision: "MARKED_FRAUD",
       feedbackLabel: "CONFIRMED_FRAUD",
-      decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD"]
+      scoringOccurrenceToken: "a".repeat(64),
+      decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD"],
+      notes: null
     };
 
     await createFraudFeedback("txn-1", feedback);
@@ -1344,6 +1346,17 @@ describe("alertsApi auth headers", () => {
       status,
       message: expect.stringContaining(`status ${status}`)
     });
+  });
+
+  it("rejects invalid fraud feedback before making a request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ feedbackId: "feedback-1" }));
+
+    await expect(createFraudFeedback("txn-1", {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD"]
+    })).rejects.toMatchObject({ status: 400, error: "INVALID_SCORING_OCCURRENCE_TOKEN" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects invalid scored transaction detail identifiers without a request", async () => {
@@ -2412,6 +2425,7 @@ function scoredTransactionDetail(overrides = {}) {
     correlationId: "corr-1",
     transactionTimestamp: "2026-06-18T10:00:00Z",
     scoredAt: "2026-06-18T10:00:01Z",
+    scoringOccurrenceToken: "a".repeat(64),
     fraudScore: 0.91,
     riskLevel: "CRITICAL",
     alertRecommended: true,

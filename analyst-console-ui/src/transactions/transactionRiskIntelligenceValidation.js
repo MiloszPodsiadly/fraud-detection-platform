@@ -1,5 +1,6 @@
 import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
 import { isValidMoneyResponse } from "./moneyResponse.js";
+import { isValidScoredTransactionTimestamp } from "./scoredTransactionTimestamp.js";
 
 const DETAIL_STATUSES = new Set(["AVAILABLE", "ABSENT", "UNAVAILABLE", "DEGRADED"]);
 const ANALYST_RECOMMENDATION_STATUSES = new Set([
@@ -44,6 +45,7 @@ const DETAIL_KEYS = [
   "correlationId",
   "transactionTimestamp",
   "scoredAt",
+  "scoringOccurrenceToken",
   "transactionAmount",
   "merchantInfo",
   "fraudScore",
@@ -52,6 +54,14 @@ const DETAIL_KEYS = [
   "reasonCodes",
   "engineIntelligence",
   "analystRecommendation"
+];
+const MERCHANT_INFO_KEYS = [
+  "merchantId",
+  "merchantName",
+  "merchantCategoryCode",
+  "merchantCategory",
+  "channel",
+  "acquiringCountryCode"
 ];
 const ENGINE_INTELLIGENCE_KEYS = [
   "status",
@@ -103,6 +113,9 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!safeString(detail.transactionId)) {
     return invalid("MISSING_TRANSACTION_ID");
   }
+  if (typeof detail.scoringOccurrenceToken !== "string" || !/^[0-9a-f]{64}$/.test(detail.scoringOccurrenceToken)) {
+    return invalid("INVALID_SCORING_OCCURRENCE_TOKEN");
+  }
   if (!engineIntelligenceContract.optionalOneOf(detail.riskLevel, engineIntelligenceContract.RISK_LEVELS)) {
     return invalid("INVALID_DETAIL_RISK_LEVEL");
   }
@@ -114,6 +127,9 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   }
   if (!isOptionalFraudScore(detail.fraudScore)) {
     return invalid("INVALID_DETAIL_FRAUD_SCORE");
+  }
+  if (!isOptionalMerchantInfo(detail.merchantInfo)) {
+    return invalid("INVALID_DETAIL_MERCHANT_INFO");
   }
   if (!validOptionalTimestamp(detail.transactionTimestamp) || !validOptionalTimestamp(detail.scoredAt)) {
     return invalid("INVALID_DETAIL_TIMESTAMP");
@@ -322,6 +338,16 @@ function isOptionalFraudScore(value) {
     || (Number.isFinite(value) && value >= 0 && value <= 1);
 }
 
+function isOptionalMerchantInfo(value) {
+  return value === undefined || value === null || (
+    value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && engineIntelligenceContract.hasOnlyKnownKeys(value, MERCHANT_INFO_KEYS)
+    && MERCHANT_INFO_KEYS.every((key) => isOptionalSafeString(value[key]))
+  );
+}
+
 function safeString(value, maxLength = engineIntelligenceContract.MAX_PUBLIC_STRING_LENGTH) {
   return engineIntelligenceContract.safeString(value, maxLength);
 }
@@ -331,7 +357,7 @@ function parseableDateString(value) {
 }
 
 function validOptionalTimestamp(value) {
-  return value === undefined || value === null || parseableDateString(value);
+  return value === undefined || value === null || isValidScoredTransactionTimestamp(value);
 }
 
 function oneOf(value, allowedValues) {

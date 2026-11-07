@@ -67,6 +67,7 @@ const REASON_CODE_PATTERN = /^[A-Z0-9_]+$/;
 const MAX_REASON_CODES = 10;
 const MAX_REASON_CODE_LENGTH = 128;
 const MAX_NOTES_LENGTH = 500;
+const SCORING_OCCURRENCE_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 const UNSAFE_TERMS = [
   "token",
   "secret",
@@ -133,11 +134,16 @@ export function validateFraudFeedbackRequest(request) {
       return invalid("UNSAFE_NOTES");
     }
   }
+  if (typeof request.scoringOccurrenceToken !== "string"
+    || !SCORING_OCCURRENCE_TOKEN_PATTERN.test(request.scoringOccurrenceToken)) {
+    return invalid("INVALID_SCORING_OCCURRENCE_TOKEN");
+  }
   return Object.freeze({
     valid: true,
     request: Object.freeze({
       analystDecision: request.analystDecision,
       feedbackLabel: request.feedbackLabel,
+      scoringOccurrenceToken: request.scoringOccurrenceToken,
       decisionReasonCodes: reasonCodes.map((code) => code.trim()),
       notes: normalizeNotes(request.notes)
     })

@@ -21,6 +21,40 @@ describe("useScoredTransactionDetail", () => {
     }));
   });
 
+  it("fences detail by the scoring occurrence reported by the list row", async () => {
+    const firstToken = "a".repeat(64);
+    const nextToken = "b".repeat(64);
+    const refreshed = deferred();
+    const apiClient = {
+      getScoredTransactionDetail: vi.fn()
+        .mockResolvedValueOnce(detail({ scoringOccurrenceToken: firstToken }))
+        .mockReturnValueOnce(refreshed.promise)
+    };
+    const { result, rerender } = renderHook(
+      ({ expectedScoringOccurrenceToken }) => useScoredTransactionDetail({
+        transactionId: "txn-1", enabled: true, apiClient, expectedScoringOccurrenceToken
+      }),
+      { initialProps: { expectedScoringOccurrenceToken: firstToken } }
+    );
+
+    await waitFor(() => expect(result.current.detail?.scoringOccurrenceToken).toBe(firstToken));
+    rerender({ expectedScoringOccurrenceToken: nextToken });
+    expect(result.current.detail).toBeNull();
+    await waitFor(() => expect(apiClient.getScoredTransactionDetail).toHaveBeenCalledTimes(2));
+    await act(async () => refreshed.resolve(detail({ scoringOccurrenceToken: nextToken })));
+    await waitFor(() => expect(result.current.detail?.scoringOccurrenceToken).toBe(nextToken));
+  });
+
+  it("rejects detail that does not match the list row occurrence", async () => {
+    const apiClient = apiClientWith(detail({ scoringOccurrenceToken: "b".repeat(64) }));
+    const { result } = renderHook(() => useScoredTransactionDetail({
+      transactionId: "txn-1", enabled: true, apiClient, expectedScoringOccurrenceToken: "a".repeat(64)
+    }));
+
+    await waitFor(() => expect(result.current.error?.message).toBe("INVALID_TRANSACTION_RISK_INTELLIGENCE_RESPONSE"));
+    expect(result.current.detail).toBeNull();
+  });
+
   it("does not fetch when disabled or transactionId is missing", () => {
     const apiClient = apiClientWith(detail());
 

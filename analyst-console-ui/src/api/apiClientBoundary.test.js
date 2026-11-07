@@ -4,6 +4,30 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+const REVIEWED_BACKEND_FILES = [
+  "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java",
+  "alert-service/src/main/java/com/frauddetection/alert/api/ScoredMerchantInfoResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionDetailResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionPageResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/controller/AlertController.java",
+  "alert-service/src/main/java/com/frauddetection/alert/controller/ScoredTransactionController.java",
+  "alert-service/src/main/java/com/frauddetection/alert/domain/ScoringOccurrenceToken.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/CreateFraudFeedbackRequest.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackMapper.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackOccurrenceRelation.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackResponse.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackService.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/validation/FraudFeedbackRequestValidator.java",
+  "alert-service/src/main/java/com/frauddetection/alert/feedback/validation/ValidatedFraudFeedback.java",
+  "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionResponseMapper.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/AlertDocument.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionDocument.java",
+  "alert-service/src/main/java/com/frauddetection/alert/service/ScoredTransactionSearchResult.java",
+  "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringService.java",
+  "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringUseCase.java"
+];
+
 describe("api client boundary", () => {
   it("does not export legacy default wrappers from alertsApi", () => {
     const source = readFileSync(join(process.cwd(), "src/api/alertsApi.js"), "utf8");
@@ -185,6 +209,29 @@ describe("api client boundary", () => {
     expect(failure).toContain("workspace runtime scope is frontend-only; backend production code must not change.");
   });
 
+  it("allows only reviewed backend correction paths in workspace guards", () => {
+    const fixtures = [
+      ["workspaceRuntime", "WORKSPACE_RUNTIME_SCOPE_CHANGED_FILES",
+        "workspace runtime scope is frontend-only; backend production code must not change."],
+      ["workspaceDetail", "WORKSPACE_DETAIL_SCOPE_CHANGED_FILES",
+        "workspace detail UX is frontend-only; backend production code/resources must not change."],
+      ["runtimeOwnership", "WORKSPACE_RUNTIME_OWNERSHIP_SCOPE_CHANGED_FILES",
+        "workspace runtime ownership is frontend-only; backend production code/resources must not change."]
+    ];
+    const unrelatedBackendFile = "alert-service/src/main/java/com/frauddetection/alert/service/FraudCaseManagementService.java";
+
+    for (const [version, changedFilesVariable, violation] of fixtures) {
+      expect(() => runScopeGuard({
+        [changedFilesVariable]: REVIEWED_BACKEND_FILES.join(",")
+      }, version)).not.toThrow();
+      const failure = captureScopeFailure({
+        [changedFilesVariable]: [...REVIEWED_BACKEND_FILES, unrelatedBackendFile].join(",")
+      }, version);
+      expect(failure).toContain(violation);
+      expect(failure).toContain(unrelatedBackendFile);
+    }
+  });
+
   it("keeps the runtime ownership backend guard explicit-fixture scoped", () => {
     const script = readFileSync(join(process.cwd(), "../scripts/check-workspace-runtime-ownership-scope.mjs"), "utf8");
 
@@ -269,6 +316,7 @@ function runScopeGuard(env = {}, version = "apiClient") {
   const scripts = {
     apiClient: "../scripts/check-api-client-scope.mjs",
     workspaceRuntime: "../scripts/check-workspace-runtime-scope.mjs",
+    workspaceDetail: "../scripts/check-workspace-detail-scope.mjs",
     runtimeOwnership: "../scripts/check-workspace-runtime-ownership-scope.mjs"
   };
   const script = scripts[version] ?? scripts.apiClient;

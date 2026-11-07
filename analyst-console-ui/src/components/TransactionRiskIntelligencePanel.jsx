@@ -33,6 +33,7 @@ const MERCHANT_DISPLAY_FIELDS = [
 
 export function TransactionRiskIntelligencePanel({
   transactionId,
+  scoringOccurrenceToken,
   enabled = true,
   apiClient,
   panelId
@@ -40,8 +41,13 @@ export function TransactionRiskIntelligencePanel({
   const shouldFetch = Boolean(enabled && transactionId);
   const safePanelId = panelId || transactionRiskIntelligencePanelId(transactionId);
   const titleId = `${safePanelId}-title`;
+  const expectedOccurrenceToken = typeof scoringOccurrenceToken === "string"
+    && /^[0-9a-f]{64}$/.test(scoringOccurrenceToken) ? scoringOccurrenceToken : null;
+  const [reviewConfirmation, setReviewConfirmation] = useState(() => ({ token: expectedOccurrenceToken, confirmed: true }));
+  const requiresOccurrenceReview = reviewConfirmation.token !== expectedOccurrenceToken || !reviewConfirmation.confirmed;
   const { detail, isLoading, error } = useScoredTransactionDetail({
     transactionId,
+    expectedScoringOccurrenceToken: expectedOccurrenceToken,
     enabled: shouldFetch,
     apiClient
   });
@@ -61,13 +67,18 @@ export function TransactionRiskIntelligencePanel({
         <p className="formError">{errorMessage(error)}</p>
       )}
       {shouldFetch && !isLoading && !error && detail && (
-        <TransactionRiskIntelligenceDetail detail={detail} apiClient={apiClient} />
+        <TransactionRiskIntelligenceDetail
+          detail={detail}
+          apiClient={apiClient}
+          requiresOccurrenceReview={requiresOccurrenceReview}
+          onConfirmOccurrenceReview={() => setReviewConfirmation({ token: expectedOccurrenceToken, confirmed: true })}
+        />
       )}
     </section>
   );
 }
 
-function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
+function TransactionRiskIntelligenceDetail({ detail, apiClient, requiresOccurrenceReview, onConfirmOccurrenceReview }) {
   const intelligence = detail.engineIntelligence;
   const alertRecommendation = alertRecommendationPresentation(detail.alertRecommended);
   return (
@@ -101,7 +112,13 @@ function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
 
       <ComparisonSummary comparison={intelligence.comparison} />
       <AnalystRecommendationPanel recommendation={detail.analystRecommendation} />
-      <AnalystFeedbackSection transactionId={detail.transactionId} apiClient={apiClient} />
+      <AnalystFeedbackSection
+        transactionId={detail.transactionId}
+        scoringOccurrenceToken={detail.scoringOccurrenceToken}
+        apiClient={apiClient}
+        requiresOccurrenceReview={requiresOccurrenceReview}
+        onConfirmOccurrenceReview={onConfirmOccurrenceReview}
+      />
       <EngineResults engines={intelligence.engines} />
       <DiagnosticSignals diagnosticSignals={intelligence.diagnosticSignals} />
       <Warnings warnings={intelligence.warnings} />
@@ -167,7 +184,7 @@ const FEEDBACK_OPTIONS = [
   }
 ];
 
-function AnalystFeedbackSection({ transactionId, apiClient }) {
+function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClient, requiresOccurrenceReview, onConfirmOccurrenceReview }) {
   const {
     feedback,
     isLoading,
@@ -177,7 +194,7 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
     submitState,
     submitError,
     submit
-  } = useFraudFeedback({ transactionId, enabled: Boolean(transactionId), apiClient });
+  } = useFraudFeedback({ transactionId, scoringOccurrenceToken, enabled: Boolean(transactionId), apiClient });
   const [selectedLabel, setSelectedLabel] = useState("CONFIRMED_FRAUD");
   const [notes, setNotes] = useState("");
   const selectedOption = FEEDBACK_OPTIONS.find((option) => option.feedbackLabel === selectedLabel) || FEEDBACK_OPTIONS[0];
@@ -187,11 +204,14 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
     submit({
       analystDecision: selectedOption.analystDecision,
       feedbackLabel: selectedOption.feedbackLabel,
+      scoringOccurrenceToken,
       decisionReasonCodes: [selectedOption.reasonCode],
-        notes: notes.trim() === "" ? null : notes.trim()
-      });
+      notes: notes.trim() === "" ? null : notes.trim()
+    });
   };
   const feedbackRuntimeAvailable = canReadFeedback && canCreateFeedback;
+  const hasScoringOccurrenceToken = typeof scoringOccurrenceToken === "string"
+    && /^[0-9a-f]{64}$/.test(scoringOccurrenceToken);
 
   return (
     <section className="detailSection analystFeedbackSection" aria-label="Analyst Feedback">
@@ -202,13 +222,25 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
         change thresholds.
       </p>
       {!canReadFeedback && <p className="emptyStateMessage">Analyst feedback is not available in this runtime.</p>}
+      {canReadFeedback && requiresOccurrenceReview && (
+        <div className="summaryCard" role="status">
+          <p className="sectionCopy">Scoring changed while this transaction was expanded. Review the current scoring before recording feedback.</p>
+          <button className="secondaryButton compactButton" type="button" onClick={onConfirmOccurrenceReview}>
+            I reviewed the current scoring
+          </button>
+        </div>
+      )}
       {canReadFeedback && isLoading && <p className="loadingText">Loading analyst feedback...</p>}
       {canReadFeedback && !isLoading && error && <p className="formError">{feedbackErrorMessage(error)}</p>}
       {canReadFeedback && !isLoading && !error && feedback && <ExistingFeedback feedback={feedback} />}
       {canReadFeedback && !canCreateFeedback && !isLoading && !error && !feedback && (
-        <p className="emptyStateMessage">Analyst feedback is not available in this runtime.</p>
+        <p className="emptyStateMessage">
+          {hasScoringOccurrenceToken
+            ? "Analyst feedback is not available in this runtime."
+            : "Refresh transaction details before recording feedback."}
+        </p>
       )}
-      {feedbackRuntimeAvailable && !isLoading && !error && !feedback && (
+      {feedbackRuntimeAvailable && !requiresOccurrenceReview && !isLoading && !error && !feedback && (
         <form className="analystFeedbackForm" onSubmit={onSubmit}>
           <fieldset disabled={submitState === "submitting"}>
             <legend>Review outcome</legend>
@@ -239,6 +271,9 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
           </label>
           {submitState === "validation-error" && <p className="formError">Feedback request is invalid.</p>}
           {submitState === "duplicate" && <p className="formError">Feedback already exists for this transaction.</p>}
+          {submitState === "stale-occurrence" && (
+            <p className="formError">Scoring changed after review. Refresh transaction details and review the current scoring before retrying.</p>
+          )}
           {submitState === "error" && <p className="formError">{feedbackErrorMessage(submitError)}</p>}
           {submitState === "success" && <p className="formSuccess">Feedback recorded.</p>}
           <button type="submit" disabled={submitState === "submitting"}>
@@ -251,6 +286,11 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
 }
 
 function ExistingFeedback({ feedback }) {
+  const relationCopy = feedback.scoringOccurrenceRelation === "CURRENT"
+    ? "This feedback snapshot matches the current scoring occurrence."
+    : feedback.scoringOccurrenceRelation === "PRIOR"
+      ? "This feedback belongs to a prior scoring occurrence and does not cover the current scoring."
+      : "The scoring occurrence for this historical feedback could not be verified.";
   return (
     <article className="summaryCard">
       <h5>Feedback recorded</h5>
@@ -263,6 +303,7 @@ function ExistingFeedback({ feedback }) {
         <Field label="Reason codes" value={listText(feedback.decisionReasonCodes)} />
         <Field label="Notes" value={feedback.notesPresent ? "Present" : "None"} />
       </dl>
+      <p className="sectionCopy">{relationCopy}</p>
       <p className="sectionCopy">One active feedback record is already present for this transaction.</p>
     </article>
   );

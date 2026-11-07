@@ -5,6 +5,7 @@ describe("formatDateTime", () => {
   it.each([
     ["unparseable text", "not-a-date"],
     ["impossible calendar date", "2026-02-30T12:00:00Z"],
+    ["invalid timezone offset", "2026-04-20T09:00:00+18:01"],
     ["invalid Date", new Date(Number.NaN)],
     ["unrepresentable input", Symbol("private")]
   ])("returns the unavailable label for %s", (_label, value) => {
