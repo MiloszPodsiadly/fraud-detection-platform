@@ -51,7 +51,8 @@ describe("useScoredTransactionDetail", () => {
       transactionId: "txn-1", enabled: true, apiClient, expectedScoringOccurrenceToken: "a".repeat(64)
     }));
 
-    await waitFor(() => expect(result.current.error?.message).toBe("INVALID_TRANSACTION_RISK_INTELLIGENCE_RESPONSE"));
+    await waitFor(() => expect(result.current.error?.code).toBe("SCORING_OCCURRENCE_CHANGED"));
+    expect(result.current.error?.message).toBe("INVALID_TRANSACTION_RISK_INTELLIGENCE_RESPONSE");
     expect(result.current.detail).toBeNull();
   });
 

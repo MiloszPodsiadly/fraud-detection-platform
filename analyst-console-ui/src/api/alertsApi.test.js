@@ -1335,6 +1335,26 @@ describe("alertsApi auth headers", () => {
     );
   });
 
+  it.each([
+    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED",
+    "FRAUD_FEEDBACK_ALREADY_RECORDED",
+    "CONFLICT"
+  ])("preserves the backend conflict reason %s from an HTTP response", async (reasonCode) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      error: "Conflict",
+      message: "Request conflict.",
+      details: [`reason:${reasonCode}`]
+    }, 409));
+
+    await expect(createFraudFeedback("txn-1", {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      scoringOccurrenceToken: "a".repeat(64),
+      decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
+      notes: null
+    })).rejects.toMatchObject({ status: 409, reasonCode });
+  });
+
   it.each([400, 401, 403, 404, 503])("propagates scored transaction detail %s errors", async (status) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       error: `E${status}`,

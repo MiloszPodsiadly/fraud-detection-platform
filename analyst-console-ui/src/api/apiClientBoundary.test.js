@@ -18,11 +18,14 @@ const REVIEWED_BACKEND_FILES = [
   "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackOccurrenceRelation.java",
   "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackResponse.java",
   "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackService.java",
+  "alert-service/src/main/java/com/frauddetection/alert/exception/AlertServiceExceptionHandler.java",
   "alert-service/src/main/java/com/frauddetection/alert/feedback/validation/FraudFeedbackRequestValidator.java",
   "alert-service/src/main/java/com/frauddetection/alert/feedback/validation/ValidatedFraudFeedback.java",
   "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionResponseMapper.java",
   "alert-service/src/main/java/com/frauddetection/alert/persistence/AlertDocument.java",
   "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionDocument.java",
+  "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionProjectionWriter.java",
+  "alert-service/src/main/java/com/frauddetection/alert/regulated/RegulatedMutationTransactionRunner.java",
   "alert-service/src/main/java/com/frauddetection/alert/service/ScoredTransactionSearchResult.java",
   "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringService.java",
   "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringUseCase.java"
@@ -252,6 +255,11 @@ describe("api client boundary", () => {
         "alert-service/src/main/java/com/frauddetection/alert/security/config/FraudCaseAuthorizationRules.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/config/BffSessionSecurityConfigurer.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java",
+        "alert-service/src/main/java/com/frauddetection/alert/exception/AlertServiceExceptionHandler.java",
+        "alert-service/src/main/java/com/frauddetection/alert/feedback/FraudFeedbackService.java",
+        "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionDocument.java",
+        "alert-service/src/main/java/com/frauddetection/alert/persistence/ScoredTransactionProjectionWriter.java",
+        "alert-service/src/main/java/com/frauddetection/alert/regulated/RegulatedMutationTransactionRunner.java",
         "alert-service/src/test/java/com/frauddetection/alert/controller/RetiredFraudCaseRouteTest.java",
         "docs/release/fraud_case_api_cleanup.md",
         "scripts/check-api-client-scope.mjs"
@@ -265,7 +273,7 @@ describe("api client boundary", () => {
       API_CLIENT_SCOPE_CHANGED_FILES: "alert-service/src/main/java/com/frauddetection/alert/service/FraudCaseManagementService.java"
     });
 
-    expect(failure).toContain("API client scope backend changes are restricted to the approved fraud-case route removal and BFF logout allowlist.");
+    expect(failure).toContain("API client scope backend changes are restricted to the reviewed alert-service correction and BFF logout allowlist.");
   });
 
   it("documents the frontend API client boundary", () => {

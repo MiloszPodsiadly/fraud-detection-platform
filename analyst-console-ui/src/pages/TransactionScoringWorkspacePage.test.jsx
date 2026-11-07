@@ -3,13 +3,40 @@ import { describe, expect, it, vi } from "vitest";
 import { TransactionScoringWorkspacePage } from "./TransactionScoringWorkspacePage.jsx";
 
 vi.mock("../components/TransactionRiskIntelligencePanel.jsx", () => ({
-  TransactionRiskIntelligencePanel: ({ transactionId, enabled, panelId }) => (
-    <section id={panelId} aria-label="Mock transaction risk intelligence">Risk intelligence for {transactionId}; enabled: {String(enabled)}</section>
+  TransactionRiskIntelligencePanel: ({ transactionId, enabled, panelId, onRefreshTransactions }) => (
+    <section id={panelId} aria-label="Mock transaction risk intelligence">
+      Risk intelligence for {transactionId}; enabled: {String(enabled)}
+      {typeof onRefreshTransactions === "function" && (
+        <button type="button" onClick={onRefreshTransactions}>Refresh transaction list from detail</button>
+      )}
+    </section>
   ),
   transactionRiskIntelligencePanelId: (transactionId) => `transaction-risk-intelligence-${String(transactionId).replace(/[^A-Za-z0-9_-]+/g, "-")}`
 }));
 
 describe("TransactionScoringWorkspacePage", () => {
+  it("passes the workspace refresh callback to the expanded detail panel", () => {
+    const refreshWorkspace = vi.fn();
+    render(
+      <TransactionScoringWorkspacePage
+        canReadTransactions
+        transactionPage={{ content: [transaction("txn-1")], page: 0, size: 25, totalPages: 1, totalElements: 1 }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onRefreshTransactions={refreshWorkspace}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh transaction list from detail" }));
+
+    expect(refreshWorkspace).toHaveBeenCalledTimes(1);
+  });
+
   it("integrates Transaction Risk Intelligence into one expanded scored transaction row with aria wiring", () => {
     render(
       <TransactionScoringWorkspacePage
@@ -164,7 +191,7 @@ describe("TransactionScoringWorkspacePage", () => {
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
   });
 
-  it("labels capped filtered totals as an upper bound", () => {
+  it("labels capped filtered totals as a display limit", () => {
     render(
       <TransactionScoringWorkspacePage
         canReadTransactions
@@ -179,8 +206,8 @@ describe("TransactionScoringWorkspacePage", () => {
       />
     );
 
-    expect(screen.getByText("Up to 10,000")).toBeInTheDocument();
-    expect(screen.getByText("filtered matches")).toBeInTheDocument();
+    expect(screen.getByText("10,000+")).toBeInTheDocument();
+    expect(screen.getByText("filtered matches (display limit)")).toBeInTheDocument();
   });
 
   it("labels exact filtered totals as exact", () => {

@@ -167,9 +167,11 @@ export function useFraudFeedback({
         return null;
       }
       const changedOccurrence = apiError?.status === 409
-        && apiError?.error === "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED";
+        && apiError?.reasonCode === "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED";
+      const duplicate = apiError?.status === 409
+        && apiError?.reasonCode === "FRAUD_FEEDBACK_ALREADY_RECORDED";
       updateState({
-        submitState: changedOccurrence ? "stale-occurrence" : (apiError?.status === 409 ? "duplicate" : "error"),
+        submitState: changedOccurrence ? "stale-occurrence" : (duplicate ? "duplicate" : "error"),
         submitError: apiError
       });
       return null;

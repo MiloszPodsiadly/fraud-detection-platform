@@ -47,6 +47,10 @@ public class RegulatedMutationTransactionRunner {
         return mode;
     }
 
+    public boolean isTransactionManagerConfigured() {
+        return transactionTemplate != null;
+    }
+
     private static RegulatedMutationTransactionMode parse(String value) {
         if (value == null || value.isBlank()) {
             return RegulatedMutationTransactionMode.OFF;

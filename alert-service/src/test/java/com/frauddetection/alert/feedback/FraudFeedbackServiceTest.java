@@ -19,6 +19,7 @@ import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnap
 import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
 import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
@@ -45,6 +46,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
+import com.mongodb.MongoException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -81,6 +83,7 @@ class FraudFeedbackServiceTest {
     private final CurrentAnalystUser currentAnalystUser = mock(CurrentAnalystUser.class);
     private final WriteActionAuditOutboxService auditOutboxService = mock(WriteActionAuditOutboxService.class);
     private final RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+    private final ScoredTransactionProjectionWriter projectionWriter = mock(ScoredTransactionProjectionWriter.class);
     private final List<FraudFeedbackRecord> savedRecords = new ArrayList<>();
     private FraudFeedbackService service;
 
@@ -88,7 +91,8 @@ class FraudFeedbackServiceTest {
     void setUp() {
         service = createService(new EngineIntelligenceResponseMapper());
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
-        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.REQUIRED);
+        when(transactionRunner.isTransactionManagerConfigured()).thenReturn(true);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenReturn(projectedEngineIntelligence());
@@ -411,7 +415,70 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void auditOutboxFailureAfterSaveReturns503AndCompensatesSavedFeedback() {
+    void transactionModeOffFailsClosedBeforeReadingOrWritingFeedback() {
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED");
+                });
+
+        verify(transactionMonitoringUseCase, never()).getScoredTransaction(any());
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(projectionWriter, never()).fenceFeedbackOccurrence(any(), any());
+    }
+
+    @Test
+    void missingTransactionManagerFailsClosedBeforeReadingOrWritingFeedback() {
+        when(transactionRunner.isTransactionManagerConfigured()).thenReturn(false);
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED");
+                });
+
+        verify(transactionMonitoringUseCase, never()).getScoredTransaction(any());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void retriesOnceAfterMongoTransientTransactionAbort() {
+        org.mockito.Mockito.doThrow(new LabelledMongoException("TransientTransactionError"))
+                .doAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get())
+                .when(transactionRunner).runLocalCommit(any());
+
+        service.create("txn-1", request());
+
+        verify(transactionRunner, org.mockito.Mockito.times(2)).runLocalCommit(any());
+        verify(repository).save(any());
+    }
+
+    @Test
+    void doesNotRetryWhenMongoCommitOutcomeIsUnknown() {
+        org.mockito.Mockito.doThrow(new LabelledMongoException("UnknownTransactionCommitResult"))
+                .when(transactionRunner).runLocalCommit(any());
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_COMMIT_OUTCOME_UNKNOWN");
+                });
+
+        verify(transactionRunner).runLocalCommit(any());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void auditOutboxFailureReturns503WithoutManualFeedbackCleanup() {
         doThrow(new IllegalStateException("outbox unavailable"))
                 .when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
 
@@ -425,43 +492,7 @@ class FraudFeedbackServiceTest {
                 });
 
         assertThat(savedRecords).hasSize(1);
-        verify(repository).deleteById(savedRecords.getFirst().getFeedbackId());
-    }
-
-    @Test
-    void outboxFailureInTransactionModeDoesNotRunLocalCleanup() {
-        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.REQUIRED);
-        doThrow(new IllegalStateException("outbox unavailable"))
-                .when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
-
-        assertThatThrownBy(() -> service.create("txn-1", request()))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(exception -> {
-                    ResponseStatusException statusException = (ResponseStatusException) exception;
-                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
-                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE");
-                });
-
         verify(repository, never()).deleteById(any());
-    }
-
-    @Test
-    void outboxFailureSuppressesCleanupFailureOnOriginalOutboxException() {
-        IllegalStateException outboxFailure = new IllegalStateException("outbox unavailable");
-        IllegalStateException cleanupFailure = new IllegalStateException("cleanup unavailable");
-        doThrow(outboxFailure).when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
-        doThrow(cleanupFailure).when(repository).deleteById(any());
-
-        assertThatThrownBy(() -> service.create("txn-1", request()))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(exception -> {
-                    ResponseStatusException statusException = (ResponseStatusException) exception;
-                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
-                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE");
-                    assertThat(statusException.getCause()).isSameAs(outboxFailure);
-                    assertThat(statusException.getCause().getSuppressed()).containsExactly(cleanupFailure);
-                    assertThat(statusException.getMessage()).doesNotContain("Customer confirmed fraud");
-                });
     }
 
     @Test
@@ -843,6 +874,7 @@ class FraudFeedbackServiceTest {
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,
+                projectionWriter,
                 new FraudFeedbackRequestValidator(),
                 recordAssembler,
                 engineIntelligenceSnapshotter,
@@ -1032,5 +1064,19 @@ class FraudFeedbackServiceTest {
         record.setCreatedAt(Instant.parse("2026-06-25T10:15:30Z"));
         record.setDecisionReasonCodes(List.of());
         return record;
+    }
+
+    private static final class LabelledMongoException extends MongoException {
+        private final String label;
+
+        private LabelledMongoException(String label) {
+            super("controlled transaction outcome");
+            this.label = label;
+        }
+
+        @Override
+        public boolean hasErrorLabel(String requestedLabel) {
+            return label.equals(requestedLabel);
+        }
     }
 }

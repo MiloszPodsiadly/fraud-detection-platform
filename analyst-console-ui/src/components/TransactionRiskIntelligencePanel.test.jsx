@@ -194,6 +194,65 @@ describe("TransactionRiskIntelligencePanel", () => {
     }));
   });
 
+  it("keeps same-occurrence feedback drafts and clears them after a new occurrence loads", () => {
+    const originalToken = "a".repeat(64);
+    const refreshedToken = "b".repeat(64);
+    const apiClient = {};
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ scoringOccurrenceToken: originalToken }),
+      isLoading: false,
+      error: null
+    });
+    const { rerender } = renderPanel({ scoringOccurrenceToken: originalToken, apiClient });
+    fireEvent.click(screen.getByLabelText("Mark as confirmed legitimate"));
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Review notes for occurrence A" } });
+
+    rerender(<TransactionRiskIntelligencePanel
+      transactionId="txn-available-1"
+      scoringOccurrenceToken={originalToken}
+      apiClient={apiClient}
+    />);
+
+    expect(screen.getByLabelText("Mark as confirmed legitimate")).toBeChecked();
+    expect(screen.getByLabelText("Notes")).toHaveValue("Review notes for occurrence A");
+
+    useScoredTransactionDetail.mockReturnValue({ detail: null, isLoading: true, error: null });
+    rerender(<TransactionRiskIntelligencePanel
+      transactionId="txn-available-1"
+      scoringOccurrenceToken={refreshedToken}
+      apiClient={apiClient}
+    />);
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({ scoringOccurrenceToken: refreshedToken }),
+      isLoading: false,
+      error: null
+    });
+    rerender(<TransactionRiskIntelligencePanel
+      transactionId="txn-available-1"
+      scoringOccurrenceToken={refreshedToken}
+      apiClient={apiClient}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "I reviewed the current scoring" }));
+    expect(screen.getByLabelText("Mark as confirmed fraud")).toBeChecked();
+    expect(screen.getByLabelText("Notes")).toHaveValue("");
+  });
+
+  it("shows a separate occurrence-changed error and refreshes the workspace list", () => {
+    const refreshTransactions = vi.fn();
+    useScoredTransactionDetail.mockReturnValue({
+      detail: null,
+      isLoading: false,
+      error: { code: "SCORING_OCCURRENCE_CHANGED" }
+    });
+
+    renderPanel({ onRefreshTransactions: refreshTransactions });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("The scored transaction changed after this row was loaded.");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh scored transactions" }));
+    expect(refreshTransactions).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the evidence limitation when merchant details are absent", () => {
     useScoredTransactionDetail.mockReturnValue({
       detail: availableDetail({ merchantInfo: null }),
@@ -560,7 +619,8 @@ describe("TransactionRiskIntelligencePanel", () => {
     [{ status: 401 }, "You do not have permission to read or record analyst feedback."],
     [{ status: 403 }, "You do not have permission to read or record analyst feedback."],
     [{ status: 404 }, "Scored transaction or feedback was not found."],
-    [{ status: 409 }, "Feedback already exists for this transaction."],
+    [{ status: 409, reasonCode: "FRAUD_FEEDBACK_ALREADY_RECORDED" }, "Feedback already exists for this transaction."],
+    [{ status: 409, reasonCode: "CONFLICT" }, "Feedback could not be recorded because transaction state changed. Refresh the transaction list and review the current scoring."],
     [{ status: 503 }, "Analyst feedback is temporarily unavailable."],
     [new Error("backend raw failure"), "Analyst feedback could not be loaded or recorded."]
   ])("renders safe analyst feedback error %#", (error, copy) => {
@@ -581,6 +641,7 @@ describe("TransactionRiskIntelligencePanel", () => {
   });
 
   it("shows a distinct stale scoring message after a feedback conflict", () => {
+    const refreshTransactions = vi.fn();
     useFraudFeedback.mockReturnValue({
       feedback: null,
       isLoading: false,
@@ -592,10 +653,13 @@ describe("TransactionRiskIntelligencePanel", () => {
       submit: vi.fn()
     });
 
-    renderPanel();
+    renderPanel({ onRefreshTransactions: refreshTransactions });
 
-    expect(screen.getByText("Scoring changed after review. Refresh transaction details and review the current scoring before retrying.")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Refresh the transaction list and review the current occurrence");
     expect(screen.queryByText("Feedback already exists for this transaction.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh scored transactions" }));
+    expect(refreshTransactions).toHaveBeenCalledTimes(1);
   });
 
   it("does not render feedback form when runtime cannot read fraud feedback", () => {

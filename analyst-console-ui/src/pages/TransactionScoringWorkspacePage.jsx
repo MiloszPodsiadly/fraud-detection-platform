@@ -20,6 +20,7 @@ export function TransactionScoringWorkspacePage({
   isStale = false,
   error,
   onRetry,
+  onRefreshTransactions,
   onTransactionFiltersChange = () => {},
   onTransactionPageChange,
   onTransactionPageSizeChange,
@@ -91,6 +92,7 @@ export function TransactionScoringWorkspacePage({
                   transactionId={transaction.transactionId}
                   scoringOccurrenceToken={transaction.scoringOccurrenceToken}
                   apiClient={apiClient}
+                  onRefreshTransactions={onRefreshTransactions}
                   enabled={canReadTransactions === true}
                   panelId={detailPanelId}
                 />

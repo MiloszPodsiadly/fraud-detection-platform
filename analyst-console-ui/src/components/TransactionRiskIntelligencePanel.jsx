@@ -36,6 +36,7 @@ export function TransactionRiskIntelligencePanel({
   scoringOccurrenceToken,
   enabled = true,
   apiClient,
+  onRefreshTransactions,
   panelId
 }) {
   const shouldFetch = Boolean(enabled && transactionId);
@@ -64,12 +65,22 @@ export function TransactionRiskIntelligencePanel({
       {enabled && !transactionId && <p className="emptyStateMessage">No transaction selected.</p>}
       {shouldFetch && isLoading && <p className="loadingText">Loading transaction risk intelligence...</p>}
       {shouldFetch && !isLoading && error && (
-        <p className="formError">{errorMessage(error)}</p>
+        error.code === "SCORING_OCCURRENCE_CHANGED" ? (
+          <div className="formError" role="alert">
+            <p>The scored transaction changed after this row was loaded. Refresh the transaction list to review the current occurrence.</p>
+            {typeof onRefreshTransactions === "function" && (
+              <button className="secondaryButton compactButton" type="button" onClick={onRefreshTransactions}>
+                Refresh scored transactions
+              </button>
+            )}
+          </div>
+        ) : <p className="formError">{errorMessage(error)}</p>
       )}
       {shouldFetch && !isLoading && !error && detail && (
         <TransactionRiskIntelligenceDetail
           detail={detail}
           apiClient={apiClient}
+          onRefreshTransactions={onRefreshTransactions}
           requiresOccurrenceReview={requiresOccurrenceReview}
           onConfirmOccurrenceReview={() => setReviewConfirmation({ token: expectedOccurrenceToken, confirmed: true })}
         />
@@ -78,7 +89,7 @@ export function TransactionRiskIntelligencePanel({
   );
 }
 
-function TransactionRiskIntelligenceDetail({ detail, apiClient, requiresOccurrenceReview, onConfirmOccurrenceReview }) {
+function TransactionRiskIntelligenceDetail({ detail, apiClient, onRefreshTransactions, requiresOccurrenceReview, onConfirmOccurrenceReview }) {
   const intelligence = detail.engineIntelligence;
   const alertRecommendation = alertRecommendationPresentation(detail.alertRecommended);
   return (
@@ -116,6 +127,7 @@ function TransactionRiskIntelligenceDetail({ detail, apiClient, requiresOccurren
         transactionId={detail.transactionId}
         scoringOccurrenceToken={detail.scoringOccurrenceToken}
         apiClient={apiClient}
+        onRefreshTransactions={onRefreshTransactions}
         requiresOccurrenceReview={requiresOccurrenceReview}
         onConfirmOccurrenceReview={onConfirmOccurrenceReview}
       />
@@ -184,7 +196,7 @@ const FEEDBACK_OPTIONS = [
   }
 ];
 
-function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClient, requiresOccurrenceReview, onConfirmOccurrenceReview }) {
+function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClient, onRefreshTransactions, requiresOccurrenceReview, onConfirmOccurrenceReview }) {
   const {
     feedback,
     isLoading,
@@ -240,7 +252,18 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
             : "Refresh transaction details before recording feedback."}
         </p>
       )}
-      {feedbackRuntimeAvailable && !requiresOccurrenceReview && !isLoading && !error && !feedback && (
+      {feedbackRuntimeAvailable && submitState === "stale-occurrence" && (
+        <div className="formError" role="alert">
+          <p>Scoring changed after review. Refresh the transaction list and review the current occurrence before recording feedback.</p>
+          {typeof onRefreshTransactions === "function" && (
+            <button className="secondaryButton compactButton" type="button" onClick={onRefreshTransactions}>
+              Refresh scored transactions
+            </button>
+          )}
+        </div>
+      )}
+      {feedbackRuntimeAvailable && !requiresOccurrenceReview && submitState !== "stale-occurrence"
+        && !isLoading && !error && !feedback && (
         <form className="analystFeedbackForm" onSubmit={onSubmit}>
           <fieldset disabled={submitState === "submitting"}>
             <legend>Review outcome</legend>
@@ -271,9 +294,6 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
           </label>
           {submitState === "validation-error" && <p className="formError">Feedback request is invalid.</p>}
           {submitState === "duplicate" && <p className="formError">Feedback already exists for this transaction.</p>}
-          {submitState === "stale-occurrence" && (
-            <p className="formError">Scoring changed after review. Refresh transaction details and review the current scoring before retrying.</p>
-          )}
           {submitState === "error" && <p className="formError">{feedbackErrorMessage(submitError)}</p>}
           {submitState === "success" && <p className="formSuccess">Feedback recorded.</p>}
           <button type="submit" disabled={submitState === "submitting"}>
@@ -287,7 +307,7 @@ function AnalystFeedbackSection({ transactionId, scoringOccurrenceToken, apiClie
 
 function ExistingFeedback({ feedback }) {
   const relationCopy = feedback.scoringOccurrenceRelation === "CURRENT"
-    ? "This feedback snapshot matches the current scoring occurrence."
+    ? "This feedback snapshot matched the scoring occurrence when checked."
     : feedback.scoringOccurrenceRelation === "PRIOR"
       ? "This feedback belongs to a prior scoring occurrence and does not cover the current scoring."
       : "The scoring occurrence for this historical feedback could not be verified.";
@@ -442,8 +462,11 @@ function feedbackErrorMessage(error) {
   if (error?.status === 404) {
     return "Scored transaction or feedback was not found.";
   }
-  if (error?.status === 409) {
+  if (error?.status === 409 && error?.reasonCode === "FRAUD_FEEDBACK_ALREADY_RECORDED") {
     return "Feedback already exists for this transaction.";
+  }
+  if (error?.status === 409) {
+    return "Feedback could not be recorded because transaction state changed. Refresh the transaction list and review the current scoring.";
   }
   if (error?.status === 503) {
     return "Analyst feedback is temporarily unavailable.";

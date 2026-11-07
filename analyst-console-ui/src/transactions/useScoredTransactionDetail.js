@@ -85,11 +85,16 @@ export function useScoredTransactionDetail({
       }
       const validation = validateTransactionRiskIntelligenceDetail(nextDetail);
       const responseTransactionId = validation.valid ? normalizeTransactionId(nextDetail.transactionId) : null;
-      if (!validation.valid || responseTransactionId !== identity.transactionId
-        || (identity.expectedScoringOccurrenceToken !== null
-          && nextDetail.scoringOccurrenceToken !== identity.expectedScoringOccurrenceToken)) {
+      const transactionIdMismatch = validation.valid && responseTransactionId !== identity.transactionId;
+      const occurrenceChanged = validation.valid
+        && !transactionIdMismatch
+        && identity.expectedScoringOccurrenceToken !== null
+        && nextDetail.scoringOccurrenceToken !== identity.expectedScoringOccurrenceToken;
+      if (!validation.valid || transactionIdMismatch || occurrenceChanged) {
         const validationError = new Error("INVALID_TRANSACTION_RISK_INTELLIGENCE_RESPONSE");
-        validationError.code = validation.valid ? "TRANSACTION_ID_MISMATCH" : validation.reason;
+        validationError.code = !validation.valid
+          ? validation.reason
+          : transactionIdMismatch ? "TRANSACTION_ID_MISMATCH" : "SCORING_OCCURRENCE_CHANGED";
         setRequestState({ identity, detail: null, isLoading: true, error: validationError });
         return null;
       }

@@ -11,6 +11,8 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEW;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEWER;
@@ -62,6 +64,47 @@ public class ScoredTransactionProjectionWriter {
             }
         }
         throw new IllegalStateException("SCORING_OCCURRENCE_ADMISSION_INDETERMINATE");
+    }
+
+    public void fenceFeedbackOccurrence(String transactionId, ScoringOccurrenceOwnership ownership) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.hasResource(mongoTemplate.getMongoDatabaseFactory())) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_MONGO_TRANSACTION_REQUIRED"
+            );
+        }
+        Query currentOccurrence = new Query(new Criteria().andOperator(
+                Criteria.where("_id").is(transactionId),
+                Criteria.where("sourceEventId").is(ownership.sourceEventId()),
+                Criteria.where("sourceEventCreatedAt").is(ownership.sourceEventCreatedAt().toString()),
+                Criteria.where("sourceEventCreatedAtEpochSecond").is(ownership.sourceEventCreatedAt().getEpochSecond()),
+                Criteria.where("sourceEventCreatedAtNano").is(ownership.sourceEventCreatedAt().getNano()),
+                Criteria.where("sourceEventFingerprint").is(ownership.sourceEventFingerprint())
+        ));
+        UpdateResult result = mongoTemplate.updateFirst(
+                currentOccurrence,
+                new Update().inc("feedbackWriteFenceVersion", 1L),
+                ScoredTransactionDocument.class
+        );
+        if (!result.wasAcknowledged() || result.getMatchedCount() > 1 || result.getModifiedCount() > 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE"
+            );
+        }
+        if (result.getMatchedCount() == 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_CHANGED"
+            );
+        }
+        if (result.getModifiedCount() != 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_OCCURRENCE_FENCE_UNAVAILABLE"
+            );
+        }
     }
 
     private UpdateResult replaceOlder(ScoredTransactionDocument candidate) {
