@@ -2,6 +2,7 @@ package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.source.SourceLineageAccess;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
@@ -9,6 +10,8 @@ import com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher;
 import com.frauddetection.enricher.persistence.FeatureStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -20,6 +23,7 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
     private final TransactionFeatureCalculator transactionFeatureCalculator;
     private final TransactionEnrichedEventMapper transactionEnrichedEventMapper;
     private final TransactionEnrichedEventPublisher transactionEnrichedEventPublisher;
+    private final SourceLineageAccess sourceLineage;
 
     public TransactionFeatureEnricherService(
             FeatureStore featureStore,
@@ -27,10 +31,25 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
             TransactionEnrichedEventMapper transactionEnrichedEventMapper,
             TransactionEnrichedEventPublisher transactionEnrichedEventPublisher
     ) {
+        this(featureStore, transactionFeatureCalculator, transactionEnrichedEventMapper, transactionEnrichedEventPublisher,
+                SourceLineageAccess.disabled());
+    }
+
+    @Autowired
+    public TransactionFeatureEnricherService(FeatureStore featureStore, TransactionFeatureCalculator calculator,
+                                            TransactionEnrichedEventMapper mapper, TransactionEnrichedEventPublisher publisher,
+                                            ObjectProvider<SourceLineageAccess> lineage) {
+        this(featureStore, calculator, mapper, publisher, lineage.getIfAvailable(SourceLineageAccess::disabled));
+    }
+
+    public TransactionFeatureEnricherService(FeatureStore featureStore, TransactionFeatureCalculator transactionFeatureCalculator,
+                                            TransactionEnrichedEventMapper transactionEnrichedEventMapper,
+                                            TransactionEnrichedEventPublisher transactionEnrichedEventPublisher, SourceLineageAccess lineage) {
         this.featureStore = featureStore;
         this.transactionFeatureCalculator = transactionFeatureCalculator;
         this.transactionEnrichedEventMapper = transactionEnrichedEventMapper;
         this.transactionEnrichedEventPublisher = transactionEnrichedEventPublisher;
+        this.sourceLineage = java.util.Objects.requireNonNull(lineage);
     }
 
     @Override
@@ -53,6 +72,8 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
         FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(event);
         EnrichedTransactionFeatures features = transactionFeatureCalculator.calculate(event, snapshot);
         TransactionEnrichedEvent enrichedEvent = transactionEnrichedEventMapper.toEvent(event, features);
+
+        sourceLineage.bindEnriched(event, enrichedEvent);
 
         transactionEnrichedEventPublisher.publish(enrichedEvent);
         featureStore.recordTransaction(event);

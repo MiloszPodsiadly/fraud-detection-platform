@@ -35,11 +35,11 @@ This ADR does not claim to repair historical Redis behavior by documentation.
 
 ## Identity, schema and indexes
 
-Admission is closed until an authenticated ingress binds `institutionId`, `sourceId`, source event ID,
-transaction ID, customer identity, device/provider evidence, source sequence and event time. The current
-raw event's random `eventId`, caller `transactionId` and caller `sourceSystem` do not supply that binding
-([raw contract](../../common-events/src/main/java/com/frauddetection/common/events/contract/TransactionRawEvent.java),
-[mapper](../../transaction-ingest-service/src/main/java/com/frauddetection/ingest/mapper/TransactionRequestMapper.java)).
+Attested transactions have verified source signatures and private links to their exact scored facts. Device admission
+still requires verified device/customer mapping, pseudonym key lifecycle, a source-issued monotonic sequence
+and signed coverage seals. Source references and receiver UUIDs supply none of those domain facts.
+Country/network assertions need fresh authorized providers; signal thresholds and risk scores require
+validation and calibration.
 
 An observation key is `(institutionId, sourceId, sourceEventId)`. The occurrence key adds the bound
 `transactionId` and contract version; transaction ID alone is not unique enough. A canonical, versioned

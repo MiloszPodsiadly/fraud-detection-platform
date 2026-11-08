@@ -2,6 +2,7 @@ package com.frauddetection.scoring.context;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.features.FeatureSnapshotWireValueNormalizer;
+import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.scoring.config.ScoringMode;
 
 import java.time.Instant;
@@ -13,8 +14,13 @@ public record ScoringContext(
         Map<String, Object> featureSnapshot,
         ScoringMode mode,
         String correlationId,
-        Instant receivedAt
+        Instant receivedAt,
+        SourceLineage sourceLineage
 ) {
+    public ScoringContext(TransactionEnrichedEvent transaction, Map<String, Object> featureSnapshot, ScoringMode mode,
+                          String correlationId, Instant receivedAt) {
+        this(transaction, featureSnapshot, mode, correlationId, receivedAt, SourceLineage.unavailable(SourceLineage.State.UNVERIFIED));
+    }
 
     public ScoringContext {
         transaction = Objects.requireNonNull(transaction, "transaction is required");
@@ -22,6 +28,7 @@ public record ScoringContext(
         mode = Objects.requireNonNull(mode, "mode is required");
         correlationId = ScoringContextValuePolicy.requireCorrelationId(correlationId);
         receivedAt = Objects.requireNonNull(receivedAt, "receivedAt is required");
+        sourceLineage = Objects.requireNonNull(sourceLineage, "sourceLineage is required").forEnriched(transaction, featureSnapshot);
     }
 
     private static Map<String, Object> copyFeatureSnapshot(Map<String, Object> source) {

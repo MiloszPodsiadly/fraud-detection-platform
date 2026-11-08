@@ -40,12 +40,16 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
             "common-events/src/main/java/com/frauddetection/common/events/contract/TransactionScoredEvent.java",
             "common-events/src/main/java/com/frauddetection/common/events/kafka/JacksonKafkaDeserializer.java",
             "common-events/src/main/java/com/frauddetection/common/events/kafka/JacksonKafkaSerializer.java",
+            "common-events/src/main/java/com/frauddetection/common/events/source/MongoSourceOccurrenceStore.java",
+            "common-events/src/main/java/com/frauddetection/common/events/source/SourceScoredOccurrence.java",
             "common-test-support/src/main/java/com/frauddetection/common/testsupport/fixture/TransactionFixtures.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/config/FraudScoringKafkaConfig.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/mapper/TransactionScoredEventMapper.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/messaging/KafkaTransactionScoredEventPublisher.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/messaging/TransactionScoredEventPublisher.java",
-            "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/TransactionFraudScoringService.java"
+            "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/TransactionFraudScoringService.java",
+            "fraud-scoring-service/src/main/java/com/frauddetection/scoring/source/SourceOccurrenceConfiguration.java",
+            "fraud-scoring-service/src/main/java/com/frauddetection/scoring/source/SourceOccurrencePublisher.java"
     );
 
     @Test

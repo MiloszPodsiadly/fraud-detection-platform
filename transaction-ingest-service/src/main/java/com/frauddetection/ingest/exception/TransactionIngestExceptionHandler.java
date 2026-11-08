@@ -14,6 +14,12 @@ import java.util.List;
 @ControllerAdvice
 public class TransactionIngestExceptionHandler {
 
+    @ExceptionHandler(com.frauddetection.ingest.source.SourceIngestException.class)
+    public ResponseEntity<ApiErrorResponse> handleSourceIngest(com.frauddetection.ingest.source.SourceIngestException exception) {
+        return ResponseEntity.status(exception.status()).body(new ApiErrorResponse(Instant.now(), exception.status().value(),
+                exception.status().getReasonPhrase(), exception.getMessage(), List.of()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException exception) {
         List<String> validationErrors = exception.getBindingResult()
