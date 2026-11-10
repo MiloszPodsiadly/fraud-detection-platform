@@ -1,6 +1,7 @@
 package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureValueBoundsContract;
 import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
@@ -23,6 +24,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class TransactionFeatureCalculatorTest {
 
     private final TransactionFeatureCalculator calculator = new TransactionFeatureCalculator(new CurrencyAmountConverter());
+
+    @Test
+    void refusesSnapshotsThatWouldEmitCountsAboveCanonicalFeatureBounds() {
+        var event = TransactionFixtures.rawTransaction().build();
+
+        assertThatThrownBy(() -> calculator.calculate(event, new FeatureStoreSnapshot(
+                FraudFeatureValueBoundsContract.MAX_RECENT_TRANSACTION_COUNT, BigDecimal.ZERO, List.of(), 0, null, false)))
+                .isInstanceOf(IllegalStateException.class).hasMessage("RECENT_TRANSACTION_WINDOW_CAPACITY_EXCEEDED");
+        assertThatThrownBy(() -> calculator.calculate(event, new FeatureStoreSnapshot(
+                0, BigDecimal.ZERO, List.of(), FraudFeatureValueBoundsContract.MAX_MERCHANT_FREQUENCY_7D, null, false)))
+                .isInstanceOf(IllegalStateException.class).hasMessage("MERCHANT_HISTORY_CAPACITY_EXCEEDED");
+    }
 
     @Test
     void shouldCalculateCanonicalFraudRelevantFacts() {

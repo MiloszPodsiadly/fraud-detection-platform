@@ -33,8 +33,8 @@ import java.util.HexFormat;
 public class RedisFeatureStore implements FeatureStore {
 
     private static final DefaultRedisScript<Long> ATTESTED_HISTORY_SCRIPT = new DefaultRedisScript<>("""
-            local expected = {'zset', 'zset', 'set', 'hash', 'string'}
-            for i = 1, 5 do
+            local expected = {'zset', 'zset', 'set', 'hash', 'string', 'set'}
+            for i = 1, 6 do
               local actual = redis.call('TYPE', KEYS[i]).ok
               if actual ~= 'none' and actual ~= expected[i] then return -3 end
             end
@@ -52,38 +52,37 @@ public class RedisFeatureStore implements FeatureStore {
               local customerScore = redis.call('ZSCORE', KEYS[1], member)
               local merchantScore = redis.call('ZSCORE', KEYS[2], tx)
               local last = tonumber(redis.call('GET', KEYS[5]))
+              for i = 1, 5 do
+                if redis.call('PTTL', KEYS[i]) <= 0 then return -2 end
+              end
               if not customerScore or tonumber(customerScore) ~= score or not merchantScore or tonumber(merchantScore) ~= score
                     or redis.call('SISMEMBER', KEYS[3], device) == 0 or not last or last < score then return -2 end
+              redis.call('SADD', KEYS[6], tx)
               redis.call('PEXPIRE', KEYS[1], ARGV[7])
               redis.call('PEXPIRE', KEYS[2], ARGV[7])
               redis.call('PEXPIRE', KEYS[3], ARGV[8])
               redis.call('PEXPIRE', KEYS[4], ARGV[9])
               redis.call('PEXPIRE', KEYS[5], ARGV[10])
+              redis.call('PEXPIRE', KEYS[6], ARGV[11])
               return 0
             end
             local oldCustomerScore = redis.call('ZSCORE', KEYS[1], member)
             local oldMerchantScore = redis.call('ZSCORE', KEYS[2], tx)
-            if oldCustomerScore or oldMerchantScore then
-              if oldCustomerScore and oldMerchantScore and tonumber(oldCustomerScore) == score and tonumber(oldMerchantScore) == score
-                    and redis.call('SISMEMBER', KEYS[3], device) == 1
-                    and tonumber(redis.call('GET', KEYS[5]) or '') and tonumber(redis.call('GET', KEYS[5])) >= score then
-                redis.call('HSET', KEYS[4], tx, commitment)
-                redis.call('PEXPIRE', KEYS[4], ARGV[9])
-                return 0
-              end
-              if oldMerchantScore or oldCustomerScore then return -1 end
+            if redis.call('SISMEMBER', KEYS[6], tx) == 1 or oldCustomerScore or oldMerchantScore then
               return -2
             end
             redis.call('ZADD', KEYS[1], score, member)
             redis.call('ZADD', KEYS[2], score, tx)
             redis.call('SADD', KEYS[3], device)
             redis.call('HSET', KEYS[4], tx, commitment)
+            redis.call('SADD', KEYS[6], tx)
             if not storedLast or score > storedLast then redis.call('SET', KEYS[5], tostring(score)) end
             redis.call('PEXPIRE', KEYS[1], ARGV[7])
             redis.call('PEXPIRE', KEYS[2], ARGV[7])
             redis.call('PEXPIRE', KEYS[3], ARGV[8])
             redis.call('PEXPIRE', KEYS[4], ARGV[9])
             redis.call('PEXPIRE', KEYS[5], ARGV[10])
+            redis.call('PEXPIRE', KEYS[6], ARGV[11])
             return 1
             """, Long.class);
 
@@ -138,8 +137,25 @@ public class RedisFeatureStore implements FeatureStore {
                 throw new IllegalStateException("PROCESSED_TRANSACTION_TTL_UNRESOLVED");
             }
             if (Boolean.TRUE.equals(recorded)) { return true; }
-            return !namespace.isLegacy() && Boolean.TRUE.equals(stringRedisTemplate.opsForSet()
-                    .isMember(v2ProcessedTransactionsKey(namespace, event.customerId()), event.transactionId()));
+            if (namespace.isLegacy()) { return false; }
+            BigDecimal amountPln = currencyAmountConverter.toPln(event.transactionAmount().amount(),
+                    event.transactionAmount().currency());
+            String member = event.transactionId() + "|" + event.transactionAmount().amount() + "|"
+                    + event.transactionAmount().currency() + "|" + amountPln;
+            boolean survivingMembership = Boolean.TRUE.equals(stringRedisTemplate.opsForSet()
+                    .isMember(attestedTransactionIdsKey(namespace, event.customerId()), event.transactionId()))
+                    || stringRedisTemplate.opsForZSet().score(customerTransactionsKey(namespace, event.customerId()), member) != null
+                    || stringRedisTemplate.opsForZSet().score(merchantTransactionsKey(namespace, event.customerId(),
+                            event.merchantInfo().merchantId()), event.transactionId()) != null
+                    || Boolean.TRUE.equals(stringRedisTemplate.opsForSet()
+                            .isMember(v2ProcessedTransactionsKey(namespace, event.customerId()), event.transactionId()))
+                    || stringRedisTemplate.opsForZSet().score(v2CustomerTransactionsKey(namespace, event.customerId()), member) != null
+                    || stringRedisTemplate.opsForZSet().score(v2MerchantTransactionsKey(namespace, event.customerId(),
+                            event.merchantInfo().merchantId()), event.transactionId()) != null;
+            if (survivingMembership) { throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED"); }
+            return false;
+        } catch (FeatureEnrichmentException known) {
+            throw known;
         } catch (Exception exception) {
             throw new FeatureEnrichmentException("Failed to check transaction idempotency state in Redis.", exception);
         }
@@ -164,6 +180,12 @@ public class RedisFeatureStore implements FeatureStore {
 
             stringRedisTemplate.opsForZSet().removeRangeByScore(customerTransactionsKey, Double.NEGATIVE_INFINITY, recentWindowStart);
             stringRedisTemplate.opsForZSet().removeRangeByScore(merchantTransactionsKey, Double.NEGATIVE_INFINITY, merchantWindowStart);
+            if (!namespace.isLegacy()) {
+                stringRedisTemplate.opsForZSet().removeRangeByScore(v2CustomerTransactionsKey(namespace, event.customerId()),
+                        Double.NEGATIVE_INFINITY, recentWindowStart);
+                stringRedisTemplate.opsForZSet().removeRangeByScore(v2MerchantTransactionsKey(namespace, event.customerId(),
+                        event.merchantInfo().merchantId()), Double.NEGATIVE_INFINITY, merchantWindowStart);
+            }
 
             Set<ZSetOperations.TypedTuple<String>> recentTransactionEntries =
                     stringRedisTemplate.opsForZSet().rangeByScoreWithScores(
@@ -171,30 +193,32 @@ public class RedisFeatureStore implements FeatureStore {
                             recentWindowStart,
                             eventTimestamp,
                             0,
-                            (long) maxFinalRecentTransactionCount + 1
+                            maxFinalRecentTransactionCount
                     );
             Set<ZSetOperations.TypedTuple<String>> legacyRecentEntries = namespace.isLegacy() ? Set.of()
                     : stringRedisTemplate.opsForZSet().rangeByScoreWithScores(
                             v2CustomerTransactionsKey(namespace, event.customerId()), recentWindowStart,
-                            eventTimestamp, 0, (long) maxFinalRecentTransactionCount + 1);
+                            eventTimestamp, 0, maxFinalRecentTransactionCount);
             List<RecentTransaction> recentTransactions = mergeRecentTransactions(
                     parseTransactions(recentTransactionEntries), parseTransactions(legacyRecentEntries));
-            if (recentTransactions.size() > maxFinalRecentTransactionCount) {
+            if (recentTransactions.size() >= maxFinalRecentTransactionCount) {
                 throw new IllegalStateException("RECENT_TRANSACTION_WINDOW_CAPACITY_EXCEEDED");
             }
             Long merchantFrequency;
             if (namespace.isLegacy()) {
                 merchantFrequency = stringRedisTemplate.opsForZSet().count(merchantTransactionsKey, merchantWindowStart, eventTimestamp);
             } else {
-                Set<String> merchantTransactions = new HashSet<>();
-                Set<String> currentMerchantTransactions = stringRedisTemplate.opsForZSet()
-                        .rangeByScore(merchantTransactionsKey, merchantWindowStart, eventTimestamp);
-                Set<String> previousMerchantTransactions = stringRedisTemplate.opsForZSet()
-                        .rangeByScore(v2MerchantTransactionsKey(namespace, event.customerId(), event.merchantInfo().merchantId()),
-                                merchantWindowStart, eventTimestamp);
-                if (currentMerchantTransactions != null) { merchantTransactions.addAll(currentMerchantTransactions); }
-                if (previousMerchantTransactions != null) { merchantTransactions.addAll(previousMerchantTransactions); }
+                Map<String, Double> merchantTransactions = new LinkedHashMap<>();
+                mergeMerchantTransactions(merchantTransactions,
+                        boundedMerchantEntries(merchantTransactionsKey, merchantWindowStart, eventTimestamp));
+                mergeMerchantTransactions(merchantTransactions, boundedMerchantEntries(
+                        v2MerchantTransactionsKey(namespace, event.customerId(), event.merchantInfo().merchantId()),
+                        merchantWindowStart, eventTimestamp));
                 merchantFrequency = (long) merchantTransactions.size();
+            }
+            if (merchantFrequency != null
+                    && merchantFrequency >= FraudFeatureValueBoundsContract.MAX_MERCHANT_FREQUENCY_7D) {
+                throw new IllegalStateException("MERCHANT_HISTORY_CAPACITY_EXCEEDED");
             }
             Boolean knownDevice = stringRedisTemplate.opsForSet().isMember(deviceSetKey, event.deviceInfo().deviceId());
             if (!namespace.isLegacy() && !Boolean.TRUE.equals(knownDevice)) {
@@ -370,7 +394,8 @@ public class RedisFeatureStore implements FeatureStore {
 
             List<String> keys = List.of(customerTransactionsKey(namespace, customerId),
                     merchantTransactionsKey(namespace, customerId, merchantId), knownDevicesKey(namespace, customerId),
-                    processedTransactionsKey(namespace, customerId), lastTransactionKey(namespace, customerId));
+                    processedTransactionsKey(namespace, customerId), lastTransactionKey(namespace, customerId),
+                    attestedTransactionIdsKey(namespace, customerId));
             if (mongoAlreadyApplied) {
                 Object storedCommitment = stringRedisTemplate.opsForHash().get(keys.get(3), transactionId);
                 if (storedCommitment != null) {
@@ -384,7 +409,7 @@ public class RedisFeatureStore implements FeatureStore {
                     boolean monotonicLast = false;
                     try { monotonicLast = last != null && !parseAttestedLastTransaction(last).isBefore(timestamp); }
                     catch (RuntimeException malformed) { /* Report a rebuild requirement below. */ }
-                    boolean ttlValid = keys.stream().allMatch(key -> {
+                    boolean ttlValid = keys.subList(0, 5).stream().allMatch(key -> {
                         Long remaining = stringRedisTemplate.getExpire(key, java.util.concurrent.TimeUnit.MILLISECONDS);
                         return remaining != null && remaining > 0;
                     });
@@ -394,6 +419,7 @@ public class RedisFeatureStore implements FeatureStore {
                     }
                     return;
                 }
+                throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED");
             }
 
             // V2 keys were untagged and cannot participate in a Redis Cluster script. Read them during
@@ -403,30 +429,18 @@ public class RedisFeatureStore implements FeatureStore {
             Double oldCustomerScore = stringRedisTemplate.opsForZSet().score(v2CustomerTransactionsKey(namespace, customerId), member);
             Double oldMerchantScore = stringRedisTemplate.opsForZSet()
                     .score(v2MerchantTransactionsKey(namespace, customerId, merchantId), transactionId);
-            Boolean oldDevice = stringRedisTemplate.opsForSet().isMember(v2KnownDevicesKey(namespace, customerId), deviceId);
-            String oldLast = stringRedisTemplate.opsForValue().get(v2LastTransactionKey(namespace, customerId));
             if (oldProcessed || oldCustomerScore != null || oldMerchantScore != null) {
-                boolean oldLastValid = false;
-                try { oldLastValid = oldLast != null && !parseAttestedLastTransaction(oldLast).isBefore(timestamp); }
-                catch (RuntimeException malformed) { /* Missing or malformed v2 state requires an explicit rebuild. */ }
-                if (oldCustomerScore != null && oldMerchantScore != null
-                        && oldCustomerScore == score && oldMerchantScore == score
-                        && Boolean.TRUE.equals(oldDevice) && oldLastValid) {
-                    return;
-                }
+                // V2 membership is keyed by business data and is not proof of the receipt-bound replay identity.
                 throw new FeatureEnrichmentException(oldMerchantScore != null && oldCustomerScore == null
                         ? "FEATURE_HISTORY_COMMITMENT_CONFLICT" : "FEATURE_HISTORY_REBUILD_REQUIRED");
             }
-            if (mongoAlreadyApplied) {
-                throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED");
-            }
-
             Long result = stringRedisTemplate.execute(ATTESTED_HISTORY_SCRIPT, keys,
                     transactionId, historyCommitment, member, Long.toString((long) score), deviceId,
                     timestamp.toString(), Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()),
                     Long.toString(featureStoreProperties.knownDeviceTtl().toMillis()),
                     Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()),
-                    Long.toString(featureStoreProperties.lastTransactionTtl().toMillis()));
+                    Long.toString(featureStoreProperties.lastTransactionTtl().toMillis()),
+                    Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()));
             if (result == null) { throw new FeatureEnrichmentException("FEATURE_HISTORY_FINALIZATION_UNRESOLVED"); }
             if (result == -1) { throw new FeatureEnrichmentException("FEATURE_HISTORY_COMMITMENT_CONFLICT"); }
             if (result == -2) { throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED"); }
@@ -494,6 +508,35 @@ public class RedisFeatureStore implements FeatureStore {
     private String lastTransactionKey(FeatureNamespace namespace, String customerId) {
         return namespacePrefix(namespace, customerId) + (namespace.isLegacy()
                 ? "customer:" + customerId + ":last-transaction" : "customer:last-transaction");
+    }
+
+    private String attestedTransactionIdsKey(FeatureNamespace namespace, String customerId) {
+        return namespacePrefix(namespace, customerId) + "customer:transaction-ids";
+    }
+
+    private Set<ZSetOperations.TypedTuple<String>> boundedMerchantEntries(String key, double start, double end) {
+        Set<ZSetOperations.TypedTuple<String>> entries = stringRedisTemplate.opsForZSet().rangeByScoreWithScores(
+                key, start, end, 0, FraudFeatureValueBoundsContract.MAX_MERCHANT_FREQUENCY_7D);
+        if (entries == null) { throw new IllegalStateException("MERCHANT_HISTORY_READ_UNRESOLVED"); }
+        return entries;
+    }
+
+    private void mergeMerchantTransactions(Map<String, Double> merged,
+                                           Set<ZSetOperations.TypedTuple<String>> entries) {
+        for (ZSetOperations.TypedTuple<String> entry : entries) {
+            if (entry == null || entry.getValue() == null || entry.getValue().isBlank()
+                    || !entry.getValue().equals(entry.getValue().trim()) || entry.getScore() == null
+                    || !Double.isFinite(entry.getScore()) || entry.getScore() != Math.rint(entry.getScore())) {
+                throw new IllegalStateException("MALFORMED_MERCHANT_TRANSACTION_MEMBERSHIP");
+            }
+            Double priorScore = merged.putIfAbsent(entry.getValue(), entry.getScore());
+            if (priorScore != null && Double.compare(priorScore, entry.getScore()) != 0) {
+                throw new IllegalStateException("MALFORMED_MERCHANT_TRANSACTION_MEMBERSHIP");
+            }
+            if (merged.size() >= FraudFeatureValueBoundsContract.MAX_MERCHANT_FREQUENCY_7D) {
+                throw new IllegalStateException("MERCHANT_HISTORY_CAPACITY_EXCEEDED");
+            }
+        }
     }
 
     private String namespacePrefix(FeatureNamespace namespace, String customerId) {

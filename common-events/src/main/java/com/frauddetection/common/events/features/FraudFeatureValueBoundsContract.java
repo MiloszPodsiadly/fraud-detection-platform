@@ -10,6 +10,8 @@ public final class FraudFeatureValueBoundsContract {
     public static final String CANONICAL_RECENT_TRANSACTION_WINDOW_TEXT =
             CANONICAL_RECENT_TRANSACTION_WINDOW.toString();
     public static final int MAX_RECENT_TRANSACTION_COUNT = 1_000_000;
+    /** Output/resource ceiling for merchantFrequency7d, aligned with the canonical count ceiling. */
+    public static final int MAX_MERCHANT_FREQUENCY_7D = 1_000_000;
     public static final double MAX_TRANSACTION_VELOCITY_PER_MINUTE = 1_000_000.0d;
     public static final double RATE_CONSISTENCY_TOLERANCE = 0.0001d;
     public static final BigDecimal MAX_RECENT_AMOUNT_SUM_PLN = new BigDecimal("999999999999.99");

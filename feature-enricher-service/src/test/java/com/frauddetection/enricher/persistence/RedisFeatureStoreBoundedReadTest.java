@@ -2,6 +2,8 @@ package com.frauddetection.enricher.persistence;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.features.FraudFeatureValueBoundsContract;
+import com.frauddetection.common.events.source.SourceLineage;
+import com.frauddetection.common.events.source.SourceScope;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
@@ -25,6 +27,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -72,6 +75,28 @@ class RedisFeatureStoreBoundedReadTest {
         assertThatThrownBy(() -> fixture.store().loadSnapshot(event()))
                 .isInstanceOf(FeatureEnrichmentException.class)
                 .hasRootCauseMessage("RECENT_TRANSACTION_WINDOW_CAPACITY_EXCEEDED");
+    }
+
+    @Test
+    void attestedRecentAndMerchantDualReadsUseOnlyBoundedSortedSetRanges() {
+        Fixture fixture = fixture(FraudFeatureValueBoundsContract.MAX_RECENT_TRANSACTION_COUNT);
+        SourceScope source = mock(SourceScope.class);
+        when(source.issuer()).thenReturn("issuer");
+        when(source.institution()).thenReturn("institution");
+        when(source.source()).thenReturn("source");
+        when(source.sourceEpoch()).thenReturn("epoch");
+        SourceLineage authority = mock(SourceLineage.class);
+        when(authority.state()).thenReturn(SourceLineage.State.VERIFIED);
+        when(authority.source()).thenReturn(source);
+        FeatureNamespace namespace = FeatureNamespace.attested(authority);
+        when(fixture.sortedSets().rangeByScoreWithScores(anyString(), anyDouble(), anyDouble(), anyLong(), anyLong()))
+                .thenReturn(Set.of());
+
+        fixture.store().loadSnapshot(event(), namespace);
+
+        verify(fixture.sortedSets(), times(4)).rangeByScoreWithScores(
+                anyString(), anyDouble(), anyDouble(), eq(0L), eq((long) FraudFeatureValueBoundsContract.MAX_RECENT_TRANSACTION_COUNT));
+        verify(fixture.sortedSets(), never()).rangeByScoreWithScores(anyString(), anyDouble(), anyDouble());
     }
 
     private Fixture fixture(int maxFinalCount) {

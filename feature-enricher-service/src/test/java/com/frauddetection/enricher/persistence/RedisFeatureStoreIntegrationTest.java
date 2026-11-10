@@ -118,6 +118,28 @@ class RedisFeatureStoreIntegrationTest {
     }
 
     @Test
+    void recentWindowAcceptsMMinusOneAndFailsAtMAndMPlusOnePriorRows() {
+        RedisFeatureStore boundedStore = new RedisFeatureStore(redisTemplate,
+                new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8),
+                        Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter(), 3);
+        TransactionRawEvent current = event("current", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN");
+
+        featureStore.recordTransaction(event("previous-1", CURRENT_TIMESTAMP.minusSeconds(3), BigDecimal.ONE, "PLN"));
+        featureStore.recordTransaction(event("previous-2", CURRENT_TIMESTAMP.minusSeconds(2), BigDecimal.ONE, "PLN"));
+        assertThat(boundedStore.loadSnapshot(current).recentTransactionCount()).isEqualTo(2);
+
+        featureStore.recordTransaction(event("previous-3", CURRENT_TIMESTAMP.minusSeconds(1), BigDecimal.ONE, "PLN"));
+        assertThatThrownBy(() -> boundedStore.loadSnapshot(current))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasRootCauseMessage("RECENT_TRANSACTION_WINDOW_CAPACITY_EXCEEDED");
+
+        featureStore.recordTransaction(event("previous-4", CURRENT_TIMESTAMP.minusMillis(500), BigDecimal.ONE, "PLN"));
+        assertThatThrownBy(() -> boundedStore.loadSnapshot(current))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasRootCauseMessage("RECENT_TRANSACTION_WINDOW_CAPACITY_EXCEEDED");
+    }
+
+    @Test
     void failsClosedForMalformedDuplicateOrMonetarilyInconsistentMembership() {
         TransactionRawEvent current = event("current", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN");
 
@@ -193,7 +215,7 @@ class RedisFeatureStoreIntegrationTest {
         assertThat(featureStore.loadSnapshot(next, namespace).lastTransactionTimestamp()).isEqualTo(CURRENT_TIMESTAMP);
 
         Set<String> keys = redisTemplate.keys("feature:v3:attested:*");
-        assertThat(keys).hasSize(5);
+        assertThat(keys).hasSize(6);
         assertThat(keys.stream().map(RedisFeatureStoreIntegrationTest::redisHashTag).collect(Collectors.toSet())).hasSize(1);
         assertThat(keys.stream().map(key -> redisTemplate.getExpire(key, java.util.concurrent.TimeUnit.MILLISECONDS))
                 .allMatch(ttl -> ttl != null && ttl > 0)).isTrue();
@@ -212,6 +234,68 @@ class RedisFeatureStoreIntegrationTest {
         redisTemplate.delete(processedKey);
         assertThatThrownBy(() -> featureStore.verifyAttestedTransaction(enriched, namespace, commitment))
                 .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+    }
+
+    @Test
+    void missingCommitmentMarkerCannotAdoptSurvivingBusinessMembership() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent raw = event("marker-loss", CURRENT_TIMESTAMP, new BigDecimal("8.00"), "PLN");
+        TransactionEnrichedEvent enriched = enriched(raw);
+        String originalCommitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
+        featureStore.recordAttestedTransaction(enriched, namespace, originalCommitment);
+
+        String processedKey = redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
+        redisTemplate.opsForHash().delete(processedKey, raw.transactionId());
+        assertThatThrownBy(() -> featureStore.hasRecordedTransaction(raw, namespace))
+                .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+        String replacementCommitment = SourceEventCommitment.attestedHistory("b".repeat(64), enriched);
+
+        assertThatThrownBy(() -> featureStore.recordAttestedTransaction(enriched, namespace, replacementCommitment))
+                .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+        assertThat(redisTemplate.opsForHash().get(processedKey, raw.transactionId())).isNull();
+        assertThat(redisTemplate.opsForSet().members(redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow()))
+                .containsExactly(raw.transactionId());
+        assertThat(redisTemplate.opsForZSet().zCard(redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow())).isEqualTo(1L);
+    }
+
+    @Test
+    void attestedMerchantFrequencyUsesExactBoundedV2V3Union() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent existing = event("merchant-shared", CURRENT_TIMESTAMP.minusSeconds(10), BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent enriched = enriched(existing);
+        featureStore.recordAttestedTransaction(enriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), enriched));
+
+        String merchantId = existing.merchantInfo().merchantId();
+        String v2MerchantKey = "feature:v2:attested:" + namespace.keySegment() + ":customer:" + CUSTOMER_ID
+                + ":merchant:" + merchantId + ":transactions";
+        redisTemplate.opsForZSet().add(v2MerchantKey, existing.transactionId(), score(existing.transactionTimestamp()));
+        redisTemplate.opsForZSet().add(v2MerchantKey, "merchant-v2-only", score(CURRENT_TIMESTAMP.minusSeconds(5)));
+
+        FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(
+                event("merchant-current", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN"), namespace);
+
+        assertThat(snapshot.merchantFrequency7d()).isEqualTo(2);
+    }
+
+    @Test
+    void attestedMerchantDualReadRejectsConflictingDuplicateTimestamps() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent existing = event("merchant-conflict", CURRENT_TIMESTAMP.minusSeconds(10), BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent enriched = enriched(existing);
+        featureStore.recordAttestedTransaction(enriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), enriched));
+        String v2MerchantKey = "feature:v2:attested:" + namespace.keySegment() + ":customer:" + CUSTOMER_ID
+                + ":merchant:" + existing.merchantInfo().merchantId() + ":transactions";
+        redisTemplate.opsForZSet().add(v2MerchantKey, existing.transactionId(), score(existing.transactionTimestamp().plusMillis(1)));
+
+        assertThatThrownBy(() -> featureStore.loadSnapshot(
+                event("merchant-current", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN"), namespace))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasRootCauseMessage("MALFORMED_MERCHANT_TRANSACTION_MEMBERSHIP");
     }
 
     @Test
