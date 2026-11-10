@@ -31,10 +31,13 @@ public final class SourceOccurrencePublisher {
     private TransactionScoredEvent deliver(String id) {
         var claim = store.claim(id);
         if (claim.status() == PUBLISHED) { return claim.event(); }
-        if (claim.status() != PENDING) { throw unresolved(); }
+        if (claim.status() != PUBLISHING) { throw unresolved(); }
         try { kafka.publish(claim.event()); }
-        catch (RuntimeException unknownAck) { throw unresolved(); }
-        var confirmed = store.confirm(id, claim.event());
+        catch (RuntimeException unknownAck) {
+            store.recordPublishFailure(id, claim.claimId(), "BROKER_ACK_UNRESOLVED");
+            throw unresolved();
+        }
+        var confirmed = store.confirm(id, claim.event(), claim.claimId());
         if (confirmed.status() != PUBLISHED) { throw unresolved(); }
         return confirmed.event();
     }
@@ -46,6 +49,13 @@ public final class SourceOccurrencePublisher {
         }
         if (unresolved > 0) { log.atWarn().addKeyValue("unresolvedCount", unresolved).log("Source scored recovery incomplete."); }
         return recovered;
+    }
+    public boolean redriveExhausted(String id, MongoSourceOccurrenceStore.RedriveReason reason) {
+        var redriven = store.redrive(id, reason);
+        if (redriven.status() != PENDING) { return false; }
+        log.warn("Source scored publication explicitly redriven.");
+        try { deliver(id); return true; }
+        catch (IllegalStateException unavailable) { return false; }
     }
     @Scheduled(fixedDelay = 30_000L, initialDelay = 30_000L)
     public void recover() {

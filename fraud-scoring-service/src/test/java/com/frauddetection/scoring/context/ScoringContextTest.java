@@ -3,6 +3,7 @@ package com.frauddetection.scoring.context;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
@@ -135,7 +136,7 @@ class ScoringContextTest {
     void exposesOnlyInternalInputBoundaryComponents() {
         assertThat(Arrays.stream(ScoringContext.class.getRecordComponents())
                 .map(RecordComponent::getName))
-                .containsExactly("transaction", "featureSnapshot", "mode", "correlationId", "receivedAt")
+                .containsExactly("transaction", "featureSnapshot", "mode", "correlationId", "receivedAt", "sourceLineage")
                 .doesNotContain(
                         "rawPayload",
                         "rawFeatures",
@@ -149,6 +150,15 @@ class ScoringContextTest {
                         "riskLevel",
                         "engineResults"
                 );
+    }
+
+    @Test
+    void keepsPrivateSourceLineageOutOfSerializedContext() {
+        String json = JsonMapper.builder().findAndAddModules().build()
+                .writeValueAsString(context("corr-1"));
+
+        assertThat(json)
+                .doesNotContain("sourceLineage", "UNVERIFIED", "receiptId", "eventCommitment");
     }
 
     private ScoringContext context(String correlationId) {

@@ -35,6 +35,11 @@ final class AuthenticatedSourceMongo implements AutoCloseable {
     }
 
     MongoClient owner() { return connect("source_owner", "ephemeral-owner-only", "admin"); }
+    String ownerUri(String database) {
+        String address = server.getHost() + ":" + server.getMappedPort(27017);
+        return "mongodb://source_owner:ephemeral-owner-only@" + address + "/" + database
+                + "?directConnection=true&authSource=admin";
+    }
     MongoClient anonymous() { return connect(null, null, null); }
 
     MongoClient consumer(MongoClient owner, String database, boolean enricher) {
@@ -53,6 +58,7 @@ final class AuthenticatedSourceMongo implements AutoCloseable {
         if (enricher) {
             privileges.add(privilege(database, "source_lineage_enriched", List.of("insert", "update")));
             privileges.add(privilege(database, "source_lineage_enriched_counts", List.of("find", "insert", "update")));
+            privileges.add(privilege(database, "source_enriched_publications", List.of("find", "insert", "update", "listIndexes")));
         }
         db.runCommand(new Document("createRole", user).append("privileges", privileges).append("roles", List.of()));
         db.runCommand(new Document("createUser", user).append("pwd", "ephemeral-consumer-only").append("roles", List.of(user)));

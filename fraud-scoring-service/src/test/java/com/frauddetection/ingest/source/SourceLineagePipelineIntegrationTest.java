@@ -4,9 +4,13 @@ import com.frauddetection.common.events.contract.*;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.events.source.*;
+import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
+import com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher;
 import com.frauddetection.enricher.persistence.FeatureStore;
+import com.frauddetection.enricher.persistence.FeatureNamespace;
+import com.frauddetection.enricher.persistence.RedisFeatureStore;
 import com.frauddetection.enricher.service.*;
 import com.frauddetection.ingest.api.IngestTransactionRequest;
 import com.frauddetection.ingest.config.KafkaTopicProperties;
@@ -24,15 +28,28 @@ import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.*;
 import com.frauddetection.scoring.service.*;
 import com.mongodb.MongoCommandException;
+import com.mongodb.MongoException;
+import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
 import org.bson.Document;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -40,6 +57,13 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.frauddetection.common.events.source.SourceLineage.State.*;
@@ -50,13 +74,20 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-/** Composition proof with real crypto, authenticated transactional Mongo, actual services/mappers and Kafka serde.
- * It does not claim broker delivery, Redis atomicity or exact post-scoring occurrence recovery (the next gate).
+/** Composition proof with real crypto, authenticated transactional Mongo, services/mappers and Kafka serde.
+ * It does not claim Redis atomicity or exact post-scoring occurrence recovery (the next gate).
  */
 class SourceLineagePipelineIntegrationTest {
     private static final AuthenticatedSourceMongo MONGO = new AuthenticatedSourceMongo();
     private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();
     private static final Clock CLOCK = Clock.fixed(TestSourceIssuer.NOW, ZoneOffset.UTC);
+    private static final String RAW_KEY = Base64.getEncoder().encodeToString(new byte[32]);
+    private static final String ENRICHED_KEY = Base64.getEncoder().encodeToString(new byte[] {1, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+    private static final SourceOriginProofs ORIGIN_PROOFS = new SourceOriginProofs(new SourceOriginProperties(true, "origin-key-1",
+            Map.of("origin-key-1", Base64.getEncoder().encodeToString(new byte[32]))));
+    private static final SourceRawPublicationProperties RAW_PUBLICATION_PROPERTIES = new SourceRawPublicationProperties(
+            true, "raw-key-1", Map.of("raw-key-1", RAW_KEY), Duration.ofSeconds(1), Duration.ofSeconds(30), 10, 8);
     private static ValidatorFactory validation;
     private MongoClient ownerClient;
     private MongoClient enricherClient;
@@ -69,7 +100,9 @@ class SourceLineagePipelineIntegrationTest {
     private MongoSourceLineage scorer;
     private final List<byte[]> rawWire = new ArrayList<>();
     private final List<byte[]> enrichedWire = new ArrayList<>();
-    private final Set<String> recorded = new HashSet<>();
+    private final Set<String> attestedRawEventIds = new HashSet<>();
+    private final Map<String, String> enrichedOriginProofs = new HashMap<>();
+    private final Map<FeatureNamespace, Set<String>> recorded = new HashMap<>();
     private final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
 
     @BeforeAll static void start() throws Exception { MONGO.start(); validation = Validation.buildDefaultValidatorFactory(); }
@@ -77,14 +110,19 @@ class SourceLineagePipelineIntegrationTest {
 
     @BeforeEach void setUp() {
         db = "lineage_" + UUID.randomUUID().toString().replace("-", "");
+        rawWire.clear(); enrichedWire.clear(); attestedRawEventIds.clear(); enrichedOriginProofs.clear(); recorded.clear();
         ownerClient = MONGO.owner();
         verifier = policy(false);
-        receipts = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
+        new MongoSourceReceiptStore(ownerClient, db, CLOCK,
                 new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier);
         owner = new MongoSourceLineage(ownerClient, db, "source_owner", MongoSourceLineage.Stage.INGEST, verifier, CLOCK);
+        receipts = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, owner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES);
         enricherClient = MONGO.consumer(ownerClient, db, true);
         scorerClient = MONGO.consumer(ownerClient, db, false);
-        enricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER, verifier, CLOCK);
+        enricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER, verifier, CLOCK,
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
         scorer = new MongoSourceLineage(scorerClient, db, "scorer", MongoSourceLineage.Stage.SCORER, verifier, CLOCK);
     }
 
@@ -97,6 +135,7 @@ class SourceLineagePipelineIntegrationTest {
                 .andExpect(status().isAccepted()).andExpect(jsonPath("$.status").value("ACCEPTED"))
                 .andExpect(jsonPath("$.sourceLineage").doesNotExist());
         var raw = lastRaw();
+        attestedRawEventIds.add(raw.eventId());
         enrich(raw);
         var enriched = lastEnriched();
         var scored = score(enriched);
@@ -118,6 +157,8 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(row).doesNotContain("customer-1", "account-1", "transactionAmount", "signature", TestSourceIssuer.ISSUER,
                     "institution-a", "source-event-42", "203.0.113.24", TestSourceIssuer.publicKey(0));
         }
+        String publication = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find().first().toJson();
+        assertThat(publication).doesNotContain("customer-1", "account-1", "transactionAmount", "institution-a", "source-event-42");
     }
 
     @Test void ordinaryUnsignedInputKeepsBaselineScoresAndNeverAcquiresSourceAuthority() throws Exception {
@@ -178,6 +219,38 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(scorer.enriched(enriched).state()).isEqualTo(VERIFIED);
     }
 
+    @Test void enrichedPublicationRetryReusesTheExactBoundSnapshotAcrossChangedFeatureHistory() throws Exception {
+        var raw = admit(Map.of());
+        var snapshot = new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
+        var features = new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw, snapshot);
+        var candidate = new TransactionEnrichedEventMapper().toAttestedEvent(raw, features);
+
+        var prepared = enricher.prepareEnrichedPublication(raw, candidate);
+        assertThat(prepared.authority().state()).isEqualTo(VERIFIED);
+        assertThat(prepared.event()).isNotNull();
+        assertThat(prepared.published()).isFalse();
+
+        Map<String, Object> changedFeatures = new HashMap<>(candidate.featureSnapshot());
+        changedFeatures.put(com.frauddetection.common.events.features.FraudFeatureContract.RECENT_TRANSACTION_COUNT, 999);
+        var changedCandidate = new TransactionEnrichedEvent(candidate.eventId(), candidate.transactionId(), candidate.correlationId(),
+                candidate.customerId(), candidate.accountId(), candidate.createdAt(), candidate.transactionTimestamp(),
+                candidate.transactionAmount(), candidate.merchantInfo(), candidate.deviceInfo(), candidate.locationInfo(),
+                candidate.customerContext(), changedFeatures);
+        var replay = enricher.prepareEnrichedPublication(raw, changedCandidate);
+        assertThat(replay.authority().state()).isEqualTo(VERIFIED);
+        assertThat(SourceEventCommitment.enriched(replay.event())).isEqualTo(SourceEventCommitment.enriched(candidate));
+        assertThat(replay.published()).isFalse();
+
+        assertThat(enricher.markEnrichedPublished(raw, candidate).state()).isEqualTo(VERIFIED);
+        var acknowledged = enricher.prepareEnrichedPublication(raw, changedCandidate);
+        assertThat(acknowledged.authority().state()).isEqualTo(VERIFIED);
+        assertThat(acknowledged.published()).isTrue();
+        assertThat(SourceEventCommitment.enriched(acknowledged.event())).isEqualTo(SourceEventCommitment.enriched(candidate));
+        assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_enriched").countDocuments()).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .find().first().getString("state")).isEqualTo("PUBLISHED");
+    }
+
     @Test void redriveOfExactBytesIsIdempotentButNoBusinessDeduplicationCrossBindsSources() throws Exception {
         var first = admit(Map.of());
         enrich(first);
@@ -193,31 +266,386 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(enricherClient.getDatabase(db).getCollection("source_lineage_enriched").countDocuments()).isEqualTo(1);
     }
 
-    @Test void newReceiverUuidsForSameSignedSourceRemainDistinctAndHaveTheSameOriginalReference() throws Exception {
-        var first = admit(Map.of());
-        var second = admit(Map.of());
-        assertThat(first.eventId()).isNotEqualTo(second.eventId());
-        assertThat(enricher.raw(first).receiptId()).isEqualTo(enricher.raw(second).receiptId());
-        assertThat(enricher.raw(first).eventCommitment()).isNotEqualTo(enricher.raw(second).eventCommitment());
+    @Test void repeatedSignedSourceReusesTheSameReceiverRawFactWithoutSpendingLineageLinks() throws Exception {
+        byte[] signedPayload = payload();
+        String signedProof = encodedProof(signedPayload, Map.of());
+        var first = service(publisher()).ingest(signedProof, signedPayload);
+        TransactionRawEvent canonical = lastRaw();
+        for (int retry = 0; retry < 35; retry++) {
+            var response = service(publisher()).ingest(signedProof, signedPayload);
+            assertThat(response.eventId()).isEqualTo(canonical.eventId());
+            assertThat(response.correlationId()).isEqualTo(canonical.correlationId());
+        }
+        assertThat(rawWire).hasSize(1);
+        assertThat(enricher.raw(canonical).receiptId()).isEqualTo(owner.raw(canonical).receiptId());
+        assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_raw")
+                .countDocuments(eq("receiptId", owner.raw(canonical).receiptId()))).isEqualTo(1);
         assertThat(ownerClient.getDatabase(db).getCollection("source_admission_receipts").countDocuments()).isEqualTo(1);
     }
 
-    @Test void sameBusinessIdsAndSourceEventIdFromDifferentAuthorizedInstitutionsRemainIsolated() throws Exception {
+    @Test void concurrentIdenticalSignedRequestsCommitOneReceiptRawLinkAndPublicationIntent() throws Exception {
+        byte[] signedPayload = payload();
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var evidence = verified(signedPayload, Map.of());
+        var mapper = new TransactionRequestMapper();
+        var firstCandidate = mapper.toEvent(request, "correlation-a");
+        var secondCandidate = mapper.toEvent(request, "correlation-b");
+        var barrier = new CyclicBarrier(2);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var a = pool.submit(() -> { barrier.await(10, TimeUnit.SECONDS); return receipts.acceptRaw(evidence, firstCandidate); });
+            var b = pool.submit(() -> { barrier.await(10, TimeUnit.SECONDS); return receipts.acceptRaw(evidence, secondCandidate); });
+            var first = a.get(20, TimeUnit.SECONDS);
+            var second = b.get(20, TimeUnit.SECONDS);
+            assertThat(first.status()).isIn(SourceReceiptStore.Status.ADMITTED, SourceReceiptStore.Status.EXISTING);
+            assertThat(second.status()).isIn(SourceReceiptStore.Status.ADMITTED, SourceReceiptStore.Status.EXISTING);
+            assertThat(first.receipt().id()).isEqualTo(second.receipt().id());
+            assertThat(first.event()).isEqualTo(second.event());
+            assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_raw")
+                    .countDocuments(eq("receiptId", first.receipt().id()))).isEqualTo(1);
+            assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                    .countDocuments(eq("_id", first.receipt().id()))).isEqualTo(1);
+        }
+    }
+
+    @Test void rawLineageBindingRequiresTheReceiptOwnersActiveTransaction() throws Exception {
+        byte[] signedPayload = payload();
+        var evidence = verified(signedPayload, Map.of());
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var candidate = new TransactionRequestMapper().toEvent(request, "uncommitted-correlation");
+        String receiptId = SourceReceiptCommitment.identity(evidence.scope());
+
+        try (ClientSession session = ownerClient.startSession()) {
+            assertThat(owner.bindRawWithinTransaction(session, evidence, receiptId, candidate).state()).isEqualTo(UNAVAILABLE);
+        }
+
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_receipts").countDocuments()).isZero();
+        assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_raw").countDocuments()).isZero();
+    }
+
+    @Test void unknownMongoCommitNeverReportsAcceptanceAndRetryReusesCommittedRawIntent() throws Exception {
+        var commitAttempts = new java.util.concurrent.atomic.AtomicInteger();
+        MongoClient faultClient = commitFault(ownerClient, (session, method, args) -> {
+            Object result = invoke(session, method, args);
+            if (method.getName().equals("commitTransaction")) {
+                commitAttempts.incrementAndGet();
+                throw unknownCommit();
+            }
+            return result;
+        });
+        var faultOwner = new MongoSourceLineage(faultClient, db, "source_owner", MongoSourceLineage.Stage.INGEST, verifier, CLOCK);
+        var faultStore = new MongoSourceReceiptStore(faultClient, db, CLOCK,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, faultOwner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES);
+        byte[] signedPayload = payload();
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var evidence = verified(signedPayload, Map.of());
+        var candidate = new TransactionRequestMapper().toEvent(request, "unknown-commit-correlation");
+
+        var uncertain = faultStore.acceptRaw(evidence, candidate);
+        assertThat(uncertain.status()).isEqualTo(SourceReceiptStore.Status.UNRESOLVED);
+        assertThat(commitAttempts.get()).isEqualTo(MongoSourceReceiptStore.ATTEMPTS);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_receipts").countDocuments()).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_raw").countDocuments()).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION).countDocuments()).isEqualTo(1);
+
+        var retried = receipts.acceptRaw(evidence, candidate);
+        assertThat(retried.status()).isEqualTo(SourceReceiptStore.Status.EXISTING);
+        assertThat(retried.event()).isEqualTo(candidate);
+    }
+
+    @Test void recoveryLeaseAllowsOnlyOneConcurrentPublisherToClaimTheRawIntent() throws Exception {
+        byte[] signedPayload = payload();
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var accepted = receipts.acceptRaw(verified(signedPayload, Map.of()),
+                new TransactionRequestMapper().toEvent(request, "lease-correlation"));
+        var publishing = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var sends = new java.util.concurrent.atomic.AtomicInteger();
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> receipts.recoverRawPublications(event -> {
+                sends.incrementAndGet();
+                publishing.countDown();
+                awaitLatch(release);
+            }, 1));
+            assertThat(publishing.await(10, TimeUnit.SECONDS)).isTrue();
+            var second = pool.submit(() -> receipts.recoverRawPublications(event -> sends.incrementAndGet(), 1));
+            assertThat(second.get(10, TimeUnit.SECONDS)).isZero();
+            release.countDown();
+            assertThat(first.get(10, TimeUnit.SECONDS)).isEqualTo(1);
+        } finally {
+            release.countDown();
+        }
+        assertThat(sends.get()).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", accepted.receipt().id())).first().getString("state")).isEqualTo("PUBLISHED");
+    }
+
+    @Test void changedSignedPayloadUnderOneSourceIdentityFencesTheReceipt() throws Exception {
+        var first = admit(Map.of());
+        String receiptId = owner.raw(first).receiptId();
+        byte[] changedPayload = new String(payload(), StandardCharsets.UTF_8)
+                .replace("\"transactionId\":\"transaction-1\"", "\"transactionId\":\"transaction-changed\"")
+                .getBytes(StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> service(publisher()).ingest(encodedProof(changedPayload, Map.of()), changedPayload))
+                .isInstanceOf(SourceIngestException.class).hasMessage("SOURCE_RECEIPT_CONFLICT");
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_identities")
+                .find(eq("_id", receiptId)).first().getString("state")).isEqualTo("CONFLICT");
+        assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_raw")
+                .countDocuments(eq("receiptId", receiptId))).isEqualTo(1);
+    }
+
+    @Test void pendingRawIntentIsQuarantinedWhenTheCurrentSourcePolicyRevokesIt() throws Exception {
+        byte[] signedPayload = payload();
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var candidate = new TransactionRequestMapper().toEvent(request, "revocation-correlation");
+        var accepted = receipts.acceptRaw(verified(signedPayload, Map.of()), candidate);
+        assertThat(accepted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
+
+        var revokedPolicy = policy(true);
+        var revokedOwner = new MongoSourceLineage(ownerClient, db, "source_owner", MongoSourceLineage.Stage.INGEST, revokedPolicy, CLOCK);
+        var revokedStore = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), revokedPolicy, revokedOwner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES);
+        AtomicReference<TransactionRawEvent> published = new AtomicReference<>();
+        assertThat(revokedStore.recoverRawPublications(published::set, 1)).isEqualTo(1);
+        assertThat(published.get()).isNull();
+        Document outbox = ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", accepted.receipt().id())).first();
+        assertThat(outbox.getString("state")).isEqualTo("QUARANTINED");
+        assertThat(outbox.getString("failureCode")).isEqualTo("AUTHORITY_DENIED");
+    }
+
+    @Test void expiryDeletesEncryptedReplayPayloadButKeepsThePermanentSourceIdentityFence() throws Exception {
+        byte[] signedPayload = payload();
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var accepted = receipts.acceptRaw(verified(signedPayload, Map.of()),
+                new TransactionRequestMapper().toEvent(request, "expiry-correlation"));
+        assertThat(accepted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
+        attestedRawEventIds.add(accepted.event().eventId());
+        enrich(accepted.event());
+        assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .countDocuments(eq("receiptId", accepted.receipt().id()))).isEqualTo(1);
+        ownerClient.getDatabase(db).getCollection("source_admission_identities").updateOne(
+                eq("_id", accepted.receipt().id()), com.mongodb.client.model.Updates.set("expiresAt", Date.from(CLOCK.instant().minusSeconds(1))));
+
+        assertThat(receipts.compactExpired(1)).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_identities")
+                .find(eq("_id", accepted.receipt().id())).first().getString("state")).isEqualTo("TOMBSTONED");
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_receipts")
+                .countDocuments(eq("_id", accepted.receipt().id()))).isZero();
+        assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .countDocuments(eq("_id", accepted.receipt().id()))).isZero();
+        assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .countDocuments(eq("receiptId", accepted.receipt().id()))).isZero();
+        assertThat(receipts.acceptRaw(verified(signedPayload, Map.of()), accepted.event()).status())
+                .isEqualTo(SourceReceiptStore.Status.TOMBSTONED);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_identities")
+                .countDocuments(eq("_id", accepted.receipt().id()))).isEqualTo(1);
+    }
+
+    @Test void receiptCapacityBoundsDurableRawPublicationQueue() throws Exception {
+        String capacityDb = "rawcap_" + UUID.randomUUID().toString().replace("-", "");
+        var limits = new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 1);
+        new MongoSourceReceiptStore(ownerClient, capacityDb, CLOCK, limits, verifier);
+        var capacityOwner = new MongoSourceLineage(ownerClient, capacityDb, "source_owner", MongoSourceLineage.Stage.INGEST, verifier, CLOCK);
+        var bounded = new MongoSourceReceiptStore(ownerClient, capacityDb, CLOCK, limits, verifier, capacityOwner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES);
+        byte[] signedPayload = payload();
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var first = bounded.acceptRaw(verified(signedPayload, Map.of()),
+                new TransactionRequestMapper().toEvent(request, "capacity-a"));
+        var second = bounded.acceptRaw(verified(signedPayload, Map.of("sourceEventId", "source-event-capacity-2")),
+                new TransactionRequestMapper().toEvent(request, "capacity-b"));
+
+        assertThat(first.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
+        assertThat(second.status()).isEqualTo(SourceReceiptStore.Status.CAPACITY_EXCEEDED);
+        assertThat(ownerClient.getDatabase(capacityDb).getCollection(MongoSourceRawPublicationSchema.COLLECTION).countDocuments()).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(capacityDb).getCollection("source_lineage_raw").countDocuments()).isEqualTo(1);
+    }
+
+    @Test void restartedPublisherReplaysEncryptedRawIntentToKafkaWithAtLeastOnceExactIdentity() throws Exception {
+        var kafka = FraudPlatformContainers.kafka();
+        if (!kafka.isRunning()) { kafka.start(); }
+        String topic = "raw-recovery-" + UUID.randomUUID().toString().replace("-", "");
+        try (var admin = AdminClient.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+            admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1))).all().get(15, TimeUnit.SECONDS);
+        }
+        Properties producerProperties = new Properties();
+        producerProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
+        producerProperties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        producerProperties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JacksonKafkaSerializer.class.getName());
+        producerProperties.put(ProducerConfig.ACKS_CONFIG, "all");
+        Properties consumerProperties = new Properties();
+        consumerProperties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
+        consumerProperties.put(ConsumerConfig.GROUP_ID_CONFIG, "raw-recovery-" + UUID.randomUUID());
+        consumerProperties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        consumerProperties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        consumerProperties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        try (var producer = new KafkaProducer<String, TransactionRawEvent>(producerProperties);
+             var consumer = new KafkaConsumer<String, String>(consumerProperties)) {
+            consumer.subscribe(List.of(topic));
+            consumer.poll(Duration.ofSeconds(1));
+            byte[] signedPayload = payload();
+            var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+            var candidate = new TransactionRequestMapper().toEvent(request, "raw-recovery-correlation");
+            String signedProof = encodedProof(signedPayload, Map.of());
+            String javaCommand = java.nio.file.Path.of(System.getProperty("java.home"), "bin",
+                    System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java").toString();
+            String childClasspath = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+            Process child = new ProcessBuilder(javaCommand, "-cp", childClasspath,
+                    SourceRawPublicationCrashWorker.class.getName(), db, MONGO.ownerUri(db), signedProof,
+                    Base64.getEncoder().encodeToString(signedPayload))
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            if (!child.waitFor(30, TimeUnit.SECONDS)) {
+                child.destroyForcibly();
+                child.waitFor(10, TimeUnit.SECONDS);
+                throw new AssertionError("RAW crash worker did not stop after durable acceptance");
+            }
+            assertThat(child.exitValue()).isZero();
+            var evidence = verified(signedPayload, Map.of());
+            String receiptId = SourceReceiptCommitment.identity(evidence.scope());
+            Document identity = ownerClient.getDatabase(db).getCollection("source_admission_identities").find(eq("_id", receiptId)).first();
+            Document receiptDocument = ownerClient.getDatabase(db).getCollection("source_admission_receipts").find(eq("_id", receiptId)).first();
+            assertThat(identity).isNotNull();
+            assertThat(receiptDocument).isNotNull();
+            String expectedBinding = SourceReceiptCommitment.binding(evidence.scope(), evidence.keyCommitment());
+            assertThat(identity.getString("bindingCommitment")).isEqualTo(expectedBinding);
+            assertThat(receiptDocument.getString("bindingCommitment")).isEqualTo(expectedBinding);
+            assertThat(receiptDocument.getString("policyVersion")).isEqualTo(evidence.policyVersion());
+            assertThat(receiptDocument.getString("verifiedAt")).isEqualTo(evidence.verifiedAt().toString());
+            assertThat(identity.getString("state")).isEqualTo("ADMITTED");
+            assertThat(identity.getInteger("schemaVersion")).isEqualTo(1);
+            assertThat(receiptDocument.getInteger("schemaVersion")).isEqualTo(1);
+            assertThat(receiptDocument.getString("keyCommitment")).isEqualTo(evidence.keyCommitment());
+            assertThat(identity.get("admittedAt")).isEqualTo(receiptDocument.get("admittedAt"));
+            assertThat(identity.get("expiresAt")).isEqualTo(receiptDocument.get("expiresAt"));
+            assertThat(SourceReceiptCommitment.identity(evidence.scope())).isEqualTo(identity.getString("_id"));
+            assertThat(verifier.receiptPolicyDenial(evidence.scope(), evidence.keyCommitment(), evidence.policyVersion(),
+                    evidence.verifiedAt())).isNull();
+            var replayAdmission = receipts.admit(evidence);
+            assertThat(replayAdmission.status()).isEqualTo(SourceReceiptStore.Status.EXISTING);
+            Document durableIntent = ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION).find().first();
+            assertThat(durableIntent.getString("state")).isEqualTo("PENDING");
+            assertThat(durableIntent.getDate("expiresAt").toInstant()).isEqualTo(replayAdmission.receipt().expiresAt());
+            assertThat(durableIntent.getString("_id")).isEqualTo(durableIntent.getString("receiptId"));
+            byte[] encryptedPayload = new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)).decrypt(durableIntent);
+            TransactionRawEvent durableEvent = JSON.readValue(new String(encryptedPayload, StandardCharsets.UTF_8), TransactionRawEvent.class);
+            assertThat(SourceEventCommitment.raw(durableEvent)).isEqualTo(durableIntent.getString("rawCommitment"));
+            var admitted = receipts.acceptRaw(evidence, candidate);
+            assertThat(admitted.status()).isEqualTo(SourceReceiptStore.Status.EXISTING);
+            assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                    .find(eq("_id", admitted.receipt().id())).first().toJson()).doesNotContain("customer-1", "203.0.113.24");
+
+            byte[] rotatedKeyBytes = new byte[32];
+            Arrays.fill(rotatedKeyBytes, (byte) 1);
+            String rotatedKey = Base64.getEncoder().encodeToString(rotatedKeyBytes);
+            var rotatedProperties = new SourceRawPublicationProperties(true, "raw-key-2",
+                    Map.of("raw-key-1", RAW_KEY, "raw-key-2", rotatedKey), Duration.ofSeconds(1), Duration.ofSeconds(30), 10, 8);
+            var restarted = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
+                    new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, owner,
+                    new SourceRawPublicationCipher("raw-key-2", rotatedProperties.encryptionKeys()), rotatedProperties);
+            assertThat(restarted.recoverRawPublications(event -> {
+                sendToKafka(producer, topic, event);
+                throw new IllegalStateException("broker confirmation lost after publication");
+            }, 1)).isEqualTo(1);
+            ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                    .updateOne(eq("_id", admitted.receipt().id()), com.mongodb.client.model.Updates.set("nextAttemptAt", Date.from(CLOCK.instant())));
+            assertThat(restarted.recoverRawPublications(event -> sendToKafka(producer, topic, event), 1)).isEqualTo(1);
+
+            List<TransactionRawEvent> deliveries = new ArrayList<>();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+            while (deliveries.size() < 2 && System.nanoTime() < deadline) {
+                consumer.poll(Duration.ofMillis(250)).forEach(record -> deliveries.add(JSON.readValue(record.value(), TransactionRawEvent.class)));
+            }
+            assertThat(deliveries).hasSize(2).allSatisfy(event -> assertThat(event).isEqualTo(admitted.event()));
+            enrich(deliveries.getFirst());
+            enrich(deliveries.getLast());
+            assertThat(enrichedWire).hasSize(1);
+            assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                    .find(eq("_id", admitted.receipt().id())).first().getString("state")).isEqualTo("PUBLISHED");
+        }
+    }
+
+    @Test void redisFeatureHistoryIsIsolatedByVerifiedInstitutionAndSourceEpoch() throws Exception {
         var a = TestSourceIssuer.policy(0, false);
         var b = new SourceVerificationProperties.TrustedKey("second-test-issuer", "institution-b", a.source(), a.sourceEpoch(),
                 a.signingKeyVersion(), a.algorithm(), a.publicKeyBase64(), a.notBefore(), a.notAfter(), false, a.purpose(), a.audience(), a.policyVersion());
-        verifier = new SourceSignatureVerifier(new SourceVerificationProperties(List.of(a, b)), CLOCK);
-        receipts = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
-                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier);
+        var nextEpoch = new SourceVerificationProperties.TrustedKey(a.issuer(), a.institution(), a.source(), "epoch-b",
+                a.signingKeyVersion(), a.algorithm(), a.publicKeyBase64(), a.notBefore(), a.notAfter(), false,
+                a.purpose(), a.audience(), a.policyVersion());
+        verifier = new SourceSignatureVerifier(new SourceVerificationProperties(List.of(a, b, nextEpoch)), CLOCK);
         owner = new MongoSourceLineage(ownerClient, db, "source_owner", MongoSourceLineage.Stage.INGEST, verifier, CLOCK);
-        enricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER, verifier, CLOCK);
+        receipts = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, owner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES);
+        enricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER, verifier, CLOCK,
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
         var first = admit(Map.of());
         var second = admit(Map.of("issuer", b.issuer(), "institution", b.institution()));
-        assertThat(first.transactionId()).isEqualTo(second.transactionId());
-        assertThat(enricher.raw(first).source().sourceEventId()).isEqualTo(enricher.raw(second).source().sourceEventId());
-        assertThat(enricher.raw(first).receiptId()).isNotEqualTo(enricher.raw(second).receiptId());
-        assertThat(enricher.raw(first).source().institution()).isEqualTo("institution-a");
-        assertThat(enricher.raw(second).source().institution()).isEqualTo("institution-b");
+        var nextEpochEvent = admit(Map.of("sourceEpoch", "epoch-b"));
+        assertThat(List.of(first, second, nextEpochEvent)).extracting(TransactionRawEvent::transactionId).containsOnly(first.transactionId());
+        assertThat(List.of(first, second, nextEpochEvent).stream().map(enricher::raw).toList())
+                .allSatisfy(lineage -> assertThat(lineage.state()).isEqualTo(VERIFIED));
+
+        var redis = FraudPlatformContainers.redis();
+        if (!redis.isRunning()) { redis.start(); }
+        var connectionFactory = new LettuceConnectionFactory(redis.getHost(), redis.getMappedPort(6379));
+        connectionFactory.afterPropertiesSet();
+        var redisTemplate = new StringRedisTemplate(connectionFactory);
+        redisTemplate.afterPropertiesSet();
+        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        try {
+            var store = new RedisFeatureStore(redisTemplate, new com.frauddetection.enricher.config.FeatureStoreProperties(
+                    Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)),
+                    new CurrencyAmountConverter());
+            var service = new TransactionFeatureEnricherService(store, new TransactionFeatureCalculator(new CurrencyAmountConverter()),
+                    new TransactionEnrichedEventMapper(), event -> enrichedWire.add(serialize(event)), enricher);
+            var firstNamespace = FeatureNamespace.attested(enricher.raw(first));
+            var secondNamespace = FeatureNamespace.attested(enricher.raw(second));
+            var epochNamespace = FeatureNamespace.attested(enricher.raw(nextEpochEvent));
+            assertThat(firstNamespace).isNotEqualTo(secondNamespace);
+            assertThat(firstNamespace).isNotEqualTo(epochNamespace);
+            assertThat(secondNamespace).isNotEqualTo(epochNamespace);
+            assertThat(firstNamespace.toString()).doesNotContain("institution-a", TestSourceIssuer.ISSUER);
+
+            service.enrich(first);
+            service.enrich(second);
+            service.enrich(nextEpochEvent);
+            service.enrich(first); // An exact retry stays idempotent inside its source namespace.
+
+            assertThat(enrichedWire).hasSize(3);
+            List<Object> recentTransactionCounts = new ArrayList<>();
+            for (byte[] bytes : enrichedWire) {
+                recentTransactionCounts.add(JSON.readValue(bytes, TransactionEnrichedEvent.class)
+                        .featureSnapshot().get("recentTransactionCount"));
+            }
+            assertThat(recentTransactionCounts).containsOnly(1);
+            for (var pair : List.of(Map.entry(first, firstNamespace), Map.entry(second, secondNamespace),
+                    Map.entry(nextEpochEvent, epochNamespace))) {
+                assertThat(store.hasRecordedTransaction(pair.getKey(), pair.getValue())).isTrue();
+                assertThat(store.loadSnapshot(pair.getKey(), pair.getValue()).recentTransactionCount()).isEqualTo(1);
+            }
+
+            assertThat(store.hasRecordedTransaction(first, FeatureNamespace.legacy())).isFalse();
+            store.recordTransaction(first); // Legacy keys retain their original names and behavior.
+            assertThat(store.hasRecordedTransaction(first)).isTrue();
+            assertThat(store.loadSnapshot(first).recentTransactionCount()).isEqualTo(1);
+            assertThat(store.loadSnapshot(first, firstNamespace).recentTransactionCount()).isEqualTo(1);
+
+            try (var pool = Executors.newFixedThreadPool(4)) {
+                var writes = new ArrayList<java.util.concurrent.Future<?>>();
+                for (int index = 0; index < 12; index++) {
+                    writes.add(pool.submit(() -> store.recordTransaction(first, firstNamespace)));
+                }
+                for (var write : writes) { write.get(10, TimeUnit.SECONDS); }
+            }
+            assertThat(store.loadSnapshot(first, firstNamespace).recentTransactionCount()).isEqualTo(1);
+        } finally {
+            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+            connectionFactory.destroy();
+        }
+
         var wrongReader = new MongoSourceLineage(scorerClient, db, "scorer", MongoSourceLineage.Stage.SCORER, policy(false), CLOCK);
         assertThat(wrongReader.raw(second).state()).isEqualTo(REVOKED);
     }
@@ -291,7 +719,7 @@ class SourceLineagePipelineIntegrationTest {
                 .sourceLineage().state()).isEqualTo(CONFLICT);
     }
 
-    @Test void conflictingSameDerivedOccurrenceIsPermanentlyFencedAndLinkGrowthIsBounded() throws Exception {
+    @Test void conflictingEnrichedInterpretationCannotReplaceTheCanonicalPublicationAndLinkGrowthIsBounded() throws Exception {
         var raw = admit(Map.of()); enrich(raw); var enriched = lastEnriched();
         var features = new LinkedHashMap<>(enriched.featureSnapshot());
         features.put("deviceNovelty", false);
@@ -299,8 +727,8 @@ class SourceLineagePipelineIntegrationTest {
                 enriched.customerId(), enriched.accountId(), enriched.createdAt(), enriched.transactionTimestamp(), enriched.transactionAmount(),
                 enriched.merchantInfo(), enriched.deviceInfo(), enriched.locationInfo(), enriched.customerContext(), features);
         assertThat(enricher.bindEnriched(raw, changed).state()).isEqualTo(CONFLICT);
-        assertThat(scorer.enriched(enriched).state()).isEqualTo(CONFLICT);
-        assertThat(enricher.bindEnriched(raw, enriched).state()).isEqualTo(CONFLICT);
+        assertThat(scorer.enriched(enriched).state()).isEqualTo(VERIFIED);
+        assertThat(enricher.bindEnriched(raw, enriched).state()).isEqualTo(VERIFIED);
         for (int i = 1; i < 32; i++) { assertThat(owner.bindRaw(verified(payload(), Map.of()), enricher.raw(raw).receiptId(),
                 change(raw, "eventId", "retry-" + i, TransactionRawEvent.class)).state()).isEqualTo(VERIFIED); }
         String receipt = enricher.raw(raw).receiptId();
@@ -311,7 +739,7 @@ class SourceLineagePipelineIntegrationTest {
     @Test void unchangedWireContractsReadOldFixturesAndIgnoreSelfAssertedAuthorityWithoutGrantingIt() throws Exception {
         var legacy = new TransactionRequestMapper().toEvent(JSON.readValue(payload(), IngestTransactionRequest.class), "legacy-correlation");
         assertThat(enricher.raw(roundTrip(legacy, TransactionRawEvent.class)).state()).isEqualTo(UNVERIFIED);
-        enrich(legacy); var enriched = lastEnriched();
+        enrich(legacy, SourceLineageAccess.legacyOnly()); var enriched = lastEnriched();
         var forged = change(enriched, "sourceVerified", true, TransactionEnrichedEvent.class);
         assertThat(scorer.enriched(forged).state()).isEqualTo(UNVERIFIED);
         assertThat(JSON.readTree(JSON.writeValueAsBytes(legacy)).propertyNames()).containsExactlyInAnyOrder(
@@ -329,17 +757,16 @@ class SourceLineagePipelineIntegrationTest {
 
     @Test void mixedDeploymentLosesTrustAtAnOldEnricherOrScorerWithoutBreakingBaselineWireProcessing() throws Exception {
         var raw = admit(Map.of());
-        enrich(raw, SourceLineageAccess.disabled()); // previous enricher behavior: no private link writer.
+        enrich(raw, SourceLineageAccess.legacyOnly()); // previous enricher behavior: no private link writer.
         var oldEnriched = lastEnriched();
-        assertThat(score(oldEnriched).context.sourceLineage().state()).isEqualTo(UNVERIFIED);
+        assertThatThrownBy(() -> score(oldEnriched)).isInstanceOf(IllegalStateException.class).hasMessage("SOURCE_ORIGIN_UNRESOLVED");
         recorded.clear();
         enrich(raw);
         var currentEnriched = lastEnriched();
         assertThat(currentEnriched.featureSnapshot()).isEqualTo(oldEnriched.featureSnapshot());
         assertThat(score(currentEnriched).context.sourceLineage().state()).isEqualTo(VERIFIED);
-        var oldScorer = score(currentEnriched, SourceLineageAccess.disabled());
-        assertThat(oldScorer.context.sourceLineage().state()).isEqualTo(UNVERIFIED);
-        assertThat(oldScorer.event.eventContractVersion()).isEqualTo(2);
+        assertThatThrownBy(() -> score(currentEnriched, SourceLineageAccess.disabled()))
+                .isInstanceOf(IllegalStateException.class).hasMessage("SOURCE_ORIGIN_UNRESOLVED");
     }
 
     @Test void receiptExpiryAndStoreOutageCannotBecomeTrustedWhileOrdinaryScoringStillRuns() throws Exception {
@@ -349,31 +776,42 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(late.enriched(enriched).state()).isNotEqualTo(VERIFIED);
         scorerClient.close();
         assertThat(scorer.enriched(enriched).state()).isEqualTo(UNAVAILABLE);
-        var scored = score(enriched);
-        assertThat(scored.context.sourceLineage().state()).isEqualTo(UNAVAILABLE);
-        assertThat(scored.event.eventContractVersion()).isEqualTo(2);
+        assertThatThrownBy(() -> score(enriched)).isInstanceOf(IllegalStateException.class).hasMessage("SOURCE_ORIGIN_UNRESOLVED");
+        var legacyRaw = new TransactionRequestMapper().toEvent(JSON.readValue(payload(), IngestTransactionRequest.class), "legacy-after-outage");
+        enrich(legacyRaw);
+        var legacyScored = score(lastEnriched());
+        assertThat(legacyScored.context.sourceLineage().state()).isEqualTo(UNVERIFIED);
+        assertThat(legacyScored.event.eventContractVersion()).isEqualTo(2);
     }
 
-    @Test void validProofWithDisabledSidecarAndUnknownPublishAcknowledgementNeverReportsAccepted() throws Exception {
+    @Test void validProofWithDisabledSidecarFailsClosedAndLostBrokerAcknowledgementReplaysExactDurableEvent() throws Exception {
         var disabled = new AttestedTransactionIngestService(new TransactionRequestMapper(), verifier, (SourceReceiptStore) null,
-                null, publisher(), new CorrelationIdProvider(), new KafkaTopicProperties("transactions.raw"), validation.getValidator());
+                publisher(), new CorrelationIdProvider(), new KafkaTopicProperties("transactions.raw"), validation.getValidator());
         assertThatThrownBy(() -> disabled.ingest(encodedProof(payload(), Map.of()), payload()))
                 .isInstanceOf(SourceIngestException.class).hasMessage("SOURCE_LINEAGE_UNAVAILABLE");
         var uncertain = service(event -> { rawWire.add(serialize(event)); throw new IllegalStateException("lost acknowledgement"); });
-        assertThatThrownBy(() -> uncertain.ingest(encodedProof(payload(), Map.of()), payload()))
-                .hasMessage("SOURCE_RAW_PUBLICATION_UNRESOLVED");
-        assertThat(enricher.raw(lastRaw()).state()).isEqualTo(VERIFIED); // durable facts may reconcile; delivery not claimed.
+        var accepted = uncertain.ingest(encodedProof(payload(), Map.of()), payload());
+        assertThat(accepted.status()).isEqualTo("ACCEPTED");
+        TransactionRawEvent first = lastRaw();
+        String receiptId = owner.raw(first).receiptId();
+        ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .updateOne(eq("_id", receiptId), com.mongodb.client.model.Updates.set("nextAttemptAt", Date.from(CLOCK.instant())));
+        assertThat(receipts.recoverRawPublications(publisher(), 1)).isEqualTo(1);
+        TransactionRawEvent replay = lastRaw();
+        assertThat(replay).isEqualTo(first);
+        assertThat(enricher.raw(replay).state()).isEqualTo(VERIFIED);
     }
 
     private MockMvc mvc() { return MockMvcBuilders.standaloneSetup(new AttestedTransactionIngestController(service(publisher())))
             .setControllerAdvice(new TransactionIngestExceptionHandler()).build(); }
     private AttestedTransactionIngestService service(TransactionRawEventProducer producer) {
-        return new AttestedTransactionIngestService(new TransactionRequestMapper(), verifier, receipts, owner, producer,
+        return new AttestedTransactionIngestService(new TransactionRequestMapper(), verifier, receipts, producer,
                 new CorrelationIdProvider(), new KafkaTopicProperties("transactions.raw"), validation.getValidator());
     }
     private TransactionRawEventProducer publisher() { return event -> rawWire.add(serialize(event)); }
     private TransactionRawEvent admit(Map<String, Object> claims) throws Exception {
-        service(publisher()).ingest(encodedProof(payload(), claims), payload()); return lastRaw();
+        service(publisher()).ingest(encodedProof(payload(), claims), payload());
+        TransactionRawEvent admitted = lastRaw(); attestedRawEventIds.add(admitted.eventId()); return admitted;
     }
     private TransactionRawEvent lastRaw() { return new JacksonKafkaDeserializer<>(TransactionRawEvent.class).deserialize("transactions.raw", rawWire.getLast()); }
     private TransactionEnrichedEvent lastEnriched() { return new JacksonKafkaDeserializer<>(TransactionEnrichedEvent.class).deserialize("transactions.enriched", enrichedWire.getLast()); }
@@ -382,12 +820,40 @@ class SourceLineagePipelineIntegrationTest {
     }
     private void enrich(TransactionRawEvent raw, SourceLineageAccess access) {
         FeatureStore store = new FeatureStore() {
-            public boolean hasRecordedTransaction(TransactionRawEvent event) { return recorded.contains(event.customerId() + "/" + event.transactionId()); }
+            public boolean hasRecordedTransaction(TransactionRawEvent event) {
+                return hasRecordedTransaction(event, FeatureNamespace.legacy());
+            }
+            public boolean hasRecordedTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
+                return recorded.getOrDefault(namespace, Set.of()).contains(event.customerId() + "/" + event.transactionId());
+            }
             public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event) { return new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false); }
-            public void recordTransaction(TransactionRawEvent event) { recorded.add(event.customerId() + "/" + event.transactionId()); }
+            public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event, FeatureNamespace namespace) {
+                return new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
+            }
+            public void recordTransaction(TransactionRawEvent event) {
+                recordTransaction(event, FeatureNamespace.legacy());
+            }
+            public void recordTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
+                recorded.computeIfAbsent(namespace, ignored -> new HashSet<>())
+                        .add(event.customerId() + "/" + event.transactionId());
+            }
+        };
+        if (access.isLegacyOnly()) {
+            new TransactionFeatureEnricherService(store, new TransactionFeatureCalculator(new CurrencyAmountConverter()),
+                    new TransactionEnrichedEventMapper(), event -> enrichedWire.add(serialize(event)), access).enrich(raw);
+            return;
+        }
+        SourceOriginProofs.Assertion assertion = attestedRawEventIds.contains(raw.eventId())
+                ? SourceOriginProofs.Assertion.KNOWN_ATTESTED : SourceOriginProofs.Assertion.PROVEN_LEGACY;
+        var publisher = new TransactionEnrichedEventPublisher() {
+            @Override public void publish(TransactionEnrichedEvent event) { enrichedWire.add(serialize(event)); }
+            @Override public void publish(TransactionEnrichedEvent event, SourceOriginProofs.Assertion origin) {
+                enrichedWire.add(serialize(event)); enrichedOriginProofs.put(event.eventId(), ORIGIN_PROOFS.signEnriched(event, origin));
+            }
         };
         new TransactionFeatureEnricherService(store, new TransactionFeatureCalculator(new CurrencyAmountConverter()),
-                new TransactionEnrichedEventMapper(), event -> enrichedWire.add(serialize(event)), access).enrich(raw);
+                new TransactionEnrichedEventMapper(), publisher, access, ORIGIN_PROOFS)
+                .enrich(raw, ORIGIN_PROOFS.signRaw(raw, assertion));
     }
     private Scored score(TransactionEnrichedEvent event) {
         return score(event, scorer);
@@ -403,7 +869,7 @@ class SourceLineagePipelineIntegrationTest {
             context.set(new ScoringContextFactory().from(request, ScoringMode.RULE_BASED, CLOCK.instant()));
             return rules.score(request);
         }, new TransactionScoredEventMapper(), output::set, scoringProperties(), new ScoringMetrics(metrics), emission,
-                new AnalystRecommendationService(), access).score(event);
+                new AnalystRecommendationService(), access, null, ORIGIN_PROOFS).score(event, enrichedOriginProofs.get(event.eventId()));
         return new Scored(output.get(), context.get());
     }
     private static ScoringProperties scoringProperties() { return new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED); }
@@ -418,6 +884,44 @@ class SourceLineagePipelineIntegrationTest {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(TestSourceIssuer.proof(payload, claims, 0));
     }
     private static byte[] serialize(Object event) { return new JacksonKafkaSerializer<>().serialize("test", event); }
+    private static MongoClient commitFault(MongoClient delegate, SessionCall fault) {
+        return (MongoClient) Proxy.newProxyInstance(MongoClient.class.getClassLoader(), new Class<?>[] {MongoClient.class},
+                (proxy, method, args) -> {
+                    Object result = invoke(delegate, method, args);
+                    if (!method.getName().equals("startSession")) { return result; }
+                    ClientSession session = (ClientSession) result;
+                    return Proxy.newProxyInstance(ClientSession.class.getClassLoader(), new Class<?>[] {ClientSession.class},
+                            (ignored, operation, parameters) -> fault.call(session, operation, parameters));
+                });
+    }
+    private static Object invoke(Object delegate, Method method, Object[] args) throws Throwable {
+        try { return method.invoke(delegate, args); }
+        catch (InvocationTargetException failure) { throw failure.getCause(); }
+    }
+    private static MongoException unknownCommit() {
+        MongoException failure = new MongoException(91, "TEST_ONLY_LOST_RAW_COMMIT_ACK");
+        failure.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL);
+        return failure;
+    }
+    @FunctionalInterface private interface SessionCall {
+        Object call(ClientSession session, Method method, Object[] args) throws Throwable;
+    }
+    private static void sendToKafka(KafkaProducer<String, TransactionRawEvent> producer, String topic, TransactionRawEvent event) {
+        try { producer.send(new ProducerRecord<>(topic, event.transactionId(), event)).get(15, TimeUnit.SECONDS); }
+        catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Test Kafka publish interrupted", interrupted);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException unavailable) {
+            throw new IllegalStateException("Test Kafka publish failed", unavailable);
+        }
+    }
+    private static void awaitLatch(CountDownLatch latch) {
+        try { if (!latch.await(10, TimeUnit.SECONDS)) { throw new IllegalStateException("Test latch timed out"); } }
+        catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Test latch interrupted", interrupted);
+        }
+    }
     private static <T> T roundTrip(T event, Class<T> type) { return new JacksonKafkaDeserializer<>(type).deserialize("test", serialize(event)); }
     private static <T> T change(Object event, String key, Object value, Class<T> type) {
         ObjectNode node = (ObjectNode) JSON.readTree(JSON.writeValueAsBytes(event));

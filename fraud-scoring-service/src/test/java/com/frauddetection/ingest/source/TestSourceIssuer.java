@@ -20,7 +20,7 @@ import java.util.Map;
 
 /** Fixed, publicly known Ed25519 test vectors. Never imported by production code. */
 final class TestSourceIssuer {
-    static final Instant NOW = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+    static final Instant NOW = Instant.parse("2026-01-15T12:00:00Z");
     static final byte[] PAYLOAD = "{\"transactionId\":\"txn-source-1\",\"amount\":\"42.00\"}".getBytes(StandardCharsets.UTF_8);
     static final String ISSUER = "source-fixture-issuer-only";
     static final String PURPOSE = "TRANSACTION_SOURCE_ATTESTATION";

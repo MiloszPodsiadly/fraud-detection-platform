@@ -58,11 +58,18 @@ public class RedisFeatureStore implements FeatureStore {
 
     @Override
     public boolean hasRecordedTransaction(TransactionRawEvent event) {
+        return hasRecordedTransaction(event, FeatureNamespace.legacy());
+    }
+
+    @Override
+    public boolean hasRecordedTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
         try {
-            Boolean recorded = stringRedisTemplate.opsForSet().isMember(
-                    processedTransactionsKey(event.customerId()),
-                    event.transactionId()
-            );
+            String key = processedTransactionsKey(namespace, event.customerId());
+            Boolean recorded = stringRedisTemplate.opsForSet().isMember(key, event.transactionId());
+            if (Boolean.TRUE.equals(recorded)
+                    && !Boolean.TRUE.equals(stringRedisTemplate.expire(key, featureStoreProperties.transactionKeyTtl()))) {
+                throw new IllegalStateException("PROCESSED_TRANSACTION_TTL_UNRESOLVED");
+            }
             return Boolean.TRUE.equals(recorded);
         } catch (Exception exception) {
             throw new FeatureEnrichmentException("Failed to check transaction idempotency state in Redis.", exception);
@@ -71,11 +78,16 @@ public class RedisFeatureStore implements FeatureStore {
 
     @Override
     public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event) {
+        return loadSnapshot(event, FeatureNamespace.legacy());
+    }
+
+    @Override
+    public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event, FeatureNamespace namespace) {
         try {
-            String customerTransactionsKey = customerTransactionsKey(event.customerId());
-            String merchantTransactionsKey = merchantTransactionsKey(event.customerId(), event.merchantInfo().merchantId());
-            String deviceSetKey = knownDevicesKey(event.customerId());
-            String lastTransactionKey = lastTransactionKey(event.customerId());
+            String customerTransactionsKey = customerTransactionsKey(namespace, event.customerId());
+            String merchantTransactionsKey = merchantTransactionsKey(namespace, event.customerId(), event.merchantInfo().merchantId());
+            String deviceSetKey = knownDevicesKey(namespace, event.customerId());
+            String lastTransactionKey = lastTransactionKey(namespace, event.customerId());
 
             double recentWindowStart = scoreFor(event.transactionTimestamp().minus(featureStoreProperties.recentTransactionWindow()));
             double merchantWindowStart = scoreFor(event.transactionTimestamp().minus(featureStoreProperties.merchantFrequencyWindow()));
@@ -116,30 +128,38 @@ public class RedisFeatureStore implements FeatureStore {
 
     @Override
     public void recordTransaction(TransactionRawEvent event) {
+        recordTransaction(event, FeatureNamespace.legacy());
+    }
+
+    @Override
+    public void recordTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
         try {
             double transactionScore = scoreFor(event.transactionTimestamp());
+            String customerTransactionsKey = customerTransactionsKey(namespace, event.customerId());
+            String merchantTransactionsKey = merchantTransactionsKey(namespace, event.customerId(), event.merchantInfo().merchantId());
+            String knownDevicesKey = knownDevicesKey(namespace, event.customerId());
+            String processedTransactionsKey = processedTransactionsKey(namespace, event.customerId());
+            String lastTransactionKey = lastTransactionKey(namespace, event.customerId());
             stringRedisTemplate.opsForZSet().add(
-                    customerTransactionsKey(event.customerId()),
+                    customerTransactionsKey,
                     customerTransactionMember(event),
                     transactionScore
             );
             stringRedisTemplate.opsForZSet().add(
-                    merchantTransactionsKey(event.customerId(), event.merchantInfo().merchantId()),
+                    merchantTransactionsKey,
                     event.transactionId(),
                     transactionScore
             );
-            stringRedisTemplate.opsForSet().add(knownDevicesKey(event.customerId()), event.deviceInfo().deviceId());
-            stringRedisTemplate.opsForSet().add(processedTransactionsKey(event.customerId()), event.transactionId());
-            stringRedisTemplate.opsForValue().set(lastTransactionKey(event.customerId()), event.transactionTimestamp().toString());
+            stringRedisTemplate.opsForSet().add(knownDevicesKey, event.deviceInfo().deviceId());
+            stringRedisTemplate.opsForValue().set(lastTransactionKey, event.transactionTimestamp().toString());
 
-            stringRedisTemplate.expire(customerTransactionsKey(event.customerId()), featureStoreProperties.transactionKeyTtl());
-            stringRedisTemplate.expire(
-                    merchantTransactionsKey(event.customerId(), event.merchantInfo().merchantId()),
-                    featureStoreProperties.transactionKeyTtl()
-            );
-            stringRedisTemplate.expire(knownDevicesKey(event.customerId()), featureStoreProperties.knownDeviceTtl());
-            stringRedisTemplate.expire(processedTransactionsKey(event.customerId()), featureStoreProperties.transactionKeyTtl());
-            stringRedisTemplate.expire(lastTransactionKey(event.customerId()), featureStoreProperties.lastTransactionTtl());
+            stringRedisTemplate.expire(customerTransactionsKey, featureStoreProperties.transactionKeyTtl());
+            stringRedisTemplate.expire(merchantTransactionsKey, featureStoreProperties.transactionKeyTtl());
+            stringRedisTemplate.expire(knownDevicesKey, featureStoreProperties.knownDeviceTtl());
+            stringRedisTemplate.expire(lastTransactionKey, featureStoreProperties.lastTransactionTtl());
+            // Write the idempotency marker last so retries can complete any partial feature-state update.
+            stringRedisTemplate.opsForSet().add(processedTransactionsKey, event.transactionId());
+            stringRedisTemplate.expire(processedTransactionsKey, featureStoreProperties.transactionKeyTtl());
         } catch (Exception exception) {
             throw new FeatureEnrichmentException("Failed to persist feature snapshot to Redis.", exception);
         }
@@ -205,8 +225,8 @@ public class RedisFeatureStore implements FeatureStore {
         return instant.toEpochMilli();
     }
 
-    private String customerTransactionsKey(String customerId) {
-        return "feature:customer:" + customerId + ":transactions";
+    private String customerTransactionsKey(FeatureNamespace namespace, String customerId) {
+        return namespacePrefix(namespace) + "customer:" + customerId + ":transactions";
     }
 
     private String customerTransactionMember(TransactionRawEvent event) {
@@ -217,19 +237,24 @@ public class RedisFeatureStore implements FeatureStore {
                 + "|" + amountPln;
     }
 
-    private String merchantTransactionsKey(String customerId, String merchantId) {
-        return "feature:customer:" + customerId + ":merchant:" + merchantId + ":transactions";
+    private String merchantTransactionsKey(FeatureNamespace namespace, String customerId, String merchantId) {
+        return namespacePrefix(namespace) + "customer:" + customerId + ":merchant:" + merchantId + ":transactions";
     }
 
-    private String knownDevicesKey(String customerId) {
-        return "feature:customer:" + customerId + ":devices";
+    private String knownDevicesKey(FeatureNamespace namespace, String customerId) {
+        return namespacePrefix(namespace) + "customer:" + customerId + ":devices";
     }
 
-    private String processedTransactionsKey(String customerId) {
-        return "feature:customer:" + customerId + ":processed-transactions";
+    private String processedTransactionsKey(FeatureNamespace namespace, String customerId) {
+        return namespacePrefix(namespace) + "customer:" + customerId + ":processed-transactions";
     }
 
-    private String lastTransactionKey(String customerId) {
-        return "feature:customer:" + customerId + ":last-transaction";
+    private String lastTransactionKey(FeatureNamespace namespace, String customerId) {
+        return namespacePrefix(namespace) + "customer:" + customerId + ":last-transaction";
+    }
+
+    private String namespacePrefix(FeatureNamespace namespace) {
+        if (namespace == null) { throw new IllegalArgumentException("FEATURE_NAMESPACE_REQUIRED"); }
+        return namespace.isLegacy() ? "feature:" : "feature:v2:attested:" + namespace.keySegment() + ":";
     }
 }

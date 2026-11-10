@@ -8,6 +8,7 @@ import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.common.events.source.SourceLineageAccess;
 import com.frauddetection.common.events.source.SourceLineage;
+import com.frauddetection.common.events.source.SourceOriginProofs;
 import com.frauddetection.common.events.source.MongoSourceOccurrenceStore;
 import com.frauddetection.scoring.source.SourceOccurrencePublisher;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -44,6 +45,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
     private final AnalystRecommendationService analystRecommendationService;
     private final SourceLineageAccess sourceLineage;
     private final SourceOccurrencePublisher sourceOccurrences;
+    private final SourceOriginProofs originProofs;
 
     public TransactionFraudScoringService(
             FraudScoringEngine fraudScoringEngine,
@@ -55,16 +57,17 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
             AnalystRecommendationService analystRecommendationService
     ) {
         this(fraudScoringEngine, transactionScoredEventMapper, transactionScoredEventPublisher, scoringProperties, scoringMetrics,
-                engineIntelligenceEmissionService, analystRecommendationService, SourceLineageAccess.disabled());
+                engineIntelligenceEmissionService, analystRecommendationService, SourceLineageAccess.legacyOnly());
     }
 
     @Autowired
     public TransactionFraudScoringService(FraudScoringEngine engine, TransactionScoredEventMapper mapper,
                                           TransactionScoredEventPublisher publisher, ScoringProperties properties, ScoringMetrics metrics,
                                           EngineIntelligenceEmissionService emission, AnalystRecommendationService recommendations,
-                                          ObjectProvider<SourceLineageAccess> lineage, ObjectProvider<SourceOccurrencePublisher> occurrences) {
+                                          ObjectProvider<SourceLineageAccess> lineage, ObjectProvider<SourceOccurrencePublisher> occurrences,
+                                          ObjectProvider<SourceOriginProofs> originProofs) {
         this(engine, mapper, publisher, properties, metrics, emission, recommendations,
-                lineage.getIfAvailable(SourceLineageAccess::disabled), occurrences.getIfAvailable());
+                lineage.getIfAvailable(SourceLineageAccess::disabled), occurrences.getIfAvailable(), originProofs.getIfAvailable());
     }
 
     public TransactionFraudScoringService(FraudScoringEngine fraudScoringEngine, TransactionScoredEventMapper transactionScoredEventMapper,
@@ -72,7 +75,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
                                           ScoringMetrics scoringMetrics, EngineIntelligenceEmissionService engineIntelligenceEmissionService,
                                           AnalystRecommendationService analystRecommendationService, SourceLineageAccess lineage) {
         this(fraudScoringEngine, transactionScoredEventMapper, transactionScoredEventPublisher, scoringProperties, scoringMetrics,
-                engineIntelligenceEmissionService, analystRecommendationService, lineage, null);
+                engineIntelligenceEmissionService, analystRecommendationService, lineage, null, null);
     }
 
     public TransactionFraudScoringService(FraudScoringEngine fraudScoringEngine, TransactionScoredEventMapper transactionScoredEventMapper,
@@ -80,6 +83,15 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
                                           ScoringMetrics scoringMetrics, EngineIntelligenceEmissionService engineIntelligenceEmissionService,
                                           AnalystRecommendationService analystRecommendationService, SourceLineageAccess lineage,
                                           SourceOccurrencePublisher occurrences) {
+        this(fraudScoringEngine, transactionScoredEventMapper, transactionScoredEventPublisher, scoringProperties, scoringMetrics,
+                engineIntelligenceEmissionService, analystRecommendationService, lineage, occurrences, null);
+    }
+
+    public TransactionFraudScoringService(FraudScoringEngine fraudScoringEngine, TransactionScoredEventMapper transactionScoredEventMapper,
+                                          TransactionScoredEventPublisher transactionScoredEventPublisher, ScoringProperties scoringProperties,
+                                          ScoringMetrics scoringMetrics, EngineIntelligenceEmissionService engineIntelligenceEmissionService,
+                                          AnalystRecommendationService analystRecommendationService, SourceLineageAccess lineage,
+                                          SourceOccurrencePublisher occurrences, SourceOriginProofs originProofs) {
         this.fraudScoringEngine = fraudScoringEngine;
         this.transactionScoredEventMapper = transactionScoredEventMapper;
         this.transactionScoredEventPublisher = transactionScoredEventPublisher;
@@ -89,11 +101,17 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         this.analystRecommendationService = analystRecommendationService;
         this.sourceLineage = java.util.Objects.requireNonNull(lineage);
         this.sourceOccurrences = occurrences;
+        this.originProofs = originProofs;
     }
 
     @Override
     public void score(TransactionEnrichedEvent event) {
-        score(event, MongoSourceOccurrenceStore.INITIAL_RUN);
+        score(event, null, MongoSourceOccurrenceStore.INITIAL_RUN);
+    }
+
+    @Override
+    public void score(TransactionEnrichedEvent event, String originProof) {
+        score(event, originProof, MongoSourceOccurrenceStore.INITIAL_RUN);
     }
 
     /** Internal explicit rescore seam. No Kafka header or HTTP field selects a new run. Reusing its ID is a replay. */
@@ -101,10 +119,10 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         if (sourceOccurrences == null || runId == null || !runId.matches("rescore:[A-Za-z0-9._:-]{1,119}")) {
             throw new IllegalArgumentException("SOURCE_RESCORE_RUN_REQUIRED");
         }
-        score(event, runId);
+        score(event, null, runId);
     }
 
-    private void score(TransactionEnrichedEvent event, String runId) {
+    private void score(TransactionEnrichedEvent event, String proof, String runId) {
         long startedAt = System.nanoTime();
         log.atInfo()
                 .addKeyValue("transactionId", event.transactionId())
@@ -112,7 +130,10 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
                 .log("Started transaction fraud scoring.");
 
         try {
-            FraudScoringRequest scoringRequest = FraudScoringRequest.from(event, sourceLineage.enriched(event));
+            OriginResolution origin = resolveOrigin(event, proof);
+            if (!MongoSourceOccurrenceStore.INITIAL_RUN.equals(runId)
+                    && (origin.legacy() || sourceOccurrences == null)) { throw new IllegalArgumentException("SOURCE_RESCORE_RUN_REQUIRED"); }
+            FraudScoringRequest scoringRequest = FraudScoringRequest.from(event, origin.authorization());
             AtomicReference<FraudScoreResult> computed = new AtomicReference<>();
             Supplier<TransactionScoredEvent> compute = () -> {
                 FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);
@@ -129,11 +150,10 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
                 );
             };
             TransactionScoredEvent scoredEvent;
-            if (sourceOccurrences != null && scoringRequest.sourceLineage().state() == SourceLineage.State.VERIFIED) {
+            if (!origin.legacy() && sourceOccurrences != null && scoringRequest.sourceLineage().state() == SourceLineage.State.VERIFIED) {
                 scoredEvent = sourceOccurrences.publish(event, runId, compute);
             } else {
-                if (sourceOccurrences != null && (scoringRequest.sourceLineage().state() == SourceLineage.State.UNAVAILABLE
-                        || !MongoSourceOccurrenceStore.INITIAL_RUN.equals(runId))) {
+                if (!origin.legacy() && sourceOccurrences != null) {
                     throw new IllegalStateException("SOURCE_SCORED_PUBLICATION_UNRESOLVED");
                 }
                 scoredEvent = compute.get();
@@ -168,6 +188,30 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
             throw exception;
         }
     }
+
+    private OriginResolution resolveOrigin(TransactionEnrichedEvent event, String token) {
+        if (originProofs != null) {
+            SourceOriginProofs.Verification proof = originProofs.verifyEnriched(event, token);
+            if (proof.status() == SourceOriginProofs.Status.INVALID) { throw new IllegalStateException("SOURCE_ORIGIN_UNRESOLVED"); }
+            if (proof.status() == SourceOriginProofs.Status.VERIFIED) {
+                if (proof.assertion() == SourceOriginProofs.Assertion.PROVEN_LEGACY) {
+                    return new OriginResolution(true, SourceLineage.unavailable(SourceLineage.State.UNVERIFIED));
+                }
+                SourceLineage authority = sourceLineage.enriched(event);
+                if (authority == null || authority.state() != SourceLineage.State.VERIFIED) {
+                    throw new IllegalStateException("SOURCE_ORIGIN_UNRESOLVED");
+                }
+                return new OriginResolution(false, authority);
+            }
+        } else if (sourceLineage.isLegacyOnly()) {
+            return new OriginResolution(true, SourceLineage.unavailable(SourceLineage.State.UNVERIFIED));
+        }
+        SourceLineage authority = sourceLineage.enriched(event);
+        if (authority != null && authority.state() == SourceLineage.State.VERIFIED) { return new OriginResolution(false, authority); }
+        throw new IllegalStateException("SOURCE_ORIGIN_UNRESOLVED");
+    }
+
+    private record OriginResolution(boolean legacy, SourceLineage authorization) { }
 
     private AnalystRecommendationResult analystRecommendation(
             FraudScoreResult scoreResult,
