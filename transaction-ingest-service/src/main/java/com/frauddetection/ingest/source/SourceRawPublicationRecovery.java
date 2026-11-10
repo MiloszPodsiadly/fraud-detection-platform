@@ -22,10 +22,37 @@ final class SourceRawPublicationRecovery {
     @Scheduled(fixedDelayString = "${fraud.source-raw-publications.poll-interval:PT1S}")
     void recover() {
         try {
-            receipts.compactExpired(50);
             receipts.recoverRawPublications(publisher, properties.batchSize());
         } catch (RuntimeException unavailable) {
             log.warn("Durable RAW publication recovery is temporarily unavailable.");
+        }
+        try {
+            receipts.compactExpired(50);
+        } catch (RuntimeException unavailable) {
+            log.warn("Expired RAW publication compaction is temporarily unavailable.");
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${fraud.source-raw-publications.health-interval:PT1M}")
+    void reportHealth() {
+        try {
+            SourceReceiptStore.RecoveryHealth health = receipts.recoveryHealth();
+            if (health.quarantinedPublishFailed() > 0 || health.quarantinedAuthorityDenied() > 0
+                    || health.quarantinedPayloadUnavailable() > 0 || health.redriveEpochExhausted() > 0) {
+                log.atWarn().addKeyValue("pendingCount", health.pending()).addKeyValue("leasedCount", health.leased())
+                        .addKeyValue("quarantinedPublishFailedCount", health.quarantinedPublishFailed())
+                        .addKeyValue("quarantinedAuthorityDeniedCount", health.quarantinedAuthorityDenied())
+                        .addKeyValue("quarantinedPayloadUnavailableCount", health.quarantinedPayloadUnavailable())
+                        .addKeyValue("redriveEpochExhaustedCount", health.redriveEpochExhausted())
+                        .addKeyValue("oldestRecoverableAgeSeconds", health.oldestRecoverableAgeSeconds())
+                        .log("Durable RAW publication queue has quarantined intents.");
+            } else {
+                log.atInfo().addKeyValue("pendingCount", health.pending()).addKeyValue("leasedCount", health.leased())
+                        .addKeyValue("oldestRecoverableAgeSeconds", health.oldestRecoverableAgeSeconds())
+                        .log("Durable RAW publication recovery health snapshot.");
+            }
+        } catch (RuntimeException unavailable) {
+            log.warn("Durable RAW publication recovery health is temporarily unavailable.");
         }
     }
 }

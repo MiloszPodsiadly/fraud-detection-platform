@@ -14,6 +14,8 @@ interface SourceReceiptStore {
     Result admit(SourceSignatureVerifier.Verified evidence);
     RawResult acceptRaw(SourceSignatureVerifier.Verified evidence, TransactionRawEvent candidate);
     int recoverRawPublications(TransactionRawEventProducer publisher, int limit);
+    RedriveResult redriveQuarantined(String receiptId, RedriveReason reason);
+    RecoveryHealth recoveryHealth();
     ReadOnly readOnly();
     int compactExpired(int limit);
 
@@ -23,6 +25,21 @@ interface SourceReceiptStore {
     }
 
     enum Status { ADMITTED, EXISTING, UNVERIFIED, CONFLICT, REVOKED, UNRESOLVED, TOMBSTONED, REPLAY_EXPIRED, CAPACITY_EXCEEDED }
+    enum RedriveReason { BROKER_RECOVERED, OPERATOR_RECONCILIATION }
+    enum RedriveStatus { REQUEUED, UNAVAILABLE, AUTHORITY_DENIED, INVALID, EXHAUSTED }
+
+    record RedriveResult(RedriveStatus status, int recoveryEpoch) {
+        public RedriveResult {
+            if (status == null || recoveryEpoch < 0 || recoveryEpoch > 3) {
+                throw new IllegalArgumentException("SOURCE_RAW_REDRIVE_RESULT_INVALID");
+            }
+        }
+        @Override public String toString() { return "SourceRawRedriveResult[" + status + ", epoch=" + recoveryEpoch + "]"; }
+    }
+
+    record RecoveryHealth(long pending, long leased, long quarantinedPublishFailed,
+                          long quarantinedAuthorityDenied, long quarantinedPayloadUnavailable,
+                          long redriveEpochExhausted, long oldestRecoverableAgeSeconds) { }
 
     record Result(Status status, Receipt receipt) {
         public Result {

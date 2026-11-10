@@ -25,10 +25,11 @@ import java.util.concurrent.TimeUnit;
 @Configuration(proxyBeanMethods = false)
 @Lazy(false)
 @EnableConfigurationProperties({SourceReceiptProperties.class, SourceLineageProperties.class, SourceRawPublicationProperties.class,
-        SourceOriginProperties.class})
+        SourceRawPublicationRedriveProperties.class, SourceOriginProperties.class})
 public class SourceReceiptConfiguration {
     public SourceReceiptConfiguration(SourceReceiptProperties receipts, SourceLineageProperties lineage,
-                                      SourceRawPublicationProperties rawPublications, SourceOriginProperties origin) {
+                                      SourceRawPublicationProperties rawPublications, SourceRawPublicationRedriveProperties redrive,
+                                      SourceOriginProperties origin) {
         if (lineage.enabled() && !receipts.enabled()) {
             throw new IllegalArgumentException("SOURCE_LINEAGE_RECEIPT_OWNER_REQUIRED");
         }
@@ -37,6 +38,9 @@ public class SourceReceiptConfiguration {
         }
         if (lineage.enabled() && !origin.enabled()) {
             throw new IllegalArgumentException("SOURCE_ORIGIN_PROOF_CONFIGURATION_REQUIRED");
+        }
+        if (redrive.enabled() && !rawPublications.enabled()) {
+            throw new IllegalArgumentException("SOURCE_RAW_REDRIVE_REQUIRES_RAW_PUBLICATIONS");
         }
     }
 
@@ -98,6 +102,17 @@ public class SourceReceiptConfiguration {
                                                                   com.frauddetection.ingest.messaging.TransactionRawEventProducer publisher,
                                                                   SourceRawPublicationProperties properties) {
             return new SourceRawPublicationRecovery(receipts, publisher, properties);
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(name = "fraud.source-raw-publications.redrive.enabled", havingValue = "true")
+    static class EnabledRawPublicationRedrive {
+        @Bean
+        SourceRawPublicationRedriveRunner sourceRawPublicationRedriveRunner(SourceReceiptStore receipts,
+                                                                            SourceRawPublicationRedriveProperties properties,
+                                                                            org.springframework.context.ConfigurableApplicationContext context) {
+            return new SourceRawPublicationRedriveRunner(receipts, properties, context);
         }
     }
 }

@@ -91,3 +91,72 @@ The E2E stage timings are single-run measurements. Receipt, lineage, occurrence
 and outbox BSON sizes were respectively 624, 488, 520, 4,346 and 2,090 bytes
 for the measured fixtures. The E2E sample does not provide a statistically
 valid before/after comparison or a production throughput estimate.
+
+## Durable RAW and ENRICHED recovery operations
+
+The RAW recovery scheduler runs publication recovery before compaction, with
+separate exception boundaries. A compaction failure therefore cannot skip
+delivery in that poll. Its one-minute health log includes pending, live lease,
+quarantine reason, exhausted epoch and oldest recoverable age counts. The
+QUARANTINED/PUBLISH_FAILED queue may be redriven only with a current, unexpired
+receipt and the exact stored AES-GCM payload after current source policy,
+receipt identity, RAW commitment, event ID and timestamp validation. The
+attempt counter resets only while incrementing a recovery epoch (maximum three).
+AUTHORITY_DENIED and PAYLOAD_UNAVAILABLE are terminal and have no operator
+override.
+
+Before deploying the new RAW strict validator, the source schema owner runs
+SourceRawPublicationRecoveryMigration.migrateValidator(database) using the
+owner Mongo client. It accepts only the exact previous strict validator and
+existing recovery index, applies collMod, and preserves every row. Limited
+ingest credentials cannot perform this operation. If the migration or app
+startup reports an incompatible schema, stop rollout and inspect validator,
+validation mode and indexes; do not grant collMod or create-index privileges
+to the service.
+
+The ENRICHED outbox now uses the same Mongo claim, 30-second lease, attempt
+counter and fencing token for live processing and independent scheduled
+recovery. Recovery reads only the ENRICHER-visible receipt, RAW lineage,
+ENRICHED lineage and encrypted ENRICHED publication. It does not read the RAW
+encrypted publication collection. The stored event is authenticated, matched
+to its immutable commitment, event ID, timestamp and lineage link, and checked
+against current receipt expiry and source policy before the worker emits an
+internal KNOWN_ATTESTED proof. Redis is not read to rebuild features.
+Acknowledgement is at-least-once: a process death after broker ACK can produce a
+duplicate with the same event bytes and identity, and the downstream exact
+occurrence fence remains responsible for deduplication.
+
+For an existing ENRICHED collection, the schema owner runs
+SourceEnrichedPublicationRecoveryMigration.migrate(database) before deploying
+the new ENRICHER. This migration accepts only the exact prior strict validator
+and _id_ index (or an exact partial state from this migration), adds the
+bounded recovery index and recovery fields as optional validator properties,
+and does not rewrite or delete legacy rows. Service startup verifies the exact
+new validator and both indexes; it never repairs them. Treat this as a
+forward-only migration once a new app has written lease fields. Preserve the
+old app image for reference, but roll forward with a corrected migration or
+application build rather than removing recovery fields from live rows.
+
+Both operator redrive paths are one-shot application launches with
+spring.main.web-application-type=none; they reject launches without that
+explicit setting and expose no HTTP route. Example RAW launch properties are
+fraud.source-raw-publications.redrive.enabled=true,
+fraud.source-raw-publications.redrive.receipt-id=<64-lowercase-hex> and
+fraud.source-raw-publications.redrive.reason=BROKER_RECOVERED. ENRICHED uses
+fraud.source-enriched-publications.redrive.enabled=true,
+fraud.source-enriched-publications.redrive.publication-id=<64-lowercase-hex>
+and fraud.source-enriched-publications.redrive.reason=BROKER_RECOVERED.
+Use spring.kafka.listener.auto-startup=false for these launches. The operator
+must be authorized by the protected deployment/control-plane RBAC that grants
+access to start this one-shot process and supply its service credentials; this
+repository contains no cluster RBAC policy. The Mongo role still enforces the
+service's normal least-privilege boundary. Logs contain only safe reason and
+epoch for redrive, and queue counts for health; receipt/publication IDs,
+source proofs, ciphertext, customer fields and secrets are not logged.
+
+Monitor RAW and ENRICHED health warnings for persistent pending age, exhausted
+attempts, quarantine and recovery-epoch exhaustion. Resolve broker connectivity
+first. For a transient broker-only failure, perform a single approved redrive
+and confirm that the scheduler drains the same stored event. For authority or
+payload failures, investigate policy/key/retention or encrypted-row integrity;
+do not override the quarantine.

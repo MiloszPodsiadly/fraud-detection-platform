@@ -45,6 +45,7 @@ import static com.mongodb.client.model.Updates.*;
 /** Owns source receipts and their encrypted, bounded RAW publication outbox; it does not read Device/Merchant history. */
 final class MongoSourceReceiptStore implements SourceReceiptStore {
     static final int ATTEMPTS = 3;
+    private static final int MAX_RECOVERY_EPOCHS = MongoSourceRawPublicationSchema.MAX_RECOVERY_EPOCHS;
     private static final JsonMapper RAW_JSON = JsonMapper.builder().findAndAddModules().build();
     private static final TransactionOptions TRANSACTION = TransactionOptions.builder().readConcern(ReadConcern.SNAPSHOT)
             .writeConcern(WriteConcern.MAJORITY).readPreference(ReadPreference.primary()).build();
@@ -186,7 +187,7 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
                     .append("rawCommitment", commitment).append("eventId", candidate.eventId())
                     .append("eventCreatedAt", candidate.createdAt().toString()).append("createdAt", Date.from(now))
                     .append("expiresAt", Date.from(receipt.expiresAt())).append("state", "PENDING").append("attempts", 0)
-                    .append("nextAttemptAt", Date.from(now));
+                    .append("nextAttemptAt", Date.from(now)).append("recoveryEpoch", 0);
             rawCipher.encrypt(row, RAW_JSON.writeValueAsString(candidate).getBytes(StandardCharsets.UTF_8));
             if (!rawPublications.insertOne(session, row).wasAcknowledged()) { throw invalid("RAW_PUBLICATION_INSERT_UNRESOLVED"); }
             return new RawResult(ADMITTED, receipt, candidate);
@@ -230,6 +231,85 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
         return handled;
     }
 
+    @Override public RedriveResult redriveQuarantined(String receiptId, RedriveReason reason) {
+        if (!rawProperties.enabled() || rawPublications == null || receiptId == null || !receiptId.matches("^[0-9a-f]{64}$")
+                || reason == null) { return redriveResult(RedriveStatus.INVALID, 0); }
+        Date redriveAt = Date.from(now());
+        Document row;
+        try { row = rawPublications.find(eq("_id", receiptId)).first(); }
+        catch (RuntimeException unavailable) { return redriveResult(RedriveStatus.UNAVAILABLE, 0); }
+        if (row == null || !"QUARANTINED".equals(row.getString("state"))) {
+            return redriveResult(RedriveStatus.UNAVAILABLE, row == null ? 0 : recoveryEpoch(row));
+        }
+        if (!"PUBLISH_FAILED".equals(row.getString("failureCode"))
+                || !(row.get("expiresAt") instanceof Date expiry) || !expiry.toInstant().isAfter(now())) {
+            return redriveResult(RedriveStatus.INVALID, recoveryEpoch(row));
+        }
+        int epoch = recoveryEpoch(row);
+        if (epoch < 0) { return redriveResult(RedriveStatus.INVALID, 0); }
+        if (epoch >= MAX_RECOVERY_EPOCHS) { return redriveResult(RedriveStatus.EXHAUSTED, epoch); }
+
+        TransactionRawEvent event = restoreRawPayload(row, Set.of("QUARANTINED"));
+        if (event == null) {
+            markQuarantineFailure(row, "PAYLOAD_UNAVAILABLE");
+            return redriveResult(RedriveStatus.AUTHORITY_DENIED, epoch);
+        }
+        SourceLineage authorization;
+        try { authorization = lineage.raw(event); }
+        catch (RuntimeException unavailable) { return redriveResult(RedriveStatus.UNAVAILABLE, epoch); }
+        if (authorization == null || authorization.state() == SourceLineage.State.UNAVAILABLE) {
+            return redriveResult(RedriveStatus.UNAVAILABLE, epoch);
+        }
+        if (authorization.state() != SourceLineage.State.VERIFIED || !receiptId.equals(authorization.receiptId())) {
+            markQuarantineFailure(row, "AUTHORITY_DENIED");
+            return redriveResult(RedriveStatus.AUTHORITY_DENIED, epoch);
+        }
+        Document receipt = receipts.find(eq("_id", receiptId)).first();
+        if (receipt == null || !Objects.equals(receipt.get("expiresAt"), row.get("expiresAt"))) {
+            markQuarantineFailure(row, "AUTHORITY_DENIED");
+            return redriveResult(RedriveStatus.AUTHORITY_DENIED, epoch);
+        }
+
+        Date nowDate = Date.from(now());
+        int nextEpoch = epoch + 1;
+        var epochFilter = epoch == 0 ? or(eq("recoveryEpoch", 0), exists("recoveryEpoch", false)) : eq("recoveryEpoch", epoch);
+        try {
+            var update = rawPublications.updateOne(and(eq("_id", receiptId), eq("state", "QUARANTINED"),
+                            eq("failureCode", "PUBLISH_FAILED"), eq("rawCommitment", row.getString("rawCommitment")),
+                            eq("eventId", row.getString("eventId")), eq("eventCreatedAt", row.getString("eventCreatedAt")),
+                            eq("keyId", row.getString("keyId")), eq("nonce", row.get("nonce")), eq("ciphertext", row.get("ciphertext")),
+                            epochFilter, gt("expiresAt", nowDate), or(exists("leaseUntil", false), lte("leaseUntil", nowDate))),
+                    combine(set("state", "PENDING"), set("attempts", 0), set("recoveryEpoch", nextEpoch),
+                            set("nextAttemptAt", nowDate), set("lastRedriveAt", redriveAt), set("redriveReason", reason.name()),
+                            unset("failureCode"), unset("leaseToken"), unset("leaseUntil")));
+            if (update.wasAcknowledged() && update.getMatchedCount() == 1 && update.getModifiedCount() == 1) {
+                return redriveResult(RedriveStatus.REQUEUED, nextEpoch);
+            }
+        } catch (RuntimeException unresolvedWrite) {
+            // Read-back below reconciles a lost acknowledgement without creating a new RAW identity or payload.
+        }
+        return reconcileRedrive(row, nextEpoch, redriveAt, reason);
+    }
+
+    @Override public RecoveryHealth recoveryHealth() {
+        if (!rawProperties.enabled() || rawPublications == null) { return new RecoveryHealth(0, 0, 0, 0, 0, 0, 0); }
+        Date nowDate = Date.from(now());
+        var active = and(gt("expiresAt", nowDate));
+        long pending = rawPublications.countDocuments(and(active, eq("state", "PENDING")));
+        long leased = rawPublications.countDocuments(and(active, eq("state", "PENDING"), gt("leaseUntil", nowDate)));
+        long publishFailed = rawPublications.countDocuments(and(active, eq("state", "QUARANTINED"), eq("failureCode", "PUBLISH_FAILED")));
+        long authorityDenied = rawPublications.countDocuments(and(active, eq("state", "QUARANTINED"), eq("failureCode", "AUTHORITY_DENIED")));
+        long payloadUnavailable = rawPublications.countDocuments(and(active, eq("state", "QUARANTINED"), eq("failureCode", "PAYLOAD_UNAVAILABLE")));
+        long epochExhausted = rawPublications.countDocuments(and(active, eq("state", "QUARANTINED"), eq("failureCode", "PUBLISH_FAILED"),
+                gte("recoveryEpoch", MAX_RECOVERY_EPOCHS)));
+        var recoverable = and(active, or(eq("state", "PENDING"), and(eq("state", "QUARANTINED"),
+                eq("failureCode", "PUBLISH_FAILED"), or(lt("recoveryEpoch", MAX_RECOVERY_EPOCHS), exists("recoveryEpoch", false)))));
+        Document oldest = rawPublications.find(recoverable).sort(ascending("createdAt"))
+                .projection(new Document("createdAt", 1)).first();
+        long age = oldest == null ? 0 : Math.max(0, java.time.Duration.between(oldest.getDate("createdAt").toInstant(), now()).toSeconds());
+        return new RecoveryHealth(pending, leased, publishFailed, authorityDenied, payloadUnavailable, epochExhausted, age);
+    }
+
     private RawResult rawTransaction(SourceSignatureVerifier.Verified evidence, Function<ClientSession, RawResult> work) {
         if (evidence == null) { return rawResult(UNVERIFIED); }
         if (verifier.currentDenial(evidence) != null) { return rawResult(REVOKED); }
@@ -271,9 +351,13 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
     }
 
     private TransactionRawEvent restoreRawPayload(Document row) {
+        return restoreRawPayload(row, Set.of("PENDING", "PUBLISHED"));
+    }
+
+    private TransactionRawEvent restoreRawPayload(Document row, Set<String> allowedStates) {
         try {
             if (row.getInteger("schemaVersion", 0) != 1 || !Objects.equals(row.getString("_id"), row.getString("receiptId"))
-                    || !Set.of("PENDING", "PUBLISHED").contains(row.getString("state"))) { return null; }
+                    || !allowedStates.contains(row.getString("state"))) { return null; }
             byte[] bytes = rawCipher.decrypt(row);
             if (bytes.length == 0 || bytes.length > SourceRawPublicationCipher.MAX_BYTES) { return null; }
             TransactionRawEvent event = RAW_JSON.readValue(new String(bytes, StandardCharsets.UTF_8), TransactionRawEvent.class);
@@ -282,6 +366,50 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
                     || !Objects.equals(row.getString("rawCommitment"), SourceEventCommitment.raw(event))) { return null; }
             return event;
         } catch (RuntimeException unavailable) { return null; }
+    }
+
+    private void markQuarantineFailure(Document original, String safeReason) {
+        if (!Set.of("AUTHORITY_DENIED", "PAYLOAD_UNAVAILABLE").contains(safeReason)) { return; }
+        try {
+            rawPublications.updateOne(and(eq("_id", original.getString("_id")), eq("state", "QUARANTINED"),
+                            eq("failureCode", "PUBLISH_FAILED"), eq("rawCommitment", original.getString("rawCommitment")),
+                            eq("ciphertext", original.get("ciphertext"))), set("failureCode", safeReason));
+        } catch (RuntimeException unavailable) {
+            // The event remains quarantined and cannot be claimed by automatic publication recovery.
+        }
+    }
+
+    private RedriveResult reconcileRedrive(Document original, int expectedEpoch, Date redriveAt, RedriveReason reason) {
+        try {
+            Document current = rawPublications.find(eq("_id", original.getString("_id"))).first();
+            if (current != null && Set.of("PENDING", "PUBLISHED").contains(current.getString("state"))
+                    && recoveryEpoch(current) == expectedEpoch && reason.name().equals(current.getString("redriveReason"))
+                    && Objects.equals(redriveAt, current.getDate("lastRedriveAt"))
+                    && Objects.equals(original.getString("receiptId"), current.getString("receiptId"))
+                    && Objects.equals(original.getString("rawCommitment"), current.getString("rawCommitment"))
+                    && Objects.equals(original.getString("eventId"), current.getString("eventId"))
+                    && Objects.equals(original.getString("eventCreatedAt"), current.getString("eventCreatedAt"))
+                    && Objects.equals(original.get("expiresAt"), current.get("expiresAt"))
+                    && Objects.equals(original.get("keyId"), current.get("keyId"))
+                    && Objects.equals(original.get("nonce"), current.get("nonce"))
+                    && Objects.equals(original.get("ciphertext"), current.get("ciphertext"))) {
+                return redriveResult(RedriveStatus.REQUEUED, expectedEpoch);
+            }
+        } catch (RuntimeException unavailable) {
+            // Preserve uncertainty rather than reporting a successful redrive without an exact read-back.
+        }
+        return redriveResult(RedriveStatus.UNAVAILABLE, recoveryEpoch(original));
+    }
+
+    private static int recoveryEpoch(Document row) {
+        if (!row.containsKey("recoveryEpoch")) { return 0; }
+        Object value = row.get("recoveryEpoch");
+        if (!(value instanceof Integer epoch) || epoch < 0 || epoch > MAX_RECOVERY_EPOCHS) { return -1; }
+        return epoch;
+    }
+
+    private static RedriveResult redriveResult(RedriveStatus status, int epoch) {
+        return new RedriveResult(status, Math.max(0, Math.min(MAX_RECOVERY_EPOCHS, epoch)));
     }
 
     private Claim claimRawPublication() {
