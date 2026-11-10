@@ -8,6 +8,7 @@ WORKDIR /workspace
 
 COPY pom.xml .
 COPY common-events/pom.xml common-events/pom.xml
+COPY source-persistence/pom.xml source-persistence/pom.xml
 COPY common-test-support/pom.xml common-test-support/pom.xml
 COPY transaction-ingest-service/pom.xml transaction-ingest-service/pom.xml
 COPY transaction-simulator-service/pom.xml transaction-simulator-service/pom.xml
@@ -21,6 +22,7 @@ RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -pl "${MODULE_NAME}" -am -Dmaven.test.skip=true dependency:go-offline
 
 COPY common-events/src common-events/src
+COPY source-persistence/src source-persistence/src
 COPY common-test-support/src common-test-support/src
 COPY transaction-ingest-service/src transaction-ingest-service/src
 COPY transaction-simulator-service/src transaction-simulator-service/src

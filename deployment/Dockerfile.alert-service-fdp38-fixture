@@ -5,6 +5,7 @@ WORKDIR /workspace
 
 COPY pom.xml .
 COPY common-events/pom.xml common-events/pom.xml
+COPY source-persistence/pom.xml source-persistence/pom.xml
 COPY common-test-support/pom.xml common-test-support/pom.xml
 COPY transaction-ingest-service/pom.xml transaction-ingest-service/pom.xml
 COPY transaction-simulator-service/pom.xml transaction-simulator-service/pom.xml
@@ -15,6 +16,7 @@ COPY audit-trust-authority/pom.xml audit-trust-authority/pom.xml
 COPY model-promotion-policy-publisher/pom.xml model-promotion-policy-publisher/pom.xml
 
 COPY common-events/src common-events/src
+COPY source-persistence/src source-persistence/src
 COPY common-test-support/src common-test-support/src
 COPY transaction-ingest-service/src transaction-ingest-service/src
 COPY transaction-simulator-service/src transaction-simulator-service/src
