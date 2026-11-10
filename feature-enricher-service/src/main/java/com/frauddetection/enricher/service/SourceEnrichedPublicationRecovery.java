@@ -57,6 +57,10 @@ public final class SourceEnrichedPublicationRecovery {
                                         claim.authority().receiptId(), claim.event()));
                     }
                     if (!claim.published()) {
+                        if (!lineage.renewEnrichedPublicationLeaseForSend(claim, 10_000L)) {
+                            lineage.deferEnrichedPublication(claim);
+                            continue;
+                        }
                         kafkaPublicationAttempted = true;
                         publisher.publish(claim.event(), SourceOriginProofs.Assertion.KNOWN_ATTESTED);
                         SourceLineage published = lineage.markEnrichedPublished(claim);

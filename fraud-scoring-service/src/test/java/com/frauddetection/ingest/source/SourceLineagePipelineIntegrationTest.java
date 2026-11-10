@@ -6,7 +6,10 @@ import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.events.source.*;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
+import com.frauddetection.enricher.config.FeatureStoreProperties;
+import com.frauddetection.enricher.config.SourceEnrichedPublicationRecoveryProperties;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
+import com.frauddetection.enricher.messaging.TransactionRawEventListener;
 import com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher;
 import com.frauddetection.enricher.persistence.FeatureStore;
 import com.frauddetection.enricher.persistence.FeatureNamespace;
@@ -38,18 +41,30 @@ import org.bson.Document;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.header.internals.RecordHeader;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.listener.MessageListener;
+import org.springframework.util.backoff.FixedBackOff;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -65,6 +80,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.frauddetection.common.events.source.SourceLineage.State.*;
 import static com.mongodb.client.model.Filters.eq;
@@ -415,6 +432,249 @@ class SourceLineagePipelineIntegrationTest {
                 .containsEntry("state", "PUBLISHED").doesNotContainKeys("leaseToken", "leaseUntil");
     }
 
+    @Test void expiredEnrichedClaimsCannotFinalizeOrSendAfterAnotherWorkerTakesOver() throws Exception {
+        var beforeHistoryRaw = admit(Map.of("sourceEventId", "lease-before-history"));
+        var beforeHistoryCandidate = enrichedCandidate(beforeHistoryRaw);
+        var beforeHistoryPrepared = enricher.prepareEnrichedPublication(beforeHistoryRaw, beforeHistoryCandidate);
+        var beforeHistoryA = enricher.claimEnrichedPublication(beforeHistoryRaw, beforeHistoryPrepared.event());
+        var workerB = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(31)), policy(false));
+        var beforeHistoryB = workerB.claimEnrichedPublication(beforeHistoryRaw, beforeHistoryPrepared.event());
+        assertThat(beforeHistoryB.status()).isEqualTo(SourceEnrichedPublicationClaim.Status.CLAIMED);
+        assertThat(enricher.markEnrichedHistoryApplied(beforeHistoryA).state()).isNotEqualTo(VERIFIED);
+        assertThat(workerB.markEnrichedHistoryApplied(beforeHistoryB).state()).isEqualTo(VERIFIED);
+        assertThat(enricher.renewEnrichedPublicationLeaseForSend(beforeHistoryA, 10_000L)).isFalse();
+        assertThat(workerB.renewEnrichedPublicationLeaseForSend(beforeHistoryB, 10_000L)).isTrue();
+        assertThat(workerB.markEnrichedPublished(beforeHistoryB).state()).isEqualTo(VERIFIED);
+
+        var afterHistoryRaw = admit(Map.of("sourceEventId", "lease-after-history"));
+        var afterHistoryCandidate = enrichedCandidate(afterHistoryRaw);
+        var afterHistoryPrepared = enricher.prepareEnrichedPublication(afterHistoryRaw, afterHistoryCandidate);
+        var afterHistoryA = enricher.claimEnrichedPublication(afterHistoryRaw, afterHistoryPrepared.event());
+        assertThat(enricher.markEnrichedHistoryApplied(afterHistoryA).state()).isEqualTo(VERIFIED);
+        var recoveryWorker = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(31)), policy(false));
+        var afterHistoryB = recoveryWorker.claimEnrichedPublication(afterHistoryRaw, afterHistoryPrepared.event());
+        assertThat(afterHistoryB.status()).isEqualTo(SourceEnrichedPublicationClaim.Status.CLAIMED);
+        assertThat(afterHistoryB.historyApplied()).isTrue();
+        assertThat(enricher.renewEnrichedPublicationLeaseForSend(afterHistoryA, 10_000L)).isFalse();
+        enricher.deferEnrichedPublication(afterHistoryA);
+        Document leased = ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .find(eq("_id", afterHistoryB.publicationId())).first();
+        assertThat(leased.getString("leaseToken")).isEqualTo(afterHistoryB.claimToken());
+        assertThat(leased.getInteger("attempts")).isEqualTo(afterHistoryB.attempts());
+        assertThat(recoveryWorker.renewEnrichedPublicationLeaseForSend(afterHistoryB, 10_000L)).isTrue();
+        assertThat(recoveryWorker.markEnrichedPublished(afterHistoryB).state()).isEqualTo(VERIFIED);
+        Document published = ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .find(eq("_id", afterHistoryB.publicationId())).first();
+        assertThat(published).containsEntry("state", "PUBLISHED").containsEntry("historyState", "APPLIED");
+    }
+
+    @Test void realRawListenerDltAndIndependentRecoveryDrainTheOriginalEnrichedOutbox() throws Exception {
+        FraudPlatformContainers.startAll();
+        String suffix = UUID.randomUUID().toString().replace("-", "");
+        String rawTopic = "source-raw-" + suffix;
+        String enrichedTopic = "source-enriched-" + suffix;
+        String dltTopic = "source-dlt-" + suffix;
+        try (AdminClient admin = AdminClient.create(Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                FraudPlatformContainers.kafka().getBootstrapServers()))) {
+            admin.createTopics(List.of(new NewTopic(rawTopic, 1, (short) 1),
+                    new NewTopic(enrichedTopic, 1, (short) 1), new NewTopic(dltTopic, 1, (short) 1)))
+                    .all().get(30, TimeUnit.SECONDS);
+        }
+
+        LettuceConnectionFactory redisFactory = new LettuceConnectionFactory(
+                FraudPlatformContainers.redis().getHost(), FraudPlatformContainers.redis().getMappedPort(6379));
+        redisFactory.afterPropertiesSet();
+        StringRedisTemplate realRedis = new StringRedisTemplate(redisFactory);
+        realRedis.afterPropertiesSet();
+        realRedis.getConnectionFactory().getConnection().serverCommands().flushAll();
+
+        Map<String, Object> producerProperties = new HashMap<>();
+        producerProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, FraudPlatformContainers.kafka().getBootstrapServers());
+        producerProperties.put(ProducerConfig.ACKS_CONFIG, "all");
+        producerProperties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        producerProperties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JacksonKafkaSerializer.class);
+        var rawFactory = new DefaultKafkaProducerFactory<String, TransactionRawEvent>(producerProperties,
+                new StringSerializer(), new JacksonKafkaSerializer<>());
+        var enrichedFactory = new DefaultKafkaProducerFactory<String, TransactionEnrichedEvent>(producerProperties,
+                new StringSerializer(), new JacksonKafkaSerializer<>());
+        var dltFactory = new DefaultKafkaProducerFactory<Object, Object>(producerProperties);
+        KafkaTemplate<String, TransactionRawEvent> rawTemplate = new KafkaTemplate<>(rawFactory);
+        KafkaTemplate<String, TransactionEnrichedEvent> enrichedTemplate = new KafkaTemplate<>(enrichedFactory);
+        KafkaTemplate<Object, Object> dltTemplate = new KafkaTemplate<>(dltFactory);
+
+        AtomicBoolean failFirstEnrichedSend = new AtomicBoolean(true);
+        AtomicInteger publisherCalls = new AtomicInteger();
+        AtomicInteger serviceCalls = new AtomicInteger();
+        AtomicReference<byte[]> firstAttemptBytes = new AtomicReference<>();
+        AtomicReference<byte[]> successfulBytes = new AtomicReference<>();
+        TransactionEnrichedEventPublisher realKafkaPublisher = new TransactionEnrichedEventPublisher() {
+            @Override public void publish(TransactionEnrichedEvent event) { send(event, null); }
+            @Override public void publish(TransactionEnrichedEvent event, SourceOriginProofs.Assertion origin) { send(event, origin); }
+            private void send(TransactionEnrichedEvent event, SourceOriginProofs.Assertion origin) {
+                publisherCalls.incrementAndGet();
+                byte[] bytes = serialize(event);
+                if (failFirstEnrichedSend.compareAndSet(true, false)) {
+                    firstAttemptBytes.set(bytes);
+                    throw new IllegalStateException("controlled ENRICHED broker boundary failure");
+                }
+                ProducerRecord<String, TransactionEnrichedEvent> record = new ProducerRecord<>(enrichedTopic,
+                        event.transactionId(), event);
+                if (origin != null) {
+                    String proof = ORIGIN_PROOFS.signEnriched(event, origin);
+                    record.headers().add(new RecordHeader(SourceOriginProofs.KAFKA_HEADER,
+                            proof.getBytes(StandardCharsets.US_ASCII)));
+                    enrichedOriginProofs.put(event.eventId(), proof);
+                }
+                try {
+                    enrichedTemplate.send(record).get(10, TimeUnit.SECONDS);
+                    successfulBytes.set(bytes);
+                } catch (Exception failure) {
+                    throw new IllegalStateException("controlled ENRICHED broker send failed", failure);
+                }
+            }
+        };
+
+        FeatureStore realFeatureStore = new RedisFeatureStore(realRedis,
+                new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8),
+                        Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
+        var realEnricher = new TransactionFeatureEnricherService(realFeatureStore,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                realKafkaPublisher, enricher, ORIGIN_PROOFS);
+        TransactionFeatureEnrichmentUseCase countedEnricher = new TransactionFeatureEnrichmentUseCase() {
+            @Override public void enrich(TransactionRawEvent event) { realEnricher.enrich(event); }
+            @Override public void enrich(TransactionRawEvent event, String proof) {
+                serviceCalls.incrementAndGet();
+                realEnricher.enrich(event, proof);
+            }
+        };
+        TransactionRawEventListener listener = new TransactionRawEventListener(countedEnricher,
+                new com.frauddetection.enricher.config.KafkaTopicProperties(rawTopic, enrichedTopic, dltTopic));
+
+        Map<String, Object> rawConsumerProperties = new HashMap<>();
+        rawConsumerProperties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, FraudPlatformContainers.kafka().getBootstrapServers());
+        rawConsumerProperties.put(ConsumerConfig.GROUP_ID_CONFIG, "source-enricher-" + suffix);
+        rawConsumerProperties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        rawConsumerProperties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        var rawConsumerFactory = new DefaultKafkaConsumerFactory<String, TransactionRawEvent>(rawConsumerProperties,
+                new StringDeserializer(), new JacksonKafkaDeserializer<>(TransactionRawEvent.class));
+        var errorHandler = new DefaultErrorHandler(new DeadLetterPublishingRecoverer(dltTemplate,
+                (record, failure) -> new TopicPartition(dltTopic, record.partition())), new FixedBackOff(0L, 2L));
+        var listenerFactory = new ConcurrentKafkaListenerContainerFactory<String, TransactionRawEvent>();
+        listenerFactory.setConsumerFactory(rawConsumerFactory);
+        listenerFactory.setCommonErrorHandler(errorHandler);
+        listenerFactory.setConcurrency(1);
+        var container = listenerFactory.createContainer(rawTopic);
+        container.getContainerProperties().setGroupId("source-enricher-" + suffix);
+        container.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        container.setupMessageListener((MessageListener<String, TransactionRawEvent>) record -> {
+            var proofHeader = record.headers().lastHeader(SourceOriginProofs.KAFKA_HEADER);
+            String proof = proofHeader == null ? null : new String(proofHeader.value(), StandardCharsets.US_ASCII);
+            listener.onMessage(record.value(), null, proof);
+        });
+
+        try {
+            var raw = admit(Map.of("sourceEventId", "kafka-recovery-" + suffix));
+            container.start();
+            ProducerRecord<String, TransactionRawEvent> rawRecord = new ProducerRecord<>(rawTopic, raw.transactionId(), raw);
+            rawRecord.headers().add(new RecordHeader(SourceOriginProofs.KAFKA_HEADER,
+                    ORIGIN_PROOFS.signRaw(raw, SourceOriginProofs.Assertion.KNOWN_ATTESTED)
+                            .getBytes(StandardCharsets.US_ASCII)));
+            rawTemplate.send(rawRecord).get(10, TimeUnit.SECONDS);
+
+            ConsumerRecord<String, TransactionRawEvent> deadLetter = pollKafkaRecord(
+                    dltTopic, TransactionRawEvent.class, Duration.ofSeconds(25));
+            assertThat(deadLetter.value()).isEqualTo(raw);
+            assertThat(serviceCalls.get()).isGreaterThanOrEqualTo(3);
+            assertThat(publisherCalls.get()).isEqualTo(1);
+            container.stop();
+
+            var initialOutbox = enricher.findEnrichedPublication(raw).publication();
+            assertThat(initialOutbox).isNotNull();
+            assertThat(initialOutbox.historyApplied()).isTrue();
+            assertThat(initialOutbox.published()).isFalse();
+            TransactionEnrichedEvent canonical = initialOutbox.event();
+            FeatureNamespace namespace = FeatureNamespace.attested(enricher.raw(raw));
+            Set<String> historyKeys = realRedis.keys("feature:v3:attested:*");
+            assertThat(historyKeys).hasSize(6);
+            assertThat(realRedis.opsForZSet().zCard(historyKeys.stream().filter(k -> k.endsWith(":customer:transactions")).findFirst().orElseThrow()))
+                    .isEqualTo(1L);
+            assertThat(realRedis.opsForZSet().zCard(historyKeys.stream().filter(k -> k.endsWith(":transactions") && k.contains(":merchant:")).findFirst().orElseThrow()))
+                    .isEqualTo(1L);
+            assertThat(realRedis.opsForHash().size(historyKeys.stream().filter(k -> k.endsWith(":customer:processed-transactions")).findFirst().orElseThrow()))
+                    .isEqualTo(1L);
+            assertThat(realRedis.opsForSet().size(historyKeys.stream().filter(k -> k.endsWith(":customer:transaction-ids")).findFirst().orElseThrow()))
+                    .isEqualTo(1L);
+
+            int callsAtDlt = serviceCalls.get();
+            var independentRecovery = new SourceEnrichedPublicationRecovery(newEnricher(
+                    Clock.offset(CLOCK, Duration.ofSeconds(5)), policy(false)), realKafkaPublisher, realFeatureStore,
+                    new SourceEnrichedPublicationRecoveryProperties(true, 1, 0, 1_000));
+            independentRecovery.recover();
+            assertThat(serviceCalls.get()).isEqualTo(callsAtDlt);
+            assertThat(publisherCalls.get()).isEqualTo(2);
+
+            ConsumerRecord<String, TransactionEnrichedEvent> recovered = pollKafkaRecord(
+                    enrichedTopic, TransactionEnrichedEvent.class, Duration.ofSeconds(15));
+            assertThat(recovered.value()).isEqualTo(canonical);
+            assertThat(successfulBytes.get()).containsExactly(firstAttemptBytes.get());
+            var stored = enricher.findEnrichedPublication(raw).publication();
+            assertThat(stored.published()).isTrue();
+            assertThat(SourceEventCommitment.enriched(stored.event())).isEqualTo(SourceEventCommitment.enriched(canonical));
+
+            TransactionRawEvent next = nextTransaction(raw);
+            FeatureStoreSnapshot nextSnapshot = realFeatureStore.loadSnapshot(next, namespace);
+            assertThat(nextSnapshot.recentTransactionCount()).isEqualTo(1);
+            assertThat(nextSnapshot.recentAmountSumPln()).isEqualByComparingTo(new CurrencyAmountConverter()
+                    .toPln(raw.transactionAmount().amount(), raw.transactionAmount().currency()));
+            assertThat(nextSnapshot.merchantFrequency7d()).isEqualTo(1);
+            assertThat(nextSnapshot.knownDevice()).isTrue();
+            assertThat(nextSnapshot.lastTransactionTimestamp()).isEqualTo(raw.transactionTimestamp());
+            Scored scored = score(recovered.value());
+            assertThat(scored.context.sourceLineage().state()).isEqualTo(VERIFIED);
+            assertThat(scored.context.sourceLineage().source().sourceEventId()).isEqualTo("kafka-recovery-" + suffix);
+        } finally {
+            container.stop();
+            realRedis.getConnectionFactory().getConnection().serverCommands().flushAll();
+            redisFactory.destroy();
+            rawFactory.destroy();
+            enrichedFactory.destroy();
+            dltFactory.destroy();
+        }
+    }
+
+    private <T> ConsumerRecord<String, T> pollKafkaRecord(String topic, Class<T> type, Duration timeout) {
+        Map<String, Object> properties = Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, FraudPlatformContainers.kafka().getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG, "source-poll-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false
+        );
+        try (KafkaConsumer<String, T> consumer = new KafkaConsumer<>(properties, new StringDeserializer(),
+                new JacksonKafkaDeserializer<>(type))) {
+            consumer.subscribe(List.of(topic));
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (System.nanoTime() < deadline) {
+                var records = consumer.poll(Duration.ofMillis(250));
+                if (!records.isEmpty()) { return records.iterator().next(); }
+            }
+        }
+        throw new AssertionError("No Kafka record arrived on " + topic + " within " + timeout);
+    }
+
+    private TransactionRawEvent nextTransaction(TransactionRawEvent raw) {
+        return new TransactionRawEvent("next-" + raw.eventId(), "next-" + raw.transactionId(), raw.correlationId(),
+                raw.customerId(), raw.accountId(), raw.paymentInstrumentId(), raw.createdAt().plusMillis(1),
+                raw.transactionTimestamp().plusSeconds(1), raw.transactionAmount(), raw.merchantInfo(), raw.deviceInfo(),
+                raw.locationInfo(), raw.customerContext(), raw.transactionType(), raw.authorizationMethod(), raw.sourceSystem(),
+                raw.traceId(), raw.attributes());
+    }
+
+    private TransactionEnrichedEvent enrichedCandidate(TransactionRawEvent raw) {
+        return new TransactionEnrichedEventMapper().toAttestedEvent(raw,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw,
+                        new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false)));
+    }
+
     @Test void publishedHistoryPayloadFailureIsQuarantinedWithoutBlockingNextHistoryRow() throws Exception {
         var source = TestSourceIssuer.policy(0, false);
         var nextEpoch = new SourceVerificationProperties.TrustedKey(source.issuer(), source.institution(), source.source(),
@@ -537,7 +797,7 @@ class SourceLineagePipelineIntegrationTest {
                 new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
     }
 
-    @Test void redriveOfExactBytesIsIdempotentButNoBusinessDeduplicationCrossBindsSources() throws Exception {
+    @Test void exactReplayIsIdempotentButDistinctObservationWithSameBusinessIdFailsClosed() throws Exception {
         var first = admit(Map.of());
         enrich(first);
         var enriched = lastEnriched();
@@ -546,7 +806,7 @@ class SourceLineagePipelineIntegrationTest {
         var second = admit(Map.of("sourceEventId", "another-source-event"));
         assertThat(enricher.raw(second).source().sourceEventId()).isEqualTo("another-source-event");
         assertThat(enricher.raw(second).receiptId()).isNotEqualTo(enricher.raw(first).receiptId());
-        enrich(second); // existing customer/transaction business dedup: no second output, no invented history completeness.
+        assertThatThrownBy(() -> enrich(second)).hasMessage("FEATURE_BUSINESS_TRANSACTION_ID_CONFLICT");
         assertThat(enrichedWire).hasSize(1);
         assertThat(scorer.enriched(enriched).source().sourceEventId()).isEqualTo("source-event-42");
         assertThat(enricherClient.getDatabase(db).getCollection("source_lineage_enriched").countDocuments()).isEqualTo(1);

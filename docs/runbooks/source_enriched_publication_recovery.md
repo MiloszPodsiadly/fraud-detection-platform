@@ -83,11 +83,18 @@ Kafka event shapes are unchanged, so consumers can remain wire-compatible.
 
 ## Redis key compatibility
 
-Attested writes use the v3 hashed customer slot tag. All five keys touched by
-the atomic history Lua script share that Redis Cluster slot. Legacy `feature:`
-keys and their writes are unchanged. Attested reads also check existing v2
+Attested writes use the v3 hashed customer slot tag. All six keys touched by
+the atomic history Lua script share that Redis Cluster slot. This includes a
+customer transaction-ID survival index written with the receipt-bound
+commitment marker. A missing marker with surviving customer or merchant
+membership fails closed; the script never adopts those memberships for a new
+receipt. Legacy `feature:` keys and their writes are unchanged. Attested reads also check existing v2
 keys while old state expires naturally; there is no broad key scan or bulk key
-copy.
+copy. During the v2-to-v3 migration window these are separate bounded Redis
+reads, not an atomic cross-slot snapshot. Concurrent v2 writes can race the
+union and yield a transient feature snapshot; conflicting duplicate timestamps
+fail closed. Drain v2 writers before relying on a point-in-time migration
+snapshot.
 
 Keep the v2 dual-read path enabled until at least 180 days after the last old
 attested writer is stopped, matching the configured known-device TTL. The
@@ -107,9 +114,11 @@ When `fraud.source-lineage.enabled=true`, normal runtime requires
 fails with `SOURCE_ENRICHED_RECOVERY_OWNER_REQUIRED`. Configure the polling
 schedule through the recovery properties. Defaults are 5 seconds initial delay
 and 30 seconds fixed delay. The worker claims one event at a time and applies
-the Redis history effect before waiting up to the configured Kafka ACK deadline
-(5 seconds by default, below the 30-second lease with a 20-second processing
-reserve).
+the Redis history effect before renewing the same unexpired Mongo token
+immediately before Kafka send. Renewal rechecks authority and `historyState`,
+and reserves 10 seconds for the send. A stale worker does not send; a deferred
+send releases its claim without consuming a Kafka publication attempt. The
+configured Kafka ACK deadline is 5 seconds by default.
 
 The bounded health log reports pending work (including already published rows
 that still need Redis history), live leases, exhausted retries, quarantined

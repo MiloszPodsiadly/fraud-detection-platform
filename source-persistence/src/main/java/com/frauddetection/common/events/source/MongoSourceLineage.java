@@ -363,12 +363,60 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             } else {
                 database.getCollection(ENRICHED_PUBLICATIONS).updateOne(and(eq("_id", claim.publicationId()),
                                 eq("state", "PUBLISHING"), eq("historyState", "PENDING"),
-                                eq("leaseToken", claim.claimToken()), gt("leaseUntil", Date.from(now))),
+                                eq("leaseToken", claim.claimToken())),
                         combine(set("state", "PENDING"), set("nextAttemptAt", retryAt), inc("attempts", -1),
                                 unset("leaseToken"), unset("leaseUntil")));
             }
         } catch (RuntimeException unavailable) {
             // Lease expiry is the retry path; the Redis marker makes unknown acknowledgements safe.
+        }
+    }
+
+    @Override public boolean renewEnrichedPublicationLeaseForSend(SourceEnrichedPublicationClaim claim,
+                                                                   long minimumRemainingMillis) {
+        if (stage != Stage.ENRICHER || enrichedPublicationCipher == null || claim == null
+                || claim.status() != SourceEnrichedPublicationClaim.Status.CLAIMED || claim.published()
+                || minimumRemainingMillis <= 0 || minimumRemainingMillis >= ENRICHED_PUBLICATION_LEASE.toMillis()) {
+            return false;
+        }
+        return transaction(session -> {
+            Instant now = clock.instant();
+            MongoCollection<Document> publications = database.getCollection(ENRICHED_PUBLICATIONS);
+            Document row = publications.find(session, eq("_id", claim.publicationId())).first();
+            if (!validClaimIdentity(row, claim) || !"PUBLISHING".equals(row.getString("state"))
+                    || !"APPLIED".equals(row.getString("historyState"))
+                    || !(row.get("leaseUntil") instanceof Date until) || !until.toInstant().isAfter(now)) {
+                return false;
+            }
+            SourceEnrichedPublication stored = readStoredEnrichedPublication(session, row);
+            if (stored.authority().state() != VERIFIED || stored.event() == null
+                    || !SourceEventCommitment.enriched(claim.event()).equals(SourceEventCommitment.enriched(stored.event()))) {
+                return false;
+            }
+            Date renewedUntil = Date.from(now.plus(ENRICHED_PUBLICATION_LEASE));
+            var renewed = publications.updateOne(session, and(eq("_id", claim.publicationId()),
+                            eq("state", "PUBLISHING"), eq("historyState", "APPLIED"),
+                            eq("leaseToken", claim.claimToken()), eq("receiptId", claim.authority().receiptId()),
+                            eq("enrichedCommitment", SourceEventCommitment.enriched(claim.event())),
+                            gt("leaseUntil", Date.from(now)), gt("expiresAt", Date.from(now))),
+                    set("leaseUntil", renewedUntil));
+            return renewed.wasAcknowledged() && renewed.getMatchedCount() == 1;
+        }, false);
+    }
+
+    @Override public void deferEnrichedPublication(SourceEnrichedPublicationClaim claim) {
+        if (stage != Stage.ENRICHER || enrichedPublicationCipher == null || claim == null
+                || claim.status() != SourceEnrichedPublicationClaim.Status.CLAIMED || claim.published()) { return; }
+        Instant now = clock.instant();
+        try {
+            database.getCollection(ENRICHED_PUBLICATIONS).updateOne(and(eq("_id", claim.publicationId()),
+                            eq("state", "PUBLISHING"), eq("historyState", "APPLIED"),
+                            eq("leaseToken", claim.claimToken()), eq("enrichedCommitment", SourceEventCommitment.enriched(claim.event())),
+                            gt("attempts", 0)),
+                    combine(set("state", "PENDING"), set("nextAttemptAt", Date.from(now.plusSeconds(30))),
+                            inc("attempts", -1), unset("leaseToken"), unset("leaseUntil"), unset("failureCode")));
+        } catch (RuntimeException unavailable) {
+            // The exact immutable publication remains recoverable after this claim expires.
         }
     }
 

@@ -46,6 +46,7 @@ path is implemented correctly.
 | Origin unknown | Unresolved; do not mutate shared legacy Redis state | No scoring or authority claim | Origin/lineage owner |
 | Sidecar unavailable | Continue only with valid proof of proven legacy; otherwise unresolved | Legacy proof may score; attested traffic requires current lineage | Service owner after sidecar recovery |
 | Exact duplicate signed request | Reuse stored RAW ID, timestamp and bytes; no additional RAW link | Idempotent under same authority | Ingest recovery worker |
+| Distinct verified source observation with a business transaction ID already in attested Redis history and no exact RAW-bound ENRICHED outbox | Fail closed with `FEATURE_BUSINESS_TRANSACTION_ID_CONFLICT`; retain the distinct RAW receipt/lineage as the reconciliation anchor | Business IDs do not prove source replay identity; do not score or mutate history | Enrichment/source-lineage owner |
 | Duplicate with changed features | Conflict against stored enriched commitment | Never reuse stale score | Enrichment/scoring owner |
 | New authorized rescore | New explicit internal run; original occurrence immutable | Score after current policy and lineage verify | Scoring owner |
 | Broker acknowledgement lost | Pending/unresolved; retry identical bytes; mark published only after durable ack record | Do not recompute score | Corresponding outbox worker |
@@ -124,7 +125,10 @@ against current receipt expiry and source policy before the worker emits an
 internal KNOWN_ATTESTED proof. Recovery does not recompute the feature snapshot
 from Redis. Mongo tracks Kafka publication and Redis history finalization as
 separate states. The worker first applies the attested Redis history effect,
-then publishes the exact encrypted-outbox event. An already PUBLISHED row with
+then renews the same unexpired Mongo lease immediately before Kafka send. The
+renewal rechecks current authority and `historyState=APPLIED`, and reserves 10
+seconds for the Kafka send. A lost or expired token defers the exact event
+without spending a Kafka publication attempt. An already PUBLISHED row with
 pending history is claimed only for history finalization and is not sent to
 Kafka again. Acknowledgement is at-least-once: a process death after broker ACK
 can produce a duplicate with the same event bytes and identity, and the
@@ -139,13 +143,33 @@ unrecoverable row from being reclaimed on every scheduler cycle or starving
 other PUBLISHED history rows.
 
 Attested Redis history uses one Lua operation across customer/merchant windows,
-known devices, a transaction commitment marker, and last transaction state. Its
-five v3 keys share a customer-derived Redis Cluster hash slot. v3 keys hash the
+known devices, a transaction commitment marker, a customer transaction-ID
+survival index, and last transaction state. Its six v3 keys share a
+customer-derived Redis Cluster hash slot. v3 keys hash the
 attested scope and customer; reads temporarily dual-read v2 attested keys while
 their configured TTLs expire. Legacy `feature:` keys and behavior are
 unchanged. If Mongo says history is applied but the Redis commitment marker is
 missing, processing reports rebuild-required rather than silently declaring
 history complete.
+
+The canonical feature contract caps `recentTransactionCount` and
+`merchantFrequency7d` at one million. The merchant ceiling is also the explicit
+resource bound for the seven-day feature; both values are emitted as an
+integer feature and the current transaction consumes one slot. Since the
+current transaction is added after Redis reads, recent-history reads reserve
+one slot and fail closed when the previous set reaches that cap. Attested
+merchant-history reads fetch at most the declared cap from each v2/v3 source,
+compute an exact transaction-ID union, and fail closed at the cap or when
+duplicate IDs disagree on timestamp. They never truncate or issue an unlimited
+range read.
+
+During the v2-to-v3 compatibility window, the bounded reads of the two Redis
+key families are separate commands and do not form an atomic cross-key or
+cross-slot snapshot. The reported union is exact for the memberships returned
+by each command; concurrent legacy v2 writes can race those reads and produce
+a transient feature snapshot that is not a point-in-time view. Conflicting
+duplicate timestamps fail closed. This migration limitation does not imply
+exactly-once or snapshot isolation across Redis, Mongo and Kafka.
 
 For an existing ENRICHED collection, the schema owner runs
 SourceEnrichedPublicationRecoveryMigration.migrate(database) before deploying

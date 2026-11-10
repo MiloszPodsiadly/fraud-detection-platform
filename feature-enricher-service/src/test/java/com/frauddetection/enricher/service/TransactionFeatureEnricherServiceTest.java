@@ -1,10 +1,13 @@
 package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
+import com.frauddetection.common.events.features.FraudFeatureValueBoundsContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.common.events.source.SourceLineageAccess;
 import com.frauddetection.common.events.source.SourceEnrichedPublication;
+import com.frauddetection.common.events.source.SourceEnrichedPublicationLookup;
+import com.frauddetection.common.events.source.SourceEnrichedPublicationClaim;
 import com.frauddetection.common.events.source.SourceScope;
 import com.frauddetection.common.events.source.SourceOriginProofs;
 import com.frauddetection.common.events.source.SourceOriginProperties;
@@ -33,6 +36,90 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class TransactionFeatureEnricherServiceTest {
+
+    @Test
+    void featureCapacityOverflowFailsBeforePublishingAnEnrichedEvent() {
+        FeatureStore featureStore = mock(FeatureStore.class);
+        TransactionEnrichedEventPublisher publisher = mock(TransactionEnrichedEventPublisher.class);
+        var event = TransactionFixtures.rawTransaction().build();
+        when(featureStore.loadSnapshot(event, FeatureNamespace.legacy())).thenReturn(new FeatureStoreSnapshot(
+                FraudFeatureValueBoundsContract.MAX_RECENT_TRANSACTION_COUNT, BigDecimal.ZERO, List.of(), 0, null, false));
+        var service = new TransactionFeatureEnricherService(featureStore, new TransactionFeatureCalculator(new CurrencyAmountConverter()),
+                new TransactionEnrichedEventMapper(), publisher);
+
+        assertThatThrownBy(() -> service.enrich(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("RECENT_TRANSACTION_WINDOW_CAPACITY_EXCEEDED");
+
+        verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any());
+        verify(featureStore, never()).recordTransaction(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void expiredOrReplacedEnrichedLeaseDefersWithoutSendingToKafka() {
+        FeatureStore featureStore = mock(FeatureStore.class);
+        TransactionFeatureCalculator calculator = mock(TransactionFeatureCalculator.class);
+        TransactionEnrichedEventMapper mapper = mock(TransactionEnrichedEventMapper.class);
+        TransactionEnrichedEventPublisher publisher = mock(TransactionEnrichedEventPublisher.class);
+        SourceLineageAccess lineage = mock(SourceLineageAccess.class);
+        var event = TransactionFixtures.rawTransaction().build();
+        var enriched = TransactionFixtures.enrichedTransaction().build();
+        var authority = verifiedAuthority();
+        when(authority.eventCommitment()).thenReturn(com.frauddetection.common.events.source.SourceEventCommitment.raw(event));
+        var claim = new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED, authority,
+                enriched, "b".repeat(64), "claim-token", 1, false, false);
+        SourceLineage applied = verifiedAuthority();
+        when(applied.eventCommitment()).thenReturn(com.frauddetection.common.events.source.SourceEventCommitment.enriched(enriched));
+        var snapshot = new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
+        var features = new EnrichedTransactionFeatures(Map.of("recentTransactionCount", 1));
+        var prepared = new SourceEnrichedPublication(authority, enriched, false, false);
+        when(lineage.raw(event)).thenReturn(authority);
+        when(featureStore.hasRecordedTransaction(event, FeatureNamespace.attested(authority))).thenReturn(false);
+        when(featureStore.loadSnapshot(event, FeatureNamespace.attested(authority))).thenReturn(snapshot);
+        when(calculator.calculate(event, snapshot)).thenReturn(features);
+        when(mapper.toAttestedEvent(event, features)).thenReturn(enriched);
+        when(lineage.prepareEnrichedPublication(event, enriched)).thenReturn(prepared);
+        when(lineage.claimEnrichedPublication(event, enriched)).thenReturn(claim);
+        when(lineage.markEnrichedHistoryApplied(claim)).thenReturn(applied);
+        when(lineage.renewEnrichedPublicationLeaseForSend(claim, 10_000L)).thenReturn(false);
+        var service = new TransactionFeatureEnricherService(featureStore, calculator, mapper, publisher, lineage);
+
+        assertThatThrownBy(() -> service.enrich(event))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasMessage("FEATURE_LINEAGE_PUBLICATION_LEASE_UNRESOLVED");
+
+        verify(lineage).deferEnrichedPublication(claim);
+        verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(lineage, never()).markEnrichedPublished(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void distinctVerifiedObservationWithRecordedBusinessIdFailsAsConflictInsteadOfBeingSkipped() {
+        FeatureStore featureStore = mock(FeatureStore.class);
+        SourceLineageAccess lineage = mock(SourceLineageAccess.class);
+        TransactionFeatureCalculator calculator = mock(TransactionFeatureCalculator.class);
+        TransactionEnrichedEventMapper mapper = mock(TransactionEnrichedEventMapper.class);
+        TransactionEnrichedEventPublisher publisher = mock(TransactionEnrichedEventPublisher.class);
+        var event = TransactionFixtures.rawTransaction().build();
+        SourceLineage authority = verifiedAuthority();
+        when(authority.eventCommitment()).thenReturn(com.frauddetection.common.events.source.SourceEventCommitment.raw(event));
+        SourceEnrichedPublicationLookup lookup = SourceEnrichedPublicationLookup.notFound(authority);
+        when(lineage.raw(event)).thenReturn(authority);
+        when(featureStore.hasRecordedTransaction(event, FeatureNamespace.attested(authority))).thenReturn(true);
+        when(lineage.findEnrichedPublication(event)).thenReturn(lookup);
+        var service = new TransactionFeatureEnricherService(featureStore, calculator, mapper, publisher, lineage);
+
+        assertThatThrownBy(() -> service.enrich(event))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasMessage("FEATURE_BUSINESS_TRANSACTION_ID_CONFLICT");
+
+        verify(featureStore, never()).loadSnapshot(event, FeatureNamespace.attested(authority));
+        verify(calculator, never()).calculate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(mapper, never()).toAttestedEvent(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any());
+        verify(featureStore, never()).recordAttestedTransaction(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
+    }
 
     @Test
     void authenticatedLegacyIngressContinuesEnrichmentWhenSidecarIsUnavailable() {

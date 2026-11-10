@@ -38,6 +38,13 @@ public interface SourceLineageAccess {
         return SourceLineage.unavailable(SourceLineage.State.UNAVAILABLE);
     }
 
+    /** Fenced lease renewal immediately before Kafka send; never revives an expired or replaced claim. */
+    default boolean renewEnrichedPublicationLeaseForSend(SourceEnrichedPublicationClaim claim,
+                                                         long minimumRemainingMillis) { return false; }
+
+    /** Releases a history-finalized claim when it was not sent, without spending a Kafka attempt. */
+    default void deferEnrichedPublication(SourceEnrichedPublicationClaim claim) { }
+
     /** Releases or backs off a failed Redis finalization without spending a Kafka publication attempt. */
     default void recordEnrichedHistoryFailure(SourceEnrichedPublicationClaim claim) { }
 

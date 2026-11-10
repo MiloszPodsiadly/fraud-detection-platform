@@ -94,11 +94,16 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                     || lookup.authority().state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED) {
                 throw new FeatureEnrichmentException("FEATURE_LINEAGE_UNRESOLVED");
             }
+            if (!origin.authority().receiptId().equals(lookup.authority().receiptId())
+                    || !com.frauddetection.common.events.source.SourceEventCommitment.raw(event)
+                            .equals(origin.authority().eventCommitment())) {
+                throw new FeatureEnrichmentException("FEATURE_SOURCE_OBSERVATION_CONFLICT");
+            }
             publication = lookup.publication();
             if (publication == null) {
-                // Redis already contains this scoped transaction, and there is no outstanding canonical outbox to drain.
-                log.info("Skipped duplicate attested raw transaction event.");
-                return;
+                // A business transaction ID is not proof that this exact source observation was already processed.
+                // The verified RAW lineage remains the durable reconciliation anchor for this conflict.
+                throw new FeatureEnrichmentException("FEATURE_BUSINESS_TRANSACTION_ID_CONFLICT");
             }
             enrichedEvent = publication.event();
         } else {
@@ -148,6 +153,10 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                                         claim.authority().receiptId(), claim.event()));
                     }
                     if (!claim.published()) {
+                        if (!sourceLineage.renewEnrichedPublicationLeaseForSend(claim, 10_000L)) {
+                            sourceLineage.deferEnrichedPublication(claim);
+                            throw new FeatureEnrichmentException("FEATURE_LINEAGE_PUBLICATION_LEASE_UNRESOLVED");
+                        }
                         try {
                             publish(claim.event(), origin.assertion());
                         } catch (RuntimeException publishFailure) {
