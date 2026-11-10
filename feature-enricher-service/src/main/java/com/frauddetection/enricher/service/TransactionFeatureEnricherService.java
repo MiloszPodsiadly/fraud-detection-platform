@@ -79,63 +79,102 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
         OriginResolution origin = resolveOrigin(event, originProof);
         boolean legacy = origin.assertion() == SourceOriginProofs.Assertion.PROVEN_LEGACY;
         FeatureNamespace namespace = legacy ? FeatureNamespace.legacy() : FeatureNamespace.attested(origin.authority());
-        if (featureStore.hasRecordedTransaction(event, namespace)) {
-            log.atInfo()
-                    .addKeyValue("transactionId", event.transactionId())
-                    .addKeyValue("customerId", event.customerId())
-                    .addKeyValue("correlationId", event.correlationId())
-                    .log("Skipped duplicate raw transaction event.");
+        if (legacy && featureStore.hasRecordedTransaction(event, namespace)) {
+            log.info("Skipped duplicate raw transaction event.");
             return;
         }
 
-        log.atInfo()
-                .addKeyValue("transactionId", event.transactionId())
-                .addKeyValue("customerId", event.customerId())
-                .addKeyValue("correlationId", event.correlationId())
-                .log("Started transaction feature enrichment.");
+        log.info("Started transaction feature enrichment.");
 
-        FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(event, namespace);
-        EnrichedTransactionFeatures features = transactionFeatureCalculator.calculate(event, snapshot);
-        TransactionEnrichedEvent candidate = legacy
-                ? transactionEnrichedEventMapper.toEvent(event, features)
-                : transactionEnrichedEventMapper.toAttestedEvent(event, features);
-        TransactionEnrichedEvent enrichedEvent = candidate;
+        SourceEnrichedPublication publication = null;
+        TransactionEnrichedEvent enrichedEvent;
+        if (!legacy && featureStore.hasRecordedTransaction(event, namespace)) {
+            var lookup = sourceLineage.findEnrichedPublication(event);
+            if (lookup == null || lookup.authority() == null
+                    || lookup.authority().state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED) {
+                throw new FeatureEnrichmentException("FEATURE_LINEAGE_UNRESOLVED");
+            }
+            publication = lookup.publication();
+            if (publication == null) {
+                // Redis already contains this scoped transaction, and there is no outstanding canonical outbox to drain.
+                log.info("Skipped duplicate attested raw transaction event.");
+                return;
+            }
+            enrichedEvent = publication.event();
+        } else {
+            FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(event, namespace);
+            EnrichedTransactionFeatures features = transactionFeatureCalculator.calculate(event, snapshot);
+            TransactionEnrichedEvent candidate = legacy
+                    ? transactionEnrichedEventMapper.toEvent(event, features)
+                    : transactionEnrichedEventMapper.toAttestedEvent(event, features);
+            enrichedEvent = candidate;
+            if (!legacy) {
+                publication = sourceLineage.prepareEnrichedPublication(event, candidate);
+                requirePrepared(publication);
+                enrichedEvent = publication.event();
+            }
+        }
         if (!legacy) {
-            SourceEnrichedPublication publication = sourceLineage.prepareEnrichedPublication(event, candidate);
             requirePrepared(publication);
             if (!origin.authority().receiptId().equals(publication.authority().receiptId())) {
                 throw new FeatureEnrichmentException("FEATURE_ORIGIN_UNRESOLVED");
             }
             enrichedEvent = publication.event();
-            if (!publication.published()) {
+            if (publication.historyApplied()) {
+                featureStore.verifyAttestedTransaction(enrichedEvent, namespace,
+                        com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
+                                publication.authority().receiptId(), enrichedEvent));
+            }
+            if (!publication.published() || !publication.historyApplied()) {
                 SourceEnrichedPublicationClaim claim = sourceLineage.claimEnrichedPublication(event, enrichedEvent);
                 if (claim.status() == SourceEnrichedPublicationClaim.Status.CLAIMED) {
-                    try {
-                        publish(claim.event(), origin.assertion());
-                    } catch (RuntimeException publishFailure) {
-                        sourceLineage.recordEnrichedPublishFailure(claim);
-                        throw publishFailure;
+                    if (!claim.historyApplied()) {
+                        try {
+                            featureStore.recordAttestedTransaction(claim.event(), namespace,
+                                    com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
+                                            claim.authority().receiptId(), claim.event()));
+                            var history = sourceLineage.markEnrichedHistoryApplied(claim);
+                            if (history == null || history.state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED
+                                    || !enrichedEventCommitment(claim.event()).equals(history.eventCommitment())) {
+                                throw new FeatureEnrichmentException("FEATURE_LINEAGE_HISTORY_UNRESOLVED");
+                            }
+                        } catch (RuntimeException historyFailure) {
+                            sourceLineage.recordEnrichedHistoryFailure(claim);
+                            throw historyFailure;
+                        }
+                    } else {
+                        featureStore.verifyAttestedTransaction(claim.event(), namespace,
+                                com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
+                                        claim.authority().receiptId(), claim.event()));
                     }
-                    var marked = sourceLineage.markEnrichedPublished(claim);
-                    if (marked == null || marked.state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED
-                            || !enrichedEventCommitment(enrichedEvent).equals(marked.eventCommitment())) {
-                        sourceLineage.recordEnrichedPublishFailure(claim);
-                        throw new FeatureEnrichmentException("FEATURE_LINEAGE_PUBLICATION_UNRESOLVED");
+                    if (!claim.published()) {
+                        try {
+                            publish(claim.event(), origin.assertion());
+                        } catch (RuntimeException publishFailure) {
+                            sourceLineage.recordEnrichedPublishFailure(claim);
+                            throw publishFailure;
+                        }
+                        var marked = sourceLineage.markEnrichedPublished(claim);
+                        if (marked == null || marked.state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED
+                                || !enrichedEventCommitment(claim.event()).equals(marked.eventCommitment())) {
+                            sourceLineage.recordEnrichedPublishFailure(claim);
+                            throw new FeatureEnrichmentException("FEATURE_LINEAGE_PUBLICATION_UNRESOLVED");
+                        }
                     }
-                } else if (claim.status() != SourceEnrichedPublicationClaim.Status.ALREADY_PUBLISHED) {
+                } else if (claim.status() == SourceEnrichedPublicationClaim.Status.ALREADY_PUBLISHED) {
+                    featureStore.verifyAttestedTransaction(enrichedEvent, namespace,
+                            com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
+                                    claim.authority().receiptId(), enrichedEvent));
+                } else {
                     throw new FeatureEnrichmentException("FEATURE_LINEAGE_PUBLICATION_UNRESOLVED");
                 }
             }
         } else {
             publish(enrichedEvent, origin.assertion());
         }
-        featureStore.recordTransaction(event, namespace);
+        if (legacy) { featureStore.recordTransaction(event, namespace); }
 
-        log.atInfo()
-                .addKeyValue("transactionId", event.transactionId())
-                .addKeyValue("correlationId", event.correlationId())
-                .addKeyValue("featureSnapshotKeys", enrichedEvent.featureSnapshot().keySet())
-                .log("Completed transaction feature enrichment.");
+        log.info("Completed transaction feature enrichment.");
     }
 
     private OriginResolution resolveOrigin(TransactionRawEvent event, String token) {

@@ -15,6 +15,11 @@ public interface SourceLineageAccess {
         return SourceEnrichedPublication.unavailable(SourceLineage.State.UNAVAILABLE);
     }
 
+    /** Looks up the exact durable intent without requiring the caller to recalculate its features. */
+    default SourceEnrichedPublicationLookup findEnrichedPublication(TransactionRawEvent input) {
+        return SourceEnrichedPublicationLookup.unavailable(SourceLineage.State.UNAVAILABLE);
+    }
+
     /** Claims the prepared exact event before a live Kafka send. */
     default SourceEnrichedPublicationClaim claimEnrichedPublication(TransactionRawEvent input, TransactionEnrichedEvent output) {
         return SourceEnrichedPublicationClaim.unavailable(SourceLineage.State.UNAVAILABLE);
@@ -27,6 +32,14 @@ public interface SourceLineageAccess {
     default SourceLineage markEnrichedPublished(SourceEnrichedPublicationClaim claim) {
         return SourceLineage.unavailable(SourceLineage.State.UNAVAILABLE);
     }
+
+    /** Confirms Redis history application only for the matching publication lease and immutable event. */
+    default SourceLineage markEnrichedHistoryApplied(SourceEnrichedPublicationClaim claim) {
+        return SourceLineage.unavailable(SourceLineage.State.UNAVAILABLE);
+    }
+
+    /** Releases or backs off a failed Redis finalization without spending a Kafka publication attempt. */
+    default void recordEnrichedHistoryFailure(SourceEnrichedPublicationClaim claim) { }
 
     /** Releases a claimed event with a bounded retry or terminal/quarantine state. */
     default void recordEnrichedPublishFailure(SourceEnrichedPublicationClaim claim) { }

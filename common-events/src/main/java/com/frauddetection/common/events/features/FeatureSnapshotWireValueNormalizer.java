@@ -9,6 +9,7 @@ import tools.jackson.databind.JsonNode;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +28,7 @@ public final class FeatureSnapshotWireValueNormalizer {
             Object value = Objects.requireNonNull(entry.getValue(), "featureSnapshot must not contain null values");
             normalized.put(key, normalizeRuntimeValue(key, value));
         }
-        return Map.copyOf(normalized);
+        return Collections.unmodifiableMap(normalized);
     }
 
     public static Map<String, Object> normalizeJsonObject(JsonNode root) {
@@ -39,7 +40,7 @@ public final class FeatureSnapshotWireValueNormalizer {
         for (Map.Entry<String, JsonNode> entry : root.properties()) {
             normalized.put(entry.getKey(), normalizeJsonValue(entry.getKey(), entry.getValue()));
         }
-        return Map.copyOf(normalized);
+        return Collections.unmodifiableMap(normalized);
     }
 
     public static Object normalizeJsonValue(String key, JsonNode value) {
@@ -224,7 +225,7 @@ public final class FeatureSnapshotWireValueNormalizer {
             for (Map.Entry<String, JsonNode> entry : value.properties()) {
                 values.put(entry.getKey(), genericJsonValue(entry.getValue()));
             }
-            return Map.copyOf(values);
+            return Collections.unmodifiableMap(values);
         }
         return value.toString();
     }
@@ -270,7 +271,7 @@ public final class FeatureSnapshotWireValueNormalizer {
             parser.nextToken();
             values.put(key, genericParserValue(parser, context));
         }
-        return Map.copyOf(values);
+        return Collections.unmodifiableMap(values);
     }
 
     private static boolean isNumberToken(JsonToken token) {

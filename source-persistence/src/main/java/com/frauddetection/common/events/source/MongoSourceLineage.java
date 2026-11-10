@@ -255,12 +255,31 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                     .append("receiptId", receipt.id).append("rawCommitment", parent.eventCommitment())
                     .append("enrichedCommitment", commitment).append("eventId", candidate.eventId())
                     .append("eventCreatedAt", candidate.createdAt().toString()).append("expiresAt", Date.from(receipt.expiresAt))
-                    .append("state", "PENDING").append("publishedAt", null).append("preparedAt", Date.from(clock.instant())).append("attempts", 0)
+                    .append("state", "PENDING").append("publishedAt", null)
+                    .append("historyState", "PENDING").append("historyAppliedAt", null)
+                    .append("preparedAt", Date.from(clock.instant())).append("attempts", 0)
                     .append("nextAttemptAt", Date.from(clock.instant())).append("recoveryEpoch", 0);
             enrichedPublicationCipher.encrypt(row, candidate);
             publications.insertOne(session, row);
-            return new SourceEnrichedPublication(bound, candidate, false);
+            return new SourceEnrichedPublication(bound, candidate, false, false);
         }, SourceEnrichedPublication.unavailable(UNAVAILABLE));
+    }
+
+    @Override public SourceEnrichedPublicationLookup findEnrichedPublication(TransactionRawEvent input) {
+        if (stage != Stage.ENRICHER || enrichedPublicationCipher == null || input == null) {
+            return SourceEnrichedPublicationLookup.unavailable(UNAVAILABLE);
+        }
+        return transaction(session -> {
+            SourceLineage parent = raw(session, input);
+            if (parent.state() != VERIFIED) { return SourceEnrichedPublicationLookup.unavailable(parent.state()); }
+            String publicationId = enrichedPublicationId(parent.eventCommitment());
+            Document row = database.getCollection(ENRICHED_PUBLICATIONS).find(session, eq("_id", publicationId)).first();
+            if (row == null) { return SourceEnrichedPublicationLookup.notFound(parent); }
+            SourceEnrichedPublication publication = readEnrichedPublication(session, input, parent, row);
+            return publication.authority().state() == VERIFIED && publication.event() != null
+                    ? SourceEnrichedPublicationLookup.found(publication)
+                    : SourceEnrichedPublicationLookup.unavailable(publication.authority().state());
+        }, SourceEnrichedPublicationLookup.unavailable(UNAVAILABLE));
     }
 
     @Override public SourceEnrichedPublicationClaim claimEnrichedPublication(TransactionRawEvent input,
@@ -287,25 +306,81 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         if (stage != Stage.ENRICHER || enrichedPublicationCipher == null || limit < 1 || limit > MAX_ENRICHED_PUBLICATION_BATCH) {
             return List.of();
         }
-        List<SourceEnrichedPublicationClaim> claims = new ArrayList<>();
-        for (int i = 0; i < limit; i++) {
-            SourceEnrichedPublicationClaim claim = claimNextEnrichedPublication();
-            if (claim.status() == SourceEnrichedPublicationClaim.Status.UNAVAILABLE) { break; }
-            if (claim.status() == SourceEnrichedPublicationClaim.Status.CLAIMED) { claims.add(claim); }
-            else if (claim.status() == SourceEnrichedPublicationClaim.Status.BUSY) { break; }
-            // Invalid, exhausted and already-published rows are terminalized/skipped by the bounded repository operation.
+        // A caller must finish one lease before asking for the next item; never preclaim a batch.
+        SourceEnrichedPublicationClaim claim = claimNextEnrichedPublication();
+        return claim.status() == SourceEnrichedPublicationClaim.Status.CLAIMED ? List.of(claim) : List.of();
+    }
+
+    @Override public SourceLineage markEnrichedHistoryApplied(SourceEnrichedPublicationClaim claim) {
+        if (stage != Stage.ENRICHER || enrichedPublicationCipher == null || claim == null
+                || claim.status() != SourceEnrichedPublicationClaim.Status.CLAIMED || claim.event() == null) {
+            return absent(UNAVAILABLE);
         }
-        return List.copyOf(claims);
+        SourceLineage result = transaction(session -> {
+            MongoCollection<Document> publications = database.getCollection(ENRICHED_PUBLICATIONS);
+            Document row = publications.find(session, eq("_id", claim.publicationId())).first();
+            if (!validClaimIdentity(row, claim)) { return absent(UNAVAILABLE); }
+            SourceEnrichedPublication stored = readStoredEnrichedPublication(session, row);
+            if (stored.authority().state() != VERIFIED || stored.event() == null) { return stored.authority(); }
+            if ("APPLIED".equals(row.getString("historyState"))) { return stored.authority(); }
+            Instant now = clock.instant();
+            String leaseField = claim.published() ? "historyLeaseToken" : "leaseToken";
+            String untilField = claim.published() ? "historyLeaseUntil" : "leaseUntil";
+            String leaseState = claim.published() ? "PUBLISHED" : "PUBLISHING";
+            var updated = publications.updateOne(session, and(eq("_id", claim.publicationId()), eq("state", leaseState),
+                            eq("historyState", "PENDING"), eq(leaseField, claim.claimToken()), gt(untilField, Date.from(now))),
+                    combine(set("historyState", "APPLIED"), set("historyAppliedAt", Date.from(now)),
+                            unset("historyLeaseToken"), unset("historyLeaseUntil")));
+            if (updated.wasAcknowledged() && updated.getMatchedCount() == 1) { return stored.authority(); }
+            return absent(UNAVAILABLE);
+        });
+        if (result.state() == VERIFIED) { return result; }
+        try {
+            Document row = database.getCollection(ENRICHED_PUBLICATIONS).find(eq("_id", claim.publicationId())).first();
+            if (row != null && "APPLIED".equals(row.getString("historyState"))
+                    && claim.authority().receiptId().equals(row.getString("receiptId"))
+                    && SourceEventCommitment.enriched(claim.event()).equals(row.getString("enrichedCommitment"))) {
+                return transaction(session -> readStoredEnrichedPublication(session,
+                        database.getCollection(ENRICHED_PUBLICATIONS).find(session, eq("_id", claim.publicationId())).first()).authority());
+            }
+        } catch (RuntimeException unavailable) {
+            // The next fenced retry resolves an unknown Mongo acknowledgement.
+        }
+        return absent(UNAVAILABLE);
+    }
+
+    @Override public void recordEnrichedHistoryFailure(SourceEnrichedPublicationClaim claim) {
+        if (stage != Stage.ENRICHER || enrichedPublicationCipher == null || claim == null
+                || claim.status() != SourceEnrichedPublicationClaim.Status.CLAIMED) { return; }
+        Instant now = clock.instant();
+        Date retryAt = Date.from(now.plusSeconds(30));
+        try {
+            if (claim.published()) {
+                database.getCollection(ENRICHED_PUBLICATIONS).updateOne(and(eq("_id", claim.publicationId()),
+                                eq("state", "PUBLISHED"), eq("historyState", "PENDING"),
+                                eq("historyLeaseToken", claim.claimToken()), gt("historyLeaseUntil", Date.from(now))),
+                        set("historyLeaseUntil", retryAt));
+            } else {
+                database.getCollection(ENRICHED_PUBLICATIONS).updateOne(and(eq("_id", claim.publicationId()),
+                                eq("state", "PUBLISHING"), eq("historyState", "PENDING"),
+                                eq("leaseToken", claim.claimToken()), gt("leaseUntil", Date.from(now))),
+                        combine(set("state", "PENDING"), set("nextAttemptAt", retryAt), inc("attempts", -1),
+                                unset("leaseToken"), unset("leaseUntil")));
+            }
+        } catch (RuntimeException unavailable) {
+            // Lease expiry is the retry path; the Redis marker makes unknown acknowledgements safe.
+        }
     }
 
     @Override public SourceLineage markEnrichedPublished(SourceEnrichedPublicationClaim claim) {
         if (stage != Stage.ENRICHER || enrichedPublicationCipher == null || claim == null
-                || claim.status() != SourceEnrichedPublicationClaim.Status.CLAIMED) { return absent(UNAVAILABLE); }
+                || claim.status() != SourceEnrichedPublicationClaim.Status.CLAIMED || claim.published()) { return absent(UNAVAILABLE); }
         SourceLineage result = transaction(session -> {
             MongoCollection<Document> publications = database.getCollection(ENRICHED_PUBLICATIONS);
             Document row = publications.find(session, eq("_id", claim.publicationId())).first();
             if (row == null || !claim.claimToken().equals(row.getString("leaseToken"))
                     || !"PUBLISHING".equals(row.getString("state"))
+                    || !"APPLIED".equals(row.getString("historyState"))
                     || !(row.get("leaseUntil") instanceof Date leaseUntil) || !leaseUntil.toInstant().isAfter(clock.instant())
                     || !claim.event().eventId().equals(row.getString("eventId"))
                     || !claim.event().createdAt().toString().equals(row.getString("eventCreatedAt"))
@@ -319,7 +394,8 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             SourceEnrichedPublication stored = readStoredEnrichedPublication(session, row);
             if (stored.authority().state() != VERIFIED || stored.event() == null) { return stored.authority(); }
             var updated = publications.updateOne(session, and(eq("_id", claim.publicationId()), eq("state", "PUBLISHING"),
-                            eq("leaseToken", claim.claimToken()), gt("leaseUntil", Date.from(clock.instant())),
+                            eq("leaseToken", claim.claimToken()), eq("historyState", "APPLIED"),
+                            gt("leaseUntil", Date.from(clock.instant())),
                             eq("enrichedCommitment", SourceEventCommitment.enriched(claim.event()))),
                     combine(set("state", "PUBLISHED"), set("publishedAt", Date.from(clock.instant())),
                             unset("leaseToken"), unset("leaseUntil"), unset("failureCode")));
@@ -361,13 +437,19 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         Date now = Date.from(clock.instant());
         MongoCollection<Document> publications = database.getCollection(ENRICHED_PUBLICATIONS);
         var active = gt("expiresAt", now);
-        long pending = publications.countDocuments(and(active, or(eq("state", "PENDING"),
-                and(eq("state", "PUBLISHING"), or(exists("leaseUntil", false), lte("leaseUntil", now))))));
-        long leased = publications.countDocuments(and(active, eq("state", "PUBLISHING"), gt("leaseUntil", now)));
+        var readyToPublish = or(eq("state", "PENDING"),
+                and(eq("state", "PUBLISHING"), or(exists("leaseUntil", false), lte("leaseUntil", now))));
+        var readyForHistory = and(eq("state", "PUBLISHED"), eq("historyState", "PENDING"),
+                or(exists("historyLeaseUntil", false), lte("historyLeaseUntil", now)));
+        var leasedForPublish = and(eq("state", "PUBLISHING"), gt("leaseUntil", now));
+        var leasedForHistory = and(eq("state", "PUBLISHED"), eq("historyState", "PENDING"),
+                gt("historyLeaseUntil", now));
+        long pending = publications.countDocuments(and(active, or(readyToPublish, readyForHistory)));
+        long leased = publications.countDocuments(and(active, or(leasedForPublish, leasedForHistory)));
         long exhausted = publications.countDocuments(and(active, eq("state", "RETRY_EXHAUSTED")));
-        long quarantined = publications.countDocuments(and(active, eq("state", "QUARANTINED")));
-        Document oldest = publications.find(and(active, or(eq("state", "PENDING"),
-                        and(eq("state", "PUBLISHING"), or(exists("leaseUntil", false), lte("leaseUntil", now))))))
+        long quarantined = publications.countDocuments(and(active, or(eq("state", "QUARANTINED"),
+                eq("historyState", "QUARANTINED"))));
+        Document oldest = publications.find(and(active, or(readyToPublish, readyForHistory)))
                 .sort(new Document("preparedAt", 1)).projection(new Document("preparedAt", 1).append("eventCreatedAt", 1)).first();
         long age = oldest == null ? 0 : publicationAge(oldest, clock.instant());
         return new SourceLineageAccess.EnrichedPublicationHealth(pending, leased, exhausted, quarantined, age);
@@ -453,6 +535,42 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         String token = UUID.randomUUID().toString();
         return transaction(session -> {
             MongoCollection<Document> publications = database.getCollection(ENRICHED_PUBLICATIONS);
+            Document publishedRow = publications.findOneAndUpdate(session,
+                    and(eq("state", "PUBLISHED"), eq("historyState", "PENDING"), gt("expiresAt", now),
+                            or(exists("historyLeaseUntil", false), lte("historyLeaseUntil", now))),
+                    combine(set("historyLeaseToken", token),
+                            set("historyLeaseUntil", Date.from(instant.plus(ENRICHED_PUBLICATION_LEASE)))),
+                    new com.mongodb.client.model.FindOneAndUpdateOptions().sort(new Document("preparedAt", 1))
+                            .returnDocument(com.mongodb.client.model.ReturnDocument.AFTER));
+            if (publishedRow != null) {
+                SourceEnrichedPublication published = readStoredEnrichedPublication(session, publishedRow);
+                if (published.authority().state() != VERIFIED || published.event() == null) {
+                    if (published.authority().state() == UNAVAILABLE) {
+                        publications.updateOne(session, and(eq("_id", publishedRow.getString("_id")),
+                                        eq("state", "PUBLISHED"), eq("historyState", "PENDING"),
+                                        eq("historyLeaseToken", token)),
+                                combine(set("historyLeaseUntil", Date.from(instant.plusSeconds(30)))));
+                        return claimStatus(SourceEnrichedPublicationClaim.Status.BUSY, UNAVAILABLE,
+                                publicationAttempts(publishedRow));
+                    }
+                    String reason = published.authority().state() == CONFLICT
+                            ? "PAYLOAD_UNAVAILABLE" : "AUTHORITY_DENIED";
+                    var quarantined = publications.updateOne(session,
+                            and(eq("_id", publishedRow.getString("_id")), eq("state", "PUBLISHED"),
+                                    eq("historyState", "PENDING"), eq("historyLeaseToken", token)),
+                            combine(set("historyState", "QUARANTINED"), set("failureCode", reason),
+                                    unset("historyLeaseToken"), unset("historyLeaseUntil")));
+                    if (!quarantined.wasAcknowledged() || quarantined.getMatchedCount() != 1) {
+                        return claimStatus(SourceEnrichedPublicationClaim.Status.BUSY, UNAVAILABLE,
+                                publicationAttempts(publishedRow));
+                    }
+                    return claimStatus(SourceEnrichedPublicationClaim.Status.QUARANTINED, published.authority().state(),
+                            publicationAttempts(publishedRow));
+                }
+                return new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED,
+                        published.authority(), published.event(), publishedRow.getString("_id"), token,
+                        publicationAttempts(publishedRow), true, false);
+            }
             var eligible = enrichedRecoveryEligibility(now);
             Document exhausted = publications.findOneAndUpdate(session, and(eligible, eq("attempts", 8)),
                     combine(set("state", "RETRY_EXHAUSTED"), set("failureCode", "PUBLISH_FAILED"),
@@ -480,7 +598,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                 return claimStatus(SourceEnrichedPublicationClaim.Status.QUARANTINED, stored.authority().state(), publicationAttempts(row));
             }
             return new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED, stored.authority(),
-                    stored.event(), row.getString("_id"), token, publicationAttempts(row));
+                    stored.event(), row.getString("_id"), token, publicationAttempts(row), false, stored.historyApplied());
         }, SourceEnrichedPublicationClaim.unavailable(UNAVAILABLE));
     }
 
@@ -488,8 +606,24 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         String state = row.getString("state");
         int attempts = publicationAttempts(row);
         if ("PUBLISHED".equals(state)) {
-            return new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.ALREADY_PUBLISHED,
-                    stored.authority(), null, null, null, attempts);
+            if (stored.historyApplied()) {
+                return new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.ALREADY_PUBLISHED,
+                        stored.authority(), null, null, null, attempts, true, true);
+            }
+            Instant instant = clock.instant();
+            Date now = Date.from(instant);
+            if (row.get("historyLeaseUntil") instanceof Date until && until.after(now)) {
+                return claimStatus(SourceEnrichedPublicationClaim.Status.BUSY, UNAVAILABLE, attempts);
+            }
+            String token = UUID.randomUUID().toString();
+            Document claimed = database.getCollection(ENRICHED_PUBLICATIONS).findOneAndUpdate(session,
+                    and(eq("_id", row.getString("_id")), eq("state", "PUBLISHED"), eq("historyState", "PENDING"),
+                            gt("expiresAt", now), or(exists("historyLeaseUntil", false), lte("historyLeaseUntil", now))),
+                    combine(set("historyLeaseToken", token), set("historyLeaseUntil", Date.from(instant.plus(ENRICHED_PUBLICATION_LEASE)))),
+                    new com.mongodb.client.model.FindOneAndUpdateOptions().returnDocument(com.mongodb.client.model.ReturnDocument.AFTER));
+            if (claimed == null) { return claimStatus(SourceEnrichedPublicationClaim.Status.BUSY, UNAVAILABLE, attempts); }
+            return new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED, stored.authority(),
+                    stored.event(), claimed.getString("_id"), token, attempts, true, false);
         }
         if ("RETRY_EXHAUSTED".equals(state)) {
             return claimStatus(SourceEnrichedPublicationClaim.Status.EXHAUSTED, UNAVAILABLE, attempts);
@@ -530,7 +664,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                 new com.mongodb.client.model.FindOneAndUpdateOptions().returnDocument(com.mongodb.client.model.ReturnDocument.AFTER));
         if (claimed == null) { return claimStatus(SourceEnrichedPublicationClaim.Status.BUSY, UNAVAILABLE, attempts); }
         return new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED, stored.authority(),
-                stored.event(), claimed.getString("_id"), token, publicationAttempts(claimed));
+                stored.event(), claimed.getString("_id"), token, publicationAttempts(claimed), false, stored.historyApplied());
     }
 
     private static org.bson.conversions.Bson enrichedRecoveryEligibility(Date now) {
@@ -562,6 +696,14 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                         unset("leaseToken"), unset("leaseUntil"), unset("nextAttemptAt")));
     }
 
+    private static boolean validClaimIdentity(Document row, SourceEnrichedPublicationClaim claim) {
+        return row != null && claim.publicationId().equals(row.getString("_id"))
+                && claim.authority().receiptId().equals(row.getString("receiptId"))
+                && SourceEventCommitment.enriched(claim.event()).equals(row.getString("enrichedCommitment"))
+                && claim.event().eventId().equals(row.getString("eventId"))
+                && claim.event().createdAt().toString().equals(row.getString("eventCreatedAt"));
+    }
+
     private SourceEnrichedPublication readStoredEnrichedPublication(ClientSession session, Document row) {
         Instant now = clock.instant();
         String state = row.getString("state");
@@ -570,7 +712,9 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         if (row.getInteger("schemaVersion", 0) != 1
                 || !enrichedPublicationId(row.getString("rawCommitment")).equals(row.getString("_id"))
                 || !(published || Set.of("PENDING", "PUBLISHING", "RETRY_EXHAUSTED", "QUARANTINED").contains(state))
-                || published != (publishedAt != null) || !row.getDate("expiresAt").toInstant().isAfter(now)) {
+                || published != (publishedAt != null) || !row.getDate("expiresAt").toInstant().isAfter(now)
+                || !("PENDING".equals(row.getString("historyState")) || "APPLIED".equals(row.getString("historyState")))
+                || ("APPLIED".equals(row.getString("historyState")) != (row.getDate("historyAppliedAt") != null))) {
             return SourceEnrichedPublication.unavailable(CONFLICT);
         }
         try {
@@ -585,7 +729,8 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                     || !row.getString("receiptId").equals(link.getString("receiptId"))
                     || !row.getDate("expiresAt").equals(link.getDate("expiresAt"))) { return SourceEnrichedPublication.unavailable(CONFLICT); }
             SourceLineage authority = enrichedLink(session, link, commitment);
-            return authority.state() == VERIFIED ? new SourceEnrichedPublication(authority, event, published)
+            return authority.state() == VERIFIED ? new SourceEnrichedPublication(authority, event, published,
+                    "APPLIED".equals(row.getString("historyState")))
                     : SourceEnrichedPublication.unavailable(authority.state());
         } catch (RuntimeException invalidPayload) {
             return SourceEnrichedPublication.unavailable(CONFLICT);
@@ -610,7 +755,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
     private static SourceEnrichedPublicationClaim claimStatus(SourceEnrichedPublicationClaim.Status status,
                                                                SourceLineage.State authority, int attempts) {
         return new SourceEnrichedPublicationClaim(status, SourceLineage.unavailable(authority), null, null, null,
-                Math.max(0, Math.min(MAX_ENRICHED_PUBLICATION_ATTEMPTS, attempts)));
+                Math.max(0, Math.min(MAX_ENRICHED_PUBLICATION_ATTEMPTS, attempts)), false, false);
     }
 
     private static int publicationAttempts(Document row) {
@@ -662,6 +807,8 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                 || !parent.eventCommitment().equals(row.getString("rawCommitment"))
                 || !row.getDate("expiresAt").toInstant().isAfter(clock.instant())
                 || published != (publishedAt != null)
+                || !("PENDING".equals(row.getString("historyState")) || "APPLIED".equals(row.getString("historyState")))
+                || ("APPLIED".equals(row.getString("historyState")) != (row.getDate("historyAppliedAt") != null))
                 || !(published || Set.of("PENDING", "PUBLISHING", "RETRY_EXHAUSTED", "QUARANTINED").contains(row.getString("state")))) {
             return SourceEnrichedPublication.unavailable(CONFLICT);
         }
@@ -683,7 +830,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             }
             SourceLineage authority = enrichedLink(session, link, commitment);
             if (authority.state() != VERIFIED) { return SourceEnrichedPublication.unavailable(authority.state()); }
-            return new SourceEnrichedPublication(authority, event, published);
+            return new SourceEnrichedPublication(authority, event, published, "APPLIED".equals(row.getString("historyState")));
         } catch (RuntimeException unavailable) {
             return SourceEnrichedPublication.unavailable(UNAVAILABLE);
         }

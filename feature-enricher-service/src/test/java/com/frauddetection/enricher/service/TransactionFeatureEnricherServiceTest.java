@@ -233,6 +233,8 @@ class TransactionFeatureEnricherServiceTest {
 
         verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any());
         verify(featureStore, never()).recordTransaction(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(featureStore, never()).recordAttestedTransaction(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -253,7 +255,7 @@ class TransactionFeatureEnricherServiceTest {
                                                         TransactionEnrichedEvent output) { return rawAuthority; }
             @Override public SourceEnrichedPublication prepareEnrichedPublication(
                     com.frauddetection.common.events.contract.TransactionRawEvent input, TransactionEnrichedEvent output) {
-                return new SourceEnrichedPublication(rawAuthority, enriched, true);
+                return new SourceEnrichedPublication(rawAuthority, enriched, true, true);
             }
         };
         var service = new TransactionFeatureEnricherService(featureStore, calculator, mapper, publisher, lineage);
@@ -265,7 +267,9 @@ class TransactionFeatureEnricherServiceTest {
         service.enrich(event);
 
         verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any());
-        verify(featureStore).recordTransaction(event, FeatureNamespace.attested(rawAuthority));
+        FeatureNamespace attestedNamespace = FeatureNamespace.attested(rawAuthority);
+        verify(featureStore).verifyAttestedTransaction(org.mockito.ArgumentMatchers.eq(enriched),
+                org.mockito.ArgumentMatchers.eq(attestedNamespace), org.mockito.ArgumentMatchers.anyString());
     }
 
     private SourceLineageAccess access(SourceLineage.State state) {
@@ -287,7 +291,7 @@ class TransactionFeatureEnricherServiceTest {
         SourceLineage authority = mock(SourceLineage.class);
         when(authority.state()).thenReturn(SourceLineage.State.VERIFIED);
         when(authority.source()).thenReturn(source);
-        when(authority.receiptId()).thenReturn("receipt");
+        when(authority.receiptId()).thenReturn("a".repeat(64));
         return authority;
     }
 }

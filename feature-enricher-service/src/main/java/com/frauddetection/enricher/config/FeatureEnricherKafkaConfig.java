@@ -14,6 +14,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -138,7 +139,6 @@ public class FeatureEnricherKafkaConfig {
                         .addKeyValue("topic", record.topic())
                         .addKeyValue("partition", record.partition())
                         .addKeyValue("offset", record.offset())
-                        .addKeyValue("key", record.key())
                         .addKeyValue("deliveryAttempt", deliveryAttempt)
                         .setCause(exception)
                         .log("Retrying Kafka record processing before dead-letter handoff."));
@@ -149,17 +149,22 @@ public class FeatureEnricherKafkaConfig {
     public ConcurrentKafkaListenerContainerFactory<String, TransactionRawEvent> transactionRawKafkaListenerContainerFactory(
             ConsumerFactory<String, TransactionRawEvent> transactionRawEventConsumerFactory,
             DefaultErrorHandler kafkaErrorHandler,
-            KafkaConsumerProperties kafkaConsumerProperties
+            KafkaConsumerProperties kafkaConsumerProperties,
+            SourceEnrichedPublicationRedriveProperties redriveProperties,
+            @Value("${spring.kafka.listener.auto-startup:true}") boolean listenerAutoStartup
     ) {
         ConcurrentKafkaListenerContainerFactory<String, TransactionRawEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(transactionRawEventConsumerFactory);
         factory.setCommonErrorHandler(kafkaErrorHandler);
         factory.setConcurrency(kafkaConsumerProperties.concurrency() == null ? 1 : kafkaConsumerProperties.concurrency());
+        factory.setAutoStartup(!redriveProperties.operatorMode() && listenerAutoStartup);
         return factory;
     }
 
     @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            name = "fraud.source-enriched-publications.redrive.operator-mode", havingValue = "false", matchIfMissing = true)
     public KafkaAdmin.NewTopics featureEnricherTopics(KafkaTopicProperties kafkaTopicProperties) {
         return new KafkaAdmin.NewTopics(
                 new NewTopic(kafkaTopicProperties.transactionRaw(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),

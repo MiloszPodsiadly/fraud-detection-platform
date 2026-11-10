@@ -238,21 +238,6 @@ class SourceScoredOccurrenceIntegrationTest {
                 var redisTemplate = new StringRedisTemplate(connections); redisTemplate.afterPropertiesSet();
                 var redisStore = new RedisFeatureStore(redisTemplate, new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7),
                         Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
-                var snapshotReads = new AtomicInteger();
-                FeatureStore counted = new FeatureStore() {
-                    @Override public boolean hasRecordedTransaction(TransactionRawEvent event) { return redisStore.hasRecordedTransaction(event); }
-                    @Override public boolean hasRecordedTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
-                        return redisStore.hasRecordedTransaction(event, namespace);
-                    }
-                    @Override public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event) { return redisStore.loadSnapshot(event); }
-                    @Override public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event, FeatureNamespace namespace) {
-                        snapshotReads.incrementAndGet(); return redisStore.loadSnapshot(event, namespace);
-                    }
-                    @Override public void recordTransaction(TransactionRawEvent event) { redisStore.recordTransaction(event); }
-                    @Override public void recordTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
-                        redisStore.recordTransaction(event, namespace);
-                    }
-                };
                 var verified = policy.verify(TestSourceIssuer.proof(PAYLOAD, Map.of("sourceEventId", "enriched-recovery-event"), 0),
                         PAYLOAD, sourceContext());
                 assertThat(verified).isInstanceOf(SourceSignatureVerifier.Verified.class);
@@ -264,41 +249,58 @@ class SourceScoredOccurrenceIntegrationTest {
                         new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic), ORIGIN_PROOFS), 1)).isEqualTo(1);
                 assertThat(records(rawTopic, TransactionRawEvent.class)).hasSize(1);
 
+                var namespace = FeatureNamespace.attested(enricher.raw(raw));
+                var snapshot = redisStore.loadSnapshot(raw, namespace);
+                var features = new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw, snapshot);
+                var candidate = new TransactionEnrichedEventMapper().toAttestedEvent(raw, features);
+                var prepared = enricher.prepareEnrichedPublication(raw, candidate);
+                assertThat(prepared.authority().state()).isEqualTo(VERIFIED);
+                TransactionEnrichedEvent stored = prepared.event();
+                assertThat(redisStore.hasRecordedTransaction(raw, namespace)).isFalse();
+
                 var failingPublisher = new com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher() {
                     @Override public void publish(TransactionEnrichedEvent event) {
                         throw new IllegalStateException("simulated Kafka outage");
                     }
                 };
-                var service = new TransactionFeatureEnricherService(counted,
-                        new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
-                        failingPublisher, enricher, ORIGIN_PROOFS);
-                assertThatThrownBy(() -> service.enrich(raw)).isInstanceOf(RuntimeException.class);
-                assertThat(snapshotReads).hasValue(1);
                 Document row = ownerClient.getDatabase(database).getCollection("source_enriched_publications").find().first();
                 assertThat(row.getString("state")).isEqualTo("PENDING");
-                assertThat(row.getInteger("attempts")).isEqualTo(1);
-                TransactionEnrichedEvent stored = new SourceEnrichedPublicationCipher("enriched-key-1",
-                        Map.of("enriched-key-1", ENRICHED_ENCRYPTION_KEY)).decrypt(row);
-
-                // Change Redis history after the canonical enriched event is durable.
-                redisStore.recordTransaction(raw, FeatureNamespace.attested(reader.raw(raw)));
+                var failedClaim = enricher.claimEnrichedPublication(raw, stored);
+                assertThat(failedClaim.status()).isEqualTo(SourceEnrichedPublicationClaim.Status.CLAIMED);
+                assertThatThrownBy(() -> failingPublisher.publish(failedClaim.event())).isInstanceOf(RuntimeException.class);
+                enricher.recordEnrichedPublishFailure(failedClaim);
+                assertThat(redisStore.hasRecordedTransaction(raw, namespace)).isFalse();
                 ownerClient.getDatabase(database).getCollection("source_enriched_publications").updateOne(eq("_id", row.getString("_id")),
                         set("nextAttemptAt", Date.from(Instant.EPOCH)));
                 var recoveryPublisher = new KafkaTransactionEnrichedEventPublisher(template(),
                         new com.frauddetection.enricher.config.KafkaTopicProperties(rawTopic, enrichedTopic, database + ".dlt"), ORIGIN_PROOFS);
                 new com.frauddetection.enricher.service.SourceEnrichedPublicationRecovery(enricher, recoveryPublisher,
-                        new com.frauddetection.enricher.config.SourceEnrichedPublicationRecoveryProperties(true, 10, 0, 5_000)).recover();
+                        redisStore, new com.frauddetection.enricher.config.SourceEnrichedPublicationRecoveryProperties(true, 10, 0, 5_000)).recover();
 
                 TransactionEnrichedEvent delivered = records(enrichedTopic, TransactionEnrichedEvent.class).getFirst();
                 assertThat(delivered).isEqualTo(stored);
                 assertThat(JSON.writeValueAsBytes(delivered)).containsExactly(JSON.writeValueAsBytes(stored));
-                assertThat(snapshotReads).hasValue(1);
                 assertThat(records(rawTopic, TransactionRawEvent.class)).hasSize(1);
                 row = ownerClient.getDatabase(database).getCollection("source_enriched_publications")
                         .find(eq("_id", row.getString("_id"))).first();
                 assertThat(row.getString("state")).isEqualTo("PUBLISHED");
                 assertThat(row.getInteger("attempts")).isEqualTo(2);
+                assertThat(row.getString("historyState")).isEqualTo("APPLIED");
+                assertThat(redisStore.hasRecordedTransaction(raw, namespace)).isTrue();
                 assertThat(enricher.enriched(delivered).state()).isEqualTo(VERIFIED);
+
+                TransactionRawEvent next = new TransactionRawEvent(raw.eventId() + "-next", raw.transactionId() + "-next",
+                        raw.correlationId(), raw.customerId(), raw.accountId(), raw.paymentInstrumentId(), raw.createdAt().plusSeconds(1),
+                        raw.transactionTimestamp().plusSeconds(1), raw.transactionAmount(), raw.merchantInfo(), raw.deviceInfo(),
+                        raw.locationInfo(), raw.customerContext(), raw.transactionType(), raw.authorizationMethod(), raw.sourceSystem(),
+                        raw.traceId(), raw.attributes());
+                var nextSnapshot = redisStore.loadSnapshot(next, namespace);
+                assertThat(nextSnapshot.recentTransactionCount()).isEqualTo(1);
+                assertThat(nextSnapshot.recentAmountSumPln()).isEqualByComparingTo(
+                        new CurrencyAmountConverter().toPln(raw.transactionAmount().amount(), raw.transactionAmount().currency()));
+                assertThat(nextSnapshot.merchantFrequency7d()).isEqualTo(1);
+                assertThat(nextSnapshot.knownDevice()).isTrue();
+                assertThat(nextSnapshot.lastTransactionTimestamp()).isEqualTo(raw.transactionTimestamp());
             } finally {
                 connections.destroy();
                 resources.shutdown(0, 1, TimeUnit.SECONDS).get(5, TimeUnit.SECONDS);
@@ -1069,6 +1071,8 @@ class SourceScoredOccurrenceIntegrationTest {
             }
             public void recordTransaction(TransactionRawEvent event) { }
             public void recordTransaction(TransactionRawEvent event, FeatureNamespace namespace) { }
+            public void recordAttestedTransaction(TransactionEnrichedEvent event, FeatureNamespace namespace, String historyCommitment) { }
+            public void verifyAttestedTransaction(TransactionEnrichedEvent event, FeatureNamespace namespace, String historyCommitment) { }
         };
         enrich(raw, features);
     }

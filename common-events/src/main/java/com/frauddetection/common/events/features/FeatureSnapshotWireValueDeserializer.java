@@ -6,6 +6,7 @@ import tools.jackson.core.JsonToken;
 import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.ValueDeserializer;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -25,6 +26,6 @@ public final class FeatureSnapshotWireValueDeserializer extends ValueDeserialize
             parser.nextToken();
             normalized.put(key, FeatureSnapshotWireValueNormalizer.normalizeJsonParserValue(key, parser, context));
         }
-        return Map.copyOf(normalized);
+        return Collections.unmodifiableMap(normalized);
     }
 }

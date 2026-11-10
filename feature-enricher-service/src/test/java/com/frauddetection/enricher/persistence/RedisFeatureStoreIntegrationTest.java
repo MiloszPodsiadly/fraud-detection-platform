@@ -1,13 +1,19 @@
 package com.frauddetection.enricher.persistence;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.events.source.SourceEventCommitment;
+import com.frauddetection.common.events.source.SourceLineage;
+import com.frauddetection.common.events.source.SourceScope;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
 import com.frauddetection.enricher.service.CurrencyAmountConverter;
+import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
+import com.frauddetection.enricher.service.TransactionFeatureCalculator;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -21,11 +27,16 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @EnabledIf(value = "#{T(org.testcontainers.DockerClientFactory).instance().isDockerAvailable()}", loadContext = false)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -153,6 +164,102 @@ class RedisFeatureStoreIntegrationTest {
         assertThat(completed.recentTransactionCount()).isEqualTo(40);
         assertThat(completed.recentAmountSumPln()).isEqualByComparingTo("40.00");
         assertThat(completed.recentTransactions()).extracting("transactionId").doesNotHaveDuplicates();
+    }
+
+    @Test
+    void attestedHistoryIsAtomicIdempotentClusterColocatedAndMonotonic() {
+        TransactionRawEvent raw = event("attested-main", CURRENT_TIMESTAMP, new BigDecimal("42.00"), "PLN");
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionEnrichedEvent enriched = enriched(raw);
+        String commitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
+
+        featureStore.recordAttestedTransaction(enriched, namespace, commitment);
+        featureStore.recordAttestedTransaction(enriched, namespace, commitment); // Ambiguous ACK retry is a no-op.
+        featureStore.verifyAttestedTransaction(enriched, namespace, commitment);
+
+        var next = event("attested-next", CURRENT_TIMESTAMP.plusSeconds(1), BigDecimal.ONE, "PLN");
+        FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(next, namespace);
+        assertThat(snapshot.recentTransactionCount()).isEqualTo(1);
+        assertThat(snapshot.recentAmountSumPln()).isEqualByComparingTo("42.00");
+        assertThat(snapshot.merchantFrequency7d()).isEqualTo(1);
+        assertThat(snapshot.knownDevice()).isTrue();
+        assertThat(snapshot.lastTransactionTimestamp()).isEqualTo(CURRENT_TIMESTAMP);
+        assertThat(featureStore.hasRecordedTransaction(raw, namespace)).isTrue();
+
+        var older = event("attested-older", CURRENT_TIMESTAMP.minusSeconds(5), BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent olderEnriched = enriched(older);
+        featureStore.recordAttestedTransaction(olderEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), olderEnriched));
+        assertThat(featureStore.loadSnapshot(next, namespace).lastTransactionTimestamp()).isEqualTo(CURRENT_TIMESTAMP);
+
+        Set<String> keys = redisTemplate.keys("feature:v3:attested:*");
+        assertThat(keys).hasSize(5);
+        assertThat(keys.stream().map(RedisFeatureStoreIntegrationTest::redisHashTag).collect(Collectors.toSet())).hasSize(1);
+        assertThat(keys.stream().map(key -> redisTemplate.getExpire(key, java.util.concurrent.TimeUnit.MILLISECONDS))
+                .allMatch(ttl -> ttl != null && ttl > 0)).isTrue();
+
+        Map<String, Object> changedSnapshot = new java.util.HashMap<>(enriched.featureSnapshot());
+        changedSnapshot.put("recentTransactionCount", 99);
+        TransactionEnrichedEvent changed = new TransactionEnrichedEvent(enriched.eventId(), enriched.transactionId(),
+                enriched.correlationId(), enriched.customerId(), enriched.accountId(), enriched.createdAt(),
+                enriched.transactionTimestamp(), enriched.transactionAmount(), enriched.merchantInfo(), enriched.deviceInfo(),
+                enriched.locationInfo(), enriched.customerContext(), changedSnapshot);
+        String changedCommitment = SourceEventCommitment.attestedHistory("a".repeat(64), changed);
+        assertThatThrownBy(() -> featureStore.recordAttestedTransaction(changed, namespace, changedCommitment))
+                .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_COMMITMENT_CONFLICT");
+
+        String processedKey = keys.stream().filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
+        redisTemplate.delete(processedKey);
+        assertThatThrownBy(() -> featureStore.verifyAttestedTransaction(enriched, namespace, commitment))
+                .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+    }
+
+    @Test
+    void malformedAttestedLastTimestampDoesNotPartiallyApplyHistory() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent existing = event("valid-last", CURRENT_TIMESTAMP, new BigDecimal("5.00"), "PLN");
+        TransactionEnrichedEvent existingEnriched = enriched(existing);
+        featureStore.recordAttestedTransaction(existingEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), existingEnriched));
+
+        Set<String> keys = redisTemplate.keys("feature:v3:attested:*");
+        String customerTransactionsKey = keys.stream().filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow();
+        String processedKey = keys.stream().filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
+        String lastKey = keys.stream().filter(key -> key.endsWith(":customer:last-transaction")).findFirst().orElseThrow();
+        redisTemplate.opsForValue().set(lastKey, "malformed-timestamp");
+
+        TransactionRawEvent rejected = event("bad-last", CURRENT_TIMESTAMP.plusSeconds(1), new BigDecimal("7.00"), "PLN");
+        TransactionEnrichedEvent rejectedEnriched = enriched(rejected);
+        String rejectedCommitment = SourceEventCommitment.attestedHistory("a".repeat(64), rejectedEnriched);
+        assertThatThrownBy(() -> featureStore.recordAttestedTransaction(rejectedEnriched, namespace, rejectedCommitment))
+                .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+        assertThat(redisTemplate.opsForZSet().score(customerTransactionsKey, "bad-last|7.00|PLN|7.00")).isNull();
+        assertThat(redisTemplate.opsForHash().get(processedKey, "bad-last")).isNull();
+    }
+
+    private FeatureNamespace attestedNamespace() {
+        SourceScope scope = mock(SourceScope.class);
+        when(scope.issuer()).thenReturn("issuer");
+        when(scope.institution()).thenReturn("institution");
+        when(scope.source()).thenReturn("source");
+        when(scope.sourceEpoch()).thenReturn("epoch");
+        SourceLineage authority = mock(SourceLineage.class);
+        when(authority.state()).thenReturn(SourceLineage.State.VERIFIED);
+        when(authority.source()).thenReturn(scope);
+        when(authority.receiptId()).thenReturn("a".repeat(64));
+        return FeatureNamespace.attested(authority);
+    }
+
+    private TransactionEnrichedEvent enriched(TransactionRawEvent raw) {
+        var snapshot = new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
+        var features = new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw, snapshot);
+        return new TransactionEnrichedEventMapper().toAttestedEvent(raw, features);
+    }
+
+    private static String redisHashTag(String key) {
+        int open = key.indexOf('{');
+        int close = key.indexOf('}', open + 1);
+        return open < 0 || close <= open ? "MISSING" : key.substring(open + 1, close);
     }
 
     private void assertMalformed(TransactionRawEvent current, List<String> members) {

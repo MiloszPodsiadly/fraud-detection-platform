@@ -24,7 +24,8 @@ public final class SourceEnrichedPublicationRedriveRunner implements Application
     }
 
     @Override public void run(ApplicationArguments args) {
-        if (!"none".equalsIgnoreCase(context.getEnvironment().getProperty("spring.main.web-application-type", ""))) {
+        if (!properties.operatorMode()
+                || !"none".equalsIgnoreCase(context.getEnvironment().getProperty("spring.main.web-application-type", ""))) {
             throw new IllegalStateException("SOURCE_ENRICHED_REDRIVE_REQUIRES_PROTECTED_NON_WEB_PROCESS");
         }
         var result = lineage.redriveEnrichedPublication(properties.publicationId(), properties.reason());

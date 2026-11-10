@@ -6,6 +6,8 @@ import com.frauddetection.common.events.source.SourceLineageAccess;
 import com.frauddetection.common.events.source.SourceOriginProofs;
 import com.frauddetection.enricher.config.SourceEnrichedPublicationRecoveryProperties;
 import com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher;
+import com.frauddetection.enricher.persistence.FeatureNamespace;
+import com.frauddetection.enricher.persistence.FeatureStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -15,31 +17,57 @@ public final class SourceEnrichedPublicationRecovery {
     private static final Logger log = LoggerFactory.getLogger(SourceEnrichedPublicationRecovery.class);
     private final SourceLineageAccess lineage;
     private final TransactionEnrichedEventPublisher publisher;
+    private final FeatureStore featureStore;
     private final SourceEnrichedPublicationRecoveryProperties properties;
 
     public SourceEnrichedPublicationRecovery(SourceLineageAccess lineage, TransactionEnrichedEventPublisher publisher,
-                                            SourceEnrichedPublicationRecoveryProperties properties) {
+                                            FeatureStore featureStore, SourceEnrichedPublicationRecoveryProperties properties) {
         this.lineage = lineage;
         this.publisher = publisher;
+        this.featureStore = featureStore;
         this.properties = properties;
     }
 
-    @Scheduled(initialDelayString = "\u0024{fraud.source-enriched-publications.recovery.initial-delay-millis:10000}",
-            fixedDelayString = "\u0024{fraud.source-enriched-publications.recovery.fixed-delay-millis:5000}")
+    @Scheduled(initialDelayString = "\u0024{fraud.source-enriched-publications.recovery.initial-delay-millis:5000}",
+            fixedDelayString = "\u0024{fraud.source-enriched-publications.recovery.fixed-delay-millis:30000}")
     public void recover() {
         int attempted = 0;
         try {
-            for (SourceEnrichedPublicationClaim claim : lineage.claimNextEnrichedPublications(properties.batchSize())) {
+            for (int index = 0; index < properties.batchSize(); index++) {
+                var claims = lineage.claimNextEnrichedPublications(1);
+                if (claims.isEmpty()) { break; }
+                SourceEnrichedPublicationClaim claim = claims.getFirst();
                 attempted++;
+                boolean historyApplied = claim.historyApplied();
+                boolean kafkaPublicationAttempted = false;
                 try {
-                    publisher.publish(claim.event(), SourceOriginProofs.Assertion.KNOWN_ATTESTED);
-                    SourceLineage published = lineage.markEnrichedPublished(claim);
-                    if (published == null || published.state() != SourceLineage.State.VERIFIED
-                            || !claim.authority().eventCommitment().equals(published.eventCommitment())) {
-                        lineage.recordEnrichedPublishFailure(claim);
+                    if (!historyApplied) {
+                        featureStore.recordAttestedTransaction(claim.event(), FeatureNamespace.attested(claim.authority()),
+                                com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
+                                        claim.authority().receiptId(), claim.event()));
+                        SourceLineage applied = lineage.markEnrichedHistoryApplied(claim);
+                        if (applied == null || applied.state() != SourceLineage.State.VERIFIED
+                                || !claim.authority().eventCommitment().equals(applied.eventCommitment())) {
+                            throw new IllegalStateException("FEATURE_LINEAGE_HISTORY_UNRESOLVED");
+                        }
+                        historyApplied = true;
+                    } else {
+                        featureStore.verifyAttestedTransaction(claim.event(), FeatureNamespace.attested(claim.authority()),
+                                com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
+                                        claim.authority().receiptId(), claim.event()));
+                    }
+                    if (!claim.published()) {
+                        kafkaPublicationAttempted = true;
+                        publisher.publish(claim.event(), SourceOriginProofs.Assertion.KNOWN_ATTESTED);
+                        SourceLineage published = lineage.markEnrichedPublished(claim);
+                        if (published == null || published.state() != SourceLineage.State.VERIFIED
+                                || !claim.authority().eventCommitment().equals(published.eventCommitment())) {
+                            lineage.recordEnrichedPublishFailure(claim);
+                        }
                     }
                 } catch (RuntimeException deliveryOrConfirmationFailure) {
-                    lineage.recordEnrichedPublishFailure(claim);
+                    if (!historyApplied) { lineage.recordEnrichedHistoryFailure(claim); }
+                    else if (kafkaPublicationAttempted && !claim.published()) { lineage.recordEnrichedPublishFailure(claim); }
                 }
             }
         } catch (RuntimeException unavailable) {

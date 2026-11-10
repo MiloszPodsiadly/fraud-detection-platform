@@ -121,21 +121,47 @@ ENRICHED lineage and encrypted ENRICHED publication. It does not read the RAW
 encrypted publication collection. The stored event is authenticated, matched
 to its immutable commitment, event ID, timestamp and lineage link, and checked
 against current receipt expiry and source policy before the worker emits an
-internal KNOWN_ATTESTED proof. Redis is not read to rebuild features.
-Acknowledgement is at-least-once: a process death after broker ACK can produce a
-duplicate with the same event bytes and identity, and the downstream exact
-occurrence fence remains responsible for deduplication.
+internal KNOWN_ATTESTED proof. Recovery does not recompute the feature snapshot
+from Redis. Mongo tracks Kafka publication and Redis history finalization as
+separate states. The worker first applies the attested Redis history effect,
+then publishes the exact encrypted-outbox event. An already PUBLISHED row with
+pending history is claimed only for history finalization and is not sent to
+Kafka again. Acknowledgement is at-least-once: a process death after broker ACK
+can produce a duplicate with the same event bytes and identity, and the
+downstream exact occurrence fence remains responsible for deduplication.
+
+If a PUBLISHED row's encrypted payload or current authority fails validation
+during history recovery, Mongo quarantines `historyState` separately while
+preserving `state=PUBLISHED`. Transient sidecar unavailability receives a
+bounded lease backoff; invalid payload and denied authority become terminal
+history quarantine reasons and are included in health counts. This prevents an
+unrecoverable row from being reclaimed on every scheduler cycle or starving
+other PUBLISHED history rows.
+
+Attested Redis history uses one Lua operation across customer/merchant windows,
+known devices, a transaction commitment marker, and last transaction state. Its
+five v3 keys share a customer-derived Redis Cluster hash slot. v3 keys hash the
+attested scope and customer; reads temporarily dual-read v2 attested keys while
+their configured TTLs expire. Legacy `feature:` keys and behavior are
+unchanged. If Mongo says history is applied but the Redis commitment marker is
+missing, processing reports rebuild-required rather than silently declaring
+history complete.
 
 For an existing ENRICHED collection, the schema owner runs
 SourceEnrichedPublicationRecoveryMigration.migrate(database) before deploying
 the new ENRICHER. This migration accepts only the exact prior strict validator
-and _id_ index (or an exact partial state from this migration), adds the
-bounded recovery index and recovery fields as optional validator properties,
-and does not rewrite or delete legacy rows. Service startup verifies the exact
-new validator and both indexes; it never repairs them. Treat this as a
-forward-only migration once a new app has written lease fields. Preserve the
-old app image for reference, but roll forward with a corrected migration or
-application build rather than removing recovery fields from live rows.
+or an exact partial migration state, adds bounded recovery/history indexes,
+installs the new strict validator, and backfills missing history fields as
+PENDING without changing publication state or encrypted event bytes. Old
+PUBLISHED rows therefore remain published but can be claimed for history
+finalization. Service startup verifies the exact new validator and indexes; it
+never repairs them. Pause old attested writers across the validator change,
+because they do not write the required history fields. Keep the ENRICHER runtime
+role separate from the schema owner. Treat this as a forward-only migration
+once a new app has written history or lease fields; roll forward with a
+corrected migration or application build rather than removing fields from live
+rows. See the [ENRICHED publication recovery runbook](../runbooks/source_enriched_publication_recovery.md)
+for rollout, Redis compatibility, health, and operator commands.
 
 Both operator redrive paths are one-shot application launches with
 spring.main.web-application-type=none; they reject launches without that
@@ -145,9 +171,13 @@ fraud.source-raw-publications.redrive.receipt-id=<64-lowercase-hex> and
 fraud.source-raw-publications.redrive.reason=BROKER_RECOVERED. ENRICHED uses
 fraud.source-enriched-publications.redrive.enabled=true,
 fraud.source-enriched-publications.redrive.publication-id=<64-lowercase-hex>
-and fraud.source-enriched-publications.redrive.reason=BROKER_RECOVERED.
-Use spring.kafka.listener.auto-startup=false for these launches. The operator
-must be authorized by the protected deployment/control-plane RBAC that grants
+and fraud.source-enriched-publications.redrive.reason=BROKER_RECOVERED. ENRICHED
+also requires `fraud.source-enriched-publications.redrive.operator-mode=true`.
+Both custom listener factories force auto-startup off in operator mode, and the
+ENRICHED operator context excludes scheduled recovery. Use
+spring.kafka.listener.auto-startup=false for these launches as an explicit
+runtime assertion. The operator must be authorized by the protected
+deployment/control-plane RBAC that grants
 access to start this one-shot process and supply its service credentials; this
 repository contains no cluster RBAC policy. The Mongo role still enforces the
 service's normal least-privilege boundary. Logs contain only safe reason and

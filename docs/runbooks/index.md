@@ -11,6 +11,7 @@ Status: current runbook standard.
 | [Engine intelligence operational runbook](engine_intelligence_operational_runbook.md) | Engine-intelligence projection, feedback submit/read, audit dependency, rollout, rollback, retention, index, and storage-growth triage. |
 | [Device Risk admission runbook](device_risk_admission.md) | Disabled Device Risk admission state, safe operator actions, external activation gates, and performance/telemetry non-claims. |
 | [Alert service operations](alert_service_operations.md) | Runtime operations, trust incidents, outbox ambiguity, audit degradation, and startup closure. |
+| [Source ENRICHED publication recovery](source_enriched_publication_recovery.md) | Attested ENRICHED outbox migration, Redis history recovery, health, and isolated one-shot redrive. |
 | [Regulated mutation recovery](regulated_mutation_recovery.md) | Lease renewal failures, checkpoint renewal failures, finalize recovery, and local audit-chain contention. |
 | [Regulated mutation drills](regulated_mutation_drills.md) | Modeled recovery drills and real alert-service kill-restart drill evidence. |
 | [Fraud case operations](fraud_case_operations.md) | Fraud-case lifecycle idempotency, work queue cursor rotation, and sensitive-read audit failures. |

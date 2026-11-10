@@ -19,6 +19,13 @@ public final class SourceEventCommitment {
     private SourceEventCommitment() { }
     public static String raw(TransactionRawEvent event) { return commit("raw", event); }
     public static String enriched(TransactionEnrichedEvent event) { return commit("enriched", event); }
+    /** Stable private identity for the Redis history effect; receipt identifiers are never written to Redis. */
+    public static String attestedHistory(String receiptId, TransactionEnrichedEvent event) {
+        if (receiptId == null || !receiptId.matches("^[0-9a-f]{64}$")) {
+            throw new IllegalArgumentException("SOURCE_RECEIPT_ID_INVALID");
+        }
+        return SourceReceiptIdentity.digest("source-enriched-history/v1", receiptId, enriched(event));
+    }
     static String eventIdentity(String kind, String eventId, java.time.Instant time) {
         SourceScope.requireReference(eventId);
         if (time == null) { throw new IllegalArgumentException("SOURCE_EVENT_TIME_REQUIRED"); }
