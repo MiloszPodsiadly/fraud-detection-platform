@@ -58,20 +58,50 @@ final class SourceOccurrenceSchema {
         }
     }
     private static Document validator(String name) {
-        Document fields = new Document("_id", hash()).append("schemaVersion", type("int").append("enum", List.of(1)));
+        Document fields = new Document("_id", hash()).append("schemaVersion", type("int").append("enum", name.equals(COUNTS) ? List.of(1) : List.of(1, 2)));
         if (name.equals(COUNTS)) { fields.append("count", type("int").append("minimum", 1).append("maximum", MAX_RUNS)); }
         else {
             fields.append("receiptId", hash()).append("enrichedCommitment", hash()).append("runId", reference())
                     .append("eventId", reference()).append("eventCreatedAt", type("string").append("maxLength", 64))
                     .append("fingerprint", hash()).append("createdAt", type("date")).append("expiresAt", type("date"))
-                    .append("state", type("string").append("enum", List.of("PENDING", "PUBLISHED", "CONFLICT", "EXPIRED")))
+                    .append("state", type("string").append("enum", List.of("PENDING", "PUBLISHING", "PUBLISHED", "RETRY_EXHAUSTED", "CONFLICT", "EXPIRED")))
                     .append("attempts", type("int").append("minimum", 0).append("maximum", 8))
+                    .append("recoveryEpoch", type("int").append("minimum", 0).append("maximum", 3))
+                    .append("lastAttemptCode", type("string").append("pattern", "^[A-Z0-9_]{1,64}$"))
+                    .append("nextAttemptAt", type("date")).append("leaseId", reference()).append("leaseUntil", type("date"))
+                    .append("lastRedriveAt", type("date"))
+                    .append("redriveReason", type("string").append("enum", List.of("BROKER_RECOVERED", "OPERATOR_RECONCILIATION")))
                     .append("keyId", reference()).append("nonce", type("binData")).append("ciphertext", type("binData"));
         }
         var required = new ArrayList<>(fields.keySet());
-        required.removeAll(List.of("keyId", "nonce", "ciphertext"));
+        required.removeAll(List.of("keyId", "nonce", "ciphertext", "recoveryEpoch", "lastAttemptCode", "nextAttemptAt",
+                "leaseId", "leaseUntil", "lastRedriveAt", "redriveReason"));
         return new Document("$jsonSchema", type("object").append("additionalProperties", false)
                 .append("required", required).append("properties", fields));
+    }
+    static void migrateRecoveryValidator(MongoDatabase db, boolean owner) {
+        if (!owner) { throw new IllegalStateException("SOURCE_OCCURRENCE_MIGRATION_OWNER_REQUIRED"); }
+        Document existing = db.listCollections().filter(eq("name", OCCURRENCES)).first();
+        if (existing == null) { throw invalid(); }
+        Document options = existing.get("options", Document.class);
+        if (options == null || !options.keySet().equals(Set.of("validator", "validationLevel", "validationAction"))
+                || !validatorV1().equals(options.get("validator")) || !"strict".equals(options.getString("validationLevel"))
+                || !"error".equals(options.getString("validationAction"))) { throw invalid(); }
+        Document result = db.runCommand(new Document("collMod", OCCURRENCES).append("validator", validator(OCCURRENCES))
+                .append("validationLevel", "strict").append("validationAction", "error"));
+        if (result.get("ok", Number.class) == null || result.get("ok", Number.class).intValue() != 1) { throw invalid(); }
+    }
+    private static Document validatorV1() {
+        Document fields = new Document("_id", hash()).append("schemaVersion", type("int").append("enum", List.of(1)))
+                .append("receiptId", hash()).append("enrichedCommitment", hash()).append("runId", reference())
+                .append("eventId", reference()).append("eventCreatedAt", type("string").append("maxLength", 64))
+                .append("fingerprint", hash()).append("createdAt", type("date")).append("expiresAt", type("date"))
+                .append("state", type("string").append("enum", List.of("PENDING", "PUBLISHED", "CONFLICT", "EXPIRED")))
+                .append("attempts", type("int").append("minimum", 0).append("maximum", 8))
+                .append("keyId", reference()).append("nonce", type("binData")).append("ciphertext", type("binData"));
+        return new Document("$jsonSchema", type("object").append("additionalProperties", false)
+                .append("required", new ArrayList<>(fields.keySet()).stream().filter(k -> !List.of("keyId", "nonce", "ciphertext").contains(k)).toList())
+                .append("properties", fields));
     }
     private static Document reference() { return type("string").append("pattern", "^[A-Za-z0-9._:-]{1,128}$"); }
     private static Document hash() { return type("string").append("pattern", "^[0-9a-f]{64}$"); }

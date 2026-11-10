@@ -51,14 +51,22 @@ public final class MongoSourceLineage implements SourceLineageAccess {
     private final SourceSignatureVerifier policy;
     private final Stage stage;
     private final Clock clock;
+    private final SourceEnrichedPublicationCipher enrichedPublicationCipher;
     private boolean occurrenceWrites;
 
     public MongoSourceLineage(MongoClient client, String database, String expectedUser, Stage stage,
                               SourceSignatureVerifier policy, Clock clock) {
+        this(client, database, expectedUser, stage, policy, clock, null);
+    }
+
+    public MongoSourceLineage(MongoClient client, String database, String expectedUser, Stage stage,
+                              SourceSignatureVerifier policy, Clock clock,
+                              SourceEnrichedPublicationCipher enrichedPublicationCipher) {
         this.client = Objects.requireNonNull(client);
         this.policy = Objects.requireNonNull(policy);
         this.clock = Objects.requireNonNull(clock);
         this.stage = Objects.requireNonNull(stage);
+        this.enrichedPublicationCipher = enrichedPublicationCipher;
         if (database == null || !database.matches("[a-z][a-z0-9_]{0,63}")) { throw invalid("DATABASE_INVALID"); }
         this.database = client.getDatabase(database).withReadConcern(ReadConcern.MAJORITY)
                 .withWriteConcern(WriteConcern.MAJORITY).withReadPreference(ReadPreference.primary());
@@ -66,6 +74,9 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         if (timeout == null || timeout <= 0 || timeout > 5_000) { throw invalid("OPERATION_TIMEOUT_REQUIRED"); }
         requireServicePrincipal(expectedUser);
         SourceLineageSchema.initialize(this.database, stage == Stage.INGEST);
+        if (stage == Stage.ENRICHER && enrichedPublicationCipher != null) {
+            SourceLineageSchema.initializeEnrichedPublications(this.database, false);
+        }
         if (stage == Stage.INGEST) { SourceOccurrenceSchema.initialize(this.database, true); }
     }
 
@@ -92,6 +103,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             String collection = resource.getString("collection");
             if (collection == null || collection.isEmpty() && !actions.stream().allMatch("listCollections"::equals)
                     || !collection.isEmpty() && !Set.of(IDENTITIES, RECEIPTS, RAW, ENRICHED, RAW_COUNTS, ENRICHED_COUNTS,
+                    ENRICHED_PUBLICATIONS,
                     SourceOccurrenceSchema.OCCURRENCES, SourceOccurrenceSchema.COUNTS).contains(collection)) {
                 throw invalid("SERVICE_PRIVILEGES_TOO_BROAD");
             }
@@ -99,7 +111,8 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                 if (action.equals("find")) { read.add(collection); }
                 if (action.equals("insert")) { insert.add(collection); }
                 if (action.equals("update")) { update.add(collection); }
-                boolean permittedWrite = stage == Stage.ENRICHER && Set.of(ENRICHED, ENRICHED_COUNTS).contains(collection)
+                boolean permittedWrite = stage == Stage.ENRICHER && Set.of(ENRICHED, ENRICHED_COUNTS,
+                        ENRICHED_PUBLICATIONS).contains(collection)
                         || stage == Stage.SCORER && Set.of(SourceOccurrenceSchema.OCCURRENCES, SourceOccurrenceSchema.COUNTS).contains(collection);
                 if ((action.equals("insert") || action.equals("update")) && !permittedWrite) {
                     throw invalid("SERVICE_WRITE_NOT_AUTHORIZED");
@@ -111,6 +124,9 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                 || !insert.containsAll(Set.of(ENRICHED, ENRICHED_COUNTS)) || !update.containsAll(Set.of(ENRICHED, ENRICHED_COUNTS)))) {
             throw invalid("SERVICE_WRITE_NOT_AUTHORIZED");
         }
+        if (stage == Stage.ENRICHER && enrichedPublicationCipher != null
+                && (!read.contains(ENRICHED_PUBLICATIONS) || !insert.contains(ENRICHED_PUBLICATIONS)
+                || !update.contains(ENRICHED_PUBLICATIONS))) { throw invalid("SERVICE_WRITE_NOT_AUTHORIZED"); }
         occurrenceWrites = stage == Stage.SCORER && read.containsAll(SourceOccurrenceSchema.COLLECTIONS)
                 && insert.containsAll(SourceOccurrenceSchema.COLLECTIONS) && update.containsAll(SourceOccurrenceSchema.COLLECTIONS);
     }
@@ -119,13 +135,25 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         if (!occurrenceWrites) { throw invalid("OCCURRENCE_WRITE_NOT_AUTHORIZED"); }
     }
 
+    /** Removes encrypted replay material in the source-owner receipt tombstone transaction. */
+    public boolean deleteEnrichedPublicationsWithinTransaction(ClientSession session, String receiptId) {
+        if (stage != Stage.INGEST || session == null || !session.hasActiveTransaction() || receiptId == null
+                || !receiptId.matches("^[0-9a-f]{64}$")) { return false; }
+        try {
+            return database.getCollection(ENRICHED_PUBLICATIONS).deleteMany(session, eq("receiptId", receiptId)).wasAcknowledged();
+        } catch (RuntimeException unavailable) { return false; }
+    }
+
     /** Same authenticated durable chain validation as live processing, used only for exact private recovery. */
     SourceLineage recoverEnriched(String receiptId, String commitment) {
-        return transaction(session -> {
-            Document link = database.getCollection(ENRICHED).find(session, eq("eventCommitment", commitment)).first();
-            if (link == null || !receiptId.equals(link.getString("receiptId"))) { return absent(UNAVAILABLE); }
-            return enrichedLink(session, link, commitment);
-        });
+        return transaction(session -> recoverEnriched(session, receiptId, commitment));
+    }
+
+    SourceLineage recoverEnriched(ClientSession session, String receiptId, String commitment) {
+        if (session == null || !session.hasActiveTransaction()) { return absent(UNAVAILABLE); }
+        Document link = database.getCollection(ENRICHED).find(session, eq("eventCommitment", commitment)).first();
+        if (link == null || !receiptId.equals(link.getString("receiptId"))) { return absent(UNAVAILABLE); }
+        return enrichedLink(session, link, commitment);
     }
 
     Instant receiptExpiry(String receiptId) {
@@ -135,14 +163,25 @@ public final class MongoSourceLineage implements SourceLineageAccess {
     public SourceLineage bindRaw(SourceSignatureVerifier.Verified evidence, String receiptId, TransactionRawEvent event) {
         if (stage != Stage.INGEST || evidence == null || policy.currentDenial(evidence) != null
                 || !SourceReceiptIdentity.identity(evidence.scope()).equals(receiptId)) { return absent(REVOKED); }
-        return transaction(session -> {
-            Receipt receipt = receipt(session, receiptId);
-            if (receipt.state != VERIFIED) { return absent(receipt.state); }
-            if (!evidence.scope().equals(receipt.scope) || !evidence.keyCommitment().equals(receipt.keyCommitment)
-                    || !evidence.policyVersion().equals(receipt.policyVersion)) { return absent(REVOKED); }
-            return bind(session, RAW, RAW_COUNTS, event.eventId(), event.createdAt(), SourceEventCommitment.raw(event),
-                    receipt, SourceReceiptIdentity.binding(receipt.scope, receipt.keyCommitment));
-        });
+        return transaction(session -> bindRawWithinTransaction(session, evidence, receiptId, event));
+    }
+
+    /**
+     * Joins the receipt owner's transaction so admission, this raw link and its publication intent can
+     * commit atomically. The caller must use the same MongoClient and database as this lineage owner.
+     */
+    public SourceLineage bindRawWithinTransaction(ClientSession session, SourceSignatureVerifier.Verified evidence,
+                                                   String receiptId, TransactionRawEvent event) {
+        if (session == null || !session.hasActiveTransaction()) { return absent(UNAVAILABLE); }
+        if (stage != Stage.INGEST || evidence == null || event == null
+                || policy.currentDenial(evidence) != null
+                || !SourceReceiptIdentity.identity(evidence.scope()).equals(receiptId)) { return absent(REVOKED); }
+        Receipt receipt = receipt(session, receiptId);
+        if (receipt.state != VERIFIED) { return absent(receipt.state); }
+        if (!evidence.scope().equals(receipt.scope) || !evidence.keyCommitment().equals(receipt.keyCommitment)
+                || !evidence.policyVersion().equals(receipt.policyVersion)) { return absent(REVOKED); }
+        return bind(session, RAW, RAW_COUNTS, event.eventId(), event.createdAt(), SourceEventCommitment.raw(event),
+                receipt, SourceReceiptIdentity.binding(receipt.scope, receipt.keyCommitment));
     }
 
     @Override public SourceLineage raw(TransactionRawEvent event) {
@@ -163,6 +202,12 @@ public final class MongoSourceLineage implements SourceLineageAccess {
 
     @Override public SourceLineage bindEnriched(TransactionRawEvent input, TransactionEnrichedEvent output) {
         if (stage != Stage.ENRICHER) { return absent(UNAVAILABLE); }
+        if (enrichedPublicationCipher != null) {
+            SourceEnrichedPublication publication = prepareEnrichedPublication(input, output);
+            if (publication.authority().state() != VERIFIED) { return publication.authority(); }
+            return SourceEventCommitment.enriched(output).equals(SourceEventCommitment.enriched(publication.event()))
+                    ? publication.authority() : absent(CONFLICT);
+        }
         return transaction(session -> {
             SourceLineage parent = raw(session, input);
             if (parent.state() != VERIFIED) { return parent; }
@@ -175,15 +220,119 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         });
     }
 
-    @Override public SourceLineage enriched(TransactionEnrichedEvent event) {
+    @Override public SourceEnrichedPublication prepareEnrichedPublication(TransactionRawEvent input,
+                                                                            TransactionEnrichedEvent candidate) {
+        if (stage != Stage.ENRICHER || enrichedPublicationCipher == null) {
+            return SourceEnrichedPublication.unavailable(UNAVAILABLE);
+        }
         return transaction(session -> {
+            SourceLineage parent = raw(session, input);
+            if (parent.state() != VERIFIED) { return SourceEnrichedPublication.unavailable(parent.state()); }
+            if (!sameInterpretation(input, candidate) || candidate.featureSnapshot() == null
+                    || !FEATURES.equals(candidate.featureSnapshot().keySet())) {
+                return SourceEnrichedPublication.unavailable(CONFLICT);
+            }
+            Receipt receipt = receipt(session, parent.receiptId());
+            if (receipt.state != VERIFIED) { return SourceEnrichedPublication.unavailable(receipt.state); }
+            String publicationId = enrichedPublicationId(parent.eventCommitment());
+            MongoCollection<Document> publications = database.getCollection(ENRICHED_PUBLICATIONS);
+            Document existing = publications.find(session, eq("_id", publicationId)).first();
+            if (existing != null) { return readEnrichedPublication(session, input, parent, existing); }
+
+            Document linked = database.getCollection(ENRICHED).find(session,
+                    eq("parentCommitment", parent.eventCommitment())).first();
+            if (linked != null) { return SourceEnrichedPublication.unavailable(UNAVAILABLE); }
+
+            String commitment = SourceEventCommitment.enriched(candidate);
+            SourceLineage bound = bind(session, ENRICHED, ENRICHED_COUNTS, candidate.eventId(), candidate.createdAt(),
+                    commitment, receipt, parent.eventCommitment());
+            if (bound.state() != VERIFIED) { return SourceEnrichedPublication.unavailable(bound.state()); }
+            Document row = new Document("_id", publicationId).append("schemaVersion", 1)
+                    .append("receiptId", receipt.id).append("rawCommitment", parent.eventCommitment())
+                    .append("enrichedCommitment", commitment).append("eventId", candidate.eventId())
+                    .append("eventCreatedAt", candidate.createdAt().toString()).append("expiresAt", Date.from(receipt.expiresAt))
+                    .append("state", "PENDING").append("publishedAt", null);
+            enrichedPublicationCipher.encrypt(row, candidate);
+            publications.insertOne(session, row);
+            return new SourceEnrichedPublication(bound, candidate, false);
+        }, SourceEnrichedPublication.unavailable(UNAVAILABLE));
+    }
+
+    @Override public SourceLineage markEnrichedPublished(TransactionRawEvent input, TransactionEnrichedEvent output) {
+        if (stage != Stage.ENRICHER || enrichedPublicationCipher == null) { return absent(UNAVAILABLE); }
+        return transaction(session -> {
+            SourceLineage parent = raw(session, input);
+            if (parent.state() != VERIFIED) { return parent; }
+            MongoCollection<Document> publications = database.getCollection(ENRICHED_PUBLICATIONS);
+            String publicationId = enrichedPublicationId(parent.eventCommitment());
+            Document row = publications.find(session, eq("_id", publicationId)).first();
+            SourceEnrichedPublication publication = row == null ? SourceEnrichedPublication.unavailable(UNVERIFIED)
+                    : readEnrichedPublication(session, input, parent, row);
+            if (publication.authority().state() != VERIFIED) { return publication.authority(); }
+            if (!SourceEventCommitment.enriched(output).equals(SourceEventCommitment.enriched(publication.event()))) {
+                return absent(CONFLICT);
+            }
+            if (!publication.published()) {
+                var result = publications.updateOne(session, and(eq("_id", publicationId), eq("state", "PENDING")),
+                        combine(set("state", "PUBLISHED"), set("publishedAt", Date.from(clock.instant()))));
+                if (!result.wasAcknowledged() || result.getMatchedCount() != 1) { throw invalid("PUBLICATION_STATE_UNRESOLVED"); }
+            }
+            return publication.authority();
+        });
+    }
+
+    private SourceEnrichedPublication readEnrichedPublication(ClientSession session, TransactionRawEvent input,
+                                                               SourceLineage parent, Document row) {
+        String expectedId = enrichedPublicationId(parent.eventCommitment());
+        Date publishedAt = row.getDate("publishedAt");
+        boolean published = "PUBLISHED".equals(row.getString("state"));
+        if (row.getInteger("schemaVersion", 0) != 1 || !expectedId.equals(row.getString("_id"))
+                || !parent.receiptId().equals(row.getString("receiptId"))
+                || !parent.eventCommitment().equals(row.getString("rawCommitment"))
+                || !row.getDate("expiresAt").toInstant().isAfter(clock.instant())
+                || published != (publishedAt != null)
+                || !(published || "PENDING".equals(row.getString("state")))) {
+            return SourceEnrichedPublication.unavailable(CONFLICT);
+        }
+        try {
+            TransactionEnrichedEvent event = enrichedPublicationCipher.decrypt(row);
             String commitment = SourceEventCommitment.enriched(event);
+            if (!event.eventId().equals(row.getString("eventId"))
+                    || !event.createdAt().toString().equals(row.getString("eventCreatedAt"))
+                    || !commitment.equals(row.getString("enrichedCommitment")) || !sameInterpretation(input, event)
+                    || event.featureSnapshot() == null || !FEATURES.equals(event.featureSnapshot().keySet())) {
+                return SourceEnrichedPublication.unavailable(CONFLICT);
+            }
             Document link = database.getCollection(ENRICHED).find(session,
                     eq("_id", SourceEventCommitment.eventIdentity("enriched", event.eventId(), event.createdAt()))).first();
-            if (link == null) { return absent(UNVERIFIED); }
-            if (!validLink(link, event.eventId(), event.createdAt(), commitment)) { return absent(CONFLICT); }
-            return enrichedLink(session, link, commitment);
-        });
+            if (link == null || !parent.eventCommitment().equals(link.getString("parentCommitment"))
+                    || !parent.receiptId().equals(link.getString("receiptId"))
+                    || !row.getDate("expiresAt").equals(link.getDate("expiresAt"))) {
+                return SourceEnrichedPublication.unavailable(CONFLICT);
+            }
+            SourceLineage authority = enrichedLink(session, link, commitment);
+            if (authority.state() != VERIFIED) { return SourceEnrichedPublication.unavailable(authority.state()); }
+            return new SourceEnrichedPublication(authority, event, published);
+        } catch (RuntimeException unavailable) {
+            return SourceEnrichedPublication.unavailable(UNAVAILABLE);
+        }
+    }
+
+    private static String enrichedPublicationId(String rawCommitment) {
+        return SourceReceiptIdentity.digest("source-enriched-publication-id/v1", rawCommitment);
+    }
+
+    @Override public SourceLineage enriched(TransactionEnrichedEvent event) {
+        return transaction(session -> enriched(session, event));
+    }
+    SourceLineage enriched(ClientSession session, TransactionEnrichedEvent event) {
+        if (session == null || !session.hasActiveTransaction()) { return absent(UNAVAILABLE); }
+        String commitment = SourceEventCommitment.enriched(event);
+        Document link = database.getCollection(ENRICHED).find(session,
+                eq("_id", SourceEventCommitment.eventIdentity("enriched", event.eventId(), event.createdAt()))).first();
+        if (link == null) { return absent(UNVERIFIED); }
+        if (!validLink(link, event.eventId(), event.createdAt(), commitment)) { return absent(CONFLICT); }
+        return enrichedLink(session, link, commitment);
     }
 
     private SourceLineage enrichedLink(ClientSession session, Document link, String commitment) {
@@ -281,29 +430,35 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                 && Objects.equals(a.locationInfo(), b.locationInfo()) && Objects.equals(a.customerContext(), b.customerContext());
     }
     private SourceLineage transaction(Function<ClientSession, SourceLineage> work) {
+        return transaction(work, absent(UNAVAILABLE));
+    }
+    private <T> T transaction(Function<ClientSession, T> work, T unavailable) {
         for (int attempt = 0; attempt < 3; attempt++) {
             try (ClientSession session = client.startSession()) {
                 session.startTransaction(TRANSACTION);
                 try {
-                    SourceLineage result = work.apply(session);
+                    T result = work.apply(session);
                     for (int commitAttempt = 0; ; commitAttempt++) {
                         try { session.commitTransaction(); return result; }
                         catch (MongoException failure) {
-                            if (!failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL) || commitAttempt == 2) { throw failure; }
+                            if (!failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL) || commitAttempt == 2) {
+                                if (failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) { return unavailable; }
+                                throw failure;
+                            }
                         }
                     }
                 } catch (RuntimeException failure) {
                     if (failure instanceof MongoException mongo && mongo.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) {
-                        return absent(UNAVAILABLE);
+                        return unavailable;
                     }
                     try { if (session.hasActiveTransaction()) { session.abortTransaction(); } } catch (RuntimeException ignored) { }
                     if (failure instanceof MongoException mongo && (mongo.getCode() == 11000
                             || mongo.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)) && attempt < 2) { continue; }
-                    return absent(UNAVAILABLE);
+                    return unavailable;
                 }
-            } catch (RuntimeException unavailable) { return absent(UNAVAILABLE); }
+            } catch (RuntimeException failure) { return unavailable; }
         }
-        return absent(UNAVAILABLE);
+        return unavailable;
     }
     private static Instant canonicalTime(String value) {
         Instant time = Instant.parse(value);

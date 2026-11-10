@@ -1,7 +1,5 @@
 package com.frauddetection.ingest.source;
 
-import com.frauddetection.common.events.source.MongoSourceLineage;
-import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.common.events.source.SourceSignatureVerifier;
 import com.frauddetection.common.events.source.SourceSignedInput;
 import com.frauddetection.ingest.api.IngestTransactionRequest;
@@ -40,7 +38,6 @@ public class AttestedTransactionIngestService {
     private final TransactionRequestMapper mapper;
     private final SourceSignatureVerifier verifier;
     private final SourceReceiptStore receipts;
-    private final MongoSourceLineage lineage;
     private final TransactionRawEventProducer publisher;
     private final CorrelationIdProvider correlation;
     private final KafkaTopicProperties topics;
@@ -48,17 +45,17 @@ public class AttestedTransactionIngestService {
 
     @Autowired
     public AttestedTransactionIngestService(TransactionRequestMapper mapper, SourceSignatureVerifier verifier,
-                                            ObjectProvider<SourceReceiptStore> receipts, ObjectProvider<MongoSourceLineage> lineage,
-                                            TransactionRawEventProducer publisher, CorrelationIdProvider correlation,
+                                            ObjectProvider<SourceReceiptStore> receipts, TransactionRawEventProducer publisher,
+                                            CorrelationIdProvider correlation,
                                             KafkaTopicProperties topics, Validator validator) {
-        this(mapper, verifier, receipts.getIfAvailable(), lineage.getIfAvailable(), publisher, correlation, topics, validator);
+        this(mapper, verifier, receipts.getIfAvailable(), publisher, correlation, topics, validator);
     }
 
     public AttestedTransactionIngestService(TransactionRequestMapper mapper, SourceSignatureVerifier verifier,
-                                            SourceReceiptStore receipts, MongoSourceLineage lineage, TransactionRawEventProducer publisher,
+                                            SourceReceiptStore receipts, TransactionRawEventProducer publisher,
                                             CorrelationIdProvider correlation, KafkaTopicProperties topics, Validator validator) {
-        this.mapper = mapper; this.verifier = verifier; this.receipts = receipts; this.lineage = lineage;
-        this.publisher = publisher; this.correlation = correlation; this.topics = topics; this.validator = validator;
+        this.mapper = mapper; this.verifier = verifier; this.receipts = receipts; this.publisher = publisher;
+        this.correlation = correlation; this.topics = topics; this.validator = validator;
     }
 
     public IngestTransactionResponse ingest(String encodedProof, byte[] payload) {
@@ -82,21 +79,20 @@ public class AttestedTransactionIngestService {
             request = MAPPER.readValue(json, IngestTransactionRequest.class);
             if (request == null || !validator.validate(request).isEmpty()) { throw new IllegalArgumentException(); }
         } catch (Exception malformed) { throw reject(HttpStatus.BAD_REQUEST, "SOURCE_TRANSACTION_INVALID"); }
-        if (receipts == null || lineage == null) { throw reject(HttpStatus.SERVICE_UNAVAILABLE, "SOURCE_LINEAGE_UNAVAILABLE"); }
-        var receipt = receipts.admit(verified);
-        if (receipt.status() != SourceReceiptStore.Status.ADMITTED && receipt.status() != SourceReceiptStore.Status.EXISTING) {
-            HttpStatus status = receipt.status() == SourceReceiptStore.Status.CONFLICT ? HttpStatus.CONFLICT
-                    : receipt.status() == SourceReceiptStore.Status.REVOKED ? HttpStatus.FORBIDDEN : HttpStatus.SERVICE_UNAVAILABLE;
-            throw reject(status, "SOURCE_RECEIPT_" + receipt.status().name());
-        }
+        if (receipts == null) { throw reject(HttpStatus.SERVICE_UNAVAILABLE, "SOURCE_LINEAGE_UNAVAILABLE"); }
         String correlationId = correlation.currentOrGenerate();
-        var event = mapper.toEvent(request, correlationId);
-        if (lineage.bindRaw(verified, receipt.receipt().id(), event).state() != SourceLineage.State.VERIFIED) {
-            throw reject(HttpStatus.SERVICE_UNAVAILABLE, "SOURCE_LINEAGE_UNAVAILABLE");
+        var accepted = receipts.acceptRaw(verified, mapper.toEvent(request, correlationId));
+        if (accepted.status() != SourceReceiptStore.Status.ADMITTED && accepted.status() != SourceReceiptStore.Status.EXISTING) {
+            HttpStatus status = accepted.status() == SourceReceiptStore.Status.CONFLICT ? HttpStatus.CONFLICT
+                    : accepted.status() == SourceReceiptStore.Status.REVOKED ? HttpStatus.FORBIDDEN : HttpStatus.SERVICE_UNAVAILABLE;
+            throw reject(status, "SOURCE_RECEIPT_" + accepted.status().name());
         }
-        try { publisher.publish(event); }
-        catch (RuntimeException uncertain) { throw reject(HttpStatus.SERVICE_UNAVAILABLE, "SOURCE_RAW_PUBLICATION_UNRESOLVED"); }
-        return new IngestTransactionResponse(event.transactionId(), event.eventId(), correlationId, topics.transactionRaw(), Instant.now(), "ACCEPTED");
+        var event = accepted.event();
+        try { receipts.recoverRawPublications(publisher, 1); }
+        catch (RuntimeException ignored) { /* The durable intent remains available to the independent recovery worker. */ }
+        // ACCEPTED means the majority-durable, replayable RAW intent exists; delivery remains recoverable separately.
+        return new IngestTransactionResponse(event.transactionId(), event.eventId(), event.correlationId(),
+                topics.transactionRaw(), Instant.now(), "ACCEPTED");
     }
     private static SourceIngestException reject(HttpStatus status, String reason) { return new SourceIngestException(status, reason); }
 }

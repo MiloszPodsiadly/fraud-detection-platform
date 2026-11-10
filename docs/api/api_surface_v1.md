@@ -44,6 +44,7 @@ Transaction ingest service:
 | Method | Path | Contract |
 | --- | --- | --- |
 | `POST` | `/api/v1/transactions` | Accepts external transaction ingestion requests. |
+| `POST` | `/api/v1/transactions/attested` | Returns `202` after the signed source occurrence and exact RAW publication intent are majority-durable; Kafka recovery may replay the same receiver event ID. |
 
 Transaction simulator service:
 

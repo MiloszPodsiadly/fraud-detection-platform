@@ -19,6 +19,7 @@
 
     <modules>
         <module>common-events</module>
+        <module>source-persistence</module>
         <module>common-test-support</module>
         <module>transaction-ingest-service</module>
         <module>transaction-simulator-service</module>

@@ -1,6 +1,8 @@
 package com.frauddetection.ingest.service;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.source.SourceOriginProofs;
+import com.frauddetection.common.events.source.SourceOriginProperties;
 import com.frauddetection.ingest.api.IngestTransactionResponse;
 import com.frauddetection.ingest.config.KafkaTopicProperties;
 import com.frauddetection.ingest.controller.TransactionIngestRequestTestData;
@@ -10,12 +12,14 @@ import com.frauddetection.ingest.observability.CorrelationIdProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,8 +42,12 @@ class TransactionIngestServiceTest {
     @Mock
     private CorrelationIdProvider correlationIdProvider;
 
-    @InjectMocks
     private TransactionIngestService transactionIngestService;
+
+    @BeforeEach void createLegacyService() {
+        transactionIngestService = new TransactionIngestService(transactionRequestMapper, transactionRawEventProducer,
+                kafkaTopicProperties, correlationIdProvider);
+    }
 
     @Test
     void shouldPublishEventAndReturnAcceptedResponse() {
@@ -79,5 +87,24 @@ class TransactionIngestServiceTest {
         assertThat(response.topic()).isEqualTo("transactions.raw");
         assertThat(response.status()).isEqualTo("ACCEPTED");
         assertThat(response.correlationId()).isEqualTo("corr-generated-1001");
+    }
+
+    @Test
+    void configuredIngressSignsTheRawEventAsProvenLegacy() {
+        var event = new TransactionRawEvent("event-1002", "txn-1002", "corr-1002", "cust-1002", "acct-1002", "card-1002",
+                Instant.parse("2026-04-20T10:15:30Z"), Instant.parse("2026-04-20T10:15:28Z"), null, null, null, null, null,
+                "PURCHASE", "3DS", "CALLER_CONTROLLED_SOURCE_SYSTEM", "trace-1002", Map.of());
+        when(transactionRequestMapper.toEvent(any(), anyString())).thenReturn(event);
+        when(kafkaTopicProperties.transactionRaw()).thenReturn("transactions.raw");
+        when(correlationIdProvider.currentOrGenerate()).thenReturn("corr-generated-1002");
+        var proofs = new SourceOriginProofs(new SourceOriginProperties(true, "origin-key-1",
+                Map.of("origin-key-1", Base64.getEncoder().encodeToString(new byte[32]))));
+        var factory = new StaticListableBeanFactory(); factory.addBean("proofs", proofs);
+        transactionIngestService = new TransactionIngestService(transactionRequestMapper, transactionRawEventProducer,
+                kafkaTopicProperties, correlationIdProvider, factory.getBeanProvider(SourceOriginProofs.class));
+
+        transactionIngestService.ingest(TransactionIngestRequestTestData.validRequest());
+
+        verify(transactionRawEventProducer).publish(event, SourceOriginProofs.Assertion.PROVEN_LEGACY);
     }
 }

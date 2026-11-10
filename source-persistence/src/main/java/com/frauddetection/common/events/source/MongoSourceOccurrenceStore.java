@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static com.frauddetection.common.events.source.SourceOccurrenceSchema.*;
@@ -39,10 +40,13 @@ public final class MongoSourceOccurrenceStore {
     private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();
     private static final TransactionOptions TX = TransactionOptions.builder().readConcern(ReadConcern.SNAPSHOT)
             .writeConcern(WriteConcern.MAJORITY).readPreference(ReadPreference.primary()).build();
-    public enum Status { ABSENT, PENDING, PUBLISHED, UNAVAILABLE, CONFLICT, UNVERIFIED }
-    public record Result(Status status, String id, TransactionScoredEvent event) {
+    public enum Status { ABSENT, PENDING, PUBLISHING, PUBLISHED, RETRY_EXHAUSTED, UNAVAILABLE, CONFLICT, UNVERIFIED }
+    public enum RedriveReason { BROKER_RECOVERED, OPERATOR_RECONCILIATION }
+    public record Result(Status status, String id, TransactionScoredEvent event, String claimId) {
+        public Result(Status status, String id, TransactionScoredEvent event) { this(status, id, event, null); }
         @Override public String toString() { return "SourceOccurrenceResult[" + status + "]"; }
     }
+    public record RecoveryHealth(long pending, long publishing, long exhausted, long oldestPendingAgeSeconds) { }
     public record Lookup(SourceLineage.State state, SourceScoredOccurrence binding) {
         @Override public String toString() { return "SourceOccurrenceLookup[" + state + "]"; }
     }
@@ -69,24 +73,24 @@ public final class MongoSourceOccurrenceStore {
     }
 
     public Result resume(TransactionEnrichedEvent input, String runId) {
-        try {
-            SourceLineage authorization = lineage.enriched(input);
-            if (authorization.state() != SourceLineage.State.VERIFIED) { return result(Status.UNVERIFIED); }
+        return transaction(session -> {
+            SourceLineage authorization = lineage.enriched(session, input);
+            if (authorization.state() != SourceLineage.State.VERIFIED) { return authorizationFailure(authorization); }
             String id = runKey(authorization.receiptId(), runId);
-            Document row = db.getCollection(OCCURRENCES).find(eq("_id", id)).first();
+            Document row = db.getCollection(OCCURRENCES).find(session, eq("_id", id)).first();
             if (row == null) { return result(Status.ABSENT); }
-            return restore(row, authorization.receiptId());
-        } catch (RuntimeException unavailable) { return result(Status.UNAVAILABLE); }
+            return restore(session, row, authorization.receiptId(), authorization.eventCommitment());
+        });
     }
 
     public Result prepare(TransactionEnrichedEvent input, String runId, TransactionScoredEvent candidate) {
         return transaction(session -> {
-            SourceLineage source = lineage.enriched(input);
-            if (source.state() != SourceLineage.State.VERIFIED) { return result(Status.UNVERIFIED); }
+            SourceLineage source = lineage.enriched(session, input);
+            if (source.state() != SourceLineage.State.VERIFIED) { return authorizationFailure(source); }
+            if (!sameInput(input, candidate)) { return result(Status.CONFLICT); }
             String id = runKey(source.receiptId(), runId);
             Document existing = db.getCollection(OCCURRENCES).find(session, eq("_id", id)).first();
-            if (existing != null) { return restore(existing, source.receiptId()); }
-            if (!sameInput(input, candidate)) { return result(Status.CONFLICT); }
+            if (existing != null) { return restore(session, existing, source.receiptId(), source.eventCommitment()); }
             if (candidate.eventId() == null || !candidate.eventId().matches("[A-Za-z0-9._:-]{1,128}") || candidate.createdAt() == null) {
                 return result(Status.CONFLICT);
             }
@@ -95,10 +99,11 @@ public final class MongoSourceOccurrenceStore {
             Instant sourceExpiry = lineage.receiptExpiry(source.receiptId());
             if (sourceExpiry.isBefore(expiry)) { expiry = sourceExpiry; }
             if (!expiry.isAfter(now)) { return result(Status.UNAVAILABLE); }
-            Document row = new Document("_id", id).append("schemaVersion", 1).append("receiptId", source.receiptId())
+            Document row = new Document("_id", id).append("schemaVersion", 2).append("receiptId", source.receiptId())
                     .append("enrichedCommitment", source.eventCommitment()).append("runId", runId).append("eventId", candidate.eventId())
                     .append("eventCreatedAt", candidate.createdAt().toString()).append("fingerprint", SourceScoredOccurrence.fingerprint(candidate))
-                    .append("createdAt", Date.from(now)).append("expiresAt", Date.from(expiry)).append("state", "PENDING").append("attempts", 0);
+                    .append("createdAt", Date.from(now)).append("expiresAt", Date.from(expiry)).append("state", "PENDING").append("attempts", 0)
+                    .append("recoveryEpoch", 0).append("nextAttemptAt", Date.from(now));
             // The encrypted transport snapshot must survive the actual serializer/deserializer without changing occurrence identity.
             byte[] bytes = SourceScoredOccurrence.bytes(JSON, candidate);
             var decoded = new JacksonKafkaDeserializer<>(TransactionScoredEvent.class).deserialize("private-scored-outbox", bytes);
@@ -131,29 +136,86 @@ public final class MongoSourceOccurrenceStore {
         return transaction(session -> {
             Document row = db.getCollection(OCCURRENCES).find(session, eq("_id", id)).first();
             if (row == null) { return result(Status.UNAVAILABLE); }
-            Result restored = restore(row, row.getString("receiptId"));
-            if (restored.status != Status.PENDING) { return restored; }
-            if (row.getInteger("attempts") >= 8) { return result(Status.UNAVAILABLE); }
-            if (db.getCollection(OCCURRENCES).updateOne(session, and(eq("_id", id), eq("state", "PENDING"), lt("attempts", 8)),
-                    inc("attempts", 1)).getModifiedCount() != 1) { throw invalid(); }
-            return restored;
+            Result restored = restore(session, row, row.getString("receiptId"), row.getString("enrichedCommitment"));
+            if (restored.status != Status.PENDING && restored.status != Status.PUBLISHING) { return restored; }
+            Instant now = clock.instant();
+            if ("PUBLISHING".equals(row.getString("state")) && row.get("leaseUntil", Date.class).toInstant().isAfter(now)) {
+                return result(Status.UNAVAILABLE);
+            }
+            Date nextAttempt = row.get("nextAttemptAt", Date.class);
+            if ("PENDING".equals(row.getString("state")) && nextAttempt != null && nextAttempt.toInstant().isAfter(now)) {
+                return result(Status.UNAVAILABLE);
+            }
+            if (row.getInteger("attempts") >= 8) {
+                db.getCollection(OCCURRENCES).updateOne(session, and(eq("_id", id), eq("state", "PENDING"), gte("attempts", 8)),
+                        combine(set("state", "RETRY_EXHAUSTED"), set("lastAttemptCode", "BROKER_PUBLISH_FAILED")));
+                return result(Status.RETRY_EXHAUSTED);
+            }
+            String claimId = java.util.UUID.randomUUID().toString();
+            var claimed = db.getCollection(OCCURRENCES).updateOne(session,
+                    and(eq("_id", id), eq("state", row.getString("state")), lt("attempts", 8)),
+                    combine(inc("attempts", 1), set("state", "PUBLISHING"), set("leaseId", claimId),
+                            set("leaseUntil", Date.from(now.plusSeconds(120)))));
+            if (claimed.getModifiedCount() != 1) { throw invalid(); }
+            return new Result(Status.PUBLISHING, id, restored.event, claimId);
         });
     }
 
     /** Called only after the real publisher has returned its broker acknowledgement. */
-    public Result confirm(String id, TransactionScoredEvent acknowledged) {
+    public Result confirm(String id, TransactionScoredEvent acknowledged, String claimId) {
         return transaction(session -> {
             Document row = db.getCollection(OCCURRENCES).find(session, eq("_id", id)).first();
             if (row == null) { return result(Status.UNAVAILABLE); }
-            Result restored = restore(row, row.getString("receiptId"));
+            Result restored = restore(session, row, row.getString("receiptId"), row.getString("enrichedCommitment"));
             if (restored.event == null || !SourceScoredOccurrence.fingerprint(acknowledged).equals(row.getString("fingerprint"))) {
                 return result(Status.CONFLICT);
             }
             if (restored.status == Status.PUBLISHED) { return restored; }
-            if (restored.status != Status.PENDING || row.getInteger("attempts") < 1) { return result(Status.UNAVAILABLE); }
-            if (db.getCollection(OCCURRENCES).updateOne(session, and(eq("_id", id), eq("state", "PENDING")),
-                    set("state", "PUBLISHED")).getModifiedCount() != 1) { throw invalid(); }
+            if (restored.status != Status.PUBLISHING || row.getInteger("attempts") < 1 || claimId == null
+                    || !claimId.equals(row.getString("leaseId"))) { return result(Status.UNAVAILABLE); }
+            if (db.getCollection(OCCURRENCES).updateOne(session, and(eq("_id", id), eq("state", "PUBLISHING"), eq("leaseId", claimId)),
+                    combine(set("state", "PUBLISHED"), unset("leaseId"), unset("leaseUntil"), unset("lastAttemptCode"))).getModifiedCount() != 1) { throw invalid(); }
             return new Result(Status.PUBLISHED, id, restored.event);
+        });
+    }
+
+    public Result recordPublishFailure(String id, String claimId, String safeCode) {
+        if (!Set.of("BROKER_PUBLISH_FAILED", "BROKER_ACK_UNRESOLVED").contains(safeCode)) { return result(Status.CONFLICT); }
+        return transaction(session -> {
+            Document row = db.getCollection(OCCURRENCES).find(session, eq("_id", id)).first();
+            if (row == null || !"PUBLISHING".equals(row.getString("state")) || !Objects.equals(claimId, row.getString("leaseId"))) {
+                return result(Status.UNAVAILABLE);
+            }
+            boolean exhausted = row.getInteger("attempts") >= 8;
+            Instant now = clock.instant();
+            long delay = Math.min(300, 15L << Math.min(4, Math.max(0, row.getInteger("attempts") - 1)));
+            var updates = exhausted
+                    ? combine(set("state", "RETRY_EXHAUSTED"), set("lastAttemptCode", safeCode), unset("leaseId"), unset("leaseUntil"))
+                    : combine(set("state", "PENDING"), set("lastAttemptCode", safeCode), set("nextAttemptAt", Date.from(now.plusSeconds(delay))),
+                            unset("leaseId"), unset("leaseUntil"));
+            if (db.getCollection(OCCURRENCES).updateOne(session, and(eq("_id", id), eq("state", "PUBLISHING"), eq("leaseId", claimId)), updates)
+                    .getModifiedCount() != 1) { return result(Status.UNAVAILABLE); }
+            return result(exhausted ? Status.RETRY_EXHAUSTED : Status.PENDING);
+        });
+    }
+
+    /** Controlled internal reconciliation; never exposed as an unauthenticated HTTP operation. */
+    public Result redrive(String id, RedriveReason reason) {
+        Objects.requireNonNull(reason, "SOURCE_OCCURRENCE_REDRIVE_REASON_REQUIRED");
+        return transaction(session -> {
+            Document row = db.getCollection(OCCURRENCES).find(session, eq("_id", id)).first();
+            if (row == null || !"RETRY_EXHAUSTED".equals(row.getString("state"))) { return result(Status.UNAVAILABLE); }
+            Result verified = restore(session, row, row.getString("receiptId"), row.getString("enrichedCommitment"));
+            if (verified.status != Status.RETRY_EXHAUSTED) { return verified; }
+            int epoch = row.getInteger("recoveryEpoch", 0);
+            if (epoch >= 3) { return result(Status.UNAVAILABLE); }
+            if (db.getCollection(OCCURRENCES).updateOne(session, and(eq("_id", id), eq("state", "RETRY_EXHAUSTED"),
+                    or(lt("recoveryEpoch", 3), exists("recoveryEpoch", false))),
+                    combine(set("state", "PENDING"), set("attempts", 0), set("recoveryEpoch", epoch + 1),
+                            set("nextAttemptAt", Date.from(clock.instant())), set("lastRedriveAt", Date.from(clock.instant())),
+                            set("redriveReason", reason.name()), unset("lastAttemptCode")))
+                    .getModifiedCount() != 1) { return result(Status.UNAVAILABLE); }
+            return new Result(Status.PENDING, id, verified.event);
         });
     }
 
@@ -180,11 +242,13 @@ public final class MongoSourceOccurrenceStore {
             Document row = db.getCollection(OCCURRENCES).find(and(eq("eventId", occurrence.eventId()),
                     eq("eventCreatedAt", occurrence.createdAt().toString()))).first();
             if (row == null || !authorization.receiptId().equals(row.getString("receiptId"))
-                    || !occurrence.fingerprint().equals(row.getString("fingerprint"))) { return absent(); }
+                    || !occurrence.fingerprint().equals(row.getString("fingerprint"))
+                    || !authorization.eventCommitment().equals(row.getString("enrichedCommitment"))) { return absent(); }
             Result result = restore(row, authorization.receiptId());
             if (result.status != Status.PUBLISHED) { return absent(); }
             SourceLineage current = lineage.recoverEnriched(row.getString("receiptId"), row.getString("enrichedCommitment"));
-            if (current.state() != SourceLineage.State.VERIFIED || !current.source().equals(authorization.source())) { return absent(); }
+            if (current.state() != SourceLineage.State.VERIFIED || !current.source().equals(authorization.source())
+                    || !current.eventCommitment().equals(authorization.eventCommitment())) { return absent(); }
             return new Lookup(SourceLineage.State.VERIFIED, new SourceScoredOccurrence(current.source(), current.receiptId(),
                     current.eventCommitment(), occurrence.eventId(), occurrence.createdAt(), row.getString("fingerprint")));
         } catch (RuntimeException unavailable) { return absent(); }
@@ -192,8 +256,23 @@ public final class MongoSourceOccurrenceStore {
 
     public List<String> pending(int limit) {
         bounded(limit);
-        return db.getCollection(OCCURRENCES).find(and(eq("state", "PENDING"), gt("expiresAt", Date.from(clock.instant())), lt("attempts", 8)))
+        Date now = Date.from(clock.instant());
+        return db.getCollection(OCCURRENCES).find(and(gt("expiresAt", now), or(
+                        and(eq("state", "PENDING"), lt("attempts", 8), or(lte("nextAttemptAt", now), exists("nextAttemptAt", false))),
+                        and(eq("state", "PUBLISHING"), lte("leaseUntil", now)))))
                 .sort(new Document("expiresAt", 1)).limit(limit).map(row -> row.getString("_id")).into(new ArrayList<>());
+    }
+
+    public RecoveryHealth recoveryHealth() {
+        Date now = Date.from(clock.instant());
+        long pending = db.getCollection(OCCURRENCES).countDocuments(and(eq("state", "PENDING"), gt("expiresAt", now), lt("attempts", 8)));
+        long publishing = db.getCollection(OCCURRENCES).countDocuments(and(eq("state", "PUBLISHING"), gt("expiresAt", now)));
+        long exhausted = db.getCollection(OCCURRENCES).countDocuments(and(gt("expiresAt", now), or(
+                eq("state", "RETRY_EXHAUSTED"), and(eq("state", "PENDING"), gte("attempts", 8)))));
+        Document oldest = db.getCollection(OCCURRENCES).find(and(eq("state", "PENDING"), gt("expiresAt", now), lt("attempts", 8)))
+                .sort(new Document("createdAt", 1)).projection(new Document("createdAt", 1)).first();
+        long age = oldest == null ? 0 : Math.max(0, Duration.between(oldest.getDate("createdAt").toInstant(), clock.instant()).toSeconds());
+        return new RecoveryHealth(pending, publishing, exhausted, age);
     }
     /** Ciphertext is removed after its explicit retention; the exact run/occurrence replay fence remains. */
     public int compactExpired(int limit) {
@@ -209,17 +288,45 @@ public final class MongoSourceOccurrenceStore {
     }
 
     private Result restore(Document row, String authorizedReceipt) {
-        if (row.getInteger("schemaVersion", 0) != 1 || !authorizedReceipt.equals(row.getString("receiptId"))
-                || !runKey(authorizedReceipt, row.getString("runId")).equals(row.getString("_id"))) { return result(Status.CONFLICT); }
-        if (!Set.of("PENDING", "PUBLISHED").contains(row.getString("state"))
-                || !row.getDate("expiresAt").toInstant().isAfter(clock.instant())
-                || row.getDate("createdAt").toInstant().isAfter(clock.instant())) { return result(Status.UNAVAILABLE); }
-        SourceLineage current = lineage.recoverEnriched(authorizedReceipt, row.getString("enrichedCommitment"));
-        if (current.state() != SourceLineage.State.VERIFIED) { return result(Status.UNAVAILABLE); }
+        return restore(row, authorizedReceipt, row.getString("enrichedCommitment"), lineage::recoverEnriched);
+    }
+    private Result restore(ClientSession session, Document row, String authorizedReceipt, String expectedCommitment) {
+        return restore(row, authorizedReceipt, expectedCommitment,
+                (receipt, commitment) -> lineage.recoverEnriched(session, receipt, commitment));
+    }
+    private Result restore(Document row, String authorizedReceipt, String expectedCommitment,
+                           BiFunction<String, String, SourceLineage> currentLineage) {
+        String state = row.getString("state");
+        if ("CONFLICT".equals(state)) { return result(Status.CONFLICT); }
+        if ("EXPIRED".equals(state)) { return result(Status.UNAVAILABLE); }
+        String receiptId = row.getString("receiptId");
+        String runId = row.getString("runId");
+        try {
+            if (!Set.of(1, 2).contains(row.getInteger("schemaVersion", 0)) || authorizedReceipt == null || !authorizedReceipt.equals(receiptId)
+                    || runId == null || !runKey(authorizedReceipt, runId).equals(row.getString("_id"))) { return result(Status.CONFLICT); }
+        } catch (RuntimeException malformedIdentity) { return result(Status.CONFLICT); }
+        if (!Set.of("PENDING", "PUBLISHING", "PUBLISHED", "RETRY_EXHAUSTED").contains(state)) { return result(Status.CONFLICT); }
+        if (expectedCommitment == null || !expectedCommitment.equals(row.getString("enrichedCommitment"))) {
+            return result(Status.CONFLICT);
+        }
+        if (!(row.get("expiresAt") instanceof Date expires) || !(row.get("createdAt") instanceof Date created)) {
+            return result(Status.CONFLICT);
+        }
+        if (!expires.toInstant().isAfter(clock.instant()) || created.toInstant().isAfter(clock.instant())) { return result(Status.UNAVAILABLE); }
+        SourceLineage current = currentLineage.apply(authorizedReceipt, row.getString("enrichedCommitment"));
+        if (current.state() != SourceLineage.State.VERIFIED) { return authorizationFailure(current); }
         var event = new JacksonKafkaDeserializer<>(TransactionScoredEvent.class).deserialize("private-scored-outbox", cipher.decrypt(row));
         if (!event.eventId().equals(row.getString("eventId")) || !event.createdAt().toString().equals(row.getString("eventCreatedAt"))
                 || !SourceScoredOccurrence.fingerprint(event).equals(row.getString("fingerprint"))) { return result(Status.CONFLICT); }
         return new Result(Status.valueOf(row.getString("state")), row.getString("_id"), event);
+    }
+    private static Result authorizationFailure(SourceLineage source) {
+        return result(switch (source.state()) {
+            case CONFLICT -> Status.CONFLICT;
+            case UNAVAILABLE -> Status.UNAVAILABLE;
+            case UNVERIFIED, REVOKED -> Status.UNVERIFIED;
+            case VERIFIED -> throw new IllegalArgumentException("SOURCE_OCCURRENCE_AUTHORIZATION_STATE_INVALID");
+        });
     }
     private static boolean sameInput(TransactionEnrichedEvent a, TransactionScoredEvent b) {
         return b != null && Objects.equals(a.transactionId(), b.transactionId()) && Objects.equals(a.correlationId(), b.correlationId())

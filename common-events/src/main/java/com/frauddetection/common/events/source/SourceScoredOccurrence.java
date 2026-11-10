@@ -41,11 +41,11 @@ public final class SourceScoredOccurrence {
     static byte[] bytes(JsonMapper mapper, Object value) {
         var output = new java.io.ByteArrayOutputStream() {
             @Override public synchronized void write(int value) {
-                if (count == SourceOccurrenceCipher.MAX_BYTES) { throw new IllegalArgumentException("SOURCE_SCORED_PAYLOAD_TOO_LARGE"); }
+                if (count == 262_144) { throw new IllegalArgumentException("SOURCE_SCORED_PAYLOAD_TOO_LARGE"); }
                 super.write(value);
             }
             @Override public synchronized void write(byte[] data, int offset, int length) {
-                if (length > SourceOccurrenceCipher.MAX_BYTES - count) { throw new IllegalArgumentException("SOURCE_SCORED_PAYLOAD_TOO_LARGE"); }
+                if (length > 262_144 - count) { throw new IllegalArgumentException("SOURCE_SCORED_PAYLOAD_TOO_LARGE"); }
                 super.write(data, offset, length);
             }
         };

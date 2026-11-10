@@ -2,6 +2,8 @@ package com.frauddetection.ingest.source;
 
 import com.frauddetection.common.events.source.SourceScope;
 import com.frauddetection.common.events.source.SourceSignatureVerifier;
+import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.ingest.messaging.TransactionRawEventProducer;
 
 
 import java.time.Duration;
@@ -10,6 +12,8 @@ import java.time.Instant;
 /** Private source-authority seam. A receipt grants neither domain history access nor a scoring-occurrence binding. */
 interface SourceReceiptStore {
     Result admit(SourceSignatureVerifier.Verified evidence);
+    RawResult acceptRaw(SourceSignatureVerifier.Verified evidence, TransactionRawEvent candidate);
+    int recoverRawPublications(TransactionRawEventProducer publisher, int limit);
     ReadOnly readOnly();
     int compactExpired(int limit);
 
@@ -27,6 +31,17 @@ interface SourceReceiptStore {
             }
         }
         @Override public String toString() { return "SourceReceiptResult[" + status + "]"; }
+    }
+
+    record RawResult(Status status, Receipt receipt, TransactionRawEvent event) {
+        public RawResult {
+            boolean accepted = status == Status.ADMITTED || status == Status.EXISTING;
+            if (status == null || accepted && (receipt == null || event == null)
+                    || !accepted && (receipt != null || event != null)) {
+                throw new IllegalArgumentException("SOURCE_RAW_RESULT_INVALID");
+            }
+        }
+        @Override public String toString() { return "SourceRawResult[" + status + "]"; }
     }
 
     /** Data projection, not an authority capability. Original payload/signature/key bytes are never stored here. */

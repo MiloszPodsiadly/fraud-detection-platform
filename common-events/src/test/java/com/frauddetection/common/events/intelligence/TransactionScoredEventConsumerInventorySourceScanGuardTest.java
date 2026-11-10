@@ -40,7 +40,6 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
             "common-events/src/main/java/com/frauddetection/common/events/contract/TransactionScoredEvent.java",
             "common-events/src/main/java/com/frauddetection/common/events/kafka/JacksonKafkaDeserializer.java",
             "common-events/src/main/java/com/frauddetection/common/events/kafka/JacksonKafkaSerializer.java",
-            "common-events/src/main/java/com/frauddetection/common/events/source/MongoSourceOccurrenceStore.java",
             "common-events/src/main/java/com/frauddetection/common/events/source/SourceScoredOccurrence.java",
             "common-test-support/src/main/java/com/frauddetection/common/testsupport/fixture/TransactionFixtures.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/config/FraudScoringKafkaConfig.java",
@@ -49,7 +48,8 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/messaging/TransactionScoredEventPublisher.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/TransactionFraudScoringService.java",
             "fraud-scoring-service/src/main/java/com/frauddetection/scoring/source/SourceOccurrenceConfiguration.java",
-            "fraud-scoring-service/src/main/java/com/frauddetection/scoring/source/SourceOccurrencePublisher.java"
+            "fraud-scoring-service/src/main/java/com/frauddetection/scoring/source/SourceOccurrencePublisher.java",
+            "source-persistence/src/main/java/com/frauddetection/common/events/source/MongoSourceOccurrenceStore.java"
     );
 
     @Test
@@ -73,6 +73,14 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
                 .noneMatch(path -> path.contains("/target/"))
                 .noneMatch(path -> path.contains("/generated/"))
                 .noneMatch(path -> path.contains("/fixtures/"));
+    }
+
+    @Test
+    void contractModuleDoesNotDependOnMongoPersistence() throws Exception {
+        assertThat(EngineIntelligenceSourceScanSupport.read("common-events/pom.xml"))
+                .doesNotContain("mongodb-driver-sync");
+        assertThat(EngineIntelligenceSourceScanSupport.productionJavaFilesContaining("com.mongodb"))
+                .noneMatch(path -> path.startsWith("common-events/src/main/java/"));
     }
 
     @Test
