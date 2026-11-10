@@ -13,6 +13,7 @@ import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
 import com.frauddetection.enricher.messaging.KafkaTransactionEnrichedEventPublisher;
 import com.frauddetection.enricher.persistence.FeatureStore;
+import com.frauddetection.enricher.persistence.FeatureNamespace;
 import com.frauddetection.enricher.service.*;
 import com.frauddetection.ingest.controller.AttestedTransactionIngestController;
 import com.frauddetection.ingest.exception.TransactionIngestExceptionHandler;
@@ -97,6 +98,12 @@ class SourceScoredOccurrenceIntegrationTest {
     private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
     private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();
     private static final String ENCRYPTION_KEY = Base64.getEncoder().encodeToString(new byte[32]);
+    private static final SourceOriginProofs ORIGIN_PROOFS = new SourceOriginProofs(new SourceOriginProperties(true,
+            "origin-key-1", Map.of("origin-key-1", originProofKey())));
+    private static final String RAW_ENCRYPTION_KEY = rawEncryptionKey();
+    private static final String ENRICHED_ENCRYPTION_KEY = enrichedEncryptionKey();
+    private static final SourceRawPublicationProperties RAW_PUBLICATION_PROPERTIES = new SourceRawPublicationProperties(
+            true, "raw-key-1", Map.of("raw-key-1", RAW_ENCRYPTION_KEY), Duration.ofSeconds(1), Duration.ofSeconds(30), 10, 8);
     private static final byte[] PAYLOAD = payload();
     private static ValidatorFactory validation;
     private final List<DefaultKafkaProducerFactory<?, ?>> factories = new ArrayList<>();
@@ -131,12 +138,14 @@ class SourceScoredOccurrenceIntegrationTest {
                     new NewTopic(scoredTopic, 1, (short) 1))).all().get(15, TimeUnit.SECONDS);
         }
         ownerClient = MONGO.owner(); policy = policy(false);
-        receipts = new MongoSourceReceiptStore(ownerClient, database, Clock.systemUTC(),
-                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), policy);
         owner = new MongoSourceLineage(ownerClient, database, "source_owner", MongoSourceLineage.Stage.INGEST, policy, Clock.systemUTC());
+        receipts = new MongoSourceReceiptStore(ownerClient, database, Clock.systemUTC(),
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), policy, owner,
+                new SourceRawPublicationCipher("raw-key-1", RAW_PUBLICATION_PROPERTIES.encryptionKeys()), RAW_PUBLICATION_PROPERTIES);
         enricherClient = MONGO.consumer(ownerClient, database, true);
         scorerClient = MONGO.occurrenceWriter(ownerClient, database);
-        enricher = new MongoSourceLineage(enricherClient, database, "enricher", MongoSourceLineage.Stage.ENRICHER, policy, Clock.systemUTC());
+        enricher = new MongoSourceLineage(enricherClient, database, "enricher", MongoSourceLineage.Stage.ENRICHER, policy, Clock.systemUTC(),
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_ENCRYPTION_KEY)));
         reader = new MongoSourceLineage(scorerClient, database, "scorer", MongoSourceLineage.Stage.SCORER, policy, Clock.systemUTC());
         store = newStore(scorerClient, policy, Clock.systemUTC());
         kafkaPublisher = new KafkaTransactionScoredEventPublisher(template(), new KafkaTopicProperties(enrichedTopic, scoredTopic, database + ".dlt"));
@@ -178,18 +187,30 @@ class SourceScoredOccurrenceIntegrationTest {
                 var redisTemplate = new StringRedisTemplate(connections); redisTemplate.afterPropertiesSet();
                 var featureStore = new RedisFeatureStore(redisTemplate, new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7),
                         Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
+                long ingressEnrichmentStarted = System.nanoTime();
                 var input = signedInput(Map.of(), featureStore);
+                long ingressEnrichmentNanos = System.nanoTime() - ingressEnrichmentStarted;
                 var raw = records(rawTopic, TransactionRawEvent.class).getFirst();
-                assertThat(featureStore.hasRecordedTransaction(raw)).isTrue();
+                assertThat(featureStore.hasRecordedTransaction(raw, FeatureNamespace.attested(reader.raw(raw)))).isTrue();
                 new KafkaTransactionRawEventProducer(template(), new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic)).publish(raw);
                 enrich(records(rawTopic, TransactionRawEvent.class).getLast(), featureStore);
                 assertThat(records(enrichedTopic, TransactionEnrichedEvent.class)).hasSize(1);
-                service(coordinator).score(input); service(coordinator).score(input);
+                long scoringStarted = System.nanoTime();
+                service(coordinator).score(input);
+                long scoringNanos = System.nanoTime() - scoringStarted;
+                service(coordinator).score(input);
                 var scored = records(scoredTopic, TransactionScoredEvent.class).getFirst();
                 assertThat(records(scoredTopic, TransactionScoredEvent.class)).hasSize(1); assertThat(computations).hasValue(1);
                 assertThat(store.lookup(scored, reader.enriched(input)).state()).isEqualTo(VERIFIED);
+                long projectionStarted = System.nanoTime();
                 assertThat(projection.write(authoritativeMapper.toDocument(scored)).outcome()).isEqualTo(APPLIED_NEW);
+                long projectionNanos = System.nanoTime() - projectionStarted;
                 assertThat(projection.write(authoritativeMapper.toDocument(scored)).outcome()).isEqualTo(IDEMPOTENT_REPLAY);
+                System.out.println("SOURCE_E2E_RUNTIME_MEASUREMENTS " + new Document("path", "attested_ingress_redis_enrichment_kafka_scoring_mongo_projection")
+                        .append("harnessIngressThroughEnrichmentMillis", ingressEnrichmentNanos / 1_000_000d)
+                        .append("scoringOccurrenceKafkaMongoMillis", scoringNanos / 1_000_000d)
+                        .append("alertProjectionMongoMillis", projectionNanos / 1_000_000d)
+                        .append("note", "single local Testcontainers sample; ingress/enrichment includes test-consumer round trips; diagnostic, not an SLO").toJson());
                 try (var connection = connections.getConnection()) {
                     assertThat(connection.ping()).isEqualTo("PONG");
                     var limits = redis.getContainerInfo().getHostConfig();
@@ -213,7 +234,7 @@ class SourceScoredOccurrenceIntegrationTest {
         try {
             var input = signedInput(Map.of()); service(coordinator).score(input);
             var proof = Base64.getUrlEncoder().withoutPadding().encodeToString(TestSourceIssuer.proof(PAYLOAD, Map.of(), 0));
-            var ingress = new AttestedTransactionIngestService(new TransactionRequestMapper(), policy, receipts, owner,
+            var ingress = new AttestedTransactionIngestService(new TransactionRequestMapper(), policy, receipts,
                     event -> fail("invalid proof must not publish"), new CorrelationIdProvider(),
                     new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic), validation.getValidator());
             var rejected = MockMvcBuilders.standaloneSetup(new AttestedTransactionIngestController(ingress))
@@ -261,7 +282,7 @@ class SourceScoredOccurrenceIntegrationTest {
             assertThat(ownerClient.getDatabase(database).getCollection(collection).countDocuments()).isEqualTo(1);
         } else {
             enrich(records(rawTopic, TransactionRawEvent.class).getFirst());
-            assertThat(reader.enriched(records(enrichedTopic, TransactionEnrichedEvent.class).getLast()).state()).isNotEqualTo(VERIFIED);
+            assertThat(reader.enriched(records(enrichedTopic, TransactionEnrichedEvent.class).getLast()).state()).isEqualTo(VERIFIED);
             assertThat(ownerClient.getDatabase(database).getCollection(collection).countDocuments()).isEqualTo(1);
         }
     }
@@ -275,6 +296,24 @@ class SourceScoredOccurrenceIntegrationTest {
             assertThat(replay.status()).isEqualTo(PUBLISHED);
         }
         Arrays.sort(samples);
+        int recoveryBatchSize = 8;
+        String measuredReceiptId = null;
+        var request = JSON.readValue(PAYLOAD, com.frauddetection.ingest.api.IngestTransactionRequest.class);
+        var rawMapper = new TransactionRequestMapper();
+        for (int index = 0; index < recoveryBatchSize; index++) {
+            var evidenceResult = policy.verify(TestSourceIssuer.proof(PAYLOAD,
+                    Map.of("sourceEventId", "recovery-measure-" + index), 0), PAYLOAD, sourceContext());
+            assertThat(evidenceResult).isInstanceOf(SourceSignatureVerifier.Verified.class);
+            var event = rawMapper.toEvent(request, "recovery-measure-correlation-" + index);
+            var admitted = receipts.acceptRaw((SourceSignatureVerifier.Verified) evidenceResult, event);
+            assertThat(admitted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
+            if (measuredReceiptId == null) { measuredReceiptId = admitted.receipt().id(); }
+        }
+        long recoveryStarted = System.nanoTime();
+        int recovered = receipts.recoverRawPublications(new KafkaTransactionRawEventProducer(template(),
+                new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic), ORIGIN_PROOFS), recoveryBatchSize);
+        long recoveryNanos = System.nanoTime() - recoveryStarted;
+        assertThat(recovered).isEqualTo(recoveryBatchSize);
         var sizes = new Document();
         for (String collection : List.of("source_admission_receipts", "source_lineage_raw", "source_lineage_enriched", "source_scored_occurrences")) {
             var row = ownerClient.getDatabase(database).getCollection(collection).find().first();
@@ -283,20 +322,50 @@ class SourceScoredOccurrenceIntegrationTest {
                 sizes.append(collection, output.getSize());
             }
         }
+        var rawOutbox = ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", measuredReceiptId)).first();
+        try (var output = new org.bson.io.BasicOutputBuffer(); var writer = new org.bson.BsonBinaryWriter(output)) {
+            new org.bson.codecs.DocumentCodec().encode(writer, rawOutbox,
+                    org.bson.codecs.EncoderContext.builder().isEncodingCollectibleDocument(true).build());
+            sizes.append(MongoSourceRawPublicationSchema.COLLECTION, output.getSize());
+        }
         assertThat(ownerClient.getDatabase(database).getCollection("source_scored_occurrences").countDocuments()).isEqualTo(1);
         assertThat(store.pending(100)).isEmpty(); assertThat(computations).hasValue(1);
         System.out.println("SOURCE_REPLAY_MEASUREMENTS " + new Document("samples", samples.length).append("warmup", 5)
                 .append("p50Millis", samples[14] / 1_000_000d).append("p95Millis", samples[28] / 1_000_000d).append("bsonBytes", sizes).toJson());
+        System.out.println("SOURCE_RAW_RECOVERY_MEASUREMENTS " + new Document("pending", recoveryBatchSize).append("recovered", recovered)
+                .append("elapsedMillis", recoveryNanos / 1_000_000d)
+                .append("eventsPerSecond", recovered / (recoveryNanos / 1_000_000_000d))
+                .append("broker", "Kafka Testcontainers; actual acknowledged publish").toJson());
     }
 
-    @Test void duplicateRawDeliveryWithAnotherEnrichedUuidReplaysTheFirstFactWithoutRecomputing() throws Exception {
+    @Test void duplicateRawDeliveryReusesCanonicalEnrichedOccurrenceAndChangedInterpretationsConflict() throws Exception {
         signedInput(Map.of());
         var raw = records(rawTopic, TransactionRawEvent.class).getFirst();
         var first = records(enrichedTopic, TransactionEnrichedEvent.class).getFirst();
         enrich(raw);
         var second = records(enrichedTopic, TransactionEnrichedEvent.class).getLast();
-        assertThat(first.eventId()).isNotEqualTo(second.eventId());
-        var service = service(coordinator); service.score(first); service.score(second); service.score(first);
+        assertThat(second.eventId()).isEqualTo(first.eventId());
+        assertThat(SourceEventCommitment.enriched(second)).isEqualTo(SourceEventCommitment.enriched(first));
+        assertThat(records(enrichedTopic, TransactionEnrichedEvent.class)).hasSize(1);
+
+        var changedFeatures = new HashMap<>(first.featureSnapshot());
+        changedFeatures.put(com.frauddetection.common.events.features.FraudFeatureContract.MERCHANT_FREQUENCY_7D, 999);
+        changedFeatures.put(com.frauddetection.common.events.features.FraudFeatureContract.DEVICE_NOVELTY,
+                !Boolean.TRUE.equals(first.featureSnapshot().get(com.frauddetection.common.events.features.FraudFeatureContract.DEVICE_NOVELTY)));
+        changedFeatures.put(com.frauddetection.common.events.features.FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 99.5d);
+        var changed = change(first, "featureSnapshot", changedFeatures, TransactionEnrichedEvent.class);
+        var differentUuid = change(first, "eventId", "another-enriched-uuid", TransactionEnrichedEvent.class);
+        var changedTransaction = change(first, "customerId", "another-customer", TransactionEnrichedEvent.class);
+        var originalCandidate = candidate(first);
+        assertThat(store.resume(changed, "initial").status()).isEqualTo(CONFLICT);
+        assertThat(store.prepare(changed, "initial", originalCandidate).status()).isEqualTo(CONFLICT);
+        assertThat(store.resume(differentUuid, "initial").status()).isEqualTo(UNVERIFIED);
+        assertThat(store.prepare(differentUuid, "initial", originalCandidate).status()).isEqualTo(UNVERIFIED);
+        assertThat(store.resume(changedTransaction, "initial").status()).isEqualTo(CONFLICT);
+        assertThat(store.prepare(changedTransaction, "initial", originalCandidate).status()).isEqualTo(CONFLICT);
+
+        var service = service(coordinator); service.score(first); service.score(first);
         assertThat(computations).hasValue(1);
         assertThat(records(scoredTopic, TransactionScoredEvent.class)).hasSize(1);
         assertThat(ownerClient.getDatabase(database).getCollection("source_scored_occurrences").countDocuments()).isEqualTo(1);
@@ -466,14 +535,17 @@ class SourceScoredOccurrenceIntegrationTest {
         var first = records(scoredTopic, TransactionScoredEvent.class).getFirst();
         assertThat(store.lookup(first, reader.enriched(input)).state()).isNotEqualTo(VERIFIED);
         scorerClient.close(); scorerClient = MONGO.reconnectScorer(database);
+        reader = new MongoSourceLineage(scorerClient, database, "scorer", MongoSourceLineage.Stage.SCORER, policy, Clock.systemUTC());
         store = newStore(scorerClient, policy, Clock.systemUTC());
+        ownerClient.getDatabase(database).getCollection("source_scored_occurrences")
+                .updateOne(eq("state", "PENDING"), set("nextAttemptAt", Date.from(Instant.now().minusSeconds(1))));
         assertThat(new SourceOccurrencePublisher(store, kafkaPublisher).recoverPending(10)).isEqualTo(1);
         var events = records(scoredTopic, TransactionScoredEvent.class);
         assertThat(events).hasSize(2);
         assertThat(ScoringOccurrenceFingerprint.from(events.get(0))).isEqualTo(ScoringOccurrenceFingerprint.from(events.get(1)));
         assertThat(projection.write(authoritativeMapper.toDocument(events.get(0))).outcome()).isEqualTo(APPLIED_NEW);
         assertThat(projection.write(authoritativeMapper.toDocument(events.get(1))).outcome()).isEqualTo(IDEMPOTENT_REPLAY);
-        assertThat(store.lookup(first, enricher.raw(records(rawTopic, TransactionRawEvent.class).getFirst())).state()).isEqualTo(VERIFIED);
+        assertThat(store.lookup(first, reader.enriched(input)).state()).isEqualTo(VERIFIED);
         assertThat(computations).hasValue(1);
     }
 
@@ -503,7 +575,7 @@ class SourceScoredOccurrenceIntegrationTest {
         var prepared = store.prepare(input, "initial", candidate(input));
         var claim = store.claim(prepared.id()); kafkaPublisher.publish(claim.event());
         var faulty = newStore(commitFault(scorerClient, true), policy, Clock.systemUTC());
-        assertThat(faulty.confirm(prepared.id(), claim.event()).status()).isEqualTo(UNAVAILABLE);
+        assertThat(faulty.confirm(prepared.id(), claim.event(), claim.claimId()).status()).isEqualTo(UNAVAILABLE);
         assertThat(store.resume(input, "initial").status()).isEqualTo(PUBLISHED);
         service(coordinator).score(input);
         assertThat(records(scoredTopic, TransactionScoredEvent.class)).hasSize(1);
@@ -555,12 +627,13 @@ class SourceScoredOccurrenceIntegrationTest {
         assertThat(records(scoredTopic, TransactionScoredEvent.class)).isEmpty();
         assertThat(store.resume(input, "initial").status()).isEqualTo(PENDING);
         scorerClient.close(); scorerClient = MONGO.reconnectScorer(database);
+        reader = new MongoSourceLineage(scorerClient, database, "scorer", MongoSourceLineage.Stage.SCORER, policy, Clock.systemUTC());
         store = newStore(scorerClient, policy, Clock.systemUTC());
         assertThat(new SourceOccurrencePublisher(store, kafkaPublisher).recoverPending(1)).isEqualTo(1);
         var recovered = records(scoredTopic, TransactionScoredEvent.class).getFirst();
         assertThat(ScoringOccurrenceFingerprint.from(recovered)).isEqualTo(ScoringOccurrenceFingerprint.from(original));
         assertThat(projection.write(authoritativeMapper.toDocument(recovered)).outcome()).isEqualTo(APPLIED_NEW);
-        assertThat(store.lookup(recovered, enricher.raw(records(rawTopic, TransactionRawEvent.class).getFirst())).state()).isEqualTo(VERIFIED);
+        assertThat(store.lookup(recovered, reader.enriched(input)).state()).isEqualTo(VERIFIED);
     }
 
     @Test void occurrenceStorageCannotBeReadOrWrittenByTheWrongServiceAndRunCapacityIsBounded() throws Exception {
@@ -645,11 +718,21 @@ class SourceScoredOccurrenceIntegrationTest {
     @Test void automaticPublicationAttemptsAreBoundedAndWrongKeyOrMissingReceiptFailsClosed() throws Exception {
         var input = signedInput(Map.of());
         var prepared = store.prepare(input, "initial", candidate(input));
-        var unavailableBroker = new SourceOccurrencePublisher(store, event -> { throw new IllegalStateException("test unavailable"); });
-        for (int i = 0; i < 12; i++) { unavailableBroker.recoverPending(1); }
+        for (int i = 0; i < 12; i++) {
+            var retryStore = newStore(scorerClient, policy, Clock.offset(Clock.systemUTC(), Duration.ofMinutes(5L * i)));
+            new SourceOccurrencePublisher(retryStore, event -> { throw new IllegalStateException("test unavailable"); }).recoverPending(1);
+        }
         Document row = ownerClient.getDatabase(database).getCollection("source_scored_occurrences").find().first();
         assertThat(row.getInteger("attempts")).isEqualTo(8); assertThat(store.pending(1)).isEmpty();
-        assertThat(store.claim(prepared.id()).status()).isEqualTo(UNAVAILABLE);
+        assertThat(store.claim(prepared.id()).status()).isEqualTo(RETRY_EXHAUSTED);
+        assertThat(store.recoveryHealth().exhausted()).isEqualTo(1);
+        assertThat(new SourceOccurrencePublisher(store, kafkaPublisher)
+                .redriveExhausted(prepared.id(), MongoSourceOccurrenceStore.RedriveReason.BROKER_RECOVERED)).isTrue();
+        assertThat(store.resume(input, "initial").status()).isEqualTo(PUBLISHED);
+        row = ownerClient.getDatabase(database).getCollection("source_scored_occurrences").find().first();
+        assertThat(row.getInteger("recoveryEpoch")).isEqualTo(1);
+        assertThat(row.getString("redriveReason")).isEqualTo("BROKER_RECOVERED");
+        assertThat(row.getString("state")).isEqualTo("PUBLISHED");
         byte[] differentKey = new byte[32]; differentKey[0] = 1;
         var wrongKey = new MongoSourceOccurrenceStore(scorerClient, database, "scorer", policy, Clock.systemUTC(),
                 new SourceOccurrenceCipher("key-1", Map.of("key-1", Base64.getEncoder().encodeToString(differentKey))), Duration.ofHours(1));
@@ -661,9 +744,9 @@ class SourceScoredOccurrenceIntegrationTest {
 
     @Test void unsignedLegacyScoringKeepsBaselineOutputAndHasNoSourceOccurrenceBinding() throws Exception {
         var raw = new TransactionRequestMapper().toEvent(JSON.readValue(PAYLOAD, com.frauddetection.ingest.api.IngestTransactionRequest.class), "legacy");
-        enrich(raw); var input = records(enrichedTopic, TransactionEnrichedEvent.class).getFirst();
+        enrichLegacy(raw); var input = records(enrichedTopic, TransactionEnrichedEvent.class).getFirst();
         var baseline = new RuleBasedFraudScoringEngine(properties()).score(FraudScoringRequest.from(input));
-        service(coordinator).score(input);
+        service(coordinator).score(input, ORIGIN_PROOFS.signEnriched(input, SourceOriginProofs.Assertion.PROVEN_LEGACY));
         var event = records(scoredTopic, TransactionScoredEvent.class).getFirst();
         assertThat(event.fraudScore()).isEqualTo(baseline.fraudScore()); assertThat(event.reasonCodes()).isEqualTo(baseline.reasonCodes());
         assertThat(store.lookup(event, reader.enriched(input)).state()).isNotEqualTo(VERIFIED);
@@ -685,7 +768,9 @@ class SourceScoredOccurrenceIntegrationTest {
                         root + "source-epoch=" + policy.sourceEpoch(), root + "signing-key-version=" + policy.signingKeyVersion(),
                         root + "algorithm=" + policy.algorithm(), root + "public-key-base64=" + policy.publicKeyBase64(),
                         root + "not-before=2000-01-01T00:00:00Z", root + "not-after=2100-01-01T00:00:00Z", root + "revoked=false",
-                        root + "purpose=" + policy.purpose(), root + "audience=" + policy.audience(), root + "policy-version=" + policy.policyVersion())
+                        root + "purpose=" + policy.purpose(), root + "audience=" + policy.audience(), root + "policy-version=" + policy.policyVersion(),
+                        "fraud.source-origin.enabled=true", "fraud.source-origin.active-key-id=origin-key-1",
+                        "fraud.source-origin.keys[origin-key-1]=" + originProofKey())
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     var published = context.getBean(SourceOccurrencePublisher.class).publish(input, "initial", () -> candidate(input));
@@ -698,14 +783,16 @@ class SourceScoredOccurrenceIntegrationTest {
         return signedInput(claims, null);
     }
     private TransactionEnrichedEvent signedInput(Map<String, Object> claims, FeatureStore features) throws Exception {
-        var producer = new KafkaTransactionRawEventProducer(template(), new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic));
-        var ingress = new AttestedTransactionIngestService(new TransactionRequestMapper(), policy, receipts, owner, producer,
+        var producer = new KafkaTransactionRawEventProducer(template(), new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic), ORIGIN_PROOFS);
+        var ingress = new AttestedTransactionIngestService(new TransactionRequestMapper(), policy, receipts, producer,
                 new CorrelationIdProvider(), new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic), validation.getValidator());
         var mvc = MockMvcBuilders.standaloneSetup(new AttestedTransactionIngestController(ingress))
                 .setControllerAdvice(new TransactionIngestExceptionHandler()).build();
-        lastIngestResponse = mvc.perform(post("/api/v1/transactions/attested").contentType("application/json").content(PAYLOAD)
+        var response = mvc.perform(post("/api/v1/transactions/attested").contentType("application/json").content(PAYLOAD)
                 .header("X-Source-Proof", Base64.getUrlEncoder().withoutPadding().encodeToString(TestSourceIssuer.proof(PAYLOAD, claims, 0))))
-                .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+                .andReturn().getResponse();
+        lastIngestResponse = response.getContentAsString();
+        assertThat(response.getStatus()).withFailMessage("Attested ingress failed: %s", lastIngestResponse).isEqualTo(202);
         var raw = records(rawTopic, TransactionRawEvent.class).getLast();
         if (features == null) { enrich(raw); } else { enrich(raw, features); }
         return records(enrichedTopic, TransactionEnrichedEvent.class).getLast();
@@ -713,22 +800,44 @@ class SourceScoredOccurrenceIntegrationTest {
     private void enrich(TransactionRawEvent raw) {
         var features = new FeatureStore() {
             public boolean hasRecordedTransaction(TransactionRawEvent event) { return false; }
+            public boolean hasRecordedTransaction(TransactionRawEvent event, FeatureNamespace namespace) { return false; }
             public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event) { return new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false); }
+            public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event, FeatureNamespace namespace) {
+                return new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
+            }
             public void recordTransaction(TransactionRawEvent event) { }
+            public void recordTransaction(TransactionRawEvent event, FeatureNamespace namespace) { }
         };
         enrich(raw, features);
     }
     private void enrich(TransactionRawEvent raw, FeatureStore features) {
         var publisher = new KafkaTransactionEnrichedEventPublisher(template(),
-                new com.frauddetection.enricher.config.KafkaTopicProperties(rawTopic, enrichedTopic, database + ".dlt"));
+                new com.frauddetection.enricher.config.KafkaTopicProperties(rawTopic, enrichedTopic, database + ".dlt"), ORIGIN_PROOFS);
         new TransactionFeatureEnricherService(features, new TransactionFeatureCalculator(new CurrencyAmountConverter()),
-                new TransactionEnrichedEventMapper(), publisher, enricher).enrich(raw);
+                new TransactionEnrichedEventMapper(), publisher, enricher, ORIGIN_PROOFS).enrich(raw);
+    }
+    private void enrichLegacy(TransactionRawEvent raw) {
+        FeatureStore features = new FeatureStore() {
+            public boolean hasRecordedTransaction(TransactionRawEvent event) { return false; }
+            public boolean hasRecordedTransaction(TransactionRawEvent event, FeatureNamespace namespace) { return false; }
+            public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event) { return new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false); }
+            public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event, FeatureNamespace namespace) {
+                return new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
+            }
+            public void recordTransaction(TransactionRawEvent event) { }
+            public void recordTransaction(TransactionRawEvent event, FeatureNamespace namespace) { }
+        };
+        var publisher = new KafkaTransactionEnrichedEventPublisher(template(),
+                new com.frauddetection.enricher.config.KafkaTopicProperties(rawTopic, enrichedTopic, database + ".dlt"), ORIGIN_PROOFS);
+        new TransactionFeatureEnricherService(features, new TransactionFeatureCalculator(new CurrencyAmountConverter()),
+                new TransactionEnrichedEventMapper(), publisher, enricher, ORIGIN_PROOFS)
+                .enrich(raw, ORIGIN_PROOFS.signRaw(raw, SourceOriginProofs.Assertion.PROVEN_LEGACY));
     }
     private TransactionFraudScoringService service(SourceOccurrencePublisher publisher) {
         var rules = new RuleBasedFraudScoringEngine(properties());
         return new TransactionFraudScoringService(request -> { computations.incrementAndGet(); return rules.score(request); },
                 new TransactionScoredEventMapper(), kafkaPublisher, properties(), new ScoringMetrics(metrics), emission(),
-                new AnalystRecommendationService(), reader, publisher);
+                new AnalystRecommendationService(), reader, publisher, ORIGIN_PROOFS);
     }
     private static TransactionScoredEvent candidate(TransactionEnrichedEvent input) {
         var request = FraudScoringRequest.from(input);
@@ -749,10 +858,12 @@ class SourceScoredOccurrenceIntegrationTest {
     }
     private void configurePolicies(SourceVerificationProperties.TrustedKey... keys) {
         policy = new SourceSignatureVerifier(new SourceVerificationProperties(List.of(keys)), Clock.systemUTC());
-        receipts = new MongoSourceReceiptStore(ownerClient, database, Clock.systemUTC(),
-                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), policy);
         owner = new MongoSourceLineage(ownerClient, database, "source_owner", MongoSourceLineage.Stage.INGEST, policy, Clock.systemUTC());
-        enricher = new MongoSourceLineage(enricherClient, database, "enricher", MongoSourceLineage.Stage.ENRICHER, policy, Clock.systemUTC());
+        receipts = new MongoSourceReceiptStore(ownerClient, database, Clock.systemUTC(),
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), policy, owner,
+                new SourceRawPublicationCipher("raw-key-1", RAW_PUBLICATION_PROPERTIES.encryptionKeys()), RAW_PUBLICATION_PROPERTIES);
+        enricher = new MongoSourceLineage(enricherClient, database, "enricher", MongoSourceLineage.Stage.ENRICHER, policy, Clock.systemUTC(),
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_ENCRYPTION_KEY)));
         reader = new MongoSourceLineage(scorerClient, database, "scorer", MongoSourceLineage.Stage.SCORER, policy, Clock.systemUTC());
         store = newStore(scorerClient, policy, Clock.systemUTC()); coordinator = new SourceOccurrencePublisher(store, kafkaPublisher);
     }
@@ -772,6 +883,18 @@ class SourceScoredOccurrenceIntegrationTest {
     }
     private static SourceSignatureVerifier policy(boolean revoked) {
         return new SourceSignatureVerifier(new SourceVerificationProperties(List.of(TestSourceIssuer.policy(0, revoked))), Clock.systemUTC());
+    }
+    private static String rawEncryptionKey() {
+        byte[] bytes = new byte[32]; bytes[0] = 2;
+        return Base64.getEncoder().encodeToString(bytes);
+    }
+    private static String enrichedEncryptionKey() {
+        byte[] bytes = new byte[32]; bytes[0] = 1;
+        return Base64.getEncoder().encodeToString(bytes);
+    }
+    private static String originProofKey() {
+        byte[] bytes = new byte[32]; bytes[0] = 3;
+        return Base64.getEncoder().encodeToString(bytes);
     }
     private <T> KafkaTemplate<String, T> template() {
         var factory = new DefaultKafkaProducerFactory<String, T>(Map.of("bootstrap.servers", KAFKA.getBootstrapServers(),
@@ -798,7 +921,7 @@ class SourceScoredOccurrenceIntegrationTest {
         ObjectNode node = (ObjectNode) JSON.readTree(JSON.writeValueAsBytes(TransactionFixtures.rawTransaction().build()));
         node.remove("eventId"); node.remove("createdAt"); node.remove("correlationId"); return JSON.writeValueAsBytes(node);
     }
-    /** Skip the inner read-only lineage commit, then lose every acknowledgement for the real outer write commit. */
+    /** Lose the acknowledgement for the store transaction commit, either before or after its durable effect. */
     private static MongoClient commitFault(MongoClient delegate, boolean durable) {
         AtomicInteger commits = new AtomicInteger();
         return (MongoClient) Proxy.newProxyInstance(MongoClient.class.getClassLoader(), new Class<?>[]{MongoClient.class}, (proxy, method, args) -> {
@@ -806,8 +929,8 @@ class SourceScoredOccurrenceIntegrationTest {
             if (!method.getName().equals("startSession")) { return value; }
             ClientSession session = (ClientSession) value;
             return Proxy.newProxyInstance(ClientSession.class.getClassLoader(), new Class<?>[]{ClientSession.class}, (ignored, operation, parameters) -> {
-                if (operation.getName().equals("commitTransaction") && commits.incrementAndGet() > 1) {
-                    if (durable) { invoke(session, operation, parameters); }
+                if (operation.getName().equals("commitTransaction")) {
+                    if (durable && commits.getAndIncrement() == 0) { invoke(session, operation, parameters); }
                     var failure = new MongoException(91, "TEST_ONLY_LOST_COMMIT_ACK");
                     failure.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL); throw failure;
                 }
