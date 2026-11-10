@@ -227,6 +227,85 @@ class SourceScoredOccurrenceIntegrationTest {
         }
     }
 
+    @Test void independentEnrichedRecoveryPublishesStoredSnapshotAfterProducerFailureWithoutRawRedelivery() throws Exception {
+        try (var redis = new GenericContainer<>(org.testcontainers.utility.DockerImageName.parse("redis:7.2-alpine")).withExposedPorts(6379)) {
+            redis.start();
+            var resources = DefaultClientResources.builder().ioThreadPoolSize(2).computationThreadPoolSize(2).build();
+            var connections = new LettuceConnectionFactory(new RedisStandaloneConfiguration(redis.getHost(), redis.getMappedPort(6379)),
+                    LettuceClientConfiguration.builder().clientResources(resources).commandTimeout(Duration.ofSeconds(3)).build());
+            try {
+                connections.afterPropertiesSet(); connections.start();
+                var redisTemplate = new StringRedisTemplate(connections); redisTemplate.afterPropertiesSet();
+                var redisStore = new RedisFeatureStore(redisTemplate, new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7),
+                        Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
+                var snapshotReads = new AtomicInteger();
+                FeatureStore counted = new FeatureStore() {
+                    @Override public boolean hasRecordedTransaction(TransactionRawEvent event) { return redisStore.hasRecordedTransaction(event); }
+                    @Override public boolean hasRecordedTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
+                        return redisStore.hasRecordedTransaction(event, namespace);
+                    }
+                    @Override public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event) { return redisStore.loadSnapshot(event); }
+                    @Override public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event, FeatureNamespace namespace) {
+                        snapshotReads.incrementAndGet(); return redisStore.loadSnapshot(event, namespace);
+                    }
+                    @Override public void recordTransaction(TransactionRawEvent event) { redisStore.recordTransaction(event); }
+                    @Override public void recordTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
+                        redisStore.recordTransaction(event, namespace);
+                    }
+                };
+                var verified = policy.verify(TestSourceIssuer.proof(PAYLOAD, Map.of("sourceEventId", "enriched-recovery-event"), 0),
+                        PAYLOAD, sourceContext());
+                assertThat(verified).isInstanceOf(SourceSignatureVerifier.Verified.class);
+                var request = JSON.readValue(PAYLOAD, com.frauddetection.ingest.api.IngestTransactionRequest.class);
+                TransactionRawEvent raw = new TransactionRequestMapper().toEvent(request, "enriched-recovery-correlation");
+                var admitted = receipts.acceptRaw((SourceSignatureVerifier.Verified) verified, raw);
+                assertThat(admitted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
+                assertThat(receipts.recoverRawPublications(new KafkaTransactionRawEventProducer(template(),
+                        new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic), ORIGIN_PROOFS), 1)).isEqualTo(1);
+                assertThat(records(rawTopic, TransactionRawEvent.class)).hasSize(1);
+
+                var failingPublisher = new com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher() {
+                    @Override public void publish(TransactionEnrichedEvent event) {
+                        throw new IllegalStateException("simulated Kafka outage");
+                    }
+                };
+                var service = new TransactionFeatureEnricherService(counted,
+                        new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                        failingPublisher, enricher, ORIGIN_PROOFS);
+                assertThatThrownBy(() -> service.enrich(raw)).isInstanceOf(RuntimeException.class);
+                assertThat(snapshotReads).hasValue(1);
+                Document row = ownerClient.getDatabase(database).getCollection("source_enriched_publications").find().first();
+                assertThat(row.getString("state")).isEqualTo("PENDING");
+                assertThat(row.getInteger("attempts")).isEqualTo(1);
+                TransactionEnrichedEvent stored = new SourceEnrichedPublicationCipher("enriched-key-1",
+                        Map.of("enriched-key-1", ENRICHED_ENCRYPTION_KEY)).decrypt(row);
+
+                // Change Redis history after the canonical enriched event is durable.
+                redisStore.recordTransaction(raw, FeatureNamespace.attested(reader.raw(raw)));
+                ownerClient.getDatabase(database).getCollection("source_enriched_publications").updateOne(eq("_id", row.getString("_id")),
+                        set("nextAttemptAt", Date.from(Instant.EPOCH)));
+                var recoveryPublisher = new KafkaTransactionEnrichedEventPublisher(template(),
+                        new com.frauddetection.enricher.config.KafkaTopicProperties(rawTopic, enrichedTopic, database + ".dlt"), ORIGIN_PROOFS);
+                new com.frauddetection.enricher.service.SourceEnrichedPublicationRecovery(enricher, recoveryPublisher,
+                        new com.frauddetection.enricher.config.SourceEnrichedPublicationRecoveryProperties(true, 10, 0, 5_000)).recover();
+
+                TransactionEnrichedEvent delivered = records(enrichedTopic, TransactionEnrichedEvent.class).getFirst();
+                assertThat(delivered).isEqualTo(stored);
+                assertThat(JSON.writeValueAsBytes(delivered)).containsExactly(JSON.writeValueAsBytes(stored));
+                assertThat(snapshotReads).hasValue(1);
+                assertThat(records(rawTopic, TransactionRawEvent.class)).hasSize(1);
+                row = ownerClient.getDatabase(database).getCollection("source_enriched_publications")
+                        .find(eq("_id", row.getString("_id"))).first();
+                assertThat(row.getString("state")).isEqualTo("PUBLISHED");
+                assertThat(row.getInteger("attempts")).isEqualTo(2);
+                assertThat(enricher.enriched(delivered).state()).isEqualTo(VERIFIED);
+            } finally {
+                connections.destroy();
+                resources.shutdown(0, 1, TimeUnit.SECONDS).get(5, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     @Test void sourceProofAndPiiStayOutOfIngestResponsesApplicationLogsAndMetricTags() throws Exception {
         var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("com.frauddetection");
         var captured = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
@@ -742,6 +821,189 @@ class SourceScoredOccurrenceIntegrationTest {
         assertThatThrownBy(() -> coordinator.recoverPending(101)).hasMessage("SOURCE_OCCURRENCE_LIMIT_INVALID");
     }
 
+    @Test void crashedEighthPublishingLeaseIsTerminalizedInMongoAndExactFactCanBeRedriven() throws Exception {
+        var input = signedInput(Map.of());
+        var prepared = store.prepare(input, "initial", candidate(input));
+        for (int attempt = 0; attempt < 7; attempt++) {
+            var retryStore = newStore(scorerClient, policy, Clock.offset(Clock.systemUTC(), Duration.ofMinutes(5L * attempt)));
+            new SourceOccurrencePublisher(retryStore, event -> { throw new IllegalStateException("test unavailable"); }).recoverPending(1);
+        }
+        ownerClient.getDatabase(database).getCollection("source_scored_occurrences")
+                .updateOne(eq("_id", prepared.id()), set("nextAttemptAt", Date.from(Instant.EPOCH)));
+
+        var eighthClaim = store.claim(prepared.id());
+        assertThat(eighthClaim.status()).isEqualTo(PUBLISHING);
+        assertThat(eighthClaim.claimId()).isNotBlank();
+        Document crashed = ownerClient.getDatabase(database).getCollection("source_scored_occurrences").find(eq("_id", prepared.id())).first();
+        assertThat(crashed.getInteger("attempts")).isEqualTo(8);
+        assertThat(crashed.getString("state")).isEqualTo("PUBLISHING");
+
+        var restarted = newStore(scorerClient, policy, Clock.offset(Clock.systemUTC(), Duration.ofMinutes(5)));
+        assertThat(restarted.claim(prepared.id()).status()).isEqualTo(RETRY_EXHAUSTED);
+        Document terminal = ownerClient.getDatabase(database).getCollection("source_scored_occurrences").find(eq("_id", prepared.id())).first();
+        assertThat(terminal.getString("state")).isEqualTo("RETRY_EXHAUSTED");
+        assertThat(terminal).doesNotContainKeys("leaseId", "leaseUntil", "nextAttemptAt");
+        assertThat(restarted.pending(1)).isEmpty();
+        assertThat(restarted.recoveryHealth().exhausted()).isEqualTo(1);
+
+        assertThat(new SourceOccurrencePublisher(restarted, kafkaPublisher)
+                .redriveExhausted(prepared.id(), MongoSourceOccurrenceStore.RedriveReason.BROKER_RECOVERED)).isTrue();
+        TransactionScoredEvent delivered = records(scoredTopic, TransactionScoredEvent.class).getFirst();
+        assertThat(delivered).isEqualTo(prepared.event());
+        terminal = ownerClient.getDatabase(database).getCollection("source_scored_occurrences").find(eq("_id", prepared.id())).first();
+        assertThat(terminal.getString("state")).isEqualTo("PUBLISHED");
+        assertThat(terminal.getInteger("recoveryEpoch")).isEqualTo(1);
+    }
+
+    @Test void concurrentConfirmationAndExpiredEighthLeaseTerminalizationCannotOverwriteEachOther() throws Exception {
+        var input = signedInput(Map.of());
+        var prepared = store.prepare(input, "initial", candidate(input));
+        var originalClaim = store.claim(prepared.id());
+        assertThat(originalClaim.status()).isEqualTo(PUBLISHING);
+        ownerClient.getDatabase(database).getCollection("source_scored_occurrences").updateOne(eq("_id", prepared.id()),
+                com.mongodb.client.model.Updates.combine(set("attempts", 8), set("leaseUntil", Date.from(Instant.EPOCH))));
+        var restarted = newStore(scorerClient, policy, Clock.offset(Clock.systemUTC(), Duration.ofMinutes(5)));
+        var start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var confirmation = pool.submit(() -> {
+                if (!start.await(10, TimeUnit.SECONDS)) { throw new IllegalStateException("CONFIRMATION_RACE_START_TIMEOUT"); }
+                return store.confirm(prepared.id(), prepared.event(), originalClaim.claimId());
+            });
+            var terminalization = pool.submit(() -> {
+                if (!start.await(10, TimeUnit.SECONDS)) { throw new IllegalStateException("TERMINALIZATION_RACE_START_TIMEOUT"); }
+                return restarted.claim(prepared.id());
+            });
+            start.countDown();
+            var confirmed = confirmation.get(20, TimeUnit.SECONDS);
+            var exhausted = terminalization.get(20, TimeUnit.SECONDS);
+            Document row = ownerClient.getDatabase(database).getCollection("source_scored_occurrences").find(eq("_id", prepared.id())).first();
+            assertThat(row.getString("state")).isIn("PUBLISHED", "RETRY_EXHAUSTED");
+            if ("PUBLISHED".equals(row.getString("state"))) {
+                assertThat(exhausted.status()).isNotEqualTo(RETRY_EXHAUSTED);
+                assertThat(confirmed.status()).isEqualTo(PUBLISHED);
+            } else {
+                assertThat(confirmed.status()).isNotEqualTo(PUBLISHED);
+                assertThat(exhausted.status()).isEqualTo(RETRY_EXHAUSTED);
+            }
+        }
+    }
+
+    @Test void quarantinedRawPublicationRequiresRedriveAndDeliversTheOriginalStoredBytesAfterKafkaRecovery() throws Exception {
+        var verification = policy.verify(TestSourceIssuer.proof(PAYLOAD, Map.of(), 0), PAYLOAD, sourceContext());
+        assertThat(verification).isInstanceOf(SourceSignatureVerifier.Verified.class);
+        var request = JSON.readValue(PAYLOAD, com.frauddetection.ingest.api.IngestTransactionRequest.class);
+        TransactionRawEvent original = new TransactionRequestMapper().toEvent(request, "raw-redrive-correlation");
+        var admitted = receipts.acceptRaw((SourceSignatureVerifier.Verified) verification, original);
+        assertThat(admitted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
+        String receiptId = admitted.receipt().id();
+
+        for (int attempt = 0; attempt < 8; attempt++) {
+            var retryStore = newReceiptStore(Clock.offset(Clock.systemUTC(), Duration.ofMinutes(5L * attempt)));
+            assertThat(retryStore.recoverRawPublications(event -> { throw new IllegalStateException("simulated Kafka outage"); }, 1))
+                    .isEqualTo(1);
+        }
+        var outbox = ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", receiptId)).first();
+        assertThat(outbox.getString("state")).isEqualTo("QUARANTINED");
+        assertThat(outbox.getString("failureCode")).isEqualTo("PUBLISH_FAILED");
+        byte[] storedBytes = new SourceRawPublicationCipher("raw-key-1", RAW_PUBLICATION_PROPERTIES.encryptionKeys()).decrypt(outbox);
+        var health = receipts.recoveryHealth();
+        assertThat(health.quarantinedPublishFailed()).isEqualTo(1);
+        assertThat(health.redriveEpochExhausted()).isZero();
+
+        var redrive = receipts.redriveQuarantined(receiptId, SourceReceiptStore.RedriveReason.BROKER_RECOVERED);
+        assertThat(redrive.status()).isEqualTo(SourceReceiptStore.RedriveStatus.REQUEUED);
+        assertThat(redrive.recoveryEpoch()).isEqualTo(1);
+        assertThat(receipts.recoverRawPublications(new KafkaTransactionRawEventProducer(template(),
+                new com.frauddetection.ingest.config.KafkaTopicProperties(rawTopic), ORIGIN_PROOFS), 1)).isEqualTo(1);
+
+        TransactionRawEvent delivered = records(rawTopic, TransactionRawEvent.class).getFirst();
+        assertThat(delivered).isEqualTo(original);
+        assertThat(JSON.writeValueAsBytes(delivered)).containsExactly(storedBytes);
+        outbox = ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", receiptId)).first();
+        assertThat(outbox.getString("state")).isEqualTo("PUBLISHED");
+        assertThat(outbox.getInteger("recoveryEpoch")).isEqualTo(1);
+        assertThat(outbox.getString("redriveReason")).isEqualTo("BROKER_RECOVERED");
+        assertThat(ownerClient.getDatabase(database).getCollection("source_admission_receipts").countDocuments()).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(database).getCollection("source_lineage_raw").countDocuments()).isEqualTo(1);
+        assertThat(receipts.recoveryHealth().quarantinedPublishFailed()).isZero();
+    }
+
+    @Test void rawRedriveIsBoundedAndConcurrentRequestsDoNotCreateMultipleEpochs() throws Exception {
+        var quarantined = quarantineRawPublication();
+        assertThatThrownBy(() -> new SourceRawPublicationRedriveProperties(true, quarantined.receiptId(), "FORCE"))
+                .hasMessage("SOURCE_RAW_REDRIVE_CONFIGURATION_INVALID");
+        assertThat(receipts.redriveQuarantined(quarantined.receiptId(), SourceReceiptStore.RedriveReason.BROKER_RECOVERED)
+                .status()).isEqualTo(SourceReceiptStore.RedriveStatus.REQUEUED);
+
+        var gate = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> { gate.await(); return receipts.redriveQuarantined(quarantined.receiptId(),
+                    SourceReceiptStore.RedriveReason.OPERATOR_RECONCILIATION); });
+            var second = pool.submit(() -> { gate.await(); return receipts.redriveQuarantined(quarantined.receiptId(),
+                    SourceReceiptStore.RedriveReason.OPERATOR_RECONCILIATION); });
+            gate.countDown();
+            first.get(20, TimeUnit.SECONDS);
+            second.get(20, TimeUnit.SECONDS);
+        }
+        Document row = ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", quarantined.receiptId())).first();
+        assertThat(row.getInteger("recoveryEpoch")).isEqualTo(1);
+        assertThat(row.getString("state")).isEqualTo("PENDING");
+        byte[] preserved = new SourceRawPublicationCipher("raw-key-1", RAW_PUBLICATION_PROPERTIES.encryptionKeys()).decrypt(row);
+        assertThat(JSON.readValue(preserved, TransactionRawEvent.class)).isEqualTo(quarantined.event());
+    }
+
+    @Test void rawRedriveRefusesTamperedCiphertextAndDoesNotClearQuarantine() throws Exception {
+        var quarantined = quarantineRawPublication();
+        Document row = ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", quarantined.receiptId())).first();
+        byte[] ciphertext = row.get("ciphertext", org.bson.types.Binary.class).getData().clone();
+        ciphertext[ciphertext.length - 1] ^= 1;
+        ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .updateOne(eq("_id", quarantined.receiptId()), com.mongodb.client.model.Updates.set("ciphertext",
+                        new org.bson.types.Binary(ciphertext)));
+
+        assertThat(receipts.redriveQuarantined(quarantined.receiptId(), SourceReceiptStore.RedriveReason.BROKER_RECOVERED).status())
+                .isEqualTo(SourceReceiptStore.RedriveStatus.AUTHORITY_DENIED);
+        row = ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", quarantined.receiptId())).first();
+        assertThat(row.getString("state")).isEqualTo("QUARANTINED");
+        assertThat(row.getString("failureCode")).isEqualTo("PAYLOAD_UNAVAILABLE");
+        assertThat(row.getInteger("recoveryEpoch")).isEqualTo(0);
+    }
+
+    @Test void rawRedriveRefusesExpiredReceiptAndCurrentPolicyRevocation() throws Exception {
+        var expired = quarantineRawPublication();
+        Date expiredAt = Date.from(Instant.now().minusSeconds(1));
+        ownerClient.getDatabase(database).getCollection("source_admission_receipts")
+                .updateOne(eq("_id", expired.receiptId()), com.mongodb.client.model.Updates.set("expiresAt", expiredAt));
+        ownerClient.getDatabase(database).getCollection("source_admission_identities")
+                .updateOne(eq("_id", expired.receiptId()), com.mongodb.client.model.Updates.set("expiresAt", expiredAt));
+        ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .updateOne(eq("_id", expired.receiptId()), com.mongodb.client.model.Updates.set("expiresAt", expiredAt));
+        ownerClient.getDatabase(database).getCollection("source_lineage_raw")
+                .updateOne(eq("receiptId", expired.receiptId()), com.mongodb.client.model.Updates.set("expiresAt", expiredAt));
+        assertThat(receipts.redriveQuarantined(expired.receiptId(), SourceReceiptStore.RedriveReason.BROKER_RECOVERED).status())
+                .isEqualTo(SourceReceiptStore.RedriveStatus.INVALID);
+
+        var revoked = quarantineRawPublication();
+        SourceSignatureVerifier revokedPolicy = policy(true);
+        var revokedOwner = new MongoSourceLineage(ownerClient, database, "source_owner", MongoSourceLineage.Stage.INGEST,
+                revokedPolicy, Clock.systemUTC());
+        var revokedStore = new MongoSourceReceiptStore(ownerClient, database, Clock.systemUTC(),
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), revokedPolicy, revokedOwner,
+                new SourceRawPublicationCipher("raw-key-1", RAW_PUBLICATION_PROPERTIES.encryptionKeys()), RAW_PUBLICATION_PROPERTIES);
+        assertThat(revokedStore.redriveQuarantined(revoked.receiptId(), SourceReceiptStore.RedriveReason.BROKER_RECOVERED).status())
+                .isEqualTo(SourceReceiptStore.RedriveStatus.AUTHORITY_DENIED);
+        Document row = ownerClient.getDatabase(database).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
+                .find(eq("_id", revoked.receiptId())).first();
+        assertThat(row.getString("state")).isEqualTo("QUARANTINED");
+        assertThat(row.getString("failureCode")).isEqualTo("AUTHORITY_DENIED");
+        assertThat(row.getInteger("recoveryEpoch")).isZero();
+    }
+
     @Test void unsignedLegacyScoringKeepsBaselineOutputAndHasNoSourceOccurrenceBinding() throws Exception {
         var raw = new TransactionRequestMapper().toEvent(JSON.readValue(PAYLOAD, com.frauddetection.ingest.api.IngestTransactionRequest.class), "legacy");
         enrichLegacy(raw); var input = records(enrichedTopic, TransactionEnrichedEvent.class).getFirst();
@@ -881,6 +1143,27 @@ class SourceScoredOccurrenceIntegrationTest {
         return new MongoSourceOccurrenceStore(client, database, "scorer", verifier, clock,
                 new SourceOccurrenceCipher("key-1", Map.of("key-1", ENCRYPTION_KEY)), Duration.ofHours(1));
     }
+    private MongoSourceReceiptStore newReceiptStore(Clock clock) {
+        return new MongoSourceReceiptStore(ownerClient, database, clock,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), policy, owner,
+                new SourceRawPublicationCipher("raw-key-1", RAW_PUBLICATION_PROPERTIES.encryptionKeys()), RAW_PUBLICATION_PROPERTIES);
+    }
+    private QuarantinedRaw quarantineRawPublication() throws Exception {
+        var verification = policy.verify(TestSourceIssuer.proof(PAYLOAD,
+                Map.of("sourceEventId", "raw-redrive-" + UUID.randomUUID()), 0), PAYLOAD, sourceContext());
+        assertThat(verification).isInstanceOf(SourceSignatureVerifier.Verified.class);
+        var request = JSON.readValue(PAYLOAD, com.frauddetection.ingest.api.IngestTransactionRequest.class);
+        TransactionRawEvent event = new TransactionRequestMapper().toEvent(request, "raw-redrive-" + UUID.randomUUID());
+        var admitted = receipts.acceptRaw((SourceSignatureVerifier.Verified) verification, event);
+        assertThat(admitted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
+        for (int attempt = 0; attempt < 8; attempt++) {
+            var retryStore = newReceiptStore(Clock.offset(Clock.systemUTC(), Duration.ofMinutes(5L * attempt)));
+            assertThat(retryStore.recoverRawPublications(ignored -> { throw new IllegalStateException("simulated Kafka outage"); }, 1))
+                    .isEqualTo(1);
+        }
+        return new QuarantinedRaw(admitted.receipt().id(), event);
+    }
+    private record QuarantinedRaw(String receiptId, TransactionRawEvent event) { }
     private static SourceSignatureVerifier policy(boolean revoked) {
         return new SourceSignatureVerifier(new SourceVerificationProperties(List.of(TestSourceIssuer.policy(0, revoked))), Clock.systemUTC());
     }

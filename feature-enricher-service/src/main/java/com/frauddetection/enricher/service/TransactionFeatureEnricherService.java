@@ -6,6 +6,7 @@ import com.frauddetection.common.events.source.SourceLineageAccess;
 import com.frauddetection.common.events.source.SourceEnrichedPublication;
 import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.common.events.source.SourceOriginProofs;
+import com.frauddetection.common.events.source.SourceEnrichedPublicationClaim;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
@@ -107,10 +108,21 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
             }
             enrichedEvent = publication.event();
             if (!publication.published()) {
-                publish(enrichedEvent, origin.assertion());
-                var published = sourceLineage.markEnrichedPublished(event, enrichedEvent);
-                if (published == null || published.state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED
-                        || !enrichedEventCommitment(enrichedEvent).equals(published.eventCommitment())) {
+                SourceEnrichedPublicationClaim claim = sourceLineage.claimEnrichedPublication(event, enrichedEvent);
+                if (claim.status() == SourceEnrichedPublicationClaim.Status.CLAIMED) {
+                    try {
+                        publish(claim.event(), origin.assertion());
+                    } catch (RuntimeException publishFailure) {
+                        sourceLineage.recordEnrichedPublishFailure(claim);
+                        throw publishFailure;
+                    }
+                    var marked = sourceLineage.markEnrichedPublished(claim);
+                    if (marked == null || marked.state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED
+                            || !enrichedEventCommitment(enrichedEvent).equals(marked.eventCommitment())) {
+                        sourceLineage.recordEnrichedPublishFailure(claim);
+                        throw new FeatureEnrichmentException("FEATURE_LINEAGE_PUBLICATION_UNRESOLVED");
+                    }
+                } else if (claim.status() != SourceEnrichedPublicationClaim.Status.ALREADY_PUBLISHED) {
                     throw new FeatureEnrichmentException("FEATURE_LINEAGE_PUBLICATION_UNRESOLVED");
                 }
             }

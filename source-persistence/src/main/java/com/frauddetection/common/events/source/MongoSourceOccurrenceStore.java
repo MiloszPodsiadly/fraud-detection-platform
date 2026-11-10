@@ -133,7 +133,7 @@ public final class MongoSourceOccurrenceStore {
 
     /** Each automatic attempt is durable and globally bounded; no body replay follows an unknown commit. */
     public Result claim(String id) {
-        return transaction(session -> {
+        Result claimResult = transaction(session -> {
             Document row = db.getCollection(OCCURRENCES).find(session, eq("_id", id)).first();
             if (row == null) { return result(Status.UNAVAILABLE); }
             Result restored = restore(session, row, row.getString("receiptId"), row.getString("enrichedCommitment"));
@@ -147,8 +147,18 @@ public final class MongoSourceOccurrenceStore {
                 return result(Status.UNAVAILABLE);
             }
             if (row.getInteger("attempts") >= 8) {
-                db.getCollection(OCCURRENCES).updateOne(session, and(eq("_id", id), eq("state", "PENDING"), gte("attempts", 8)),
-                        combine(set("state", "RETRY_EXHAUSTED"), set("lastAttemptCode", "BROKER_PUBLISH_FAILED")));
+                Date nowDate = Date.from(now);
+                var terminalized = db.getCollection(OCCURRENCES).updateOne(session,
+                        and(eq("_id", id), gte("attempts", 8), or(
+                                and(eq("state", "PENDING"),
+                                        or(exists("leaseUntil", false), lte("leaseUntil", nowDate)),
+                                        or(exists("nextAttemptAt", false), lte("nextAttemptAt", nowDate))),
+                                and(eq("state", "PUBLISHING"), lte("leaseUntil", nowDate)))),
+                        combine(set("state", "RETRY_EXHAUSTED"), set("lastAttemptCode", "BROKER_PUBLISH_FAILED"),
+                                unset("leaseId"), unset("leaseUntil"), unset("nextAttemptAt")));
+                if (!terminalized.wasAcknowledged() || terminalized.getMatchedCount() != 1 || terminalized.getModifiedCount() != 1) {
+                    return result(Status.UNAVAILABLE);
+                }
                 return result(Status.RETRY_EXHAUSTED);
             }
             String claimId = java.util.UUID.randomUUID().toString();
@@ -158,6 +168,20 @@ public final class MongoSourceOccurrenceStore {
                             set("leaseUntil", Date.from(now.plusSeconds(120)))));
             if (claimed.getModifiedCount() != 1) { throw invalid(); }
             return new Result(Status.PUBLISHING, id, restored.event, claimId);
+        });
+        if (claimResult.status() != Status.UNAVAILABLE) { return claimResult; }
+        return readBackTerminalClaim(id);
+    }
+
+    /** Reconciles a failed CAS or unknown transaction commit before reporting an authoritative terminal state. */
+    private Result readBackTerminalClaim(String id) {
+        if (id == null) { return result(Status.UNAVAILABLE); }
+        return transaction(session -> {
+            Document row = db.getCollection(OCCURRENCES).find(session, eq("_id", id)).first();
+            if (row == null) { return result(Status.UNAVAILABLE); }
+            Result restored = restore(session, row, row.getString("receiptId"), row.getString("enrichedCommitment"));
+            return restored.status() == Status.PUBLISHED || restored.status() == Status.RETRY_EXHAUSTED
+                    ? restored : result(Status.UNAVAILABLE);
         });
     }
 

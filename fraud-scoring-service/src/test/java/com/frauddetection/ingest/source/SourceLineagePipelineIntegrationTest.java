@@ -128,6 +128,82 @@ class SourceLineagePipelineIntegrationTest {
 
     @AfterEach void cleanUp() { metrics.close(); ownerClient.getDatabase(db).drop(); }
 
+    @Test void rawRecoverySchemaMigrationIsOwnerOnlyAdditiveAndPreservesExistingV1Rows() {
+        String migrationDatabase = "raw_migration_" + UUID.randomUUID().toString().replace("-", "");
+        var database = ownerClient.getDatabase(migrationDatabase);
+        database.createCollection(MongoSourceRawPublicationSchema.COLLECTION,
+                new com.mongodb.client.model.CreateCollectionOptions().validationOptions(new com.mongodb.client.model.ValidationOptions()
+                        .validator(MongoSourceRawPublicationSchema.validatorV1())
+                        .validationLevel(com.mongodb.client.model.ValidationLevel.STRICT)
+                        .validationAction(com.mongodb.client.model.ValidationAction.ERROR)));
+        database.getCollection(MongoSourceRawPublicationSchema.COLLECTION).createIndex(MongoSourceRawPublicationSchema.RECOVERY_KEY,
+                new com.mongodb.client.model.IndexOptions().name(MongoSourceRawPublicationSchema.RECOVERY_INDEX));
+        String receipt = "a".repeat(64);
+        Document legacy = new Document("_id", receipt).append("schemaVersion", 1).append("receiptId", receipt)
+                .append("rawCommitment", "b".repeat(64)).append("eventId", "legacy-raw-event")
+                .append("eventCreatedAt", TestSourceIssuer.NOW.toString()).append("createdAt", Date.from(TestSourceIssuer.NOW))
+                .append("expiresAt", Date.from(TestSourceIssuer.NOW.plus(Duration.ofHours(1))))
+                .append("state", "PENDING").append("attempts", 0).append("nextAttemptAt", Date.from(TestSourceIssuer.NOW))
+                .append("keyId", "raw-key-1").append("nonce", new org.bson.types.Binary(new byte[12]))
+                .append("ciphertext", new org.bson.types.Binary(new byte[17]));
+        database.getCollection(MongoSourceRawPublicationSchema.COLLECTION).insertOne(legacy);
+
+        assertThatThrownBy(() -> MongoSourceRawPublicationSchema.migrateRecoveryValidator(database, false))
+                .hasMessage("SOURCE_RAW_PUBLICATION_MIGRATION_OWNER_REQUIRED");
+        SourceRawPublicationRecoveryMigration.migrateValidator(database);
+
+        MongoSourceRawPublicationSchema.initialize(database);
+        Document preserved = database.getCollection(MongoSourceRawPublicationSchema.COLLECTION).find(eq("_id", receipt)).first();
+        assertThat(preserved).containsEntry("state", "PENDING").containsEntry("attempts", 0).doesNotContainKey("recoveryEpoch");
+        database.drop();
+    }
+
+    @Test void enrichedRecoveryMigrationIsOwnerOnlyAdditiveAndPreservesLegacyPublicationRows() {
+        String migrationDatabase = "enriched_migration_" + UUID.randomUUID().toString().replace("-", "");
+        var database = ownerClient.getDatabase(migrationDatabase);
+        database.createCollection("source_enriched_publications", new com.mongodb.client.model.CreateCollectionOptions()
+                .validationOptions(new com.mongodb.client.model.ValidationOptions()
+                        .validator(legacyEnrichedPublicationValidator())
+                        .validationLevel(com.mongodb.client.model.ValidationLevel.STRICT)
+                        .validationAction(com.mongodb.client.model.ValidationAction.ERROR)));
+        String receipt = "a".repeat(64);
+        Document legacy = new Document("_id", "b".repeat(64)).append("schemaVersion", 1).append("receiptId", receipt)
+                .append("rawCommitment", "c".repeat(64)).append("enrichedCommitment", "d".repeat(64))
+                .append("eventId", "legacy-enriched-event").append("eventCreatedAt", TestSourceIssuer.NOW.toString())
+                .append("expiresAt", Date.from(TestSourceIssuer.NOW.plus(Duration.ofHours(1))))
+                .append("state", "PENDING").append("publishedAt", null).append("keyId", "enriched-key-1")
+                .append("nonce", new org.bson.types.Binary(new byte[12])).append("ciphertext", new org.bson.types.Binary(new byte[17]));
+        database.getCollection("source_enriched_publications").insertOne(legacy);
+        MongoClient limited = MONGO.consumer(ownerClient, migrationDatabase, true);
+
+        assertThatThrownBy(() -> SourceEnrichedPublicationRecoveryMigration.migrate(limited.getDatabase(migrationDatabase)))
+                .isInstanceOf(MongoCommandException.class);
+        SourceEnrichedPublicationRecoveryMigration.migrate(database);
+
+        Document preserved = database.getCollection("source_enriched_publications").find(eq("_id", legacy.getString("_id"))).first();
+        assertThat(preserved).containsEntry("state", "PENDING").containsEntry("eventId", "legacy-enriched-event")
+                .doesNotContainKeys("attempts", "leaseToken", "recoveryEpoch", "preparedAt");
+        var indexes = database.getCollection("source_enriched_publications").listIndexes().into(new ArrayList<>());
+        assertThat(indexes).extracting(row -> row.getString("name"))
+                .containsExactlyInAnyOrder("_id_", "enriched_publication_recovery");
+        database.drop();
+    }
+
+    private static Document legacyEnrichedPublicationValidator() {
+        java.util.function.Function<Object, Document> type = value -> new Document("bsonType", value);
+        Document hash = type.apply("string").append("pattern", "^[0-9a-f]{64}$");
+        Document properties = new Document("_id", hash).append("schemaVersion", type.apply("int").append("enum", List.of(1)))
+                .append("receiptId", hash).append("rawCommitment", hash).append("enrichedCommitment", hash)
+                .append("eventId", type.apply("string").append("pattern", "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"))
+                .append("eventCreatedAt", type.apply("string").append("maxLength", 64)).append("expiresAt", type.apply("date"))
+                .append("state", type.apply("string").append("enum", List.of("PENDING", "PUBLISHED")))
+                .append("publishedAt", type.apply(List.of("date", "null")))
+                .append("keyId", type.apply("string").append("pattern", "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"))
+                .append("nonce", type.apply("binData")).append("ciphertext", type.apply("binData"));
+        return new Document("$jsonSchema", type.apply("object").append("additionalProperties", false)
+                .append("required", List.copyOf(properties.keySet())).append("properties", properties));
+    }
+
     @Test void signedHttpInputSurvivesActualSerdeEnricherAndScorerContextWithoutPublicProofFields() throws Exception {
         byte[] payload = payload();
         mvc().perform(post("/api/v1/transactions/attested").contentType("application/json")
@@ -241,7 +317,10 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(SourceEventCommitment.enriched(replay.event())).isEqualTo(SourceEventCommitment.enriched(candidate));
         assertThat(replay.published()).isFalse();
 
-        assertThat(enricher.markEnrichedPublished(raw, candidate).state()).isEqualTo(VERIFIED);
+        var claim = enricher.claimEnrichedPublication(raw, candidate);
+        assertThat(claim.status()).isEqualTo(SourceEnrichedPublicationClaim.Status.CLAIMED);
+        assertThat(enricher.claimEnrichedPublication(raw, candidate).status()).isEqualTo(SourceEnrichedPublicationClaim.Status.BUSY);
+        assertThat(enricher.markEnrichedPublished(claim).state()).isEqualTo(VERIFIED);
         var acknowledged = enricher.prepareEnrichedPublication(raw, changedCandidate);
         assertThat(acknowledged.authority().state()).isEqualTo(VERIFIED);
         assertThat(acknowledged.published()).isTrue();
@@ -249,6 +328,101 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_enriched").countDocuments()).isEqualTo(1);
         assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_publications")
                 .find().first().getString("state")).isEqualTo("PUBLISHED");
+    }
+
+    @Test void enrichedRecoveryLeaseFencesLiveAndRestartedWorkersAndReusesTheSameEvent() throws Exception {
+        var raw = admit(Map.of());
+        var candidate = new TransactionEnrichedEventMapper().toAttestedEvent(raw,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw,
+                        new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false)));
+        var prepared = enricher.prepareEnrichedPublication(raw, candidate);
+        var liveClaim = enricher.claimEnrichedPublication(raw, prepared.event());
+        assertThat(liveClaim.status()).isEqualTo(SourceEnrichedPublicationClaim.Status.CLAIMED);
+        assertThat(enricher.claimNextEnrichedPublications(1)).isEmpty();
+
+        var restarted = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(31)), policy(false));
+        var recoveryClaims = restarted.claimNextEnrichedPublications(1);
+        assertThat(recoveryClaims).hasSize(1);
+        var recoveryClaim = recoveryClaims.getFirst();
+        assertThat(recoveryClaim.event()).isEqualTo(liveClaim.event());
+        assertThat(SourceEventCommitment.enriched(recoveryClaim.event())).isEqualTo(SourceEventCommitment.enriched(candidate));
+        assertThat(enricher.markEnrichedPublished(liveClaim).state()).isNotEqualTo(VERIFIED);
+        assertThat(restarted.markEnrichedPublished(recoveryClaim).state()).isEqualTo(VERIFIED);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_publications").find().first())
+                .containsEntry("state", "PUBLISHED").doesNotContainKeys("leaseToken", "leaseUntil");
+    }
+
+    @Test void enrichedPublishExhaustionHasBoundedAuditedRedriveAndRefusesFurtherEpochs() throws Exception {
+        var raw = admit(Map.of());
+        var candidate = new TransactionEnrichedEventMapper().toAttestedEvent(raw,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw,
+                        new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false)));
+        var prepared = enricher.prepareEnrichedPublication(raw, candidate);
+        var publicationId = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find().first().getString("_id");
+        for (int attempt = 0; attempt < 8; attempt++) {
+            var worker = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(600L * attempt)), policy(false));
+            var claims = worker.claimNextEnrichedPublications(1);
+            assertThat(claims).as("attempt %d publication=%s", attempt,
+                    ownerClient.getDatabase(db).getCollection("source_enriched_publications").find(eq("_id", publicationId)).first().toJson())
+                    .hasSize(1);
+            worker.recordEnrichedPublishFailure(claims.getFirst());
+        }
+        Document exhausted = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find(eq("_id", publicationId)).first();
+        assertThat(exhausted).containsEntry("state", "RETRY_EXHAUSTED").containsEntry("failureCode", "PUBLISH_FAILED")
+                .containsEntry("attempts", 8);
+        assertThat(enricher.redriveEnrichedPublication(publicationId, "FORCE").status())
+                .isEqualTo(SourceLineageAccess.EnrichedPublicationRedriveStatus.INVALID);
+        var redrive = enricher.redriveEnrichedPublication(publicationId, "BROKER_RECOVERED");
+        assertThat(redrive.status()).isEqualTo(SourceLineageAccess.EnrichedPublicationRedriveStatus.REQUEUED);
+        assertThat(redrive.recoveryEpoch()).isEqualTo(1);
+        Document queued = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find(eq("_id", publicationId)).first();
+        assertThat(queued.getString("state")).isEqualTo("PENDING");
+        assertThat(new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY))
+                .decrypt(queued)).isEqualTo(prepared.event());
+        ownerClient.getDatabase(db).getCollection("source_enriched_publications").updateOne(eq("_id", publicationId),
+                set("state", "RETRY_EXHAUSTED"));
+        ownerClient.getDatabase(db).getCollection("source_enriched_publications").updateOne(eq("_id", publicationId),
+                set("failureCode", "PUBLISH_FAILED"));
+        ownerClient.getDatabase(db).getCollection("source_enriched_publications").updateOne(eq("_id", publicationId),
+                set("recoveryEpoch", 3));
+        ownerClient.getDatabase(db).getCollection("source_enriched_publications").updateOne(eq("_id", publicationId),
+                set("attempts", 8));
+        assertThat(enricher.redriveEnrichedPublication(publicationId, "BROKER_RECOVERED").status())
+                .isEqualTo(SourceLineageAccess.EnrichedPublicationRedriveStatus.EXHAUSTED);
+    }
+
+    @Test void enrichedRecoveryQuarantinesTamperedCiphertextAndCurrentlyRevokedAuthority() throws Exception {
+        var raw = admit(Map.of("sourceEventId", "tampered-enriched-recovery"));
+        var candidate = new TransactionEnrichedEventMapper().toAttestedEvent(raw,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw,
+                        new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false)));
+        var prepared = enricher.prepareEnrichedPublication(raw, candidate);
+        Document publication = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find().first();
+        byte[] ciphertext = publication.get("ciphertext", org.bson.types.Binary.class).getData().clone();
+        ciphertext[ciphertext.length - 1] ^= 1;
+        ownerClient.getDatabase(db).getCollection("source_enriched_publications").updateOne(eq("_id", publication.getString("_id")),
+                set("ciphertext", new org.bson.types.Binary(ciphertext)));
+        assertThat(enricher.claimNextEnrichedPublications(1)).isEmpty();
+        publication = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find(eq("_id", publication.getString("_id"))).first();
+        assertThat(publication).containsEntry("state", "QUARANTINED").containsEntry("failureCode", "PAYLOAD_UNAVAILABLE");
+
+        var revokedRaw = admit(Map.of("sourceEventId", "revoked-enriched-recovery"));
+        var revokedCandidate = new TransactionEnrichedEventMapper().toAttestedEvent(revokedRaw,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(revokedRaw,
+                        new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false)));
+        enricher.prepareEnrichedPublication(revokedRaw, revokedCandidate);
+        var revokedWorker = newEnricher(CLOCK, new SourceSignatureVerifier(
+                new SourceVerificationProperties(List.of(TestSourceIssuer.policy(0, true))), CLOCK));
+        assertThat(revokedWorker.claimNextEnrichedPublications(2)).isEmpty();
+        Document revokedRow = ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .find(eq("rawCommitment", SourceEventCommitment.raw(revokedRaw))).first();
+        assertThat(revokedRow).containsEntry("state", "QUARANTINED").containsEntry("failureCode", "AUTHORITY_DENIED");
+        assertThat(SourceEventCommitment.enriched(prepared.event())).isNotEqualTo(SourceEventCommitment.enriched(revokedCandidate));
+    }
+
+    private MongoSourceLineage newEnricher(Clock clock, SourceSignatureVerifier verifier) {
+        return new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER, verifier, clock,
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
     }
 
     @Test void redriveOfExactBytesIsIdempotentButNoBusinessDeduplicationCrossBindsSources() throws Exception {
