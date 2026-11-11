@@ -30,12 +30,61 @@ transaction.
   put Mongo URIs, encryption keys, source proofs, customer data, ciphertext, or
   raw receipt/publication IDs in tickets or logs.
 
+## Source receipt capacity and rollover
+
+`fraud.source-receipts.max-receipts` is configured for the receipt database and
+must be between 1 and 100,000. There is no universal production capacity value
+in this repository. The replay horizon must be positive and at most 30 days;
+receipt retention must be at least the replay horizon plus five minutes and
+at most 90 days. The exact limits are bound to the database's capacity policy
+commitment, so changing them in place causes startup to fail with
+`SOURCE_RECEIPT_CAPACITY_POLICY_INCOMPATIBLE`.
+
+Capacity is lifetime-based and shared by every issuer, institution, source, and
+source epoch that uses the same Mongo database. A single
+`source_admission_limits` record stores `count`; each new admitted receipt
+reserves a unique capacity slot and increments that counter in the same Mongo
+transaction as its replay identity and receipt. The counter is never
+decremented. After retention, compaction deletes the receipt and encrypted RAW
+and ENRICHED replay material but leaves the admission identity as a tombstone
+with its capacity slot. This keeps replays fenced and the consumed capacity
+unavailable.
+
+At the configured cap, an exact replay of a still-admitted matching identity
+continues to return `EXISTING`; changed bindings conflict, and expired or
+tombstoned identities return `TOMBSTONED`. A new identity returns
+`CAPACITY_EXCEEDED` before RAW lineage or a RAW publication intent is created.
+The ingest endpoint returns HTTP 503 with the bounded category
+`SOURCE_RECEIPT_CAPACITY_EXCEEDED`; capacity exhaustion must never publish RAW
+without an admitted receipt. The authenticated Mongo integration tests cover
+duplicate replay at capacity, expiration/compaction, retained tombstones, and
+the absence of a RAW outbox row on capacity rejection.
+
+The persistent count is not included in the RAW recovery health log. Monitor it
+through the protected schema-owner operations view: compare
+`source_admission_limits.count` for `_id="capacity"` with the active approved
+`max-receipts` setting. Configure an early warning threshold from the
+deployment's observed admission rate and the lead time needed for an approved
+rollover; alert critically when count reaches the cap. The count and remaining
+capacity are low-cardinality database signals. Do not add receipt IDs,
+customer fields, issuer/source labels, or policy commitments to metrics or
+logs.
+
+Capacity cannot be reset by deleting the counter or tombstones, raising the
+limit, or changing source epoch. A new database or policy epoch requires an
+explicit source-owner and schema-owner approved cutover plan that preserves
+the replay fence across the configured replay horizon. The service does not
+perform implicit rollover or migrate old tombstones into a new database.
+
 ## Mongo migration and rollout
 
 Run both owner migrations before starting the new ENRICHER version. Pause
-attested ENRICHED writers for the migration window so an old writer cannot
-insert a row while the strict validator and durable business-identity fence are
-being prepared.
+attested source admission, RAW replay/recovery, ENRICHED writers/recovery, and
+receipt compaction for the migration window. Drain in-flight work before the
+owner scans publications. This maintenance boundary prevents old and new
+writers from changing the publication, receipt, RAW lineage, or fence inputs
+while the migration runs; Mongo does not provide one atomic transaction across
+these collections. Do not treat the migration as an all-database snapshot.
 
 The outbox migration accepts only the known prior strict validators or an exact
 partially completed migration state. It adds the recovery and history indexes,
@@ -84,6 +133,22 @@ validators and all required indexes, and does not repair them. Verify and
 record the `backfilledRows` count in the READY marker in
 `source_enriched_business_identities`.
 
+The business-identity migration writes fences before it writes READY. A crash
+or invalid publication can therefore leave exact fences with no READY marker;
+keep writers paused, correct the underlying problem, then rerun the owner
+migration. It accepts an existing fence only when receipt, RAW, ENRICHED, scope,
+and expiry commitments match exactly. A collision or incompatible fence stops
+the backfill and leaves ENRICHER startup closed. Startup checks the strict
+validator, TTL index, READY record, and bounded fence-row shape; it never
+repairs schema or data.
+
+Only unexpired ENRICHED publications are backfilled. The fence expiry matches
+the source receipt's expiry and the TTL index removes it after that retention
+deadline. Source-owner receipt compaction also deletes the corresponding
+business fence in the same transaction that removes encrypted replay material,
+while retaining the source admission tombstone to reject replays. Expired
+publications are not reconstructed or adopted by the migration.
+
 Roll forward in this order:
 
 1. Pause attested ENRICHED writers and verify the owner change record.
@@ -124,6 +189,32 @@ transaction-history and last-transaction keys have shorter configured TTLs
 (8 and 30 days by default). Monitor Redis memory and the effective TTL
 configuration before removing dual reads in a separate reviewed change.
 
+### Attested event-time ordering
+
+No source contract currently defines a bounded event-time lateness allowance.
+The ENRICHER therefore accepts a new attested transaction only when its
+`transactionTimestamp` is equal to or later than the customer's latest applied
+attested timestamp. A regression fails before Redis window pruning with
+`FEATURE_EVENT_TIME_OUT_OF_ORDER`; the Kafka error handler sends it directly to
+the RAW DLT. The signed RAW record and verified source authority remain intact,
+but no ENRICHED publication or downstream SCORED occurrence is created. Do not
+retry by changing Redis state, replacing the source proof, or sending the event
+through the legacy path. Keep the DLT item for source-owner reconciliation.
+
+Attested RAW records are partitioned by a SHA-256 digest of customer ID so one
+customer is processed serially across ENRICHER instances. Legacy RAW records
+continue using the transaction-ID key. When deploying this routing change,
+pause source admission and RAW recovery, drain the RAW consumer group and
+in-flight attested RAW outbox, deploy the producer and ENRICHER versions
+together, and resume only after the consumer is healthy. Old and new routing
+must not be active together for the same customer's in-flight records.
+
+Exact RAW replay still resolves the existing canonical publication before
+feature calculation, so it remains idempotent even after normal velocity or
+merchant-window pruning. The one-minute window remains exclusive at its lower
+bound and inclusive at its upper bound; this ordering check does not change the
+feature windows or legacy behavior.
+
 The v3 receipt-bound commitment marker and customer transaction-ID survival
 index outlive naturally pruned velocity-window memberships. Natural expiry from
 the one-minute customer window or seven-day merchant window therefore does not
@@ -163,45 +254,45 @@ redriven.
 ## Measured merchant-history read profile
 
 The gated benchmark uses Redis Testcontainers and measures v2-only, v3-only,
-disjoint v2/v3, and overlapping v2/v3 histories. Each reported profile has 3
-warmups and 8 timed reads. Values below are milliseconds for p50/p95/max,
-allocated bytes per read, observed post-read heap peak in bytes, GC count/time
-delta, and Redis commands per read. The routine profile covers 0, 1,000,
-10,000, and 100,000 union entries; the separate 250,000-to-1,000,000 stress
-profile was skipped.
+disjoint v2/v3, and overlapping v2/v3 histories. Each routine profile has 3
+warmups and 8 timed reads. Values are milliseconds for p50/p95/max, allocated
+bytes per read, observed post-read heap peak in bytes, GC count/time delta, all
+Redis command-stat calls per read (excluding the INFO snapshots), and Redis
+`used_memory` after the reads. The 8-sample nearest-rank p95 equals the
+maximum; it is only a descriptive sample, and no p99 is reported. The routine
+profile covers 0, 1,000, 10,000, and 100,000 union entries. High-bound 250,000,
+500,000, and 1,000,000 profiles are separately gated and were not run.
 
-| Union | Mode | p50 / p95 / max ms | Allocated B/read | Heap peak B | GC count / ms | Redis commands/read |
-|---:|---|---:|---:|---:|---:|---:|
-| 0 | v3 only | 16.149 / 20.216 / 20.216 | 33,292 | 43,586,320 | 0 / 0 | 12 |
-| 0 | v2 only | 15.588 / 18.763 / 18.763 | 33,176 | 44,634,896 | 0 / 0 | 12 |
-| 0 | disjoint | 13.947 / 15.368 / 15.368 | 33,145 | 46,732,048 | 0 / 0 | 12 |
-| 0 | overlap | 14.281 / 18.416 / 18.416 | 33,139 | 48,829,200 | 0 / 0 | 12 |
-| 1,000 | v3 only | 19.023 / 29.647 / 29.647 | 306,602 | 56,169,232 | 1 / 8 | 12 |
-| 1,000 | v2 only | 15.588 / 19.777 / 19.777 | 306,706 | 38,501,784 | 0 / 0 | 12 |
-| 1,000 | disjoint | 14.819 / 17.080 / 17.080 | 306,677 | 46,890,392 | 0 / 0 | 12 |
-| 1,000 | overlap | 17.020 / 20.172 / 20.172 | 531,516 | 57,376,152 | 1 / 3 | 12 |
-| 10,000 | v3 only | 25.226 / 31.802 / 31.802 | 2,615,613 | 56,327,576 | 1 / 4 | 12 |
-| 10,000 | v2 only | 20.535 / 38.778 / 38.778 | 2,615,619 | 57,570,472 | 3 / 15 | 12 |
-| 10,000 | disjoint | 20.522 / 31.245 / 31.245 | 2,615,781 | 57,469,664 | 3 / 9 | 12 |
-| 10,000 | overlap | 27.924 / 34.650 / 34.650 | 4,746,853 | 150,448,448 | 0 / 0 | 12 |
-| 100,000 | v3 only | 113.638 / 158.951 / 158.951 | 28,476,445 | 232,259,584 | 15 / 139 | 12 |
-| 100,000 | v2 only | 100.043 / 129.843 / 129.843 | 28,476,540 | 293,601,280 | 10 / 84 | 12 |
-| 100,000 | disjoint | 94.326 / 145.427 / 145.427 | 28,477,509 | 333,447,168 | 9 / 78 | 12 |
-| 100,000 | overlap | 197.638 / 260.904 / 260.904 | 51,622,373 | 308,281,344 | 16 / 148 | 12 |
+| Union | Mode | p50 / p95 / max ms | Allocated B/read | Post-read heap peak B | GC count / ms | Commands/read | Redis used memory B |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 0 | v3 only | 23.152 / 27.339 / 27.339 | 37,906 | 36,557,160 | 0 / 0 | 14 | 1,087,296 |
+| 0 | v2 only | 19.002 / 21.642 / 21.642 | 39,292 | 38,654,312 | 0 / 0 | 14 | 1,087,296 |
+| 0 | disjoint | 13.180 / 17.889 / 17.889 | 37,741 | 39,702,888 | 0 / 0 | 14 | 1,087,296 |
+| 0 | overlap | 14.300 / 17.989 / 17.989 | 37,741 | 41,800,040 | 0 / 0 | 14 | 1,087,296 |
+| 1,000 | v3 only | 17.765 / 20.444 / 20.444 | 311,308 | 55,431,528 | 0 / 0 | 14 | 1,198,984 |
+| 1,000 | v2 only | 19.842 / 21.310 / 21.310 | 311,055 | 36,899,856 | 0 / 0 | 14 | 1,199,160 |
+| 1,000 | disjoint | 17.550 / 19.919 / 19.919 | 311,285 | 45,288,464 | 0 / 0 | 14 | 1,200,304 |
+| 1,000 | overlap | 18.227 / 22.302 / 22.302 | 536,120 | 56,822,800 | 1 / 2 | 14 | 1,286,640 |
+| 10,000 | v3 only | 27.372 / 31.986 / 31.986 | 2,620,223 | 57,028,520 | 1 / 4 | 14 | 2,161,424 |
+| 10,000 | v2 only | 23.241 / 32.957 / 32.957 | 2,620,221 | 79,477,384 | 0 / 0 | 14 | 2,160,096 |
+| 10,000 | disjoint | 19.080 / 24.427 / 24.427 | 2,620,389 | 144,489,096 | 0 / 0 | 14 | 2,152,600 |
+| 10,000 | overlap | 25.285 / 30.915 / 30.915 | 4,751,593 | 197,966,472 | 1 / 2 | 14 | 3,210,872 |
+| 100,000 | v3 only | 121.675 / 303.130 / 303.130 | 28,481,055 | 229,638,144 | 11 / 174 | 14 | 10,738,728 |
+| 100,000 | v2 only | 99.430 / 138.799 / 138.799 | 28,481,053 | 223,746,704 | 15 / 135 | 14 | 10,749,864 |
+| 100,000 | disjoint | 84.608 / 109.056 / 109.056 | 28,482,117 | 290,256,016 | 10 / 87 | 14 | 10,739,912 |
+| 100,000 | overlap | 163.256 / 185.050 / 185.050 | 51,626,981 | 318,489,928 | 17 / 147 | 14 | 20,391,712 |
 
-The measured implementation replaces the merchant-ID `LinkedHashMap` with a
-`HashMap`; merchant map iteration order is not part of the output contract.
-At 100,000 entries, measured allocation fell from 29,276,461 to 28,476,445 B
-for v3-only, 29,276,556 to 28,476,540 B for v2-only, 29,277,525 to 28,477,509
-B for disjoint data, and 52,422,389 to 51,622,373 B for overlapping data. The
-change reduces allocation by about 2.7% in the first three profiles and 1.5%
-for overlap; p95 varies between runs, so this is not an SLO claim. The
-conflicting duplicate timestamp profile failed closed in 17.183 ms. No
-250,000-to-1,000,000 result is available.
+The benchmark replaces the merchant-ID `LinkedHashMap` with a `HashMap`; map
+iteration order is not part of the output contract. The corrected command
+instrumentation sums Redis command-stat calls and excludes its own INFO
+snapshots. The conflicting duplicate timestamp profile failed closed, in
+12.308 ms in this run. Heap peak is sampled after each completed read and may
+miss a short-lived peak within a read. These measurements are diagnostic and
+do not establish a latency or throughput SLO.
 
-The post-change run used JDK 21.0.10, `-Xmx1g`, `redis:7.2-alpine` constrained
+The validation run used JDK 21.0.10, `-Xmx1g`, `redis:7.2-alpine` constrained
 to 1 GiB, Redis `maxmemory=0` within that container limit, and a host reporting
-33,570,611,200 bytes of memory. It ran with:
+33,570,611,200 bytes total memory. It ran with:
 
 ```powershell
 mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dtest=RedisMerchantHistoryBenchmarkTest" `
@@ -209,10 +300,18 @@ mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dtest=RedisMerchantHistoryBenchmarkTest"
   "-Dsurefire.failIfNoSpecifiedTests=false" -pl feature-enricher-service -am test
 ```
 
-The benchmark validates exact union counts and conflicting duplicate handling,
-but does not establish a latency target or measured capacity at the one-million
-contract ceiling. Keep the separately gated high-bound stress profile for a
-resource-controlled job.
+The high-bound test requires both benchmark and stress opt-ins, at least a
+4 GiB Java heap, at least 8 GiB free host memory, and has a 20-minute timeout.
+It seeds in bounded 10,000-entry batches. This run used a 1 GiB heap and did
+not enable the stress property, so the 250,000, 500,000, and 1,000,000 profiles
+were intentionally not measured. The one-million feature bound is a resource
+ceiling, not evidence that the profile fits a 1 GiB heap or meets a latency
+target.
+
+To opt into the high-bound test after confirming the heap and free-memory
+preconditions, add `-Dmerchant.history.stress=true` and `-DargLine=-Xmx4g` to
+the Maven command above. The test reports each size/mode as it completes; stop
+the run if host or container memory pressure appears.
 
 ## Normal runtime and health
 

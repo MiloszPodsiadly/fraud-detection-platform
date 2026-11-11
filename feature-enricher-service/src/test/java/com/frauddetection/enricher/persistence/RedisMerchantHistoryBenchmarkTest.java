@@ -8,9 +8,11 @@ import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
 import com.frauddetection.enricher.service.CurrencyAmountConverter;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisCallback;
@@ -29,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,6 +49,7 @@ class RedisMerchantHistoryBenchmarkTest {
     private static final String MERCHANT = "merchant-benchmark-id";
     private static final int WARMUP_ITERATIONS = 3;
     private static final int MEASURED_ITERATIONS = 8;
+    private static final int SEED_BATCH_SIZE = 10_000;
     private static final long REDIS_MEMORY_LIMIT_BYTES = 1_073_741_824L;
     private static final Pattern CALLS = Pattern.compile("calls=(\\d+)");
 
@@ -108,44 +112,69 @@ class RedisMerchantHistoryBenchmarkTest {
 
         for (int size : List.of(0, 1_000, 10_000, 100_000)) {
             for (Mode mode : List.of(Mode.V3_ONLY, Mode.V2_ONLY, Mode.DISJOINT, Mode.OVERLAP)) {
-                Scenario scenario = new Scenario(size, mode);
-                redis.getConnectionFactory().getConnection().serverCommands().flushDb();
-                seed(scenario);
-                long expected = scenario.expectedUnionSize();
-                for (int index = 0; index < WARMUP_ITERATIONS; index++) {
-                    assertThat(store.loadSnapshot(current, namespace).merchantFrequency7d()).isEqualTo(expected);
-                }
-                var gcBefore = gcSnapshot();
-                Properties beforeCommands = redisInfo("commandstats");
-                long threadId = Thread.currentThread().threadId();
-                long allocatedBefore = allocationBytes(threadId);
-                long observedHeapPeak = usedHeap();
-                List<Long> elapsedNanos = new ArrayList<>(MEASURED_ITERATIONS);
-                for (int index = 0; index < MEASURED_ITERATIONS; index++) {
-                    long start = System.nanoTime();
-                    var snapshot = store.loadSnapshot(current, namespace);
-                    elapsedNanos.add(System.nanoTime() - start);
-                    assertThat(snapshot.merchantFrequency7d()).isEqualTo(expected);
-                    observedHeapPeak = Math.max(observedHeapPeak, usedHeap());
-                }
-                long allocated = allocationBytes(threadId) - allocatedBefore;
-                Properties afterCommands = redisInfo("commandstats");
-                long commandCount = redisCalls(afterCommands) - redisCalls(beforeCommands);
-                var gcAfter = gcSnapshot();
-                elapsedNanos.sort(Comparator.naturalOrder());
-                System.out.printf("MERCHANT_BENCHMARK_RESULT mode=%s requestedUnion=%d v3=%d v2=%d expected=%d "
-                                + "p50Ms=%.3f p95Ms=%.3f maxMs=%.3f allocatedBytesPerRead=%d postReadHeapPeakBytes=%d "
-                                + "gcCollectionsDelta=%d gcTimeMsDelta=%d redisCommandsPerRead=%.1f%n",
-                        mode, size, scenario.v3Count(), scenario.v2Count(), expected,
-                        millis(percentile(elapsedNanos, .50)), millis(percentile(elapsedNanos, .95)),
-                        millis(elapsedNanos.getLast()), allocated / MEASURED_ITERATIONS, observedHeapPeak,
-                        gcAfter.collections() - gcBefore.collections(), gcAfter.timeMillis() - gcBefore.timeMillis(),
-                        (double) commandCount / MEASURED_ITERATIONS);
+                measure(new Scenario(size, mode), WARMUP_ITERATIONS, MEASURED_ITERATIONS, "routine");
             }
         }
         assertMalformedDuplicateFailsClosed();
         System.out.printf("MERCHANT_BENCHMARK_END usedHeapBeforeBytes=%d usedHeapAfterBytes=%d maxMeasuredUnion=100000 "
-                        + "stress250kTo1m=SKIPPED routineProfile=true%n", heapBefore, usedHeap());
+                        + "highBoundStress=SEPARATELY_GATED routineProfile=true%n", heapBefore, usedHeap());
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "merchant.history.stress", matches = "true")
+    @Timeout(value = 20, unit = TimeUnit.MINUTES)
+    void recordsGatedHighBoundHistoryReadMeasurements() {
+        var os = (com.sun.management.OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+        Assumptions.assumeTrue(Runtime.getRuntime().maxMemory() >= 4L * 1024 * 1024 * 1024,
+                "high-bound profile requires a 4 GiB Java heap");
+        Assumptions.assumeTrue(os.getFreeMemorySize() >= 8L * 1024 * 1024 * 1024,
+                "high-bound profile requires 8 GiB free host memory");
+        System.out.printf("MERCHANT_BENCHMARK_HIGH_BOUND_ENV maxHeapBytes=%d freeHostMemoryBytes=%d redisMemoryLimitBytes=%d "
+                        + "timeoutMinutes=20 warmup=%d iterations=%d%n",
+                Runtime.getRuntime().maxMemory(), os.getFreeMemorySize(), REDIS_MEMORY_LIMIT_BYTES,
+                WARMUP_ITERATIONS, MEASURED_ITERATIONS);
+        for (int size : List.of(250_000, 500_000, 1_000_000)) {
+            for (Mode mode : List.of(Mode.V3_ONLY, Mode.V2_ONLY, Mode.DISJOINT, Mode.OVERLAP)) {
+                measure(new Scenario(size, mode), WARMUP_ITERATIONS, MEASURED_ITERATIONS, "high-bound");
+            }
+        }
+    }
+
+    private void measure(Scenario scenario, int warmups, int iterations, String profile) {
+        redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+        seed(scenario);
+        long expected = scenario.expectedUnionSize();
+        for (int index = 0; index < warmups; index++) {
+            assertThat(store.loadSnapshot(current, namespace).merchantFrequency7d()).isEqualTo(expected);
+        }
+        var gcBefore = gcSnapshot();
+        Properties beforeCommands = redisInfo("commandstats");
+        long threadId = Thread.currentThread().threadId();
+        long allocatedBefore = allocationBytes(threadId);
+        long observedHeapPeak = usedHeap();
+        List<Long> elapsedNanos = new ArrayList<>(iterations);
+        for (int index = 0; index < iterations; index++) {
+            long start = System.nanoTime();
+            var snapshot = store.loadSnapshot(current, namespace);
+            elapsedNanos.add(System.nanoTime() - start);
+            assertThat(snapshot.merchantFrequency7d()).isEqualTo(expected);
+            observedHeapPeak = Math.max(observedHeapPeak, usedHeap());
+        }
+        long allocated = allocationBytes(threadId) - allocatedBefore;
+        Properties afterCommands = redisInfo("commandstats");
+        long commandCount = redisCalls(afterCommands) - redisCalls(beforeCommands)
+                - (redisCalls(afterCommands, "info") - redisCalls(beforeCommands, "info"));
+        long redisUsedMemory = Long.parseLong(redisInfo("memory").getProperty("used_memory", "0"));
+        var gcAfter = gcSnapshot();
+        elapsedNanos.sort(Comparator.naturalOrder());
+        System.out.printf("MERCHANT_BENCHMARK_RESULT profile=%s samples=%d mode=%s requestedUnion=%d v3=%d v2=%d expected=%d "
+                        + "p50Ms=%.3f p95Ms=%.3f maxMs=%.3f allocatedBytesPerRead=%d postReadHeapPeakBytes=%d "
+                        + "gcCollectionsDelta=%d gcTimeMsDelta=%d redisCommandsPerRead=%.1f redisUsedMemoryBytes=%d%n",
+                profile, iterations, scenario.mode(), scenario.requestedUnion(), scenario.v3Count(), scenario.v2Count(), expected,
+                millis(percentile(elapsedNanos, .50)), millis(percentile(elapsedNanos, .95)),
+                millis(elapsedNanos.getLast()), allocated / iterations, observedHeapPeak,
+                gcAfter.collections() - gcBefore.collections(), gcAfter.timeMillis() - gcBefore.timeMillis(),
+                (double) commandCount / iterations, redisUsedMemory);
     }
 
     private void seed(Scenario scenario) {
@@ -154,17 +183,22 @@ class RedisMerchantHistoryBenchmarkTest {
         byte[] v3Prefix = (scenario.mode() == Mode.DISJOINT ? "v3-" : "tx-").getBytes(StandardCharsets.UTF_8);
         byte[] v2Prefix = (scenario.mode() == Mode.DISJOINT ? "v2-" : "tx-").getBytes(StandardCharsets.UTF_8);
         long scoreBase = EVENT_TIME.minus(Duration.ofHours(1)).toEpochMilli();
-        redis.executePipelined((RedisCallback<Object>) connection -> {
-            for (int index = 0; index < scenario.v3Count(); index++) {
-                connection.zAdd(v3Key, scoreBase + index,
-                        join(v3Prefix, Integer.toString(index).getBytes(StandardCharsets.UTF_8)));
-            }
-            for (int index = 0; index < scenario.v2Count(); index++) {
-                connection.zAdd(v2Key, scoreBase + index,
-                        join(v2Prefix, Integer.toString(index).getBytes(StandardCharsets.UTF_8)));
-            }
-            return null;
-        });
+        int batches = Math.max(scenario.v3Count(), scenario.v2Count());
+        for (int start = 0; start < batches; start += SEED_BATCH_SIZE) {
+            int batchStart = start;
+            int batchEnd = Math.min(batches, start + SEED_BATCH_SIZE);
+            redis.executePipelined((RedisCallback<Object>) connection -> {
+                for (int index = batchStart; index < Math.min(batchEnd, scenario.v3Count()); index++) {
+                    connection.zAdd(v3Key, scoreBase + index,
+                            join(v3Prefix, Integer.toString(index).getBytes(StandardCharsets.UTF_8)));
+                }
+                for (int index = batchStart; index < Math.min(batchEnd, scenario.v2Count()); index++) {
+                    connection.zAdd(v2Key, scoreBase + index,
+                            join(v2Prefix, Integer.toString(index).getBytes(StandardCharsets.UTF_8)));
+                }
+                return null;
+            });
+        }
     }
 
     private void assertMalformedDuplicateFailsClosed() {
@@ -187,13 +221,18 @@ class RedisMerchantHistoryBenchmarkTest {
 
     private static long redisCalls(Properties info) {
         long calls = 0;
-        for (String command : List.of("zrangebyscore", "zremrangebyscore", "sismember", "get")) {
-            String value = info.getProperty("cmdstat_" + command);
-            if (value == null) { continue; }
-            Matcher matcher = CALLS.matcher(value);
-            if (matcher.find()) { calls += Long.parseLong(matcher.group(1)); }
+        for (String property : info.stringPropertyNames()) {
+            if (!property.startsWith("cmdstat_")) { continue; }
+            calls += redisCalls(info, property.substring("cmdstat_".length()));
         }
         return calls;
+    }
+
+    private static long redisCalls(Properties info, String command) {
+        String value = info.getProperty("cmdstat_" + command);
+        if (value == null) { return 0; }
+        Matcher matcher = CALLS.matcher(value);
+        return matcher.find() ? Long.parseLong(matcher.group(1)) : 0;
     }
 
     private static long percentile(List<Long> sorted, double quantile) {
