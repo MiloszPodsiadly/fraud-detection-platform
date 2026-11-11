@@ -2,6 +2,7 @@ package com.frauddetection.common.events.source;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.CreateCollectionOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.ReplaceOptions;
@@ -43,6 +44,7 @@ final class SourceEnrichedBusinessIdentitySchema {
                 || rows < 0 || rows > MAX_BACKFILL_ROWS) {
             throw incompatible("MIGRATION_INCOMPLETE");
         }
+        verifyRecords(database);
     }
 
     /** Owner-only forward migration; bounded to the maximum source admission capacity. */
@@ -147,7 +149,16 @@ final class SourceEnrichedBusinessIdentitySchema {
 
     private static void ensureCollection(MongoDatabase database, boolean owner) {
         Document existing = database.listCollections().filter(eq("name", COLLECTION)).first();
-        if (existing != null) { return; }
+        if (existing != null) {
+            if (owner && hasExpectedValidator(existing)) {
+                var indexes = database.getCollection(COLLECTION).listIndexes().into(new ArrayList<>());
+                if (indexes.size() == 1 && isIdIndex(indexes.getFirst())) {
+                    database.getCollection(COLLECTION).createIndex(new Document("expiresAt", 1),
+                            new IndexOptions().name(EXPIRY_INDEX).expireAfter(0L, TimeUnit.SECONDS));
+                }
+            }
+            return;
+        }
         if (!owner) { throw incompatible("OWNER_MIGRATION_REQUIRED"); }
         database.createCollection(COLLECTION, new CreateCollectionOptions().validationOptions(new ValidationOptions()
                 .validator(validator()).validationLevel(ValidationLevel.STRICT).validationAction(ValidationAction.ERROR)));
@@ -173,6 +184,51 @@ final class SourceEnrichedBusinessIdentitySchema {
                 || expiry.containsKey("partialFilterExpression") || expiry.containsKey("collation")) {
             throw incompatible("INDEX_INVALID");
         }
+    }
+
+    private static boolean hasExpectedValidator(Document collection) {
+        Document options = collection.get("options", Document.class);
+        return options != null && options.keySet().equals(Set.of("validator", "validationLevel", "validationAction"))
+                && validator().equals(options.get("validator")) && "strict".equals(options.getString("validationLevel"))
+                && "error".equals(options.getString("validationAction"));
+    }
+
+    private static boolean isIdIndex(Document index) {
+        return index != null && "_id_".equals(index.getString("name")) && new Document("_id", 1).equals(index.get("key"));
+    }
+
+    /** Existing BSON rows are not retroactively checked by Mongo's strict collection validator. */
+    private static void verifyRecords(MongoDatabase database) {
+        int count = 0;
+        boolean readySeen = false;
+        try (MongoCursor<Document> cursor = database.getCollection(COLLECTION).find().limit(MAX_BACKFILL_ROWS + 2).iterator()) {
+            while (cursor.hasNext()) {
+                Document row = cursor.next();
+                if (++count > MAX_BACKFILL_ROWS + 1) { throw incompatible("RECORD_LIMIT_EXCEEDED"); }
+                if (READY_ID.equals(row.getString("_id"))) {
+                    if (readySeen || !isReadyRecord(row)) { throw incompatible("MIGRATION_INCOMPLETE"); }
+                    readySeen = true;
+                } else if (!isFenceRecord(row)) {
+                    throw incompatible("FENCE_INVALID");
+                }
+            }
+        }
+        if (!readySeen) { throw incompatible("MIGRATION_INCOMPLETE"); }
+    }
+
+    private static boolean isReadyRecord(Document row) {
+        return row != null && row.keySet().equals(Set.of("_id", "schemaVersion", "recordType", "completedAt", "backfilledRows"))
+                && READY_ID.equals(row.getString("_id")) && row.getInteger("schemaVersion", 0) == 1
+                && "READY".equals(row.getString("recordType")) && row.get("completedAt") instanceof Date
+                && row.get("backfilledRows") instanceof Integer rows && rows >= 0 && rows <= MAX_BACKFILL_ROWS;
+    }
+
+    private static boolean isFenceRecord(Document row) {
+        return row != null && row.keySet().equals(Set.of("_id", "schemaVersion", "recordType", "receiptId", "rawCommitment",
+                "enrichedCommitment", "expiresAt")) && isHash(row.getString("_id")) && !READY_ID.equals(row.getString("_id"))
+                && row.getInteger("schemaVersion", 0) == 1 && "FENCE".equals(row.getString("recordType"))
+                && isHash(row.getString("receiptId")) && isHash(row.getString("rawCommitment"))
+                && isHash(row.getString("enrichedCommitment")) && row.get("expiresAt") instanceof Date;
     }
 
     private static Document validator() {

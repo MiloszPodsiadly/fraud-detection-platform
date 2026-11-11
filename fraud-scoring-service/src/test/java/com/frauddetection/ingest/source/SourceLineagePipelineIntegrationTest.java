@@ -70,6 +70,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.*;
 import java.util.*;
 import java.lang.reflect.InvocationTargetException;
@@ -225,6 +227,253 @@ class SourceLineagePipelineIntegrationTest {
         assertThatThrownBy(() -> SourceEnrichedPublicationRecoveryMigration.migrate(database))
                 .isInstanceOf(IllegalStateException.class).hasMessage("SOURCE_LINEAGE_SCHEMA_INCOMPATIBLE");
         database.drop();
+    }
+
+    @Test void businessIdentityMigrationIsOwnerOnlyAndInitializesAnEmptyFenceBeforeEnricherStartup() {
+        var database = ownerClient.getDatabase(db);
+        var identities = database.getCollection("source_enriched_business_identities");
+        assertThat(identities.find(eq("_id", "0".repeat(64))).first())
+                .containsEntry("schemaVersion", 1).containsEntry("recordType", "READY").containsEntry("backfilledRows", 0);
+
+        Document collection = database.listCollections().filter(eq("name", "source_enriched_business_identities")).first();
+        Document options = collection.get("options", Document.class);
+        assertThat(options.getString("validationLevel")).isEqualTo("strict");
+        assertThat(options.getString("validationAction")).isEqualTo("error");
+        assertThat(options.get("validator", Document.class).get("$jsonSchema", Document.class)
+                .getList("oneOf", Document.class)).hasSize(2);
+        List<Document> indexes = identities.listIndexes().into(new ArrayList<>());
+        assertThat(indexes).extracting(row -> row.getString("name"))
+                .containsExactlyInAnyOrder("_id_", "source_business_identity_expiry");
+        assertThat(indexes.stream().filter(row -> "source_business_identity_expiry".equals(row.getString("name")))
+                .findFirst().orElseThrow()).containsEntry("expireAfterSeconds", 0);
+
+        identities.drop();
+        var limitedDatabase = enricherClient.getDatabase(db);
+        assertThatThrownBy(() -> SourceEnrichedBusinessIdentityMigration.migrate(limitedDatabase,
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)), CLOCK))
+                .isInstanceOf(MongoCommandException.class);
+        assertThatThrownBy(() -> newEnricher(CLOCK, verifier))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_INDEX_INVALID");
+
+        assertThatCode(() -> SourceEnrichedBusinessIdentityMigration.migrate(database,
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)), CLOCK))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> newEnricher(CLOCK, verifier)).doesNotThrowAnyException();
+
+        assertThatThrownBy(() -> limitedDatabase.getCollection("source_enriched_business_identities")
+                .createIndex(new Document("probe", 1))).isInstanceOf(MongoCommandException.class);
+        assertThatThrownBy(() -> limitedDatabase.getCollection("source_enriched_business_identities")
+                .updateOne(eq("_id", "0".repeat(64)), new Document("$set", new Document("backfilledRows", 1))))
+                .isInstanceOf(MongoCommandException.class);
+        assertThatThrownBy(() -> limitedDatabase.getCollection("source_enriched_business_identities")
+                .deleteOne(eq("_id", "0".repeat(64)))).isInstanceOf(MongoCommandException.class);
+        assertThatThrownBy(() -> scorerClient.getDatabase(db).getCollection("source_enriched_business_identities")
+                .countDocuments()).isInstanceOf(MongoCommandException.class);
+    }
+
+    @Test void businessIdentityMigrationBackfillsTenPublicationsIdempotentlyAndSeparatesSourceScopes() throws Exception {
+        var base = TestSourceIssuer.policy(0, false);
+        var otherInstitution = new SourceVerificationProperties.TrustedKey("second-test-issuer", "institution-b",
+                base.source(), base.sourceEpoch(), base.signingKeyVersion(), base.algorithm(), base.publicKeyBase64(),
+                base.notBefore(), base.notAfter(), false, base.purpose(), base.audience(), base.policyVersion());
+        var nextEpoch = new SourceVerificationProperties.TrustedKey(base.issuer(), base.institution(), base.source(),
+                "epoch-b", base.signingKeyVersion(), base.algorithm(), base.publicKeyBase64(), base.notBefore(),
+                base.notAfter(), false, base.purpose(), base.audience(), base.policyVersion());
+        verifier = new SourceSignatureVerifier(new SourceVerificationProperties(List.of(base, otherInstitution, nextEpoch)), CLOCK);
+        owner = new MongoSourceLineage(ownerClient, db, "source_owner", MongoSourceLineage.Stage.INGEST, verifier, CLOCK);
+        receipts = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, owner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES);
+        var cipher = new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY));
+        enricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER, verifier, CLOCK, cipher);
+
+        List<TransactionRawEvent> admitted = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            TransactionRawEvent raw = admit(payload("migration-txn-" + i, TestSourceIssuer.NOW.plusSeconds(i),
+                    Integer.toString(10 + i) + ".00", "migration-merchant-" + i),
+                    Map.of("sourceEventId", "migration-source-" + i));
+            enrich(raw);
+            admitted.add(raw);
+        }
+        for (Map<String, Object> scope : List.<Map<String, Object>>of(Map.of(), Map.of("issuer", otherInstitution.issuer(),
+                "institution", otherInstitution.institution()), Map.of("sourceEpoch", nextEpoch.sourceEpoch()))) {
+            int index = admitted.size();
+            Map<String, Object> claims = new HashMap<>(scope);
+            claims.put("sourceEventId", "migration-shared-source-" + index);
+            TransactionRawEvent raw = admit(payload("migration-shared-transaction", TestSourceIssuer.NOW.plusSeconds(100 + index),
+                    Integer.toString(30 + index) + ".00", "migration-shared-merchant-" + index),
+                    claims);
+            enrich(raw);
+            admitted.add(raw);
+        }
+        assertThat(admitted).hasSize(13);
+        assertThat(admitted.stream().map(raw -> enricher.raw(raw).source()).map(SourceScope::issuer).distinct()).hasSize(2);
+        assertThat(admitted.stream().map(raw -> enricher.raw(raw).source()).map(SourceScope::sourceEpoch).distinct()).hasSize(2);
+
+        ownerClient.getDatabase(db).getCollection("source_enriched_business_identities").drop();
+        var database = ownerClient.getDatabase(db);
+        SourceEnrichedBusinessIdentityMigration.migrate(database, cipher, CLOCK);
+        var identities = database.getCollection("source_enriched_business_identities");
+        assertThat(identities.countDocuments(eq("recordType", "FENCE"))).isEqualTo(13L);
+        assertThat(identities.find(eq("_id", "0".repeat(64))).first().getInteger("backfilledRows")).isEqualTo(13);
+
+        for (TransactionRawEvent raw : admitted) {
+            SourceLineage parent = enricher.raw(raw);
+            Document publication = database.getCollection("source_enriched_publications")
+                    .find(eq("rawCommitment", parent.eventCommitment())).first();
+            assertThat(publication).isNotNull();
+            TransactionEnrichedEvent event = cipher.decrypt(publication);
+            String businessIdentity = SourceEventCommitment.businessTransaction(parent.source(), event.customerId(), event.transactionId());
+            Document fence = identities.find(eq("_id", businessIdentity)).first();
+            assertThat(fence).containsEntry("receiptId", parent.receiptId())
+                    .containsEntry("rawCommitment", parent.eventCommitment())
+                    .containsEntry("enrichedCommitment", SourceEventCommitment.enriched(event));
+        }
+        List<Document> fencesBeforeRerun = identities.find(eq("recordType", "FENCE")).sort(new Document("_id", 1))
+                .into(new ArrayList<>());
+        Document readyBeforeRerun = identities.find(eq("_id", "0".repeat(64))).first();
+        SourceEnrichedBusinessIdentityMigration.migrate(database, cipher, CLOCK);
+        assertThat(identities.find(eq("recordType", "FENCE")).sort(new Document("_id", 1)).into(new ArrayList<>()))
+                .containsExactlyElementsOf(fencesBeforeRerun);
+        assertThat(identities.find(eq("_id", "0".repeat(64))).first()).isEqualTo(readyBeforeRerun);
+    }
+
+    @Test void businessIdentityMigrationDetectsSameScopeReceiptCollisionAndDoesNotPublishReady() throws Exception {
+        TransactionRawEvent first = admit(payload("same-business-id", TestSourceIssuer.NOW, "10.00", "merchant-a"),
+                Map.of("sourceEventId", "migration-conflict-a"));
+        TransactionRawEvent second = admit(payload("same-business-id", TestSourceIssuer.NOW.plusSeconds(30), "99.00", "merchant-b"),
+                Map.of("sourceEventId", "migration-conflict-b"));
+        SourceLineage firstParent = enricher.raw(first);
+        SourceLineage secondParent = enricher.raw(second);
+        TransactionEnrichedEvent firstEvent = enrichedCandidate(first);
+        TransactionEnrichedEvent secondEvent = enrichedCandidate(second);
+        assertThat(firstParent.receiptId()).isNotEqualTo(secondParent.receiptId());
+        assertThat(SourceEventCommitment.businessTransaction(firstParent.source(), first.customerId(), first.transactionId()))
+                .isEqualTo(SourceEventCommitment.businessTransaction(secondParent.source(), second.customerId(), second.transactionId()));
+        assertThat(firstEvent.transactionAmount()).isNotEqualTo(secondEvent.transactionAmount());
+        assertThat(firstEvent.merchantInfo().merchantId()).isNotEqualTo(secondEvent.merchantInfo().merchantId());
+
+        var database = ownerClient.getDatabase(db);
+        var identities = database.getCollection("source_enriched_business_identities");
+        identities.drop();
+        var cipher = new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY));
+        insertMigrationPublication(database, cipher, first, firstEvent);
+        insertMigrationPublication(database, cipher, second, secondEvent);
+
+        assertThatThrownBy(() -> SourceEnrichedBusinessIdentityMigration.migrate(database, cipher, CLOCK))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_BUSINESS_IDENTITY_COLLISION");
+        assertThat(identities.countDocuments(eq("recordType", "FENCE"))).isEqualTo(1L);
+        assertThat(identities.find(eq("_id", "0".repeat(64))).first()).isNull();
+        assertThatThrownBy(() -> newEnricher(CLOCK, verifier))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_MIGRATION_INCOMPLETE");
+    }
+
+    @Test void businessIdentityMigrationResumesAfterPartialBackfillAndEnricherWaitsForReady() throws Exception {
+        TransactionRawEvent first = admit(payload("resume-first", TestSourceIssuer.NOW, "10.00", "merchant-a"),
+                Map.of("sourceEventId", "migration-resume-a"));
+        TransactionRawEvent second = admit(payload("resume-second", TestSourceIssuer.NOW.plusSeconds(30), "20.00", "merchant-b"),
+                Map.of("sourceEventId", "migration-resume-b"));
+        var database = ownerClient.getDatabase(db);
+        var cipher = new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY));
+        insertMigrationPublication(database, cipher, first, enrichedCandidate(first));
+        insertMigrationPublication(database, cipher, second, enrichedCandidate(second));
+        var identities = database.getCollection("source_enriched_business_identities");
+        identities.drop();
+
+        List<Document> publications = database.getCollection("source_enriched_publications")
+                .find(new Document("expiresAt", new Document("$gt", Date.from(CLOCK.instant()))))
+                .sort(new Document("_id", 1)).into(new ArrayList<>());
+        assertThat(publications).hasSize(2);
+        Document interrupted = publications.get(1);
+        database.getCollection("source_enriched_publications").updateOne(eq("_id", interrupted.getString("_id")),
+                new Document("$set", new Document("ciphertext", new org.bson.types.Binary(new byte[] {1, 2, 3}))));
+
+        assertThatThrownBy(() -> SourceEnrichedBusinessIdentityMigration.migrate(database, cipher, CLOCK))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_PUBLICATION_UNAVAILABLE");
+        assertThat(identities.countDocuments(eq("recordType", "FENCE"))).isEqualTo(1L);
+        assertThat(identities.find(eq("_id", "0".repeat(64))).first()).isNull();
+        assertThatThrownBy(() -> newEnricher(CLOCK, verifier))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_MIGRATION_INCOMPLETE");
+
+        database.getCollection("source_enriched_publications").updateOne(eq("_id", interrupted.getString("_id")),
+                new Document("$set", new Document("ciphertext", interrupted.get("ciphertext"))));
+        SourceEnrichedBusinessIdentityMigration.migrate(database, cipher, CLOCK);
+        assertThat(identities.countDocuments(eq("recordType", "FENCE"))).isEqualTo(2L);
+        assertThat(identities.find(eq("_id", "0".repeat(64))).first().getInteger("backfilledRows")).isEqualTo(2);
+        assertThatCode(() -> newEnricher(CLOCK, verifier)).doesNotThrowAnyException();
+    }
+
+    @Test void businessIdentityMigrationSkipsExpiredPublicationsAndDoesNotAdoptThem() throws Exception {
+        TransactionRawEvent raw = admit(payload("expired-publication", TestSourceIssuer.NOW, "10.00", "merchant-expired"),
+                Map.of("sourceEventId", "migration-expired-publication"));
+        var database = ownerClient.getDatabase(db);
+        var cipher = new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY));
+        insertMigrationPublication(database, cipher, raw, enrichedCandidate(raw));
+        database.getCollection("source_enriched_business_identities").drop();
+
+        SourceEnrichedBusinessIdentityMigration.migrate(database, cipher, Clock.offset(CLOCK, Duration.ofHours(3)));
+        var identities = database.getCollection("source_enriched_business_identities");
+        assertThat(identities.countDocuments(eq("recordType", "FENCE"))).isZero();
+        assertThat(identities.find(eq("_id", "0".repeat(64))).first().getInteger("backfilledRows")).isZero();
+        assertThat(database.getCollection("source_enriched_publications")
+                .countDocuments(eq("rawCommitment", SourceEventCommitment.raw(raw)))).isEqualTo(1L);
+    }
+
+    @Test void businessIdentityStartupRejectsMalformedExistingFenceWithoutRepairingIt() throws Exception {
+        TransactionRawEvent raw = admit(payload("tampered-business-fence", TestSourceIssuer.NOW, "10.00", "merchant-fence"),
+                Map.of("sourceEventId", "migration-fence-tamper"));
+        enrich(raw);
+        var database = ownerClient.getDatabase(db);
+        var identities = database.getCollection("source_enriched_business_identities");
+        String businessIdentity = SourceEventCommitment.businessTransaction(enricher.raw(raw).source(), raw.customerId(), raw.transactionId());
+        Document originalCollection = database.listCollections().filter(eq("name", "source_enriched_business_identities")).first();
+        Document originalOptions = originalCollection.get("options", Document.class);
+        Document strictValidator = Document.parse(originalOptions.get("validator", Document.class).toJson());
+
+        database.runCommand(new Document("collMod", "source_enriched_business_identities")
+                .append("validator", new Document()).append("validationLevel", "strict").append("validationAction", "error"));
+        identities.updateOne(eq("_id", businessIdentity), new Document("$set", new Document("recordType", "CORRUPT")));
+        database.runCommand(new Document("collMod", "source_enriched_business_identities")
+                .append("validator", strictValidator).append("validationLevel", "strict").append("validationAction", "error"));
+
+        assertThatThrownBy(() -> newEnricher(CLOCK, verifier))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_FENCE_INVALID");
+        assertThat(identities.find(eq("_id", businessIdentity)).first().getString("recordType")).isEqualTo("CORRUPT");
+    }
+
+    @Test void businessIdentityStartupRejectsTamperedValidatorIndexAndReadyMetadataWithoutRepairingThem() {
+        var database = ownerClient.getDatabase(db);
+        var identities = database.getCollection("source_enriched_business_identities");
+        Document originalCollection = database.listCollections().filter(eq("name", "source_enriched_business_identities")).first();
+        Document originalOptions = originalCollection.get("options", Document.class);
+        Document strictValidator = Document.parse(originalOptions.get("validator", Document.class).toJson());
+
+        Document invalidValidator = new Document("$jsonSchema", new Document("bsonType", "object"));
+        database.runCommand(new Document("collMod", "source_enriched_business_identities")
+                .append("validator", invalidValidator).append("validationLevel", "strict").append("validationAction", "error"));
+        assertThatThrownBy(() -> newEnricher(CLOCK, verifier))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_SCHEMA_INVALID");
+        assertThat(database.listCollections().filter(eq("name", "source_enriched_business_identities")).first()
+                .get("options", Document.class).get("validator")).isEqualTo(invalidValidator);
+
+        database.runCommand(new Document("collMod", "source_enriched_business_identities")
+                .append("validator", strictValidator).append("validationLevel", "strict").append("validationAction", "error"));
+        identities.dropIndex("source_business_identity_expiry");
+        assertThatThrownBy(() -> newEnricher(CLOCK, verifier))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_INDEX_INVALID");
+        assertThat(identities.listIndexes().into(new ArrayList<>())).extracting(row -> row.getString("name"))
+                .containsExactly("_id_");
+
+        identities.createIndex(new Document("expiresAt", 1), new com.mongodb.client.model.IndexOptions()
+                .name("source_business_identity_expiry").expireAfter(0L, TimeUnit.SECONDS));
+        database.runCommand(new Document("collMod", "source_enriched_business_identities")
+                .append("validator", new Document()).append("validationLevel", "strict").append("validationAction", "error"));
+        identities.updateOne(eq("_id", "0".repeat(64)), new Document("$set", new Document("backfilledRows", 100_001)));
+        database.runCommand(new Document("collMod", "source_enriched_business_identities")
+                .append("validator", strictValidator).append("validationLevel", "strict").append("validationAction", "error"));
+        assertThatThrownBy(() -> newEnricher(CLOCK, verifier))
+                .hasMessage("SOURCE_BUSINESS_IDENTITY_MIGRATION_MIGRATION_INCOMPLETE");
+        assertThat(identities.find(eq("_id", "0".repeat(64))).first().getInteger("backfilledRows")).isEqualTo(100_001);
     }
 
     @Test void enrichedRecoveryMigrationUpgradesThePreviousHistoryValidator() {
@@ -441,9 +690,26 @@ class SourceLineagePipelineIntegrationTest {
     }
 
     @Test void expiredEnrichedClaimsCannotFinalizeOrSendAfterAnotherWorkerTakesOver() throws Exception {
-        var beforeHistoryRaw = admit(Map.of("sourceEventId", "lease-before-history"));
+        var beforeHistoryRaw = admit(payload("lease-before-history-tx", TestSourceIssuer.NOW),
+                Map.of("sourceEventId", "lease-before-history"));
         var beforeHistoryCandidate = enrichedCandidate(beforeHistoryRaw);
         var beforeHistoryPrepared = enricher.prepareEnrichedPublication(beforeHistoryRaw, beforeHistoryCandidate);
+
+        var afterHistoryRaw = admit(payload("lease-after-history-tx", TestSourceIssuer.NOW.plus(Duration.ofMinutes(1))),
+                Map.of("sourceEventId", "lease-after-history"));
+        var afterHistoryCandidate = enrichedCandidate(afterHistoryRaw);
+        var afterHistoryPrepared = enricher.prepareEnrichedPublication(afterHistoryRaw, afterHistoryCandidate);
+
+        assertThat(beforeHistoryRaw.transactionId()).isNotEqualTo(afterHistoryRaw.transactionId());
+        assertThat(beforeHistoryPrepared.authority().state()).isEqualTo(VERIFIED);
+        assertThat(afterHistoryPrepared.authority().state()).isEqualTo(VERIFIED);
+        var publications = ownerClient.getDatabase(db).getCollection("source_enriched_publications");
+        assertThat(publications.find(eq("rawCommitment", SourceEventCommitment.raw(beforeHistoryRaw))).first())
+                .isNotNull();
+        assertThat(publications.find(eq("rawCommitment", SourceEventCommitment.raw(afterHistoryRaw))).first())
+                .isNotNull();
+        assertThat(publications.countDocuments()).isEqualTo(2L);
+
         var beforeHistoryA = enricher.claimEnrichedPublication(beforeHistoryRaw, beforeHistoryPrepared.event());
         var workerB = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(31)), policy(false));
         var beforeHistoryB = workerB.claimEnrichedPublication(beforeHistoryRaw, beforeHistoryPrepared.event());
@@ -454,9 +720,6 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(workerB.renewEnrichedPublicationLeaseForSend(beforeHistoryB, 10_000L)).isTrue();
         assertThat(workerB.markEnrichedPublished(beforeHistoryB).state()).isEqualTo(VERIFIED);
 
-        var afterHistoryRaw = admit(Map.of("sourceEventId", "lease-after-history"));
-        var afterHistoryCandidate = enrichedCandidate(afterHistoryRaw);
-        var afterHistoryPrepared = enricher.prepareEnrichedPublication(afterHistoryRaw, afterHistoryCandidate);
         var afterHistoryA = enricher.claimEnrichedPublication(afterHistoryRaw, afterHistoryPrepared.event());
         assertThat(enricher.markEnrichedHistoryApplied(afterHistoryA).state()).isEqualTo(VERIFIED);
         var recoveryWorker = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(31)), policy(false));
@@ -668,7 +931,7 @@ class SourceLineagePipelineIntegrationTest {
         try {
             var raw = admit(Map.of("sourceEventId", "kafka-recovery-" + suffix));
             container.start();
-            ProducerRecord<String, TransactionRawEvent> rawRecord = new ProducerRecord<>(rawTopic, raw.transactionId(), raw);
+            ProducerRecord<String, TransactionRawEvent> rawRecord = new ProducerRecord<>(rawTopic, customerPartitionKey(raw.customerId()), raw);
             rawRecord.headers().add(new RecordHeader(SourceOriginProofs.KAFKA_HEADER,
                     ORIGIN_PROOFS.signRaw(raw, SourceOriginProofs.Assertion.KNOWN_ATTESTED)
                             .getBytes(StandardCharsets.US_ASCII)));
@@ -702,7 +965,8 @@ class SourceLineagePipelineIntegrationTest {
             byte[] laterPayload = payload(raw.transactionId() + "-later", raw.transactionTimestamp().plus(Duration.ofMinutes(2)));
             TransactionRawEvent laterRaw = admit(laterPayload, Map.of("sourceEventId", "kafka-recovery-later-" + suffix));
             container.start();
-            ProducerRecord<String, TransactionRawEvent> laterRecord = new ProducerRecord<>(rawTopic, laterRaw.transactionId(), laterRaw);
+            ProducerRecord<String, TransactionRawEvent> laterRecord = new ProducerRecord<>(rawTopic,
+                    customerPartitionKey(laterRaw.customerId()), laterRaw);
             laterRecord.headers().add(new RecordHeader(SourceOriginProofs.KAFKA_HEADER,
                     ORIGIN_PROOFS.signRaw(laterRaw, SourceOriginProofs.Assertion.KNOWN_ATTESTED)
                             .getBytes(StandardCharsets.US_ASCII)));
@@ -755,7 +1019,7 @@ class SourceLineagePipelineIntegrationTest {
             // Replaying the exact RAW A after B pruned its minute-window membership remains idempotent.
             container.start();
             rawEventToAwait.set(raw.eventId());
-            rawRecord = new ProducerRecord<>(rawTopic, raw.transactionId(), raw);
+            rawRecord = new ProducerRecord<>(rawTopic, customerPartitionKey(raw.customerId()), raw);
             rawRecord.headers().add(new RecordHeader(SourceOriginProofs.KAFKA_HEADER,
                     ORIGIN_PROOFS.signRaw(raw, SourceOriginProofs.Assertion.KNOWN_ATTESTED)
                             .getBytes(StandardCharsets.US_ASCII)));
@@ -833,8 +1097,9 @@ class SourceLineagePipelineIntegrationTest {
             realRedis.delete(List.of(commitmentHash, businessIds));
             assertThat(realFeatureStore.hasRecordedTransaction(b, namespace)).isFalse();
 
+            assertThat(enricher.prepareEnrichedPublication(b, enrichedCandidate(b)).authority().state()).isEqualTo(CONFLICT);
             assertThatThrownBy(() -> realEnricher.enrich(b, proofB))
-                    .hasMessage("FEATURE_LINEAGE_UNRESOLVED");
+                    .hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
             assertThat(enricher.findEnrichedPublication(b).publication()).isNull();
             assertThat(published).hasSize(1);
 
@@ -865,7 +1130,7 @@ class SourceLineagePipelineIntegrationTest {
             assertThatCode(() -> institutionAwareEnricher.enrich(a, proofA)).doesNotThrowAnyException();
             assertThat(published).hasSize(2);
             assertThat(realRedis.opsForZSet().zCard(keys.stream().filter(key -> key.endsWith(":customer:transactions"))
-                    .findFirst().orElseThrow())).isZero();
+                    .findFirst().orElseThrow())).isEqualTo(1L);
             List<String> merchantHistory = keys.stream().filter(key -> key.endsWith(":transactions") && key.contains(":merchant:")).toList();
             assertThat(merchantHistory).hasSize(1);
             assertThat(realRedis.opsForZSet().zCard(merchantHistory.getFirst())).isEqualTo(1L);
@@ -926,6 +1191,28 @@ class SourceLineagePipelineIntegrationTest {
         return new TransactionEnrichedEventMapper().toAttestedEvent(raw,
                 new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw,
                         new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false)));
+    }
+
+    private void insertMigrationPublication(com.mongodb.client.MongoDatabase database,
+                                            SourceEnrichedPublicationCipher cipher,
+                                            TransactionRawEvent raw,
+                                            TransactionEnrichedEvent event) {
+        SourceLineage parent = enricher.raw(raw);
+        assertThat(parent.state()).isEqualTo(VERIFIED);
+        Document rawLink = database.getCollection("source_lineage_raw")
+                .find(eq("eventCommitment", parent.eventCommitment())).first();
+        assertThat(rawLink).isNotNull();
+        Date expiresAt = rawLink.getDate("expiresAt");
+        Date now = Date.from(CLOCK.instant());
+        Document row = new Document("_id", SourceEventCommitment.enriched(event)).append("schemaVersion", 1)
+                .append("receiptId", parent.receiptId()).append("rawCommitment", parent.eventCommitment())
+                .append("enrichedCommitment", SourceEventCommitment.enriched(event)).append("eventId", event.eventId())
+                .append("eventCreatedAt", event.createdAt().toString()).append("expiresAt", expiresAt)
+                .append("state", "PENDING").append("publishedAt", null).append("preparedAt", now).append("attempts", 0)
+                .append("nextAttemptAt", now).append("recoveryEpoch", 0).append("historyState", "PENDING")
+                .append("historyAppliedAt", null).append("historyAttempts", 0).append("historyNextAttemptAt", now);
+        cipher.encrypt(row, event);
+        database.getCollection("source_enriched_publications").insertOne(row);
     }
 
     @Test void publishedHistoryPayloadFailureIsQuarantinedWithoutBlockingNextHistoryRow() throws Exception {
@@ -1201,30 +1488,45 @@ class SourceLineagePipelineIntegrationTest {
     }
 
     @Test void enrichedRecoveryQuarantinesTamperedCiphertextAndCurrentlyRevokedAuthority() throws Exception {
-        var raw = admit(Map.of("sourceEventId", "tampered-enriched-recovery"));
+        var raw = admit(payload("tampered-enriched-recovery-tx", TestSourceIssuer.NOW),
+                Map.of("sourceEventId", "tampered-enriched-recovery"));
         var candidate = new TransactionEnrichedEventMapper().toAttestedEvent(raw,
                 new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw,
                         new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false)));
         var prepared = enricher.prepareEnrichedPublication(raw, candidate);
-        Document publication = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find().first();
-        byte[] ciphertext = publication.get("ciphertext", org.bson.types.Binary.class).getData().clone();
-        ciphertext[ciphertext.length - 1] ^= 1;
-        ownerClient.getDatabase(db).getCollection("source_enriched_publications").updateOne(eq("_id", publication.getString("_id")),
-                set("ciphertext", new org.bson.types.Binary(ciphertext)));
-        assertThat(enricher.claimNextEnrichedPublications(1)).isEmpty();
-        publication = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find(eq("_id", publication.getString("_id"))).first();
-        assertThat(publication).containsEntry("state", "QUARANTINED").containsEntry("failureCode", "PAYLOAD_UNAVAILABLE");
 
-        var revokedRaw = admit(Map.of("sourceEventId", "revoked-enriched-recovery"));
+        var revokedRaw = admit(payload("revoked-enriched-recovery-tx", TestSourceIssuer.NOW.plus(Duration.ofMinutes(1))),
+                Map.of("sourceEventId", "revoked-enriched-recovery"));
         var revokedCandidate = new TransactionEnrichedEventMapper().toAttestedEvent(revokedRaw,
                 new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(revokedRaw,
                         new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false)));
-        enricher.prepareEnrichedPublication(revokedRaw, revokedCandidate);
+        var revokedPrepared = enricher.prepareEnrichedPublication(revokedRaw, revokedCandidate);
+
+        assertThat(raw.transactionId()).isNotEqualTo(revokedRaw.transactionId());
+        assertThat(prepared.authority().state()).isEqualTo(VERIFIED);
+        assertThat(revokedPrepared.authority().state()).isEqualTo(VERIFIED);
+        var publications = ownerClient.getDatabase(db).getCollection("source_enriched_publications");
+        Document tamperedRow = publications.find(eq("rawCommitment", SourceEventCommitment.raw(raw))).first();
+        Document revokedRow = publications.find(eq("rawCommitment", SourceEventCommitment.raw(revokedRaw))).first();
+        assertThat(tamperedRow).isNotNull();
+        assertThat(revokedRow).isNotNull();
+        assertThat(publications.countDocuments()).isEqualTo(2L);
+
+        // Both rows share the test clock instant; order the tampered row first for deterministic recovery selection.
+        publications.updateOne(eq("_id", tamperedRow.getString("_id")),
+                set("preparedAt", Date.from(CLOCK.instant().minusSeconds(1))));
+        byte[] ciphertext = tamperedRow.get("ciphertext", org.bson.types.Binary.class).getData().clone();
+        ciphertext[ciphertext.length - 1] ^= 1;
+        publications.updateOne(eq("_id", tamperedRow.getString("_id")),
+                set("ciphertext", new org.bson.types.Binary(ciphertext)));
+        assertThat(enricher.claimNextEnrichedPublications(1)).isEmpty();
+        tamperedRow = publications.find(eq("_id", tamperedRow.getString("_id"))).first();
+        assertThat(tamperedRow).containsEntry("state", "QUARANTINED").containsEntry("failureCode", "PAYLOAD_UNAVAILABLE");
+
         var revokedWorker = newEnricher(CLOCK, new SourceSignatureVerifier(
                 new SourceVerificationProperties(List.of(TestSourceIssuer.policy(0, true))), CLOCK));
         assertThat(revokedWorker.claimNextEnrichedPublications(2)).isEmpty();
-        Document revokedRow = ownerClient.getDatabase(db).getCollection("source_enriched_publications")
-                .find(eq("rawCommitment", SourceEventCommitment.raw(revokedRaw))).first();
+        revokedRow = publications.find(eq("rawCommitment", SourceEventCommitment.raw(revokedRaw))).first();
         assertThat(revokedRow).containsEntry("state", "QUARANTINED").containsEntry("failureCode", "AUTHORITY_DENIED");
         assertThat(SourceEventCommitment.enriched(prepared.event())).isNotEqualTo(SourceEventCommitment.enriched(revokedCandidate));
     }
@@ -1407,6 +1709,8 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(accepted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
         attestedRawEventIds.add(accepted.event().eventId());
         enrich(accepted.event());
+        assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_business_identities")
+                .countDocuments(eq("receiptId", accepted.receipt().id()))).isEqualTo(1L);
         assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_publications")
                 .countDocuments(eq("receiptId", accepted.receipt().id()))).isEqualTo(1);
         ownerClient.getDatabase(db).getCollection("source_admission_identities").updateOne(
@@ -1420,6 +1724,8 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
                 .countDocuments(eq("_id", accepted.receipt().id()))).isZero();
         assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .countDocuments(eq("receiptId", accepted.receipt().id()))).isZero();
+        assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_business_identities")
                 .countDocuments(eq("receiptId", accepted.receipt().id()))).isZero();
         assertThat(receipts.acceptRaw(verified(signedPayload, Map.of()), accepted.event()).status())
                 .isEqualTo(SourceReceiptStore.Status.TOMBSTONED);
@@ -1633,6 +1939,49 @@ class SourceLineagePipelineIntegrationTest {
 
         var wrongReader = new MongoSourceLineage(scorerClient, db, "scorer", MongoSourceLineage.Stage.SCORER, policy(false), CLOCK);
         assertThat(wrongReader.raw(second).state()).isEqualTo(REVOKED);
+    }
+
+    @Test void delayedAttestedObservationFailsClosedWithoutCreatingEnrichedOrScoredWork() throws Exception {
+        var redis = FraudPlatformContainers.redis();
+        if (!redis.isRunning()) { redis.start(); }
+        var connectionFactory = new LettuceConnectionFactory(redis.getHost(), redis.getMappedPort(6379));
+        connectionFactory.afterPropertiesSet();
+        var redisTemplate = new StringRedisTemplate(connectionFactory);
+        redisTemplate.afterPropertiesSet();
+        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        try {
+            var store = new RedisFeatureStore(redisTemplate, new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7),
+                    Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
+            List<TransactionEnrichedEvent> published = new ArrayList<>();
+            var service = new TransactionFeatureEnricherService(store,
+                    new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                    published::add, enricher, ORIGIN_PROOFS);
+
+            TransactionRawEvent first = admit(payload("late-a", TestSourceIssuer.NOW), Map.of("sourceEventId", "late-a-source"));
+            TransactionRawEvent later = admit(payload("late-b", TestSourceIssuer.NOW.plus(Duration.ofMinutes(2))),
+                    Map.of("sourceEventId", "late-b-source"));
+            TransactionRawEvent delayed = admit(payload("late-c", TestSourceIssuer.NOW.plusSeconds(30)),
+                    Map.of("sourceEventId", "late-c-source"));
+            service.enrich(first, ORIGIN_PROOFS.signRaw(first, SourceOriginProofs.Assertion.KNOWN_ATTESTED));
+            service.enrich(later, ORIGIN_PROOFS.signRaw(later, SourceOriginProofs.Assertion.KNOWN_ATTESTED));
+
+            String delayedProof = ORIGIN_PROOFS.signRaw(delayed, SourceOriginProofs.Assertion.KNOWN_ATTESTED);
+            assertThat(ORIGIN_PROOFS.verifyRaw(delayed, delayedProof).assertion())
+                    .isEqualTo(SourceOriginProofs.Assertion.KNOWN_ATTESTED);
+            assertThatThrownBy(() -> service.enrich(delayed, delayedProof))
+                    .isInstanceOf(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class)
+                    .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+
+            assertThat(published).extracting(TransactionEnrichedEvent::transactionId)
+                    .containsExactly(first.transactionId(), later.transactionId());
+            assertThat(enricher.raw(delayed).state()).isEqualTo(VERIFIED);
+            assertThat(enricher.findEnrichedPublication(delayed).publication()).isNull();
+            assertThat(enricherClient.getDatabase(db).getCollection("source_lineage_enriched").countDocuments()).isEqualTo(2L);
+            assertThat(enricherClient.getDatabase(db).getCollection("source_enriched_publications").countDocuments()).isEqualTo(2L);
+        } finally {
+            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+            connectionFactory.destroy();
+        }
     }
 
     @Test void corruptedParentMetadataCannotSupplyAuthorityAndStartupNeverRepairsMissingMetadata() throws Exception {
@@ -1906,12 +2255,22 @@ class SourceLineagePipelineIntegrationTest {
         Object call(ClientSession session, Method method, Object[] args) throws Throwable;
     }
     private static void sendToKafka(KafkaProducer<String, TransactionRawEvent> producer, String topic, TransactionRawEvent event) {
-        try { producer.send(new ProducerRecord<>(topic, event.transactionId(), event)).get(15, TimeUnit.SECONDS); }
+        try { producer.send(new ProducerRecord<>(topic, customerPartitionKey(event.customerId()), event)).get(15, TimeUnit.SECONDS); }
         catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Test Kafka publish interrupted", interrupted);
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException unavailable) {
             throw new IllegalStateException("Test Kafka publish failed", unavailable);
+        }
+    }
+
+    private static String customerPartitionKey(String customerId) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update("source-customer-partition/v1\u0000".getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest.digest(customerId.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException unavailable) {
+            throw new IllegalStateException("SOURCE_CUSTOMER_PARTITION_KEY_UNAVAILABLE", unavailable);
         }
     }
     private static void awaitLatch(CountDownLatch latch) {

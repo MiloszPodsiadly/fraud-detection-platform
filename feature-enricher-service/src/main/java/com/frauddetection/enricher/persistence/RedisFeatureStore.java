@@ -8,6 +8,7 @@ import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.domain.RecentTransaction;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
+import com.frauddetection.enricher.exception.OutOfOrderFeatureEventException;
 import com.frauddetection.enricher.service.CurrencyAmountConverter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -16,6 +17,7 @@ import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -80,6 +82,7 @@ public class RedisFeatureStore implements FeatureStore {
               redis.call('PEXPIRE', KEYS[6], ARGV[11])
               return 0
             end
+            if storedLast and score < storedLast then return -4 end
             if ARGV[14] == '1' then return -2 end
             local oldCustomerScore = redis.call('ZSCORE', KEYS[1], member)
             local oldMerchantScore = redis.call('ZSCORE', KEYS[2], tx)
@@ -189,6 +192,33 @@ public class RedisFeatureStore implements FeatureStore {
             String deviceSetKey = knownDevicesKey(namespace, event.customerId());
             String lastTransactionKey = lastTransactionKey(namespace, event.customerId());
 
+            String lastTransactionTimestamp = stringRedisTemplate.opsForValue().get(lastTransactionKey);
+            Instant lastTransaction = namespace.isLegacy() ? null : parseAttestedLastTransaction(lastTransactionTimestamp);
+            if (!namespace.isLegacy()) {
+                String oldTimestamp = stringRedisTemplate.opsForValue().get(v2LastTransactionKey(namespace, event.customerId()));
+                Instant oldLastTransaction = oldTimestamp == null ? null : Instant.parse(oldTimestamp);
+                if (oldLastTransaction != null && (lastTransaction == null || oldLastTransaction.isAfter(lastTransaction))) {
+                    lastTransaction = oldLastTransaction;
+                }
+                if (lastTransaction != null) {
+                    if (event.transactionTimestamp().isBefore(lastTransaction)) {
+                        throw new OutOfOrderFeatureEventException();
+                    }
+                    if (Duration.between(lastTransaction, event.transactionTimestamp())
+                            .compareTo(featureStoreProperties.merchantFrequencyWindow()) < 0) {
+                        boolean v3HistoryPresent = Boolean.TRUE.equals(stringRedisTemplate.hasKey(
+                                processedTransactionsKey(namespace, event.customerId())));
+                        boolean v2HistoryPresent = Boolean.TRUE.equals(stringRedisTemplate.hasKey(
+                                v2ProcessedTransactionsKey(namespace, event.customerId())));
+                        if ((lastTransactionTimestamp != null && !v3HistoryPresent)
+                                || (oldTimestamp != null && !v2HistoryPresent)) {
+                            throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED");
+                        }
+                    }
+                    lastTransactionTimestamp = lastTransaction.toString();
+                }
+            }
+
             double recentWindowStart = scoreFor(event.transactionTimestamp().minus(featureStoreProperties.recentTransactionWindow()));
             double merchantWindowStart = scoreFor(event.transactionTimestamp().minus(featureStoreProperties.merchantFrequencyWindow()));
             double eventTimestamp = scoreFor(event.transactionTimestamp());
@@ -239,26 +269,34 @@ public class RedisFeatureStore implements FeatureStore {
             if (!namespace.isLegacy() && !Boolean.TRUE.equals(knownDevice)) {
                 knownDevice = stringRedisTemplate.opsForSet().isMember(v2KnownDevicesKey(namespace, event.customerId()), event.deviceInfo().deviceId());
             }
-            String lastTransactionTimestamp = stringRedisTemplate.opsForValue().get(lastTransactionKey);
-            if (!namespace.isLegacy()) {
-                String oldTimestamp = stringRedisTemplate.opsForValue().get(v2LastTransactionKey(namespace, event.customerId()));
-                Instant current = parseAttestedLastTransaction(lastTransactionTimestamp);
-                Instant old = oldTimestamp == null ? null : Instant.parse(oldTimestamp);
-                if (old != null && (current == null || old.isAfter(current))) { lastTransactionTimestamp = old.toString(); }
-                else if (current != null) { lastTransactionTimestamp = current.toString(); }
-            }
-
             return new FeatureStoreSnapshot(
                     recentTransactions.size(),
                     sumAmountsPln(recentTransactions),
                     recentTransactions,
                     merchantFrequency == null ? 0 : merchantFrequency.intValue(),
-                    lastTransactionTimestamp == null ? null : Instant.parse(lastTransactionTimestamp),
+                    currentAttestedLastTransactionTimestamp(namespace, event.customerId(), lastTransactionTimestamp),
                     Boolean.TRUE.equals(knownDevice)
             );
+        } catch (FeatureEnrichmentException known) {
+            throw known;
         } catch (Exception exception) {
             throw new FeatureEnrichmentException("Failed to load feature snapshot from Redis.", exception);
         }
+    }
+
+    private Instant currentAttestedLastTransactionTimestamp(FeatureNamespace namespace, String customerId,
+                                                            String lastTransactionTimestamp) {
+        if (namespace.isLegacy()) {
+            return lastTransactionTimestamp == null ? null : Instant.parse(lastTransactionTimestamp);
+        }
+        Instant latest = lastTransactionTimestamp == null ? null : Instant.parse(lastTransactionTimestamp);
+        String currentV3Value = stringRedisTemplate.opsForValue().get(lastTransactionKey(namespace, customerId));
+        Instant currentV3 = parseAttestedLastTransaction(currentV3Value);
+        if (currentV3 != null && (latest == null || currentV3.isAfter(latest))) { latest = currentV3; }
+        String currentV2Value = stringRedisTemplate.opsForValue().get(v2LastTransactionKey(namespace, customerId));
+        Instant currentV2 = currentV2Value == null ? null : Instant.parse(currentV2Value);
+        if (currentV2 != null && (latest == null || currentV2.isAfter(latest))) { latest = currentV2; }
+        return latest;
     }
 
     @Override
@@ -461,6 +499,7 @@ public class RedisFeatureStore implements FeatureStore {
             if (result == -1) { throw new FeatureEnrichmentException("FEATURE_HISTORY_COMMITMENT_CONFLICT"); }
             if (result == -2) { throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED"); }
             if (result == -3) { throw new FeatureEnrichmentException("FEATURE_HISTORY_REDIS_SCHEMA_CONFLICT"); }
+            if (result == -4) { throw new OutOfOrderFeatureEventException(); }
             if (result < 0 || result > 1) { throw new FeatureEnrichmentException("FEATURE_HISTORY_FINALIZATION_UNRESOLVED"); }
     }
 

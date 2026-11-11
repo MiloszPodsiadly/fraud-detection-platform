@@ -10,7 +10,8 @@ final class EnrichedHistoryFailureClassifier {
             "FEATURE_HISTORY_REBUILD_REQUIRED",
             "FEATURE_HISTORY_REDIS_SCHEMA_CONFLICT",
             "FEATURE_HISTORY_TIMESTAMP_INVALID",
-            "MALFORMED_LAST_TRANSACTION_TIMESTAMP");
+            "MALFORMED_LAST_TRANSACTION_TIMESTAMP",
+            "FEATURE_EVENT_TIME_OUT_OF_ORDER");
 
     private EnrichedHistoryFailureClassifier() { }
 

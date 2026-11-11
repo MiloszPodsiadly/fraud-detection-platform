@@ -219,8 +219,9 @@ class RedisFeatureStoreIntegrationTest {
 
         var older = event("attested-older", CURRENT_TIMESTAMP.minusSeconds(5), BigDecimal.ONE, "PLN");
         TransactionEnrichedEvent olderEnriched = enriched(older);
-        featureStore.recordAttestedTransaction(olderEnriched, namespace,
-                SourceEventCommitment.attestedHistory("a".repeat(64), olderEnriched));
+        assertThatThrownBy(() -> featureStore.recordAttestedTransaction(olderEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), olderEnriched)))
+                .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
         assertThat(featureStore.loadSnapshot(next, namespace).lastTransactionTimestamp()).isEqualTo(CURRENT_TIMESTAMP);
 
         Set<String> keys = redisTemplate.keys("feature:v3:attested:*");
@@ -243,6 +244,32 @@ class RedisFeatureStoreIntegrationTest {
         redisTemplate.delete(processedKey);
         assertThatThrownBy(() -> featureStore.verifyAttestedTransaction(enriched, namespace, commitment))
                 .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+    }
+
+    @Test
+    void lateAttestedEventDoesNotScoreFromHistoryPrunedByALaterEvent() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent first = event("late-a", CURRENT_TIMESTAMP, new BigDecimal("10.00"), "PLN");
+        TransactionEnrichedEvent firstEnriched = enriched(first);
+        featureStore.recordAttestedTransaction(firstEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), firstEnriched));
+
+        TransactionRawEvent later = event("late-b", CURRENT_TIMESTAMP.plus(Duration.ofMinutes(2)),
+                new BigDecimal("20.00"), "PLN");
+        FeatureStoreSnapshot laterSnapshot = featureStore.loadSnapshot(later, namespace);
+        TransactionEnrichedEvent laterEnriched = enriched(later);
+        featureStore.recordAttestedTransaction(laterEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), laterEnriched));
+
+        TransactionRawEvent delayed = event("late-c", CURRENT_TIMESTAMP.plusSeconds(30),
+                new BigDecimal("30.00"), "PLN");
+        assertThat(laterSnapshot.recentTransactionCount()).isZero();
+        assertThatThrownBy(() -> featureStore.loadSnapshot(delayed, namespace))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+        assertThat(featureStore.hasRecordedTransaction(first, namespace)).isTrue();
+        assertThat(featureStore.hasRecordedTransaction(later, namespace)).isTrue();
+        assertThat(featureStore.hasRecordedTransaction(delayed, namespace)).isFalse();
     }
 
     @Test
@@ -500,6 +527,84 @@ class RedisFeatureStoreIntegrationTest {
                 .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
         assertThat(redisTemplate.opsForZSet().score(customerTransactionsKey, "bad-last|7.00|PLN|7.00")).isNull();
         assertThat(redisTemplate.opsForHash().get(processedKey, "bad-last")).isNull();
+    }
+
+    @Test
+    void attestedEqualTimestampIsAcceptedButOneMillisecondRegressionFailsClosed() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent first = event("ordered-first", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent firstEnriched = enriched(first);
+        featureStore.recordAttestedTransaction(firstEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), firstEnriched));
+
+        TransactionRawEvent sameTimestamp = event("ordered-same-time", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN");
+        FeatureStoreSnapshot sameTimeSnapshot = featureStore.loadSnapshot(sameTimestamp, namespace);
+        assertThat(sameTimeSnapshot.recentTransactions()).extracting("transactionId").containsExactly("ordered-first");
+        TransactionEnrichedEvent sameTimeEnriched = enriched(sameTimestamp);
+        featureStore.recordAttestedTransaction(sameTimeEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), sameTimeEnriched));
+
+        TransactionRawEvent oneMillisecondEarlier = event("ordered-earlier", CURRENT_TIMESTAMP.minusMillis(1), BigDecimal.ONE, "PLN");
+        assertThatThrownBy(() -> featureStore.loadSnapshot(oneMillisecondEarlier, namespace))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+    }
+
+    @Test
+    void attestedWindowKeepsExclusiveLowerAndInclusiveUpperBoundaries() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent lower = event("attested-lower", CURRENT_TIMESTAMP.minusSeconds(60), BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent lowerEnriched = enriched(lower);
+        featureStore.recordAttestedTransaction(lowerEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), lowerEnriched));
+        TransactionRawEvent upper = event("attested-upper", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent upperEnriched = enriched(upper);
+        featureStore.recordAttestedTransaction(upperEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), upperEnriched));
+
+        FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(upper, namespace);
+
+        assertThat(snapshot.recentTransactionCount()).isEqualTo(1);
+        assertThat(snapshot.recentTransactions()).extracting("transactionId").containsExactly("attested-upper");
+        assertThat(snapshot.merchantFrequency7d()).isEqualTo(2);
+    }
+
+    @Test
+    void v2WatermarkRegressionFailsBeforePruningV3Members() throws Exception {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent existing = event("v2-watermark-existing", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent existingEnriched = enriched(existing);
+        featureStore.recordAttestedTransaction(existingEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), existingEnriched));
+        String v2LastKey = privateKey("v2LastTransactionKey", new Class<?>[]{FeatureNamespace.class, String.class},
+                namespace, CUSTOMER_ID);
+        redisTemplate.opsForValue().set(v2LastKey, CURRENT_TIMESTAMP.plus(Duration.ofMinutes(2)).toString());
+
+        TransactionRawEvent regressed = event("v2-watermark-regressed", CURRENT_TIMESTAMP.plus(Duration.ofMinutes(1)),
+                BigDecimal.ONE, "PLN");
+        assertThatThrownBy(() -> featureStore.loadSnapshot(regressed, namespace))
+                .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+        String customerTransactionsKey = redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow();
+        String existingMember = privateKey("customerTransactionMember", new Class<?>[]{TransactionRawEvent.class}, existing);
+        assertThat(redisTemplate.opsForZSet().score(customerTransactionsKey, existingMember))
+                .isNotNull();
+    }
+
+    @Test
+    void missingActiveCommitmentHistoryCannotBeUsedByANewAttestedSnapshot() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent existing = event("expired-history-marker", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent existingEnriched = enriched(existing);
+        featureStore.recordAttestedTransaction(existingEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), existingEnriched));
+        String processedKey = redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
+        redisTemplate.delete(processedKey);
+
+        TransactionRawEvent next = event("after-history-loss", CURRENT_TIMESTAMP.plus(Duration.ofDays(1)), BigDecimal.ONE, "PLN");
+        assertThatThrownBy(() -> featureStore.loadSnapshot(next, namespace))
+                .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
     }
 
     private FeatureNamespace attestedNamespace() {

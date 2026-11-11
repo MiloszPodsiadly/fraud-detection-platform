@@ -53,6 +53,7 @@ path is implemented correctly.
 | Mongo commit ambiguous | Unresolved; reconcile stable identity before retrying writes | No assumption that commit succeeded | Owning Mongo store/worker |
 | Key revoked | Deny new admission and recovery requiring current authority; preserve fence | No scoring under revoked authority | Trust-policy owner |
 | Cross-institution matching business IDs | Keep receipts, Redis namespace and occurrence binding scoped | Each source uses only its verified lineage | Ingest/enrichment/scoring owners |
+| Attested event-time regression | Reject a new observation whose timestamp is before the latest applied timestamp for that customer; equal timestamps remain valid | `FEATURE_EVENT_TIME_OUT_OF_ORDER`; no ENRICHED publication or scoring | Source owner / enrichment operations |
 
 ## Execution order
 
@@ -151,6 +152,29 @@ their configured TTLs expire. Legacy `feature:` keys and behavior are
 unchanged. If Mongo says history is applied but the Redis commitment marker is
 missing, processing reports rebuild-required rather than silently declaring
 history complete.
+
+The source request contract permits past transaction timestamps and defines no
+maximum event-time lateness or strict ordering guarantee. The configured Redis
+history TTL cannot prove completeness for an arbitrarily delayed event, and
+`loadSnapshot` must not use a later event's timestamp to silently erase history
+needed by an older observation. Until the source owner establishes a bounded
+lateness contract and corresponding retained-history budget, attested feature
+processing therefore requires nondecreasing transaction timestamps per
+customer. Redis rejects a regression before window pruning and the atomic
+history append independently fences a concurrent or recovered regression.
+Same-timestamp transactions are accepted. The terminal error is sent to RAW
+DLT without retry; it is never relabeled as legacy and creates no ENRICHED or
+SCORED occurrence.
+
+To make the watermark check apply in one customer order across ENRICHER
+instances, attested RAW Kafka records use a SHA-256 customer partition key.
+Legacy records retain the transaction-ID key. This changes Kafka partition
+routing only; event payloads and RAW/ENRICHED/SCORED wire schemas are unchanged.
+For rollout, pause source admission and RAW recovery, drain the RAW consumer
+group and any in-flight attested RAW publication, deploy the keying and
+watermark-checking versions together, then resume traffic. Do not mix old
+transaction-keyed RAW traffic with new customer-keyed traffic for the same
+customer while either can still be processed.
 
 The canonical feature contract caps `recentTransactionCount` and
 `merchantFrequency7d` at one million. The merchant ceiling is also the explicit

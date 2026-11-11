@@ -133,6 +133,7 @@ public class FeatureEnricherKafkaConfig {
         long retryAttempts = Math.max((kafkaConsumerProperties.retryAttempts() == null ? 3 : kafkaConsumerProperties.retryAttempts()) - 1L, 0L);
         long retryBackoffMillis = kafkaConsumerProperties.retryBackoffMillis() == null ? 1000L : kafkaConsumerProperties.retryBackoffMillis();
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(deadLetterPublishingRecoverer, new FixedBackOff(retryBackoffMillis, retryAttempts));
+        errorHandler.addNotRetryableExceptions(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class);
         errorHandler.setRetryListeners((ConsumerRecord<?, ?> record, Exception exception, int deliveryAttempt) ->
                 log.atWarn()
                         .addKeyValue("service", "feature-enricher-service")
