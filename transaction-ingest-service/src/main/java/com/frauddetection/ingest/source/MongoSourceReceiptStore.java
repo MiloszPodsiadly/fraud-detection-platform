@@ -174,6 +174,9 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
             if (admission.status() == EXISTING) { return rawResult(UNRESOLVED); }
             SourceLineage binding = lineage.bindRawWithinTransaction(session, evidence, receipt.id(), candidate);
             if (binding.state() != SourceLineage.State.VERIFIED) {
+                if (binding.state() == SourceLineage.State.ORDER_PENDING) {
+                    throw new RawTransactionAbort(rawResult(ORDER_PENDING));
+                }
                 if (binding.state() == SourceLineage.State.CONFLICT) {
                     var fenced = identities.updateOne(session, and(eq("_id", receipt.id()), eq("state", "ADMITTED")), set("state", "CONFLICT"));
                     if (!fenced.wasAcknowledged() || fenced.getMatchedCount() != 1) { throw invalid("FENCE_UNRESOLVED"); }
@@ -473,6 +476,7 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
             case CONFLICT -> CONFLICT;
             case REVOKED -> REVOKED;
             case UNAVAILABLE -> UNRESOLVED;
+            case ORDER_PENDING -> ORDER_PENDING;
         };
     }
 

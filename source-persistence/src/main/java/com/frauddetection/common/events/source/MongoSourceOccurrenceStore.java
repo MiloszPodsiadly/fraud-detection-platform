@@ -348,7 +348,7 @@ public final class MongoSourceOccurrenceStore {
         return result(switch (source.state()) {
             case CONFLICT -> Status.CONFLICT;
             case UNAVAILABLE -> Status.UNAVAILABLE;
-            case UNVERIFIED, REVOKED -> Status.UNVERIFIED;
+            case UNVERIFIED, REVOKED, ORDER_PENDING -> Status.UNVERIFIED;
             case VERIFIED -> throw new IllegalArgumentException("SOURCE_OCCURRENCE_AUTHORIZATION_STATE_INVALID");
         });
     }

@@ -20,6 +20,11 @@ public interface SourceLineageAccess {
         return SourceEnrichedPublicationLookup.unavailable(SourceLineage.State.UNAVAILABLE);
     }
 
+    /** Resolves only an exact, pre-append event-time rejection while preserving its signed RAW audit anchor. */
+    default SourceLineage rejectLateRawObservation(TransactionRawEvent input) {
+        return SourceLineage.unavailable(SourceLineage.State.UNAVAILABLE);
+    }
+
     /** Claims the prepared exact event before a live Kafka send. */
     default SourceEnrichedPublicationClaim claimEnrichedPublication(TransactionRawEvent input, TransactionEnrichedEvent output) {
         return SourceEnrichedPublicationClaim.unavailable(SourceLineage.State.UNAVAILABLE);

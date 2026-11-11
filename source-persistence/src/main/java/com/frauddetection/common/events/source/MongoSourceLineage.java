@@ -79,9 +79,11 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         if (timeout == null || timeout <= 0 || timeout > 5_000) { throw invalid("OPERATION_TIMEOUT_REQUIRED"); }
         requireServicePrincipal(expectedUser);
         SourceLineageSchema.initialize(this.database, stage == Stage.INGEST);
+        if (stage == Stage.INGEST) { SourceFeatureOrderGateSchema.initialize(this.database, true, clock); }
         if (stage == Stage.ENRICHER && enrichedPublicationCipher != null) {
             SourceLineageSchema.initializeEnrichedPublications(this.database, false);
             SourceEnrichedBusinessIdentitySchema.initialize(this.database, false);
+            SourceFeatureOrderGateSchema.initialize(this.database, false, clock);
         }
         if (stage == Stage.INGEST) { SourceOccurrenceSchema.initialize(this.database, true); }
     }
@@ -109,7 +111,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             String collection = resource.getString("collection");
             if (collection == null || collection.isEmpty() && !actions.stream().allMatch("listCollections"::equals)
                     || !collection.isEmpty() && !Set.of(IDENTITIES, RECEIPTS, RAW, ENRICHED, RAW_COUNTS, ENRICHED_COUNTS,
-                    ENRICHED_PUBLICATIONS, BUSINESS_IDENTITIES,
+                    ENRICHED_PUBLICATIONS, BUSINESS_IDENTITIES, SourceFeatureOrderGateSchema.COLLECTION,
                     SourceOccurrenceSchema.OCCURRENCES, SourceOccurrenceSchema.COUNTS).contains(collection)) {
                 throw invalid("SERVICE_PRIVILEGES_TOO_BROAD");
             }
@@ -121,7 +123,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                 if (action.equals("insert")) { insert.add(collection); }
                 if (action.equals("update")) { update.add(collection); }
                 boolean permittedWrite = stage == Stage.ENRICHER && Set.of(ENRICHED, ENRICHED_COUNTS,
-                        ENRICHED_PUBLICATIONS).contains(collection)
+                        ENRICHED_PUBLICATIONS, SourceFeatureOrderGateSchema.COLLECTION).contains(collection)
                         || stage == Stage.SCORER && Set.of(SourceOccurrenceSchema.OCCURRENCES, SourceOccurrenceSchema.COUNTS).contains(collection);
                 boolean permittedFenceInsert = stage == Stage.ENRICHER && BUSINESS_IDENTITIES.equals(collection)
                         && action.equals("insert");
@@ -138,7 +140,10 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         if (stage == Stage.ENRICHER && enrichedPublicationCipher != null
                 && (!read.contains(ENRICHED_PUBLICATIONS) || !insert.contains(ENRICHED_PUBLICATIONS)
                 || !update.contains(ENRICHED_PUBLICATIONS) || !read.contains(BUSINESS_IDENTITIES)
-                || !insert.contains(BUSINESS_IDENTITIES) || update.contains(BUSINESS_IDENTITIES))) {
+                || !insert.contains(BUSINESS_IDENTITIES) || update.contains(BUSINESS_IDENTITIES)
+                || !read.contains(SourceFeatureOrderGateSchema.COLLECTION)
+                || !update.contains(SourceFeatureOrderGateSchema.COLLECTION)
+                || insert.contains(SourceFeatureOrderGateSchema.COLLECTION))) {
             throw invalid("SERVICE_WRITE_NOT_AUTHORIZED");
         }
         occurrenceWrites = stage == Stage.SCORER && read.containsAll(SourceOccurrenceSchema.COLLECTIONS)
@@ -198,8 +203,78 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         if (receipt.state != VERIFIED) { return absent(receipt.state); }
         if (!evidence.scope().equals(receipt.scope) || !evidence.keyCommitment().equals(receipt.keyCommitment)
                 || !evidence.policyVersion().equals(receipt.policyVersion)) { return absent(REVOKED); }
-        return bind(session, RAW, RAW_COUNTS, event.eventId(), event.createdAt(), SourceEventCommitment.raw(event),
-                receipt, SourceReceiptIdentity.binding(receipt.scope, receipt.keyCommitment));
+        SourceLineage bound = bind(session, RAW, RAW_COUNTS, event.eventId(), event.createdAt(),
+                SourceEventCommitment.raw(event), receipt, SourceReceiptIdentity.binding(receipt.scope, receipt.keyCommitment));
+        if (bound.state() != VERIFIED) { return bound; }
+        return acquireFeatureOrderGate(session, receipt.scope, event.customerId(), receipt.id, bound.eventCommitment())
+                ? bound : SourceLineage.unavailable(ORDER_PENDING);
+    }
+
+    private boolean acquireFeatureOrderGate(ClientSession session, SourceScope scope, String customerId,
+                                            String receiptId, String rawCommitment) {
+        MongoCollection<Document> gates = database.getCollection(SourceFeatureOrderGateSchema.COLLECTION);
+        String id = SourceFeatureOrderIdentity.identity(scope, customerId);
+        Date now = Date.from(clock.instant());
+        Document existing = gates.find(session, eq("_id", id)).first();
+        if (existing == null) {
+            gates.insertOne(session, new Document("_id", id).append("schemaVersion", 1).append("status", "ACTIVE")
+                    .append("receiptId", receiptId).append("rawCommitment", rawCommitment).append("activatedAt", now)
+                    .append("resolvedAt", null).append("resolution", null));
+            return true;
+        }
+        if (SourceFeatureOrderGateSchema.isActive(existing, receiptId, rawCommitment)) { return true; }
+        if (SourceFeatureOrderGateSchema.isResolvedFor(existing, receiptId, rawCommitment)) { return true; }
+        if (!SourceFeatureOrderGateSchema.isResolvedFor(existing, existing.getString("receiptId"),
+                existing.getString("rawCommitment"))) { return false; }
+        var activated = gates.updateOne(session, and(eq("_id", id), eq("status", existing.getString("status")),
+                        eq("receiptId", existing.getString("receiptId")), eq("rawCommitment", existing.getString("rawCommitment")),
+                        eq("resolvedAt", existing.getDate("resolvedAt")), eq("resolution", existing.getString("resolution"))),
+                combine(set("status", "ACTIVE"), set("receiptId", receiptId), set("rawCommitment", rawCommitment),
+                        set("activatedAt", now), set("resolvedAt", null), set("resolution", null)));
+        return activated.wasAcknowledged() && activated.getMatchedCount() == 1 && activated.getModifiedCount() == 1;
+    }
+
+    private boolean activeFeatureOrderGate(ClientSession session, SourceLineage authority, String customerId,
+                                           String rawCommitment) {
+        if (session == null || authority == null || authority.state() != VERIFIED || authority.source() == null) { return false; }
+        String id = SourceFeatureOrderIdentity.identity(authority.source(), customerId);
+        Document gate = database.getCollection(SourceFeatureOrderGateSchema.COLLECTION).find(session, eq("_id", id)).first();
+        return SourceFeatureOrderGateSchema.isActive(gate, authority.receiptId(), rawCommitment);
+    }
+
+    private boolean lateRejectedFeatureOrderGate(ClientSession session, SourceLineage authority, String customerId,
+                                                  String rawCommitment) {
+        if (session == null || authority == null || authority.state() != VERIFIED || authority.source() == null) { return false; }
+        String id = SourceFeatureOrderIdentity.identity(authority.source(), customerId);
+        Document gate = database.getCollection(SourceFeatureOrderGateSchema.COLLECTION).find(session, eq("_id", id)).first();
+        return "LATE_REJECTED".equals(gate == null ? null : gate.getString("status"))
+                && SourceFeatureOrderGateSchema.isResolvedFor(gate, authority.receiptId(), rawCommitment);
+    }
+
+    @Override public SourceLineage rejectLateRawObservation(TransactionRawEvent input) {
+        if (stage != Stage.ENRICHER || enrichedPublicationCipher == null || input == null) { return absent(UNAVAILABLE); }
+        return transaction(session -> {
+            SourceLineage parent = raw(session, input);
+            if (parent.state() != VERIFIED) { return parent; }
+            String publicationId = enrichedPublicationId(parent.eventCommitment());
+            if (database.getCollection(ENRICHED_PUBLICATIONS).find(session, eq("_id", publicationId)).first() != null) {
+                return absent(CONFLICT);
+            }
+            String gateId = SourceFeatureOrderIdentity.identity(parent.source(), input.customerId());
+            MongoCollection<Document> gates = database.getCollection(SourceFeatureOrderGateSchema.COLLECTION);
+            Document gate = gates.find(session, eq("_id", gateId)).first();
+            if (SourceFeatureOrderGateSchema.isResolvedFor(gate, parent.receiptId(), parent.eventCommitment())
+                    && "LATE_REJECTED".equals(gate.getString("status"))) { return parent; }
+            if (!SourceFeatureOrderGateSchema.isActive(gate, parent.receiptId(), parent.eventCommitment())) {
+                return absent(UNAVAILABLE);
+            }
+            var resolved = gates.updateOne(session, and(eq("_id", gateId), eq("status", "ACTIVE"),
+                            eq("receiptId", parent.receiptId()), eq("rawCommitment", parent.eventCommitment())),
+                    combine(set("status", "LATE_REJECTED"), set("resolvedAt", Date.from(clock.instant())),
+                            set("resolution", "LATE_REJECTED")));
+            return resolved.wasAcknowledged() && resolved.getMatchedCount() == 1
+                    ? parent : absent(UNAVAILABLE);
+        });
     }
 
     @Override public SourceLineage raw(TransactionRawEvent event) {
@@ -255,7 +330,15 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             String publicationId = enrichedPublicationId(parent.eventCommitment());
             MongoCollection<Document> publications = database.getCollection(ENRICHED_PUBLICATIONS);
             Document existing = publications.find(session, eq("_id", publicationId)).first();
-            if (existing != null) { return readEnrichedPublication(session, input, parent, existing); }
+            if (existing != null) {
+                SourceEnrichedPublication stored = readEnrichedPublication(session, input, parent, existing);
+                return stored.authority().state() == VERIFIED && !stored.historyApplied()
+                        && !activeFeatureOrderGate(session, stored.authority(), input.customerId(), parent.eventCommitment())
+                        ? SourceEnrichedPublication.unavailable(UNAVAILABLE) : stored;
+            }
+            if (!activeFeatureOrderGate(session, parent, input.customerId(), parent.eventCommitment())) {
+                return SourceEnrichedPublication.unavailable(UNAVAILABLE);
+            }
 
             String commitment = SourceEventCommitment.enriched(candidate);
             String businessIdentity = SourceEventCommitment.businessTransaction(receipt.scope, candidate.customerId(),
@@ -302,9 +385,16 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             if (parent.state() != VERIFIED) { return SourceEnrichedPublicationLookup.unavailable(parent.state()); }
             String publicationId = enrichedPublicationId(parent.eventCommitment());
             Document row = database.getCollection(ENRICHED_PUBLICATIONS).find(session, eq("_id", publicationId)).first();
-            if (row == null) { return SourceEnrichedPublicationLookup.notFound(parent); }
+            if (row == null) {
+                return activeFeatureOrderGate(session, parent, input.customerId(), parent.eventCommitment())
+                        || lateRejectedFeatureOrderGate(session, parent, input.customerId(), parent.eventCommitment())
+                        ? SourceEnrichedPublicationLookup.notFound(parent)
+                        : SourceEnrichedPublicationLookup.unavailable(UNAVAILABLE);
+            }
             SourceEnrichedPublication publication = readEnrichedPublication(session, input, parent, row);
-            return publication.authority().state() == VERIFIED && publication.event() != null
+            boolean orderAllowed = publication.authority().state() == VERIFIED && (publication.historyApplied()
+                    || activeFeatureOrderGate(session, publication.authority(), input.customerId(), parent.eventCommitment()));
+            return publication.authority().state() == VERIFIED && publication.event() != null && orderAllowed
                     ? SourceEnrichedPublicationLookup.found(publication)
                     : SourceEnrichedPublicationLookup.unavailable(publication.authority().state());
         }, SourceEnrichedPublicationLookup.unavailable(UNAVAILABLE));
@@ -325,6 +415,10 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             if (publication.authority().state() != VERIFIED) { return claimUnavailable(publication.authority().state()); }
             if (!SourceEventCommitment.enriched(output).equals(SourceEventCommitment.enriched(publication.event()))) {
                 return claimUnavailable(CONFLICT);
+            }
+            if (!publication.historyApplied()
+                    && !activeFeatureOrderGate(session, publication.authority(), input.customerId(), parent.eventCommitment())) {
+                return claimUnavailable(UNAVAILABLE);
             }
             return claimPreparedRow(session, row, publication);
         }, SourceEnrichedPublicationClaim.unavailable(UNAVAILABLE));
@@ -355,12 +449,24 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             String leaseField = claim.published() ? "historyLeaseToken" : "leaseToken";
             String untilField = claim.published() ? "historyLeaseUntil" : "leaseUntil";
             String leaseState = claim.published() ? "PUBLISHED" : "PUBLISHING";
+            String gateId = SourceFeatureOrderIdentity.identity(stored.authority().source(), stored.event().customerId());
+            MongoCollection<Document> gates = database.getCollection(SourceFeatureOrderGateSchema.COLLECTION);
+            Document gate = gates.find(session, eq("_id", gateId)).first();
+            if (!SourceFeatureOrderGateSchema.isActive(gate, stored.authority().receiptId(), row.getString("rawCommitment"))) {
+                return absent(UNAVAILABLE);
+            }
+            var resolved = gates.updateOne(session, and(eq("_id", gateId), eq("status", "ACTIVE"),
+                            eq("receiptId", stored.authority().receiptId()), eq("rawCommitment", row.getString("rawCommitment"))),
+                    combine(set("status", "RESOLVED"), set("resolvedAt", Date.from(now)), set("resolution", "HISTORY_APPLIED")));
+            if (!resolved.wasAcknowledged() || resolved.getMatchedCount() != 1 || resolved.getModifiedCount() != 1) {
+                throw invalid("FEATURE_ORDER_GATE_RESOLUTION_UNRESOLVED");
+            }
             var updated = publications.updateOne(session, and(eq("_id", claim.publicationId()), eq("state", leaseState),
                             eq("historyState", "PENDING"), eq(leaseField, claim.claimToken()), gt(untilField, Date.from(now))),
                     combine(set("historyState", "APPLIED"), set("historyAppliedAt", Date.from(now)),
                             unset("historyLeaseToken"), unset("historyLeaseUntil"), unset("historyFailureCode")));
             if (updated.wasAcknowledged() && updated.getMatchedCount() == 1) { return stored.authority(); }
-            return absent(UNAVAILABLE);
+            throw invalid("FEATURE_LINEAGE_HISTORY_ACK_UNRESOLVED");
         });
         if (result.state() == VERIFIED) { return result; }
         try {
@@ -592,7 +698,11 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         }
         SourceEnrichedPublication verified = transaction(session -> {
             Document current = publications.find(session, eq("_id", publicationId)).first();
-            return current == null ? SourceEnrichedPublication.unavailable(UNAVAILABLE) : readStoredEnrichedPublication(session, current);
+            if (current == null) { return SourceEnrichedPublication.unavailable(UNAVAILABLE); }
+            SourceEnrichedPublication stored = readStoredEnrichedPublication(session, current);
+            return stored.authority().state() == VERIFIED && !stored.historyApplied()
+                    && !activeFeatureOrderGate(session, stored.authority(), stored.event().customerId(), current.getString("rawCommitment"))
+                    ? SourceEnrichedPublication.unavailable(UNAVAILABLE) : stored;
         }, SourceEnrichedPublication.unavailable(UNAVAILABLE));
         if (verified.authority().state() == UNAVAILABLE) {
             return enrichedRedriveResult(SourceLineageAccess.EnrichedPublicationRedriveStatus.UNAVAILABLE, epoch);
@@ -655,7 +765,11 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         }
         SourceEnrichedPublication verified = transaction(session -> {
             Document current = publications.find(session, eq("_id", publicationId)).first();
-            return current == null ? SourceEnrichedPublication.unavailable(UNAVAILABLE) : readStoredEnrichedPublication(session, current);
+            if (current == null) { return SourceEnrichedPublication.unavailable(UNAVAILABLE); }
+            SourceEnrichedPublication stored = readStoredEnrichedPublication(session, current);
+            return stored.authority().state() == VERIFIED && activeFeatureOrderGate(session, stored.authority(),
+                    stored.event().customerId(), current.getString("rawCommitment"))
+                    ? stored : SourceEnrichedPublication.unavailable(UNAVAILABLE);
         }, SourceEnrichedPublication.unavailable(UNAVAILABLE));
         if (verified.authority().state() == UNAVAILABLE) {
             return enrichedRedriveResult(SourceLineageAccess.EnrichedPublicationRedriveStatus.UNAVAILABLE, epoch);
@@ -749,6 +863,12 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                     return claimStatus(SourceEnrichedPublicationClaim.Status.QUARANTINED, published.authority().state(),
                             publicationAttempts(publishedRow));
                 }
+                if (!published.historyApplied() && !activeFeatureOrderGate(session, published.authority(),
+                        published.event().customerId(), publishedRow.getString("rawCommitment"))) {
+                    quarantineHistoryOrderMismatch(session, publishedRow, true, token);
+                    return claimStatus(SourceEnrichedPublicationClaim.Status.QUARANTINED, UNAVAILABLE,
+                            publicationAttempts(publishedRow));
+                }
                 return new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED,
                         published.authority(), published.event(), publishedRow.getString("_id"), token,
                         publicationAttempts(publishedRow), true, false);
@@ -779,9 +899,32 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                         ? "PAYLOAD_UNAVAILABLE" : "AUTHORITY_DENIED");
                 return claimStatus(SourceEnrichedPublicationClaim.Status.QUARANTINED, stored.authority().state(), publicationAttempts(row));
             }
+            if (!stored.historyApplied() && !activeFeatureOrderGate(session, stored.authority(),
+                    stored.event().customerId(), row.getString("rawCommitment"))) {
+                quarantineHistoryOrderMismatch(session, row, false, token);
+                return claimStatus(SourceEnrichedPublicationClaim.Status.QUARANTINED, UNAVAILABLE,
+                        publicationAttempts(row));
+            }
             return new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED, stored.authority(),
                     stored.event(), row.getString("_id"), token, publicationAttempts(row), false, stored.historyApplied());
         }, SourceEnrichedPublicationClaim.unavailable(UNAVAILABLE));
+    }
+
+    private void quarantineHistoryOrderMismatch(ClientSession session, Document row, boolean published, String token) {
+        String state = published ? "PUBLISHED" : "PUBLISHING";
+        String leaseField = published ? "historyLeaseToken" : "leaseToken";
+        var filter = and(eq("_id", row.getString("_id")), eq("state", state), eq("historyState", "PENDING"),
+                eq(leaseField, token));
+        var updates = combine(set("historyState", "QUARANTINED"), set("historyFailureCode", "HISTORY_DATA_INVALID"),
+                unset("historyLeaseToken"), unset("historyLeaseUntil"));
+        if (!published) {
+            updates = combine(updates, set("state", "PENDING"), inc("attempts", -1),
+                    unset("leaseToken"), unset("leaseUntil"), unset("nextAttemptAt"));
+        }
+        var result = database.getCollection(ENRICHED_PUBLICATIONS).updateOne(session, filter, updates);
+        if (!result.wasAcknowledged() || result.getMatchedCount() != 1 || result.getModifiedCount() != 1) {
+            throw invalid("FEATURE_ORDER_GATE_MISMATCH_QUARANTINE_UNRESOLVED");
+        }
     }
 
     private SourceEnrichedPublicationClaim claimPreparedRow(ClientSession session, Document row, SourceEnrichedPublication stored) {

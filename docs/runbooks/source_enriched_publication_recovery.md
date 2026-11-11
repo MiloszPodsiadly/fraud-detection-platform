@@ -14,13 +14,20 @@ same attested Redis history effect, then publishes the stored event bytes. Kafka
 delivery remains at-least-once; Mongo and Redis do not share a distributed
 transaction.
 
+Code merge and deployment are separate decisions. Passing repository tests can
+support code review; it does not authorize institutional onboarding. Deployment
+also requires approved live issuer/source keys and scopes, owner-only Mongo
+migrations and roles, retention/key-rotation approval, Kafka producer routing
+coordination, a measured receipt-capacity threshold and alert route, and an
+operator-approved recovery/cutover plan.
+
 ## Required roles and access
 
-- A schema owner performs both Mongo migrations. Its custom role needs scoped
+- A schema owner performs the three Mongo migrations. Its custom role needs scoped
   `createCollection`, `createIndex`, `collMod`, and backfill read/write actions
   only on the ENRICHED publication, business-identity, receipt, admission
-  identity, and RAW lineage collections. It does not need general `drop` or
-  `delete` access.
+  identity, RAW lineage, and feature-order gate collections. It does not need
+  general `drop` or `delete` access.
 - The ENRICHER runtime uses its restricted service principal. Do not add schema
   owner privileges to this role.
 - A protected deployment or control-plane RBAC policy must authorize launching
@@ -61,7 +68,7 @@ duplicate replay at capacity, expiration/compaction, retained tombstones, and
 the absence of a RAW outbox row on capacity rejection.
 
 The persistent count is not included in the RAW recovery health log. Monitor it
-through the protected schema-owner operations view: compare
+through the protected read-only schema-owner operations view: compare
 `source_admission_limits.count` for `_id="capacity"` with the active approved
 `max-receipts` setting. Configure an early warning threshold from the
 deployment's observed admission rate and the lead time needed for an approved
@@ -69,6 +76,16 @@ rollover; alert critically when count reaches the cap. The count and remaining
 capacity are low-cardinality database signals. Do not add receipt IDs,
 customer fields, issuer/source labels, or policy commitments to metrics or
 logs.
+
+The repository cannot choose a numeric warning point or alert route without a
+deployment-specific admission rate and cutover lead time. Before enabling
+attested production traffic, record those inputs, the selected threshold, the
+on-call route, and the owner-approved cutover action. A schema-owner query can
+read the count without returning receipt or customer data:
+
+```javascript
+db.source_admission_limits.findOne({ _id: "capacity" }, { _id: 0, count: 1 })
+```
 
 Capacity cannot be reset by deleting the counter or tombstones, raising the
 limit, or changing source epoch. A new database or policy epoch requires an
@@ -78,12 +95,12 @@ perform implicit rollover or migrate old tombstones into a new database.
 
 ## Mongo migration and rollout
 
-Run both owner migrations before starting the new ENRICHER version. Pause
-attested source admission, RAW replay/recovery, ENRICHED writers/recovery, and
-receipt compaction for the migration window. Drain in-flight work before the
-owner scans publications. This maintenance boundary prevents old and new
-writers from changing the publication, receipt, RAW lineage, or fence inputs
-while the migration runs; Mongo does not provide one atomic transaction across
+Run all three owner migrations before starting the gate-aware ENRICHER version.
+Pause attested source admission, RAW replay/recovery, ENRICHED writers/recovery,
+and receipt compaction for the migration window. Drain in-flight work before
+the owner scans publications. This maintenance boundary prevents old and new
+writers from changing publication, receipt, RAW lineage, and fence inputs
+while the migrations run; Mongo does not provide one atomic transaction across
 these collections. Do not treat the migration as an all-database snapshot.
 
 The outbox migration accepts only the known prior strict validators or an exact
@@ -102,13 +119,14 @@ The outbox operation is exposed as
 SourceEnrichedPublicationCipher, Clock)`. It decrypts and verifies every
 unexpired stored publication before creating its scoped business-identity
 fence; it fails closed above its 100,000-row bound or on any receipt/publication
-binding mismatch. Invoke both from the approved schema-owner maintenance
+binding mismatch. Invoke all three in the approved schema-owner maintenance
 program with a separately supplied owner Mongo client and the publication key
 ring, for example:
 
 ```java
 import com.frauddetection.common.events.source.SourceEnrichedPublicationRecoveryMigration;
 import com.frauddetection.common.events.source.SourceEnrichedBusinessIdentityMigration;
+import com.frauddetection.common.events.source.SourceFeatureOrderGateMigration;
 import com.frauddetection.common.events.source.SourceEnrichedPublicationCipher;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
@@ -121,12 +139,13 @@ try (MongoClient owner = MongoClients.create(migrationUri)) {
     var database = owner.getDatabase(databaseName);
     SourceEnrichedPublicationRecoveryMigration.migrate(database);
     SourceEnrichedBusinessIdentityMigration.migrate(database, publicationCipher, Clock.systemUTC());
+    SourceFeatureOrderGateMigration.migrate(database, Clock.systemUTC());
 }
 ```
 
 The maintenance program must obtain the URI, database name, and publication
-key ring from the approved secret/configuration source. Do not run either
-migration with
+key ring from the approved secret/configuration source. Do not run these
+migrations with
 `SourceLineageClients.open` or ENRICHER service credentials. Confirm completion
 by starting a restricted ENRICHER instance: startup validates the exact strict
 validators and all required indexes, and does not repair them. Verify and
@@ -142,6 +161,41 @@ the backfill and leaves ENRICHER startup closed. Startup checks the strict
 validator, TTL index, READY record, and bounded fence-row shape; it never
 repairs schema or data.
 
+`SourceFeatureOrderGateMigration.migrate(MongoDatabase, Clock)` installs the
+strict, versioned `source_feature_order_gates` collection. It fails closed if
+any unexpired ENRICHED history is not `APPLIED`, a RAW publication remains
+pending or quarantined, or an unexpired bound RAW row lacks its exact applied
+ENRICHED publication. The bounded pre-gate scan rejects more than 100,000
+unexpired RAW rows. Resolve or expire pre-gate work under source-owner policy
+before retrying; do not create an empty gate collection over in-flight or DLT
+RAW work. The gate uses only the `_id` index, stores a domain-separated hash
+rather than customer data, and has no TTL. ENRICHER can read and update gates,
+but cannot insert, delete, or alter their schema. A bounded aggregate view may
+report `ACTIVE`, `RESOLVED`, and `LATE_REJECTED` counts and oldest active age;
+never include gate IDs or customer fields in logs or metrics.
+
+The repository exposes the durable gate state through Mongo rather than a
+runtime gate-metrics endpoint. A deployment-owned, low-frequency monitor can
+run these bounded owner-read queries (the collection is limited to the
+100,000-receipt lifetime capacity):
+
+```javascript
+db.source_feature_order_gates.aggregate([
+  { $group: { _id: "$status", count: { $sum: 1 } } },
+  { $project: { _id: 0, status: "$_id", count: 1 } }
+])
+
+db.source_feature_order_gates.aggregate([
+  { $match: { status: "ACTIVE" } },
+  { $group: { _id: null, active: { $sum: 1 }, oldestActiveAt: { $min: "$activatedAt" } } },
+  { $project: { _id: 0, active: 1, oldestActiveAt: 1 } }
+])
+```
+
+Alert on a sustained active count or age according to the deployment's
+reconciliation capacity. The monitor reports counts and timestamps only; it
+does not expose the hashed `_id`, receipt ID, customer, or source labels.
+
 Only unexpired ENRICHED publications are backfilled. The fence expiry matches
 the source receipt's expiry and the TTL index removes it after that retention
 deadline. Source-owner receipt compaction also deletes the corresponding
@@ -152,7 +206,7 @@ publications are not reconstructed or adopted by the migration.
 Roll forward in this order:
 
 1. Pause attested ENRICHED writers and verify the owner change record.
-2. Run both owner migrations once with the schema-owner client and current
+2. Run all three owner migrations once with the schema-owner client and current
    publication decryption key ring.
 3. Deploy the new ENRICHER with source lineage and the scheduled recovery owner
    enabled. Keep ordinary RAW listener startup under normal service policy.
@@ -161,12 +215,58 @@ Roll forward in this order:
    existing rows and old binaries, so an old worker can still run old retry
    behavior until it is stopped.
 5. Confirm startup passes schema checks and observe pending, leased, exhausted,
-   quarantined, and oldest-pending health values.
+   quarantined, oldest-pending, and gate-active health values. Use the protected
+   schema-owner operations view for aggregate gate status counts and oldest
+   active age; expose no gate IDs or customer labels.
 6. Resume attested traffic after the independent recovery worker is healthy.
 
 The new Mongo schema requires history state on writes. Do not run old and new
 attested ENRICHER writers concurrently across the migration boundary. Public
 Kafka event shapes are unchanged, so consumers can remain wire-compatible.
+
+While a gate is `ACTIVE`, a later admission for the same source scope and
+customer returns HTTP 503 `SOURCE_RECEIPT_ORDER_PENDING`. The transaction
+aborts before reserving lifetime receipt capacity or creating a replay identity,
+RAW row, or RAW outbox entry. The caller may retry after the earlier event's
+history is applied. An active gate has no timeout: if the earlier event is
+quarantined, revoked, corrupt, or expired, retain the barrier until an
+authorized reconciliation proves its exact history effect or approves a
+source/feature-namespace cutover. Never delete or reset a gate to restore
+traffic.
+
+## Business-identity startup validation profile
+
+`SourceEnrichedBusinessIdentitySchema.initialize()` retains the bounded
+`verifyRecords()` scan on each ENRICHER startup. The opt-in Testcontainers
+probe seeds valid fences, checks Mongo `executionStats`, and records elapsed
+initialization time, thread allocation, and heap observations. One local run
+used JDK 21.0.10, Mongo `mongo:7.0`, an 8,392,802,304-byte maximum Java heap,
+and a host reporting 33,570,611,200 bytes of memory (7,346,049,024 bytes free
+at probe start).
+
+| Fences | Documents checked / explain examined | Explain ms | One init ms / allocated bytes | Three init ms per init / allocated bytes per init |
+|---:|---:|---:|---:|---:|
+| 0 | 1 / 1 | 0 | 46.364 / 852,392 | 43.374 / 852,490 |
+| 10,000 | 10,001 / 10,001 | 2 | 166.697 / 66,497,824 | 113.556 / 61,882,037 |
+| 100,000 | 100,001 / 100,001 | 24 | 833.192 / 635,607,648 | 841.946 / 610,373,821 |
+
+Thread allocation is cumulative allocation during initialization, not retained
+heap. The 100,000-row run's observed heap-used increase was about 124 MiB for
+one initialization and 61 MiB for the three-initialization batch; a later
+initialization can collect prior temporary objects. This is a single local
+profile, not a production startup SLO. No operating-target threshold was
+provided, so the full scan remains in place to validate existing fence shape
+and READY integrity. Do not remove it based on Mongo's strict validator, which
+does not retroactively validate stored documents.
+
+To reproduce the probe:
+
+```powershell
+mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dsurefire.failIfNoSpecifiedTests=false" `
+  "-Dsource.business-identity.startup.benchmark=true" `
+  -pl fraud-scoring-service -am `
+  -Dtest=SourceLineagePipelineIntegrationTest#recordsOptInBusinessIdentityStartupScanProfile test
+```
 
 ## Redis key compatibility
 
@@ -196,10 +296,19 @@ The ENRICHER therefore accepts a new attested transaction only when its
 `transactionTimestamp` is equal to or later than the customer's latest applied
 attested timestamp. A regression fails before Redis window pruning with
 `FEATURE_EVENT_TIME_OUT_OF_ORDER`; the Kafka error handler sends it directly to
-the RAW DLT. The signed RAW record and verified source authority remain intact,
+the RAW DLT. The ENRICHER durably changes only that exact event's active
+order gate to `LATE_REJECTED` after revalidating RAW authority and gate
+ownership. Redelivery remains a late rejection and cannot contribute feature
+history. The signed RAW record and verified source authority remain intact,
 but no ENRICHED publication or downstream SCORED occurrence is created. Do not
 retry by changing Redis state, replacing the source proof, or sending the event
 through the legacy path. Keep the DLT item for source-owner reconciliation.
+
+This accepted late-event outcome is different from an earlier in-order event
+whose feature history is pending: its gate stays `ACTIVE`, and later same-scope
+admission receives `SOURCE_RECEIPT_ORDER_PENDING` until recovery safely applies
+the earlier effect. Neither RAW DLT nor exhausted retries implicitly clears an
+active gate. Keep the DLT item and reconcile it under source-owner policy.
 
 Attested RAW records are partitioned by a SHA-256 digest of customer ID so one
 customer is processed serially across ENRICHER instances. Legacy RAW records
@@ -281,6 +390,25 @@ profile covers 0, 1,000, 10,000, and 100,000 union entries. High-bound 250,000,
 | 100,000 | v2 only | 99.430 / 138.799 / 138.799 | 28,481,053 | 223,746,704 | 15 / 135 | 14 | 10,749,864 |
 | 100,000 | disjoint | 84.608 / 109.056 / 109.056 | 28,482,117 | 290,256,016 | 10 / 87 | 14 | 10,739,912 |
 | 100,000 | overlap | 163.256 / 185.050 / 185.050 | 51,626,981 | 318,489,928 | 17 / 147 | 14 | 20,391,712 |
+
+An additional R4 rerun exercised only the routine 100,000-entry profile. Keep
+these measurements separate from the table above; they are a new eight-sample
+run, not a replacement or a general performance promise.
+
+| Union | Mode | p50 / p95 / max ms | Allocated B/read | Post-read heap peak B | GC count / ms | Commands/read | Redis used memory B |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 100,000 | v3 only | 84.044 / 106.060 / 106.060 | 28,481,053 | 240,648,192 | 11 / 95 | 14 | 10,743,888 |
+| 100,000 | v2 only | 97.949 / 146.304 / 146.304 | 28,481,148 | 213,909,504 | 15 / 104 | 14 | 10,744,928 |
+| 100,000 | disjoint | 95.521 / 129.821 / 129.821 | 28,482,117 | 241,696,768 | 15 / 122 | 14 | 10,737,656 |
+| 100,000 | overlap | 155.449 / 211.765 / 211.765 | 51,626,981 | 277,594,032 | 20 / 146 | 14 | 20,385,112 |
+
+The malformed duplicate-timestamp profile failed closed in 12.578 ms in this
+rerun. It used JDK 21.0.10, `-Xmx1g`, `redis:7.2-alpine` constrained to 1 GiB
+with Redis `maxmemory=0`, 3 warmups, 8 samples per mode, and a host reporting
+33,570,611,200 bytes total memory. The high-bound profile was not run because
+the configured 1 GiB heap and absent stress opt-in did not satisfy its resource
+gate: `NOT_EXECUTED_RESOURCE_GATED`. The one-million value remains a contract
+ceiling, not a demonstrated operating limit or SLO.
 
 The benchmark replaces the merchant-ID `LinkedHashMap` with a `HashMap`; map
 iteration order is not part of the output contract. The corrected command

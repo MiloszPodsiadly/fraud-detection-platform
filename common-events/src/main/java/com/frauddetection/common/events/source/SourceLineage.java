@@ -9,7 +9,7 @@ import java.util.Objects;
 /** Private processing context, never an event/API field or permission to read domain history. */
 @JsonIgnoreType
 public final class SourceLineage {
-    public enum State { VERIFIED, UNVERIFIED, UNAVAILABLE, CONFLICT, REVOKED }
+    public enum State { VERIFIED, UNVERIFIED, UNAVAILABLE, CONFLICT, REVOKED, ORDER_PENDING }
     private final State state;
     private final String receiptId;
     private final SourceScope source;
@@ -31,6 +31,7 @@ public final class SourceLineage {
             case UNAVAILABLE -> UNAVAILABLE_VALUE;
             case CONFLICT -> CONFLICT_VALUE;
             case REVOKED -> REVOKED_VALUE;
+            case ORDER_PENDING -> new SourceLineage(State.ORDER_PENDING, null, null, null);
             case VERIFIED -> throw new IllegalArgumentException("SOURCE_LINEAGE_STATE_INVALID");
         };
     }

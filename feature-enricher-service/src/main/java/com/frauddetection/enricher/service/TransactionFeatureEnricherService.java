@@ -108,7 +108,17 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                 // The verified RAW lineage remains the durable reconciliation anchor for this conflict.
                 throw new FeatureEnrichmentException("FEATURE_BUSINESS_TRANSACTION_ID_CONFLICT");
             } else {
-                FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(event, namespace);
+                FeatureStoreSnapshot snapshot;
+                try {
+                    snapshot = featureStore.loadSnapshot(event, namespace);
+                } catch (com.frauddetection.enricher.exception.OutOfOrderFeatureEventException late) {
+                    SourceLineage rejected = sourceLineage.rejectLateRawObservation(event);
+                    if (rejected == null || rejected.state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED
+                            || !origin.authority().eventCommitment().equals(rejected.eventCommitment())) {
+                        throw new FeatureEnrichmentException("FEATURE_LINEAGE_LATE_ORDER_RESOLUTION_UNRESOLVED", late);
+                    }
+                    throw late;
+                }
                 EnrichedTransactionFeatures features = transactionFeatureCalculator.calculate(event, snapshot);
                 TransactionEnrichedEvent candidate = transactionEnrichedEventMapper.toAttestedEvent(event, features);
                 publication = sourceLineage.prepareEnrichedPublication(event, candidate);
