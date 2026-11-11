@@ -548,6 +548,36 @@ organization's approved sensitive-data process explicitly requires it. Escalate
 schema mismatch to the Mongo owner, authority/key problems to the source trust
 owner, and sustained storage or broker failures to the service owner.
 
+## Durable late RAW rejection
+
+An exact RAW observation that Redis rejects as event-time out of order is kept
+in the signed RAW audit path and receives no ENRICHED or SCORED event. The same
+Mongo transaction resolves its active customer gate to `LATE_REJECTED` and
+inserts an immutable row in `source_raw_terminal_dispositions`. Replays that
+still pass current source-policy and signed-payload checks return the same
+`FEATURE_EVENT_TIME_OUT_OF_ORDER` result before Redis history is read. Gate
+reuse by a later observation, an ENRICHER restart, or Redis marker loss does not
+change that stored decision.
+
+For rollout, pause attested admission, RAW recovery, ENRICHER processing, and
+ENRICHED recovery. Run the owner code path
+`SourceRawTerminalDispositionMigration.migrate(database, clock)` before
+starting ENRICHER instances with the new role. It creates/verifies a strict
+validator and `_id`-only index, then backfills only currently retained
+`LATE_REJECTED` gates. It is safe to rerun after interruption and does not
+repair incompatible existing schema or malformed rows. Resume traffic only
+after owner and ENRICHER startup checks pass and all writers use the atomic
+gate-plus-disposition transaction.
+
+The new collection has no TTL or compaction; its maximum is the existing
+100,000 lifetime receipt identities. Grant ENRICHER only `find`, `insert`, and
+`listIndexes` on this collection. SCORER receives no access. Do not grant
+`update`, `delete`, `collMod`, `createIndex`, or `createCollection` to either
+runtime role. If an older release already reused a gate and erased a previous
+`LATE_REJECTED` state, the exact decision cannot be backfilled. Treat that RAW
+as unresolved and follow the source-owner reconciliation process; do not infer
+an outcome from Redis or rescore it.
+
 ## Non-claims
 
 This runbook does not establish external source authority, enable Device or

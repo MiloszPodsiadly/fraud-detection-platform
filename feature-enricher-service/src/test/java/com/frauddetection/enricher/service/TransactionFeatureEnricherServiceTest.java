@@ -14,6 +14,7 @@ import com.frauddetection.common.events.source.SourceOriginProperties;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
+import com.frauddetection.enricher.exception.OutOfOrderFeatureEventException;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
 import com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher;
 import com.frauddetection.enricher.persistence.FeatureStore;
@@ -36,6 +37,28 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class TransactionFeatureEnricherServiceTest {
+
+    @Test
+    void durableLateRejectionStopsBeforeFeatureHistoryOrPublication() {
+        FeatureStore featureStore = mock(FeatureStore.class);
+        TransactionEnrichedEventPublisher publisher = mock(TransactionEnrichedEventPublisher.class);
+        SourceLineageAccess lineage = mock(SourceLineageAccess.class);
+        var event = TransactionFixtures.rawTransaction().build();
+        SourceLineage authority = verifiedAuthority();
+        when(authority.eventCommitment()).thenReturn(com.frauddetection.common.events.source.SourceEventCommitment.raw(event));
+        SourceEnrichedPublicationLookup terminalLookup = SourceEnrichedPublicationLookup.lateRejected(authority);
+        when(lineage.raw(event)).thenReturn(authority);
+        when(lineage.findEnrichedPublication(event)).thenReturn(terminalLookup);
+        var service = new TransactionFeatureEnricherService(featureStore,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                publisher, lineage);
+
+        assertThatThrownBy(() -> service.enrich(event)).isInstanceOf(OutOfOrderFeatureEventException.class)
+                .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+
+        verifyNoInteractions(featureStore);
+        verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any());
+    }
 
     @Test
     void featureCapacityOverflowFailsBeforePublishingAnEnrichedEvent() {

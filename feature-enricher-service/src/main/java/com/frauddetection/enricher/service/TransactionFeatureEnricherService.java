@@ -10,6 +10,7 @@ import com.frauddetection.common.events.source.SourceEnrichedPublicationClaim;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
+import com.frauddetection.enricher.exception.OutOfOrderFeatureEventException;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
 import com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher;
 import com.frauddetection.enricher.persistence.FeatureNamespace;
@@ -98,6 +99,13 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                     || !com.frauddetection.common.events.source.SourceEventCommitment.raw(event)
                             .equals(origin.authority().eventCommitment())) {
                 throw new FeatureEnrichmentException("FEATURE_SOURCE_OBSERVATION_CONFLICT");
+            }
+            if (lookup.outcome() == com.frauddetection.common.events.source.SourceEnrichedPublicationLookup.Outcome.LATE_REJECTED) {
+                throw new OutOfOrderFeatureEventException();
+            }
+            if (lookup.outcome() != com.frauddetection.common.events.source.SourceEnrichedPublicationLookup.Outcome.FOUND
+                    && lookup.outcome() != com.frauddetection.common.events.source.SourceEnrichedPublicationLookup.Outcome.NOT_FOUND) {
+                throw new FeatureEnrichmentException("FEATURE_LINEAGE_UNRESOLVED");
             }
             publication = lookup.publication();
             if (publication != null) {

@@ -59,7 +59,8 @@ final class AuthenticatedSourceMongo implements AutoCloseable {
             privileges.add(privilege(database, "source_lineage_enriched_counts", List.of("find", "insert", "update")));
             privileges.add(privilege(database, "source_enriched_publications", List.of("find", "insert", "update", "listIndexes")));
             privileges.add(privilege(database, "source_enriched_business_identities", List.of("find", "insert", "listIndexes")));
-            privileges.add(privilege(database, "source_enriched_business_identities", List.of("find", "insert", "listIndexes")));
+            privileges.add(privilege(database, "source_feature_order_gates", List.of("find", "update", "listIndexes")));
+            privileges.add(privilege(database, "source_raw_terminal_dispositions", List.of("find", "insert", "listIndexes")));
         }
         if (occurrenceWriter) {
             for (String collection : List.of("source_scored_occurrences", "source_scored_occurrence_counts")) {

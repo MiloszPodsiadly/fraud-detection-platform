@@ -81,6 +81,7 @@ import java.lang.reflect.Proxy;
 import java.lang.management.ManagementFactory;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -2101,7 +2102,7 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(wrongReader.raw(second).state()).isEqualTo(REVOKED);
     }
 
-    @Test void delayedAttestedObservationFailsClosedWithoutCreatingEnrichedOrScoredWork() throws Exception {
+    @Test void lateRejectedObservationRetainsTerminalDispositionAfterAnotherAdmissionReusesGate() throws Exception {
         var redis = FraudPlatformContainers.redis();
         if (!redis.isRunning()) { redis.start(); }
         var connectionFactory = new LettuceConnectionFactory(redis.getHost(), redis.getMappedPort(6379));
@@ -2112,10 +2113,17 @@ class SourceLineagePipelineIntegrationTest {
         try {
             var store = new RedisFeatureStore(redisTemplate, new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7),
                     Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
-            List<TransactionEnrichedEvent> published = new ArrayList<>();
+            List<TransactionEnrichedEvent> published = new CopyOnWriteArrayList<>();
+            var publisher = new com.frauddetection.enricher.messaging.TransactionEnrichedEventPublisher() {
+                @Override public void publish(TransactionEnrichedEvent event) { published.add(event); }
+                @Override public void publish(TransactionEnrichedEvent event, SourceOriginProofs.Assertion origin) {
+                    published.add(event);
+                    enrichedOriginProofs.put(event.eventId(), ORIGIN_PROOFS.signEnriched(event, origin));
+                }
+            };
             var service = new TransactionFeatureEnricherService(store,
                     new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
-                    published::add, enricher, ORIGIN_PROOFS);
+                    publisher, enricher, ORIGIN_PROOFS);
 
             TransactionRawEvent first = admit(payload("late-a", TestSourceIssuer.NOW), Map.of("sourceEventId", "late-a-source"));
             service.enrich(first, ORIGIN_PROOFS.signRaw(first, SourceOriginProofs.Assertion.KNOWN_ATTESTED));
@@ -2131,6 +2139,30 @@ class SourceLineagePipelineIntegrationTest {
             assertThatThrownBy(() -> service.enrich(delayed, delayedProof))
                     .isInstanceOf(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class)
                     .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+            assertThatThrownBy(() -> service.enrich(delayed, "invalid-origin-proof"))
+                    .isInstanceOf(com.frauddetection.enricher.exception.FeatureEnrichmentException.class)
+                    .hasMessage("FEATURE_ORIGIN_UNRESOLVED");
+            TransactionRawEvent tampered = change(delayed, "transactionId", "tampered-late-c", TransactionRawEvent.class);
+            assertThatThrownBy(() -> service.enrich(tampered, delayedProof))
+                    .isInstanceOf(com.frauddetection.enricher.exception.FeatureEnrichmentException.class)
+                    .hasMessage("FEATURE_ORIGIN_UNRESOLVED");
+            var revokedEnricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER,
+                    policy(true), CLOCK, new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
+            var revokedService = new TransactionFeatureEnricherService(store,
+                    new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                    publisher, revokedEnricher, ORIGIN_PROOFS);
+            assertThatThrownBy(() -> revokedService.enrich(delayed, delayedProof))
+                    .isInstanceOf(com.frauddetection.enricher.exception.FeatureEnrichmentException.class)
+                    .hasMessage("FEATURE_ORIGIN_UNRESOLVED");
+            var expiredEnricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER,
+                    verifier, Clock.offset(CLOCK, Duration.ofHours(3)),
+                    new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
+            var expiredService = new TransactionFeatureEnricherService(store,
+                    new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                    publisher, expiredEnricher, ORIGIN_PROOFS);
+            assertThatThrownBy(() -> expiredService.enrich(delayed, delayedProof))
+                    .isInstanceOf(com.frauddetection.enricher.exception.FeatureEnrichmentException.class)
+                    .hasMessage("FEATURE_ORIGIN_UNRESOLVED");
 
             assertThat(published).extracting(TransactionEnrichedEvent::transactionId)
                     .containsExactly(first.transactionId(), later.transactionId());
@@ -2138,8 +2170,169 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(enricher.findEnrichedPublication(delayed).publication()).isNull();
             assertThat(enricherClient.getDatabase(db).getCollection("source_lineage_enriched").countDocuments()).isEqualTo(2L);
             assertThat(enricherClient.getDatabase(db).getCollection("source_enriched_publications").countDocuments()).isEqualTo(2L);
-            assertThat(ownerClient.getDatabase(db).getCollection("source_feature_order_gates")
-                    .find(eq("receiptId", enricher.raw(delayed).receiptId())).first()).containsEntry("status", "LATE_REJECTED");
+            Document initiallyRejectedGate = ownerClient.getDatabase(db).getCollection("source_feature_order_gates")
+                    .find(eq("receiptId", enricher.raw(delayed).receiptId())).first();
+            assertThat(initiallyRejectedGate).containsEntry("status", "LATE_REJECTED");
+            ownerClient.getDatabase(db).getCollection("source_raw_terminal_dispositions").drop();
+            SourceRawTerminalDispositionMigration.migrate(ownerClient.getDatabase(db), CLOCK);
+            SourceRawTerminalDispositionMigration.migrate(ownerClient.getDatabase(db), CLOCK);
+            var dispositionCollection = ownerClient.getDatabase(db).getCollection("source_raw_terminal_dispositions");
+            Document migratedDisposition = dispositionCollection.find(eq("receiptId", enricher.raw(delayed).receiptId())).first();
+            assertThat(migratedDisposition).containsEntry("receiptId", enricher.raw(delayed).receiptId())
+                    .containsEntry("rawCommitment", SourceEventCommitment.raw(delayed))
+                    .containsEntry("outcome", "FEATURE_EVENT_TIME_OUT_OF_ORDER");
+            assertThat(dispositionCollection.countDocuments(eq("recordType", "DISPOSITION"))).isEqualTo(1L);
+            var dispositionIndexes = dispositionCollection.listIndexes().into(new ArrayList<>());
+            assertThat(dispositionIndexes).hasSize(1);
+            assertThat(dispositionIndexes.getFirst()).containsEntry("name", "_id_").doesNotContainKey("expireAfterSeconds");
+            TransactionRawEvent next = admit(payload("late-d", TestSourceIssuer.NOW.plus(Duration.ofMinutes(4))),
+                    Map.of("sourceEventId", "late-d-source"));
+            String nextProof = ORIGIN_PROOFS.signRaw(next, SourceOriginProofs.Assertion.KNOWN_ATTESTED);
+            MongoClient restartedEnricherClient = MONGO.reconnectEnricher(db);
+            var restartedEnricher = new MongoSourceLineage(restartedEnricherClient, db, "enricher",
+                    MongoSourceLineage.Stage.ENRICHER, verifier, CLOCK,
+                    new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
+            var restartedService = new TransactionFeatureEnricherService(store,
+                    new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                    publisher, restartedEnricher, ORIGIN_PROOFS);
+            java.util.concurrent.CountDownLatch concurrentStart = new java.util.concurrent.CountDownLatch(1);
+            Throwable[] replayFailure = new Throwable[1];
+            try (var pool = Executors.newFixedThreadPool(2)) {
+                var processNext = pool.submit(() -> {
+                    awaitLatch(concurrentStart);
+                    service.enrich(next, nextProof);
+                });
+                var replayLate = pool.submit(() -> {
+                    awaitLatch(concurrentStart);
+                    try { restartedService.enrich(delayed, delayedProof); }
+                    catch (RuntimeException expected) { replayFailure[0] = expected; }
+                });
+                concurrentStart.countDown();
+                processNext.get(20, TimeUnit.SECONDS);
+                replayLate.get(20, TimeUnit.SECONDS);
+            }
+            assertThat(replayFailure[0]).isInstanceOf(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class)
+                    .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+            assertThat(published).extracting(TransactionEnrichedEvent::transactionId)
+                    .containsExactly(first.transactionId(), later.transactionId(), next.transactionId());
+            TransactionEnrichedEvent nextEnriched = published.stream()
+                    .filter(event -> event.transactionId().equals(next.transactionId())).findFirst().orElseThrow();
+            assertThat(score(nextEnriched).event()).isNotNull();
+            var delayedAuthority = enricher.raw(delayed);
+            var nextAuthority = enricher.raw(next);
+            String gateId = SourceFeatureOrderIdentity.identity(delayedAuthority.source(), delayed.customerId());
+            Document reusedGate = ownerClient.getDatabase(db).getCollection("source_feature_order_gates")
+                    .find(eq("_id", gateId)).first();
+            assertThat(reusedGate).containsEntry("status", "RESOLVED")
+                    .containsEntry("receiptId", nextAuthority.receiptId())
+                    .containsEntry("rawCommitment", nextAuthority.eventCommitment());
+            assertThat(enricherClient.getDatabase(db).getCollection("source_lineage_enriched").countDocuments()).isEqualTo(3L);
+            assertThat(enricherClient.getDatabase(db).getCollection("source_enriched_publications").countDocuments()).isEqualTo(3L);
+            var durableLookup = restartedEnricher.findEnrichedPublication(delayed);
+            assertThat(durableLookup.outcome()).isEqualTo(SourceEnrichedPublicationLookup.Outcome.LATE_REJECTED);
+            Document durableDisposition = ownerClient.getDatabase(db).getCollection("source_raw_terminal_dispositions")
+                    .find(eq("receiptId", delayedAuthority.receiptId())).first();
+            assertThat(durableDisposition).containsEntry("receiptId", delayedAuthority.receiptId())
+                    .containsEntry("rawCommitment", delayedAuthority.eventCommitment())
+                    .containsEntry("outcome", "FEATURE_EVENT_TIME_OUT_OF_ORDER");
+            Document conflictingDisposition = new Document(durableDisposition)
+                    .append("rawCommitment", "0".repeat(64));
+            assertThatThrownBy(() -> enricherClient.getDatabase(db)
+                    .getCollection("source_raw_terminal_dispositions").insertOne(conflictingDisposition))
+                    .isInstanceOf(com.mongodb.MongoWriteException.class);
+            assertThat(ownerClient.getDatabase(db).getCollection("source_raw_terminal_dispositions")
+                    .find(eq("receiptId", delayedAuthority.receiptId())).first())
+                    .containsEntry("rawCommitment", delayedAuthority.eventCommitment());
+
+            var snapshotAfterNext = store.loadSnapshot(next, FeatureNamespace.attested(nextAuthority));
+            assertThatThrownBy(() -> restartedService.enrich(delayed, delayedProof))
+                    .isInstanceOf(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class)
+                    .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+            assertThat(store.loadSnapshot(next, FeatureNamespace.attested(nextAuthority))).isEqualTo(snapshotAfterNext);
+            assertThat(published).extracting(TransactionEnrichedEvent::transactionId)
+                    .containsExactly(first.transactionId(), later.transactionId(), next.transactionId());
+
+            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+            assertThatThrownBy(() -> restartedService.enrich(delayed, delayedProof))
+                    .isInstanceOf(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class)
+                    .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+            assertThat(published).extracting(TransactionEnrichedEvent::transactionId)
+                    .containsExactly(first.transactionId(), later.transactionId(), next.transactionId());
+
+            TransactionRawEvent ackFirst = admit(payload("late-ack-first", TestSourceIssuer.NOW,
+                    "10.00", "merchant-late-ack", "customer-late-ack"),
+                    Map.of("sourceEventId", "late-ack-first-source"));
+            service.enrich(ackFirst, ORIGIN_PROOFS.signRaw(ackFirst, SourceOriginProofs.Assertion.KNOWN_ATTESTED));
+            TransactionRawEvent ackLater = admit(payload("late-ack-later", TestSourceIssuer.NOW.plus(Duration.ofMinutes(2)),
+                    "20.00", "merchant-late-ack", "customer-late-ack"),
+                    Map.of("sourceEventId", "late-ack-later-source"));
+            service.enrich(ackLater, ORIGIN_PROOFS.signRaw(ackLater, SourceOriginProofs.Assertion.KNOWN_ATTESTED));
+            TransactionRawEvent ackDelayed = admit(payload("late-ack-delayed", TestSourceIssuer.NOW.plusSeconds(30),
+                    "30.00", "merchant-late-ack", "customer-late-ack"),
+                    Map.of("sourceEventId", "late-ack-delayed-source"));
+            var loseNextCommitAck = new AtomicBoolean();
+            var lostCommitAcks = new java.util.concurrent.atomic.AtomicInteger();
+            MongoClient ackFaultClient = commitFault(enricherClient, (session, method, args) -> {
+                Object result = invoke(session, method, args);
+                if (method.getName().equals("commitTransaction") && loseNextCommitAck.compareAndSet(true, false)) {
+                    lostCommitAcks.incrementAndGet();
+                    throw unknownCommit();
+                }
+                return result;
+            });
+            var ackFaultLineage = new MongoSourceLineage(ackFaultClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER,
+                    verifier, CLOCK, new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
+            FeatureStore loseAckOnLateDecision = new FeatureStore() {
+                @Override public boolean hasRecordedTransaction(TransactionRawEvent event) {
+                    return store.hasRecordedTransaction(event);
+                }
+                @Override public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event) {
+                    return store.loadSnapshot(event);
+                }
+                @Override public void recordTransaction(TransactionRawEvent event) { store.recordTransaction(event); }
+                @Override public boolean hasRecordedTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
+                    return store.hasRecordedTransaction(event, namespace);
+                }
+                @Override public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event, FeatureNamespace namespace) {
+                    if (event.eventId().equals(ackDelayed.eventId())) {
+                        loseNextCommitAck.set(true);
+                        throw new com.frauddetection.enricher.exception.OutOfOrderFeatureEventException();
+                    }
+                    return store.loadSnapshot(event, namespace);
+                }
+                @Override public void recordTransaction(TransactionRawEvent event, FeatureNamespace namespace) {
+                    store.recordTransaction(event, namespace);
+                }
+                @Override public void recordAttestedTransaction(TransactionEnrichedEvent event, FeatureNamespace namespace,
+                                                                String historyCommitment) {
+                    store.recordAttestedTransaction(event, namespace, historyCommitment);
+                }
+                @Override public void verifyAttestedTransaction(TransactionEnrichedEvent event, FeatureNamespace namespace,
+                                                               String historyCommitment) {
+                    store.verifyAttestedTransaction(event, namespace, historyCommitment);
+                }
+            };
+            var ackFaultService = new TransactionFeatureEnricherService(loseAckOnLateDecision,
+                    new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                    publisher, ackFaultLineage, ORIGIN_PROOFS);
+            assertThatThrownBy(() -> ackFaultService.enrich(ackDelayed,
+                    ORIGIN_PROOFS.signRaw(ackDelayed, SourceOriginProofs.Assertion.KNOWN_ATTESTED)))
+                    .isInstanceOf(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class)
+                    .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+            assertThat(lostCommitAcks.get()).isEqualTo(1);
+            assertThat(loseNextCommitAck).isFalse();
+            assertThat(ackFaultLineage.findEnrichedPublication(ackDelayed).outcome())
+                    .isEqualTo(SourceEnrichedPublicationLookup.Outcome.LATE_REJECTED);
+            assertThat(ownerClient.getDatabase(db).getCollection("source_raw_terminal_dispositions")
+                    .countDocuments(eq("receiptId", enricher.raw(ackDelayed).receiptId()))).isEqualTo(1L);
+            assertThatThrownBy(() -> service.enrich(ackDelayed,
+                    ORIGIN_PROOFS.signRaw(ackDelayed, SourceOriginProofs.Assertion.KNOWN_ATTESTED)))
+                    .isInstanceOf(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class)
+                    .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
+            assertThat(published).extracting(TransactionEnrichedEvent::transactionId)
+                    .contains(first.transactionId(), later.transactionId(), next.transactionId(), ackFirst.transactionId(),
+                            ackLater.transactionId())
+                    .doesNotContain(ackDelayed.transactionId());
         } finally {
             redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
             connectionFactory.destroy();
@@ -2225,15 +2418,10 @@ class SourceLineagePipelineIntegrationTest {
             int capacityAfterA = database.getCollection("source_admission_limits").find(eq("_id", "capacity"))
                     .first().getInteger("count");
 
-            boolean bDeferred = false;
-            TransactionRawEvent b = null;
-            try { b = admit(bPayload, bClaims); }
-            catch (SourceIngestException blocked) {
-                assertThat(blocked.status()).isEqualTo(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
-                assertThat(blocked).hasMessage("SOURCE_RECEIPT_ORDER_PENDING");
-                bDeferred = true;
-            }
-            assertThat(bDeferred).as("B admission must wait until A's Redis effect is durably acknowledged").isTrue();
+            SourceIngestException blocked = catchThrowableOfType(() -> admit(bPayload, bClaims), SourceIngestException.class);
+            assertThat(blocked).as("B admission must wait until A's Redis effect is durably acknowledged").isNotNull()
+                    .hasMessage("SOURCE_RECEIPT_ORDER_PENDING");
+            assertThat(blocked.status()).isEqualTo(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
 
             Clock recoveryClock = Clock.offset(CLOCK, Duration.ofMinutes(1));
             var recoveryLineage = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER,
@@ -2241,28 +2429,6 @@ class SourceLineagePipelineIntegrationTest {
                     new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
             SourceEnrichedPublicationRecovery recovery = new SourceEnrichedPublicationRecovery(recoveryLineage,
                     enrichedPublisher, store, new SourceEnrichedPublicationRecoveryProperties(true, 10, 0, 1_000));
-
-            if (!bDeferred) {
-                assertThat(b).isNotNull();
-                TransactionRawEvent admittedB = b;
-                new TransactionFeatureEnricherService(store, calculator, mapper, enrichedPublisher, enricher, ORIGIN_PROOFS)
-                        .enrich(admittedB, ORIGIN_PROOFS.signRaw(admittedB, SourceOriginProofs.Assertion.KNOWN_ATTESTED));
-                TransactionEnrichedEvent incompleteB = published.stream()
-                        .filter(event -> event.transactionId().equals(admittedB.transactionId())).findFirst().orElseThrow();
-                assertThat(score(incompleteB).event()).isNotNull();
-                int observedBCount = (Integer) incompleteB.featureSnapshot().get(
-                        com.frauddetection.common.events.features.FraudFeatureContract.RECENT_TRANSACTION_COUNT);
-                recovery.recover();
-                Document overtakenA = database.getCollection("source_enriched_publications")
-                        .find(eq("rawCommitment", SourceEventCommitment.raw(a))).first();
-                assertThat(overtakenA).containsEntry("historyState", "QUARANTINED")
-                        .containsEntry("historyFailureCode", "HISTORY_DATA_INVALID");
-                assertThat(store.hasRecordedTransaction(a, namespace)).isFalse();
-                assertThat(store.hasRecordedTransaction(b, namespace)).isTrue();
-                assertThat(observedBCount).as("B must include A in its history-dependent snapshot before scoring")
-                        .isEqualTo(2);
-                return;
-            }
 
             assertThat(rawWire).hasSize(1);
             assertThat(database.getCollection("source_admission_limits").find(eq("_id", "capacity"))
@@ -2276,7 +2442,7 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(appliedA).containsEntry("historyState", "APPLIED");
             assertThat(store.hasRecordedTransaction(a, namespace)).isTrue();
 
-            b = admit(bPayload, bClaims);
+            TransactionRawEvent b = admit(bPayload, bClaims);
             TransactionRawEvent admittedB = b;
             new TransactionFeatureEnricherService(store, calculator, mapper, enrichedPublisher, recoveryLineage, ORIGIN_PROOFS)
                     .enrich(admittedB, ORIGIN_PROOFS.signRaw(admittedB, SourceOriginProofs.Assertion.KNOWN_ATTESTED));
@@ -2337,6 +2503,23 @@ class SourceLineagePipelineIntegrationTest {
                             assertThat(((MongoCommandException) error).getCode()).isEqualTo(13));
         }
         assertThatThrownBy(() -> scorerClient.getDatabase(db).getCollection("source_lineage_enriched").deleteMany(new Document()))
+                .isInstanceOf(MongoCommandException.class).satisfies(error -> assertThat(((MongoCommandException) error).getCode()).isEqualTo(13));
+        assertThatThrownBy(() -> enricherClient.getDatabase(db).getCollection("source_feature_order_gates")
+                .insertOne(new Document("_id", "a".repeat(64))))
+                .isInstanceOf(MongoCommandException.class).satisfies(error -> assertThat(((MongoCommandException) error).getCode()).isEqualTo(13));
+        assertThatThrownBy(() -> enricherClient.getDatabase(db).getCollection("source_raw_terminal_dispositions")
+                .updateOne(new Document(), set("outcome", "ACCEPTED")))
+                .isInstanceOf(MongoCommandException.class).satisfies(error -> assertThat(((MongoCommandException) error).getCode()).isEqualTo(13));
+        assertThatThrownBy(() -> enricherClient.getDatabase(db).getCollection("source_raw_terminal_dispositions")
+                .deleteMany(new Document()))
+                .isInstanceOf(MongoCommandException.class).satisfies(error -> assertThat(((MongoCommandException) error).getCode()).isEqualTo(13));
+        assertThatThrownBy(() -> enricherClient.getDatabase(db).runCommand(new Document("collMod", "source_raw_terminal_dispositions")
+                .append("validator", new Document())))
+                .isInstanceOf(MongoCommandException.class).satisfies(error -> assertThat(((MongoCommandException) error).getCode()).isEqualTo(13));
+        assertThatThrownBy(() -> scorerClient.getDatabase(db).getCollection("source_raw_terminal_dispositions").find().first())
+                .isInstanceOf(MongoCommandException.class).satisfies(error -> assertThat(((MongoCommandException) error).getCode()).isEqualTo(13));
+        assertThatThrownBy(() -> scorerClient.getDatabase(db).getCollection("source_raw_terminal_dispositions")
+                .insertOne(new Document("_id", "b".repeat(64))))
                 .isInstanceOf(MongoCommandException.class).satisfies(error -> assertThat(((MongoCommandException) error).getCode()).isEqualTo(13));
     }
 

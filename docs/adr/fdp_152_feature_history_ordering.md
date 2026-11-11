@@ -51,3 +51,43 @@ Use the authenticated Mongo replica-set and real Redis fixtures in `SourceLineag
 Companion cases cover a failure after Lua but before Mongo acknowledgement; RAW accepted before ENRICHED preparation; lease takeover; equal-time and genuinely late events; duplicate A; independent recovery; and different scope/customer progress. A real Kafka/Mongo/Redis listener test verifies that a genuinely late event keeps `FEATURE_EVENT_TIME_OUT_OF_ORDER` in RAW DLT and creates no ENRICHED/SCORED output. A migration test verifies that unresolved legacy history blocks gate creation and that the owner migration installs the strict no-TTL schema after reconciliation. The tests use live services and explicit failpoints rather than sleeps or mock-only evidence for the ordering guarantee.
 
 These are local Testcontainers results on the current working tree. They do not replace required GitHub checks on the final pushed SHA or prove production deployment readiness.
+
+## Durable disposition for a late RAW observation
+
+The per-customer gate is reusable state. When an exact RAW observation is
+rejected as `FEATURE_EVENT_TIME_OUT_OF_ORDER`, the ENRICHER now writes an
+immutable row to `source_raw_terminal_dispositions` in the same majority
+Mongo transaction that changes that RAW's active gate to `LATE_REJECTED`.
+The row's `_id` is a domain-separated digest of its receipt ID; it also stores
+the exact receipt ID, RAW commitment, terminal outcome, and decision time.
+This makes a second commitment for the same receipt collide with the same
+identity and fail closed. It stores no customer/source plaintext, has a strict
+validator, and uses only Mongo's exact `_id` index. It has no TTL and is bounded
+by the existing 100,000 lifetime receipt identities.
+
+The ENRICHER role may `find` and `insert` disposition rows and `listIndexes`;
+it cannot update/delete them or alter the schema. The SCORER role has no access.
+Every replay first revalidates the current signed RAW evidence and its receipt,
+then looks up the exact disposition. A matching row returns an explicit
+`LATE_REJECTED` result and raises the existing
+`FEATURE_EVENT_TIME_OUT_OF_ORDER` exception before feature history is read or
+recomputed. A missing, malformed, mismatched, or unreadable row remains
+unavailable and cannot authorize a snapshot or publication.
+
+`SourceRawTerminalDispositionMigration.migrate(database, clock)` is the
+owner-run migration entry point. The owner installs the strict collection and
+backfills currently retained `LATE_REJECTED` gate rows. It is bounded to
+100,000 rows, idempotent, and refuses an incompatible validator, index, or
+legacy gate record. Run it while attested admission and ENRICHER/recovery
+writers are paused, before deploying ENRICHER credentials with the new narrow
+grant. Owner startup installs the collection when absent and verifies exact
+schema, index, records, and legacy gate coverage; ENRICHER startup fails closed
+until the owner migration is ready. Never grant ENRICHER `collMod`,
+`createIndex`, `delete`, or `update` on the disposition collection.
+
+The migration can recover only late rejections still represented by a
+`LATE_REJECTED` gate. If an older binary already reused that gate and erased the
+earlier status, Mongo no longer contains enough evidence to reconstruct the
+old terminal decision. Such a replay remains `FEATURE_LINEAGE_UNRESOLVED` and
+requires authorized reconciliation; the migration must not infer a terminal
+outcome from Redis or recreate a disposition from untrusted event data.

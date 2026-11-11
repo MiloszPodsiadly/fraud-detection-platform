@@ -61,6 +61,7 @@ final class AuthenticatedSourceMongo implements AutoCloseable {
             privileges.add(privilege(database, "source_enriched_publications", List.of("find", "insert", "update", "listIndexes")));
             privileges.add(privilege(database, "source_enriched_business_identities", List.of("find", "insert", "listIndexes")));
             privileges.add(privilege(database, "source_feature_order_gates", List.of("find", "update", "listIndexes")));
+            privileges.add(privilege(database, "source_raw_terminal_dispositions", List.of("find", "insert", "listIndexes")));
         }
         db.runCommand(new Document("createRole", user).append("privileges", privileges).append("roles", List.of()));
         db.runCommand(new Document("createUser", user).append("pwd", "ephemeral-consumer-only").append("roles", List.of(user)));
@@ -79,6 +80,7 @@ final class AuthenticatedSourceMongo implements AutoCloseable {
         clients.add(client);
         return client;
     }
+    MongoClient reconnectEnricher(String database) { return connect("enricher", "ephemeral-consumer-only", database); }
     @Override public void close() {
         clients.forEach(MongoClient::close);
         server.stop();

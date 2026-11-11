@@ -382,12 +382,13 @@ class SourceScoredOccurrenceIntegrationTest {
         Arrays.sort(samples);
         int recoveryBatchSize = 8;
         String measuredReceiptId = null;
-        var request = JSON.readValue(PAYLOAD, com.frauddetection.ingest.api.IngestTransactionRequest.class);
         var rawMapper = new TransactionRequestMapper();
         for (int index = 0; index < recoveryBatchSize; index++) {
-            var evidenceResult = policy.verify(TestSourceIssuer.proof(PAYLOAD,
-                    Map.of("sourceEventId", "recovery-measure-" + index), 0), PAYLOAD, sourceContext());
+            byte[] recoveryPayload = payload("recovery-measure-customer-" + index);
+            var evidenceResult = policy.verify(TestSourceIssuer.proof(recoveryPayload,
+                    Map.of("sourceEventId", "recovery-measure-" + index), 0), recoveryPayload, sourceContext());
             assertThat(evidenceResult).isInstanceOf(SourceSignatureVerifier.Verified.class);
+            var request = JSON.readValue(recoveryPayload, com.frauddetection.ingest.api.IngestTransactionRequest.class);
             var event = rawMapper.toEvent(request, "recovery-measure-correlation-" + index);
             var admitted = receipts.acceptRaw((SourceSignatureVerifier.Verified) evidenceResult, event);
             assertThat(admitted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
@@ -1156,10 +1157,11 @@ class SourceScoredOccurrenceIntegrationTest {
                 new SourceRawPublicationCipher("raw-key-1", RAW_PUBLICATION_PROPERTIES.encryptionKeys()), RAW_PUBLICATION_PROPERTIES);
     }
     private QuarantinedRaw quarantineRawPublication() throws Exception {
-        var verification = policy.verify(TestSourceIssuer.proof(PAYLOAD,
-                Map.of("sourceEventId", "raw-redrive-" + UUID.randomUUID()), 0), PAYLOAD, sourceContext());
+        byte[] rawPayload = payload("raw-redrive-customer-" + UUID.randomUUID());
+        var verification = policy.verify(TestSourceIssuer.proof(rawPayload,
+                Map.of("sourceEventId", "raw-redrive-" + UUID.randomUUID()), 0), rawPayload, sourceContext());
         assertThat(verification).isInstanceOf(SourceSignatureVerifier.Verified.class);
-        var request = JSON.readValue(PAYLOAD, com.frauddetection.ingest.api.IngestTransactionRequest.class);
+        var request = JSON.readValue(rawPayload, com.frauddetection.ingest.api.IngestTransactionRequest.class);
         TransactionRawEvent event = new TransactionRequestMapper().toEvent(request, "raw-redrive-" + UUID.randomUUID());
         var admitted = receipts.acceptRaw((SourceSignatureVerifier.Verified) verification, event);
         assertThat(admitted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
@@ -1210,6 +1212,11 @@ class SourceScoredOccurrenceIntegrationTest {
     private static byte[] payload() {
         ObjectNode node = (ObjectNode) JSON.readTree(JSON.writeValueAsBytes(TransactionFixtures.rawTransaction().build()));
         node.remove("eventId"); node.remove("createdAt"); node.remove("correlationId"); return JSON.writeValueAsBytes(node);
+    }
+    private static byte[] payload(String customerId) {
+        ObjectNode node = (ObjectNode) JSON.readTree(JSON.writeValueAsBytes(TransactionFixtures.rawTransaction().build()));
+        node.remove("eventId"); node.remove("createdAt"); node.remove("correlationId"); node.put("customerId", customerId);
+        return JSON.writeValueAsBytes(node);
     }
     /** Lose the acknowledgement for the store transaction commit, either before or after its durable effect. */
     private static MongoClient commitFault(MongoClient delegate, boolean durable) {
