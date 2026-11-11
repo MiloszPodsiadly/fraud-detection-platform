@@ -297,10 +297,21 @@ describe("useScoredTransactionStream ownership", () => {
 
     await waitFor(() => expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(1));
     act(() => result.current.setRequest({ page: 400, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" }));
-    await waitFor(() => expect(result.current.page.page).toBe(0));
+    await waitFor(() => expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(3);
-    expect(apiClient.listScoredTransactions.mock.calls.map(([request]) => request.page)).toEqual([0, 400, 0]);
+    const requests = apiClient.listScoredTransactions.mock.calls.map(([request]) => request);
+    expect(requests.map((request) => request.page)).toEqual([0, 400, 0]);
+    expect(requests.map((request) => request.query)).toEqual(["", "merchant", "merchant"]);
+    expect(requests.slice(1).map((request) => [request.size, request.riskLevel, request.status]))
+      .toEqual([[25, "ALL", "ALL"], [25, "ALL", "ALL"]]);
+    expect(result.current.request).toEqual({ page: 0, size: 25, query: "merchant", riskLevel: "ALL", status: "ALL" });
+    expect(result.current.page.page).toBe(0);
+    expect(result.current.page.totalElements).toBe(10_000);
+    expect(result.current.page.totalElementsCapped).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(false);
   });
 
   it("fails closed when rows or malformed cap metadata escape the filtered window", async () => {

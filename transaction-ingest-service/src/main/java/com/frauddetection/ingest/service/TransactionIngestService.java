@@ -1,6 +1,7 @@
 package com.frauddetection.ingest.service;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.source.SourceOriginProofs;
 import com.frauddetection.ingest.api.IngestTransactionRequest;
 import com.frauddetection.ingest.api.IngestTransactionResponse;
 import com.frauddetection.ingest.config.KafkaTopicProperties;
@@ -10,6 +11,8 @@ import com.frauddetection.ingest.observability.CorrelationIdProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Instant;
 
@@ -22,6 +25,7 @@ public class TransactionIngestService implements TransactionIngestUseCase {
     private final TransactionRawEventProducer transactionRawEventProducer;
     private final KafkaTopicProperties kafkaTopicProperties;
     private final CorrelationIdProvider correlationIdProvider;
+    private final SourceOriginProofs originProofs;
 
     public TransactionIngestService(
             TransactionRequestMapper transactionRequestMapper,
@@ -33,6 +37,19 @@ public class TransactionIngestService implements TransactionIngestUseCase {
         this.transactionRawEventProducer = transactionRawEventProducer;
         this.kafkaTopicProperties = kafkaTopicProperties;
         this.correlationIdProvider = correlationIdProvider;
+        this.originProofs = null;
+    }
+
+    @Autowired
+    public TransactionIngestService(TransactionRequestMapper transactionRequestMapper,
+                                    TransactionRawEventProducer transactionRawEventProducer,
+                                    KafkaTopicProperties kafkaTopicProperties, CorrelationIdProvider correlationIdProvider,
+                                    ObjectProvider<SourceOriginProofs> originProofs) {
+        this.transactionRequestMapper = transactionRequestMapper;
+        this.transactionRawEventProducer = transactionRawEventProducer;
+        this.kafkaTopicProperties = kafkaTopicProperties;
+        this.correlationIdProvider = correlationIdProvider;
+        this.originProofs = originProofs.getIfAvailable();
     }
 
     @Override
@@ -46,7 +63,8 @@ public class TransactionIngestService implements TransactionIngestUseCase {
                 .log("Accepted transaction ingest request.");
 
         TransactionRawEvent event = transactionRequestMapper.toEvent(request, correlationId);
-        transactionRawEventProducer.publish(event);
+        if (originProofs == null) { transactionRawEventProducer.publish(event); }
+        else { transactionRawEventProducer.publish(event, SourceOriginProofs.Assertion.PROVEN_LEGACY); }
 
         return new IngestTransactionResponse(
                 request.transactionId(),

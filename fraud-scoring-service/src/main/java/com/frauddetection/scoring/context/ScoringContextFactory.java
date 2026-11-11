@@ -23,7 +23,8 @@ public final class ScoringContextFactory {
                 featureSnapshot,
                 mode,
                 transaction.correlationId(),
-                receivedAt
+                receivedAt,
+                request.sourceLineage()
         );
     }
 }

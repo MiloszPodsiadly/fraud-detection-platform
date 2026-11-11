@@ -46,7 +46,9 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 Map.entry("futureAdditiveFeature", Map.of("nested", List.of(1, "two")))
         ));
 
-        TransactionEnrichedEvent replayed = deserialize(event);
+        byte[] originalBytes = serializer.serialize("transactions.enriched", event);
+        TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", originalBytes);
+        assertThat(serializer.serialize("transactions.enriched", replayed)).containsExactly(originalBytes);
         Map<String, Object> snapshot = replayed.featureSnapshot();
 
         assertThat(snapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT))

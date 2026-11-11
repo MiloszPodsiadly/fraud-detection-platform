@@ -39,8 +39,17 @@
             <artifactId>nimbus-jose-jwt</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.mongodb</groupId>
+            <artifactId>mongodb-driver-sync</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.frauddetection</groupId>
             <artifactId>common-events</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.frauddetection</groupId>
+            <artifactId>source-persistence</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -64,6 +73,17 @@
             <groupId>com.frauddetection</groupId>
             <artifactId>feature-enricher-service</artifactId>
             <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.frauddetection</groupId>
+            <artifactId>transaction-ingest-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -4,7 +4,7 @@ Status: accepted boundary for the disabled Merchant Risk foundation.
 
 ## Decision
 
-Merchant history stays unavailable until a domain-owned verifier can admit both an authenticated institutional source scope and the exact occurrence being scored. The current ingest request supplies `sourceSystem`, merchant identity, and transaction time as caller input. It provides no authenticated issuer/institution binding or monotonic source sequence. The raw-to-enriched mapper creates a new event ID, and `ScoringContext` carries neither verified source provenance nor a scoring occurrence. The alert service's scoring occurrence is created after scoring and cannot serve as the pre-scoring source proof.
+Merchant history stays unavailable until a domain-owned verifier admits the institutional merchant mapping, coverage and exact occurrence. Optional attested ingest verifies the source signature over the original transaction bytes and privately links them to an exact scored fact; ordinary ingest remains unverified. This source proof supplies no monotonic sequence, merchant identity mapping, coverage seal, population denominator or mature labels. The post-scoring fact cannot authorize the current transaction's pre-scoring history read.
 
 The internal admission interfaces remain default-deny. Test authorities may grant exact fixtures only; equality with caller claims is not admission. Governance signing identities are purpose-scoped and are not merchant-source authority. No production verifier, registration, or event contract is introduced by this decision.
 
@@ -116,7 +116,7 @@ The exact hot 1k invocation is shown above. For hot 5k and 10k, use the same com
 
 ## Next Integration Owner
 
-The source-admission/integration branch must establish domain-separated source authentication and key lifecycle, bind issuer and institution to the authenticated principal, provide a monotonic source sequence, and preserve an exact payload-to-scoring-occurrence binding. It must also define revocation, completeness, and retention policy before any production admission path exists.
+Integration still requires versioned, effective-dated institution merchant mapping, authenticated source sequence and coverage seals, and independently admitted denominators and mature deduplicated labels for the same population. MCC taxonomy, activity/concentration methods and any risk score require validation and calibration. Retention and target-load capacity remain approval gates.
 
 ## Non-claims
 

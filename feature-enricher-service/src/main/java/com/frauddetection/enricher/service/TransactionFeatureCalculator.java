@@ -2,6 +2,7 @@ package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureValueBoundsContract;
 import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
@@ -25,6 +26,14 @@ public class TransactionFeatureCalculator {
     }
 
     public EnrichedTransactionFeatures calculate(TransactionRawEvent event, FeatureStoreSnapshot snapshot) {
+        if (snapshot.recentTransactionCount() < 0
+                || snapshot.recentTransactionCount() >= FraudFeatureValueBoundsContract.MAX_RECENT_TRANSACTION_COUNT) {
+            throw new IllegalStateException("RECENT_TRANSACTION_WINDOW_CAPACITY_EXCEEDED");
+        }
+        if (snapshot.merchantFrequency7d() < 0
+                || snapshot.merchantFrequency7d() >= FraudFeatureValueBoundsContract.MAX_MERCHANT_FREQUENCY_7D) {
+            throw new IllegalStateException("MERCHANT_HISTORY_CAPACITY_EXCEEDED");
+        }
         int recentTransactionCount = snapshot.recentTransactionCount() + 1;
         BigDecimal currentAmountPln = currencyAmountConverter.toPln(event.transactionAmount().amount(), event.transactionAmount().currency());
         BigDecimal recentAmountSumPln = snapshot.recentAmountSumPln().add(currentAmountPln);

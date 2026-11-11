@@ -2,6 +2,7 @@ package com.frauddetection.scoring.messaging;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.observability.TraceContext;
+import com.frauddetection.common.events.source.SourceOriginProofs;
 import com.frauddetection.scoring.config.KafkaTopicProperties;
 import com.frauddetection.scoring.service.TransactionFraudScoringUseCase;
 import org.slf4j.Logger;
@@ -32,7 +33,8 @@ public class TransactionEnrichedEventListener {
     )
     public void onMessage(
             TransactionEnrichedEvent event,
-            @Header(name = TraceContext.KAFKA_TRACE_ID_HEADER, required = false) String traceId
+            @Header(name = TraceContext.KAFKA_TRACE_ID_HEADER, required = false) String traceId,
+            @Header(name = SourceOriginProofs.KAFKA_HEADER, required = false) String originProof
     ) {
         try (TraceContext.Scope ignored = TraceContext.open(event.correlationId(), traceId, event.transactionId(), null)) {
             log.atInfo()
@@ -40,7 +42,7 @@ public class TransactionEnrichedEventListener {
                     .addKeyValue("correlationId", event.correlationId())
                     .addKeyValue("topic", kafkaTopicProperties.transactionEnriched())
                     .log("Received enriched transaction event for scoring.");
-            transactionFraudScoringUseCase.score(event);
+            transactionFraudScoringUseCase.score(event, originProof);
         }
     }
 }
