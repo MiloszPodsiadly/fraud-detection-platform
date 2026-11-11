@@ -38,10 +38,10 @@ public final class SourceEnrichedPublicationRecovery {
                 if (claims.isEmpty()) { break; }
                 SourceEnrichedPublicationClaim claim = claims.getFirst();
                 attempted++;
-                boolean historyApplied = claim.historyApplied();
+                boolean historyVerified = false;
                 boolean kafkaPublicationAttempted = false;
                 try {
-                    if (!historyApplied) {
+                    if (!claim.historyApplied()) {
                         featureStore.recordAttestedTransaction(claim.event(), FeatureNamespace.attested(claim.authority()),
                                 com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
                                         claim.authority().receiptId(), claim.event()));
@@ -50,12 +50,12 @@ public final class SourceEnrichedPublicationRecovery {
                                 || !claim.authority().eventCommitment().equals(applied.eventCommitment())) {
                             throw new IllegalStateException("FEATURE_LINEAGE_HISTORY_UNRESOLVED");
                         }
-                        historyApplied = true;
                     } else {
                         featureStore.verifyAttestedTransaction(claim.event(), FeatureNamespace.attested(claim.authority()),
                                 com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
                                         claim.authority().receiptId(), claim.event()));
                     }
+                    historyVerified = true;
                     if (!claim.published()) {
                         if (!lineage.renewEnrichedPublicationLeaseForSend(claim, 10_000L)) {
                             lineage.deferEnrichedPublication(claim);
@@ -70,7 +70,10 @@ public final class SourceEnrichedPublicationRecovery {
                         }
                     }
                 } catch (RuntimeException deliveryOrConfirmationFailure) {
-                    if (!historyApplied) { lineage.recordEnrichedHistoryFailure(claim); }
+                    if (!historyVerified) {
+                        lineage.recordEnrichedHistoryFailure(claim,
+                                EnrichedHistoryFailureClassifier.isPermanent(deliveryOrConfirmationFailure));
+                    }
                     else if (kafkaPublicationAttempted && !claim.published()) { lineage.recordEnrichedPublishFailure(claim); }
                 }
             }

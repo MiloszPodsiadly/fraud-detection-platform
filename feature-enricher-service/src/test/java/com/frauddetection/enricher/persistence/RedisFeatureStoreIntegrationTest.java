@@ -3,6 +3,7 @@ package com.frauddetection.enricher.persistence;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.source.SourceEventCommitment;
 import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.common.events.source.SourceScope;
@@ -21,11 +22,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,6 +39,12 @@ import java.util.concurrent.Executors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.anyDouble;
+import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 @EnabledIf(value = "#{T(org.testcontainers.DockerClientFactory).instance().isDockerAvailable()}", loadContext = false)
@@ -262,6 +271,106 @@ class RedisFeatureStoreIntegrationTest {
     }
 
     @Test
+    void exactAppliedHistoryRemainsVerifiableAfterNaturalRecentWindowPruning() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent original = event("pruned-original", CURRENT_TIMESTAMP,
+                new BigDecimal("8.00"), "PLN");
+        TransactionEnrichedEvent originalEnriched = enriched(original);
+        String originalCommitment = SourceEventCommitment.attestedHistory("a".repeat(64), originalEnriched);
+        featureStore.recordAttestedTransaction(originalEnriched, namespace, originalCommitment);
+
+        TransactionRawEvent later = event("pruning-later", CURRENT_TIMESTAMP.plus(Duration.ofMinutes(2)),
+                BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent laterEnriched = enriched(later);
+        featureStore.loadSnapshot(later, namespace);
+        featureStore.recordAttestedTransaction(laterEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), laterEnriched));
+
+        assertThat(featureStore.hasRecordedTransaction(original, namespace)).isTrue();
+        featureStore.verifyAttestedTransaction(originalEnriched, namespace, originalCommitment);
+        featureStore.recordAttestedTransaction(originalEnriched, namespace, originalCommitment);
+
+        String customerTransactions = redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow();
+        String customerIds = redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow();
+        assertThat(redisTemplate.opsForZSet().zCard(customerTransactions)).isEqualTo(1L);
+        assertThat(redisTemplate.opsForSet().members(customerIds)).containsExactlyInAnyOrder(
+                original.transactionId(), later.transactionId());
+    }
+
+    @Test
+    void missingRecentMembershipInsideActiveWindowStillFailsClosed() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent raw = event("active-member", CURRENT_TIMESTAMP, new BigDecimal("8.00"), "PLN");
+        TransactionEnrichedEvent enriched = enriched(raw);
+        String commitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
+        featureStore.recordAttestedTransaction(enriched, namespace, commitment);
+
+        String customerTransactions = redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow();
+        String member = raw.transactionId() + "|8.00|PLN|8.00";
+        assertThat(redisTemplate.opsForZSet().remove(customerTransactions, member)).isEqualTo(1L);
+
+        assertThatThrownBy(() -> featureStore.verifyAttestedTransaction(enriched, namespace, commitment))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+    }
+
+    @Test
+    void missingAttestedTransactionIdentitySurvivalMarkerFailsClosed() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent raw = event("missing-survival-marker", CURRENT_TIMESTAMP, new BigDecimal("8.00"), "PLN");
+        TransactionEnrichedEvent enriched = enriched(raw);
+        String commitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
+        featureStore.recordAttestedTransaction(enriched, namespace, commitment);
+
+        String identityKey = redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow();
+        assertThat(redisTemplate.opsForSet().remove(identityKey, raw.transactionId())).isEqualTo(1L);
+
+        assertThatThrownBy(() -> featureStore.verifyAttestedTransaction(enriched, namespace, commitment))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+    }
+
+    @Test
+    void expiredAttestedTransactionIdentitySurvivalIndexFailsClosed() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent raw = event("expired-survival-index", CURRENT_TIMESTAMP, new BigDecimal("8.00"), "PLN");
+        TransactionEnrichedEvent enriched = enriched(raw);
+        String commitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
+        featureStore.recordAttestedTransaction(enriched, namespace, commitment);
+
+        String identityKey = redisTemplate.keys("feature:v3:attested:*").stream()
+                .filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow();
+        assertThat(redisTemplate.expire(identityKey, Duration.ZERO)).isTrue();
+
+        assertThatThrownBy(() -> featureStore.verifyAttestedTransaction(enriched, namespace, commitment))
+                .isInstanceOf(FeatureEnrichmentException.class)
+                .hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
+    }
+
+    @Test
+    void exactAppliedHistoryRemainsVerifiableAfterNaturalMerchantWindowPruning() {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent original = event("merchant-pruned-original", CURRENT_TIMESTAMP,
+                new BigDecimal("8.00"), "PLN");
+        TransactionEnrichedEvent originalEnriched = enriched(original);
+        String originalCommitment = SourceEventCommitment.attestedHistory("a".repeat(64), originalEnriched);
+        featureStore.recordAttestedTransaction(originalEnriched, namespace, originalCommitment);
+
+        TransactionRawEvent later = event("merchant-pruning-later",
+                CURRENT_TIMESTAMP.plus(Duration.ofDays(8)), BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent laterEnriched = enriched(later);
+        featureStore.loadSnapshot(later, namespace);
+        featureStore.recordAttestedTransaction(laterEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), laterEnriched));
+
+        featureStore.verifyAttestedTransaction(originalEnriched, namespace, originalCommitment);
+    }
+
+    @Test
     void attestedMerchantFrequencyUsesExactBoundedV2V3Union() {
         FeatureNamespace namespace = attestedNamespace();
         TransactionRawEvent existing = event("merchant-shared", CURRENT_TIMESTAMP.minusSeconds(10), BigDecimal.ONE, "PLN");
@@ -296,6 +405,78 @@ class RedisFeatureStoreIntegrationTest {
                 event("merchant-current", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN"), namespace))
                 .isInstanceOf(FeatureEnrichmentException.class)
                 .hasRootCauseMessage("MALFORMED_MERCHANT_TRANSACTION_MEMBERSHIP");
+    }
+
+    @Test
+    void forcedV2AndV3InterleavingsAreBoundedButNotPointInTimeSnapshots() throws Exception {
+        FeatureNamespace namespace = attestedNamespace();
+        TransactionRawEvent original = event("snapshot-before-v3-write", CURRENT_TIMESTAMP.minusSeconds(40), BigDecimal.ONE, "PLN");
+        TransactionEnrichedEvent originalEnriched = enriched(original);
+        featureStore.recordAttestedTransaction(originalEnriched, namespace,
+                SourceEventCommitment.attestedHistory("a".repeat(64), originalEnriched));
+
+        var v3WriterRaw = withDevice(event("snapshot-v3-write", CURRENT_TIMESTAMP.minusSeconds(5),
+                new BigDecimal("2.00"), "PLN"), "device-v3-interleaved");
+        var v3Current = withDevice(event("snapshot-v3-current", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN"),
+                "device-v3-interleaved");
+        String v3CustomerKey = privateKey("customerTransactionsKey", new Class<?>[] {FeatureNamespace.class, String.class},
+                namespace, CUSTOMER_ID);
+        var v3Paused = new CountDownLatch(1);
+        var v3Release = new CountDownLatch(1);
+        RedisFeatureStore v3Reader = pauseAfterZSetRange(v3CustomerKey, v3Paused, v3Release);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var snapshotFuture = executor.submit(() -> v3Reader.loadSnapshot(v3Current, namespace));
+            assertThat(v3Paused.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            TransactionEnrichedEvent v3Writer = enriched(v3WriterRaw);
+            featureStore.recordAttestedTransaction(v3Writer, namespace,
+                    SourceEventCommitment.attestedHistory("a".repeat(64), v3Writer));
+            String v2Prefix = "feature:v2:attested:" + namespace.keySegment() + ":customer:" + CUSTOMER_ID;
+            redisTemplate.opsForZSet().add(v2Prefix + ":transactions",
+                    v3WriterRaw.transactionId() + "|2.00|PLN|2.00", score(v3WriterRaw.transactionTimestamp()));
+            redisTemplate.opsForZSet().add(v2Prefix + ":merchant:" + v3WriterRaw.merchantInfo().merchantId() + ":transactions",
+                    v3WriterRaw.transactionId(), score(v3WriterRaw.transactionTimestamp()));
+            redisTemplate.opsForSet().add(v2Prefix + ":devices", v3WriterRaw.deviceInfo().deviceId());
+            redisTemplate.opsForValue().set(v2Prefix + ":last-transaction", v3WriterRaw.transactionTimestamp().toString());
+            v3Release.countDown();
+            FeatureStoreSnapshot mixedV3 = snapshotFuture.get();
+            assertThat(mixedV3.recentTransactionCount()).isEqualTo(2);
+            assertThat(mixedV3.recentTransactions()).extracting("transactionId")
+                    .containsExactly(original.transactionId(), v3WriterRaw.transactionId());
+            assertThat(mixedV3.merchantFrequency7d()).isEqualTo(2);
+            assertThat(mixedV3.knownDevice()).isTrue();
+            assertThat(mixedV3.lastTransactionTimestamp()).isEqualTo(v3WriterRaw.transactionTimestamp());
+        } finally {
+            v3Release.countDown();
+        }
+
+        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        var v2WriterRaw = withDevice(event("snapshot-v2-write", CURRENT_TIMESTAMP.minusSeconds(5),
+                new BigDecimal("2.00"), "PLN"), "device-v2-interleaved");
+        var v2Current = withDevice(event("snapshot-v2-current", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN"),
+                "device-v2-interleaved");
+        String v2Prefix = "feature:v2:attested:" + namespace.keySegment() + ":customer:" + CUSTOMER_ID;
+        String v2CustomerKey = v2Prefix + ":transactions";
+        var v2Paused = new CountDownLatch(1);
+        var v2Release = new CountDownLatch(1);
+        RedisFeatureStore v2Reader = pauseAfterZSetRange(v2CustomerKey, v2Paused, v2Release);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var snapshotFuture = executor.submit(() -> v2Reader.loadSnapshot(v2Current, namespace));
+            assertThat(v2Paused.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            String member = v2WriterRaw.transactionId() + "|2.00|PLN|2.00";
+            redisTemplate.opsForZSet().add(v2CustomerKey, member, score(v2WriterRaw.transactionTimestamp()));
+            redisTemplate.opsForZSet().add(v2Prefix + ":merchant:" + v2WriterRaw.merchantInfo().merchantId() + ":transactions",
+                    v2WriterRaw.transactionId(), score(v2WriterRaw.transactionTimestamp()));
+            redisTemplate.opsForSet().add(v2Prefix + ":devices", v2WriterRaw.deviceInfo().deviceId());
+            redisTemplate.opsForValue().set(v2Prefix + ":last-transaction", v2WriterRaw.transactionTimestamp().toString());
+            v2Release.countDown();
+            FeatureStoreSnapshot mixedV2 = snapshotFuture.get();
+            assertThat(mixedV2.recentTransactionCount()).isZero();
+            assertThat(mixedV2.merchantFrequency7d()).isEqualTo(1);
+            assertThat(mixedV2.knownDevice()).isTrue();
+            assertThat(mixedV2.lastTransactionTimestamp()).isEqualTo(v2WriterRaw.transactionTimestamp());
+        } finally {
+            v2Release.countDown();
+        }
     }
 
     @Test
@@ -338,6 +519,39 @@ class RedisFeatureStoreIntegrationTest {
         var snapshot = new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
         var features = new TransactionFeatureCalculator(new CurrencyAmountConverter()).calculate(raw, snapshot);
         return new TransactionEnrichedEventMapper().toAttestedEvent(raw, features);
+    }
+
+    private RedisFeatureStore pauseAfterZSetRange(String key, CountDownLatch paused, CountDownLatch release) {
+        StringRedisTemplate readerTemplate = spy(redisTemplate);
+        ZSetOperations<String, String> zSetOperations = spy(redisTemplate.opsForZSet());
+        doReturn(zSetOperations).when(readerTemplate).opsForZSet();
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            paused.countDown();
+            await(release);
+            return result;
+        }).when(zSetOperations).rangeByScoreWithScores(eq(key), anyDouble(), anyDouble(), anyLong(), anyLong());
+        return new RedisFeatureStore(readerTemplate,
+                new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8),
+                        Duration.ofDays(180), Duration.ofDays(30)),
+                new CurrencyAmountConverter());
+    }
+
+    private String privateKey(String methodName, Class<?>[] parameterTypes, Object... arguments) throws Exception {
+        Method method = RedisFeatureStore.class.getDeclaredMethod(methodName, parameterTypes);
+        method.setAccessible(true);
+        return (String) method.invoke(featureStore, arguments);
+    }
+
+    private TransactionRawEvent withDevice(TransactionRawEvent raw, String deviceId) {
+        DeviceInfo device = raw.deviceInfo();
+        DeviceInfo replacement = new DeviceInfo(deviceId, device.fingerprint(), device.ipAddress(), device.userAgent(),
+                device.platform(), device.browser(), device.trustedDevice(), device.proxyDetected(), device.vpnDetected(),
+                device.attributes());
+        return new TransactionRawEvent(raw.eventId(), raw.transactionId(), raw.correlationId(), raw.customerId(),
+                raw.accountId(), raw.paymentInstrumentId(), raw.createdAt(), raw.transactionTimestamp(),
+                raw.transactionAmount(), raw.merchantInfo(), replacement, raw.locationInfo(), raw.customerContext(),
+                raw.transactionType(), raw.authorizationMethod(), raw.sourceSystem(), raw.traceId(), raw.attributes());
     }
 
     private static String redisHashTag(String key) {

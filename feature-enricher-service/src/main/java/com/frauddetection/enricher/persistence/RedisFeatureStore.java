@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -52,11 +53,24 @@ public class RedisFeatureStore implements FeatureStore {
               local customerScore = redis.call('ZSCORE', KEYS[1], member)
               local merchantScore = redis.call('ZSCORE', KEYS[2], tx)
               local last = tonumber(redis.call('GET', KEYS[5]))
+              local recentWindowMillis = tonumber(ARGV[12])
+              local merchantWindowMillis = tonumber(ARGV[13])
+              local customerPruned = not customerScore and last and last >= score + recentWindowMillis
+              local merchantPruned = not merchantScore and last and last >= score + merchantWindowMillis
+              if redis.call('PTTL', KEYS[6]) <= 0 or redis.call('SISMEMBER', KEYS[6], tx) == 0 then return -2 end
               for i = 1, 5 do
-                if redis.call('PTTL', KEYS[i]) <= 0 then return -2 end
+                local ttl = redis.call('PTTL', KEYS[i])
+                local naturallyPruned = (i == 1 and customerPruned) or (i == 2 and merchantPruned)
+                if naturallyPruned then
+                  if ttl == -1 or ttl == 0 then return -2 end
+                elseif ttl <= 0 then
+                  return -2
+                end
               end
-              if not customerScore or tonumber(customerScore) ~= score or not merchantScore or tonumber(merchantScore) ~= score
+              if (not customerScore and not customerPruned) or (customerScore and tonumber(customerScore) ~= score)
+                    or (not merchantScore and not merchantPruned) or (merchantScore and tonumber(merchantScore) ~= score)
                     or redis.call('SISMEMBER', KEYS[3], device) == 0 or not last or last < score then return -2 end
+              if ARGV[14] == '1' then return 0 end
               redis.call('SADD', KEYS[6], tx)
               redis.call('PEXPIRE', KEYS[1], ARGV[7])
               redis.call('PEXPIRE', KEYS[2], ARGV[7])
@@ -66,6 +80,7 @@ public class RedisFeatureStore implements FeatureStore {
               redis.call('PEXPIRE', KEYS[6], ARGV[11])
               return 0
             end
+            if ARGV[14] == '1' then return -2 end
             local oldCustomerScore = redis.call('ZSCORE', KEYS[1], member)
             local oldMerchantScore = redis.call('ZSCORE', KEYS[2], tx)
             if redis.call('SISMEMBER', KEYS[6], tx) == 1 or oldCustomerScore or oldMerchantScore then
@@ -208,7 +223,7 @@ public class RedisFeatureStore implements FeatureStore {
             if (namespace.isLegacy()) {
                 merchantFrequency = stringRedisTemplate.opsForZSet().count(merchantTransactionsKey, merchantWindowStart, eventTimestamp);
             } else {
-                Map<String, Double> merchantTransactions = new LinkedHashMap<>();
+                Map<String, Double> merchantTransactions = new HashMap<>();
                 mergeMerchantTransactions(merchantTransactions,
                         boundedMerchantEntries(merchantTransactionsKey, merchantWindowStart, eventTimestamp));
                 mergeMerchantTransactions(merchantTransactions, boundedMerchantEntries(
@@ -397,29 +412,11 @@ public class RedisFeatureStore implements FeatureStore {
                     processedTransactionsKey(namespace, customerId), lastTransactionKey(namespace, customerId),
                     attestedTransactionIdsKey(namespace, customerId));
             if (mongoAlreadyApplied) {
-                Object storedCommitment = stringRedisTemplate.opsForHash().get(keys.get(3), transactionId);
-                if (storedCommitment != null) {
-                    if (!historyCommitment.equals(storedCommitment.toString())) {
-                        throw new FeatureEnrichmentException("FEATURE_HISTORY_COMMITMENT_CONFLICT");
-                    }
-                    Double customerScore = stringRedisTemplate.opsForZSet().score(keys.get(0), member);
-                    Double merchantScore = stringRedisTemplate.opsForZSet().score(keys.get(1), transactionId);
-                    Boolean knownDevice = stringRedisTemplate.opsForSet().isMember(keys.get(2), deviceId);
-                    String last = stringRedisTemplate.opsForValue().get(keys.get(4));
-                    boolean monotonicLast = false;
-                    try { monotonicLast = last != null && !parseAttestedLastTransaction(last).isBefore(timestamp); }
-                    catch (RuntimeException malformed) { /* Report a rebuild requirement below. */ }
-                    boolean ttlValid = keys.subList(0, 5).stream().allMatch(key -> {
-                        Long remaining = stringRedisTemplate.getExpire(key, java.util.concurrent.TimeUnit.MILLISECONDS);
-                        return remaining != null && remaining > 0;
-                    });
-                    if (customerScore == null || customerScore != score || merchantScore == null || merchantScore != score
-                            || !Boolean.TRUE.equals(knownDevice) || !monotonicLast || !ttlValid) {
-                        throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED");
-                    }
-                    return;
-                }
-                throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED");
+                Long result = executeAttestedHistory(keys, transactionId, historyCommitment, member, score,
+                        deviceId, timestamp, true);
+                validateAttestedHistoryResult(result);
+                if (result != 0) { throw new FeatureEnrichmentException("FEATURE_HISTORY_FINALIZATION_UNRESOLVED"); }
+                return;
             }
 
             // V2 keys were untagged and cannot participate in a Redis Cluster script. Read them during
@@ -434,23 +431,37 @@ public class RedisFeatureStore implements FeatureStore {
                 throw new FeatureEnrichmentException(oldMerchantScore != null && oldCustomerScore == null
                         ? "FEATURE_HISTORY_COMMITMENT_CONFLICT" : "FEATURE_HISTORY_REBUILD_REQUIRED");
             }
-            Long result = stringRedisTemplate.execute(ATTESTED_HISTORY_SCRIPT, keys,
-                    transactionId, historyCommitment, member, Long.toString((long) score), deviceId,
-                    timestamp.toString(), Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()),
-                    Long.toString(featureStoreProperties.knownDeviceTtl().toMillis()),
-                    Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()),
-                    Long.toString(featureStoreProperties.lastTransactionTtl().toMillis()),
-                    Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()));
-            if (result == null) { throw new FeatureEnrichmentException("FEATURE_HISTORY_FINALIZATION_UNRESOLVED"); }
-            if (result == -1) { throw new FeatureEnrichmentException("FEATURE_HISTORY_COMMITMENT_CONFLICT"); }
-            if (result == -2) { throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED"); }
-            if (result == -3) { throw new FeatureEnrichmentException("FEATURE_HISTORY_REDIS_SCHEMA_CONFLICT"); }
-            if (result < 0 || result > 1) { throw new FeatureEnrichmentException("FEATURE_HISTORY_FINALIZATION_UNRESOLVED"); }
+            Long result = executeAttestedHistory(keys, transactionId, historyCommitment, member, score,
+                    deviceId, timestamp, false);
+            validateAttestedHistoryResult(result);
         } catch (FeatureEnrichmentException known) {
             throw known;
         } catch (Exception exception) {
             throw new FeatureEnrichmentException("Failed to finalize attested feature history.", exception);
         }
+    }
+
+    private Long executeAttestedHistory(List<String> keys, String transactionId, String historyCommitment,
+                                        String member, double score, String deviceId, Instant timestamp,
+                                        boolean verifyOnly) {
+        return stringRedisTemplate.execute(ATTESTED_HISTORY_SCRIPT, keys,
+                transactionId, historyCommitment, member, Long.toString((long) score), deviceId,
+                timestamp.toString(), Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()),
+                Long.toString(featureStoreProperties.knownDeviceTtl().toMillis()),
+                Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()),
+                Long.toString(featureStoreProperties.lastTransactionTtl().toMillis()),
+                Long.toString(featureStoreProperties.transactionKeyTtl().toMillis()),
+                Long.toString(featureStoreProperties.recentTransactionWindow().toMillis()),
+                Long.toString(featureStoreProperties.merchantFrequencyWindow().toMillis()),
+                verifyOnly ? "1" : "0");
+    }
+
+    private void validateAttestedHistoryResult(Long result) {
+            if (result == null) { throw new FeatureEnrichmentException("FEATURE_HISTORY_FINALIZATION_UNRESOLVED"); }
+            if (result == -1) { throw new FeatureEnrichmentException("FEATURE_HISTORY_COMMITMENT_CONFLICT"); }
+            if (result == -2) { throw new FeatureEnrichmentException("FEATURE_HISTORY_REBUILD_REQUIRED"); }
+            if (result == -3) { throw new FeatureEnrichmentException("FEATURE_HISTORY_REDIS_SCHEMA_CONFLICT"); }
+            if (result < 0 || result > 1) { throw new FeatureEnrichmentException("FEATURE_HISTORY_FINALIZATION_UNRESOLVED"); }
     }
 
     private static Instant parseAttestedLastTransaction(String value) {

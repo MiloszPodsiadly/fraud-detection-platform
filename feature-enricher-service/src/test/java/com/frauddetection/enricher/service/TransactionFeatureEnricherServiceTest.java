@@ -66,6 +66,8 @@ class TransactionFeatureEnricherServiceTest {
         var enriched = TransactionFixtures.enrichedTransaction().build();
         var authority = verifiedAuthority();
         when(authority.eventCommitment()).thenReturn(com.frauddetection.common.events.source.SourceEventCommitment.raw(event));
+        var missingPublication = SourceEnrichedPublicationLookup.notFound(authority);
+        when(lineage.findEnrichedPublication(event)).thenReturn(missingPublication);
         var claim = new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED, authority,
                 enriched, "b".repeat(64), "claim-token", 1, false, false);
         SourceLineage applied = verifiedAuthority();
@@ -91,6 +93,38 @@ class TransactionFeatureEnricherServiceTest {
         verify(lineage).deferEnrichedPublication(claim);
         verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
         verify(lineage, never()).markEnrichedPublished(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void appliedHistoryVerificationFailureIsRecordedAfterClaimBeforeKafkaSend() {
+        FeatureStore featureStore = mock(FeatureStore.class);
+        TransactionEnrichedEventPublisher publisher = mock(TransactionEnrichedEventPublisher.class);
+        SourceLineageAccess lineage = mock(SourceLineageAccess.class);
+        var event = TransactionFixtures.rawTransaction().build();
+        var enriched = TransactionFixtures.enrichedTransaction().build();
+        var authority = verifiedAuthority();
+        when(authority.eventCommitment()).thenReturn(com.frauddetection.common.events.source.SourceEventCommitment.raw(event));
+        var publication = new SourceEnrichedPublication(authority, enriched, false, true);
+        var lookup = SourceEnrichedPublicationLookup.found(publication);
+        when(lineage.raw(event)).thenReturn(authority);
+        when(lineage.findEnrichedPublication(event)).thenReturn(lookup);
+        var claim = new SourceEnrichedPublicationClaim(SourceEnrichedPublicationClaim.Status.CLAIMED, authority,
+                enriched, "b".repeat(64), "claim-token", 1, false, true);
+        when(lineage.claimEnrichedPublication(event, enriched)).thenReturn(claim);
+        doThrow(new IllegalStateException("Redis history marker unavailable"))
+                .when(featureStore).verifyAttestedTransaction(org.mockito.ArgumentMatchers.eq(enriched),
+                        org.mockito.ArgumentMatchers.any(FeatureNamespace.class), org.mockito.ArgumentMatchers.anyString());
+        var service = new TransactionFeatureEnricherService(featureStore,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                publisher, lineage);
+
+        assertThatThrownBy(() -> service.enrich(event)).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Redis history marker unavailable");
+
+        verify(lineage).claimEnrichedPublication(event, enriched);
+        verify(lineage).recordEnrichedHistoryFailure(claim, false);
+        verify(lineage, never()).recordEnrichedPublishFailure(claim);
+        verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -298,8 +332,13 @@ class TransactionFeatureEnricherServiceTest {
         var features = new EnrichedTransactionFeatures(Map.of("recentTransactionCount", 1));
         var candidate = TransactionFixtures.enrichedTransaction().build();
         SourceLineage rawAuthority = verifiedAuthority();
+        when(rawAuthority.eventCommitment()).thenReturn(com.frauddetection.common.events.source.SourceEventCommitment.raw(event));
         SourceLineageAccess lineage = new SourceLineageAccess() {
             @Override public SourceLineage raw(com.frauddetection.common.events.contract.TransactionRawEvent input) { return rawAuthority; }
+            @Override public SourceEnrichedPublicationLookup findEnrichedPublication(
+                    com.frauddetection.common.events.contract.TransactionRawEvent input) {
+                return SourceEnrichedPublicationLookup.notFound(rawAuthority);
+            }
             @Override public SourceLineage enriched(TransactionEnrichedEvent output) { return SourceLineage.unavailable(SourceLineage.State.UNVERIFIED); }
             @Override public SourceLineage bindEnriched(com.frauddetection.common.events.contract.TransactionRawEvent input,
                                                         TransactionEnrichedEvent output) { return SourceLineage.unavailable(SourceLineage.State.CONFLICT); }
@@ -325,7 +364,7 @@ class TransactionFeatureEnricherServiceTest {
     }
 
     @Test
-    void alreadyAcknowledgedDurablePublicationDoesNotPublishAgain() {
+    void alreadyAcknowledgedDurablePublicationReplaysWithoutRedisMarkersOrRepublishing() {
         FeatureStore featureStore = mock(FeatureStore.class);
         TransactionFeatureCalculator calculator = mock(TransactionFeatureCalculator.class);
         TransactionEnrichedEventMapper mapper = mock(TransactionEnrichedEventMapper.class);
@@ -335,28 +374,28 @@ class TransactionFeatureEnricherServiceTest {
         var features = new EnrichedTransactionFeatures(Map.of("recentTransactionCount", 1));
         var enriched = TransactionFixtures.enrichedTransaction().build();
         SourceLineage rawAuthority = verifiedAuthority();
+        when(rawAuthority.eventCommitment()).thenReturn(com.frauddetection.common.events.source.SourceEventCommitment.raw(event));
+        var durablePublication = new SourceEnrichedPublication(rawAuthority, enriched, true, true);
         SourceLineageAccess lineage = new SourceLineageAccess() {
             @Override public SourceLineage raw(com.frauddetection.common.events.contract.TransactionRawEvent input) { return rawAuthority; }
             @Override public SourceLineage enriched(TransactionEnrichedEvent output) { return rawAuthority; }
             @Override public SourceLineage bindEnriched(com.frauddetection.common.events.contract.TransactionRawEvent input,
                                                         TransactionEnrichedEvent output) { return rawAuthority; }
+            @Override public SourceEnrichedPublicationLookup findEnrichedPublication(
+                    com.frauddetection.common.events.contract.TransactionRawEvent input) {
+                return SourceEnrichedPublicationLookup.found(durablePublication);
+            }
             @Override public SourceEnrichedPublication prepareEnrichedPublication(
                     com.frauddetection.common.events.contract.TransactionRawEvent input, TransactionEnrichedEvent output) {
                 return new SourceEnrichedPublication(rawAuthority, enriched, true, true);
             }
         };
         var service = new TransactionFeatureEnricherService(featureStore, calculator, mapper, publisher, lineage);
-        when(featureStore.hasRecordedTransaction(event, FeatureNamespace.attested(rawAuthority))).thenReturn(false);
-        when(featureStore.loadSnapshot(event, FeatureNamespace.attested(rawAuthority))).thenReturn(snapshot);
-        when(calculator.calculate(event, snapshot)).thenReturn(features);
-        when(mapper.toAttestedEvent(event, features)).thenReturn(enriched);
 
         service.enrich(event);
 
         verify(publisher, never()).publish(org.mockito.ArgumentMatchers.any());
-        FeatureNamespace attestedNamespace = FeatureNamespace.attested(rawAuthority);
-        verify(featureStore).verifyAttestedTransaction(org.mockito.ArgumentMatchers.eq(enriched),
-                org.mockito.ArgumentMatchers.eq(attestedNamespace), org.mockito.ArgumentMatchers.anyString());
+        verifyNoInteractions(featureStore, calculator, mapper);
     }
 
     private SourceLineageAccess access(SourceLineage.State state) {

@@ -28,7 +28,11 @@ final class SourceLineageSchema {
     static final String ENRICHED_PUBLICATION_HISTORY_INDEX = "enriched_publication_history";
     static final Document ENRICHED_PUBLICATION_HISTORY_KEY = new Document("historyState", 1)
             .append("expiresAt", 1).append("preparedAt", 1);
+    static final String ENRICHED_PUBLICATION_HISTORY_RETRY_INDEX = "enriched_publication_history_retry";
+    static final Document ENRICHED_PUBLICATION_HISTORY_RETRY_KEY = new Document("state", 1)
+            .append("historyState", 1).append("historyNextAttemptAt", 1).append("expiresAt", 1).append("preparedAt", 1);
     static final int MAX_ENRICHED_PUBLICATION_ATTEMPTS = 8;
+    static final int MAX_ENRICHED_HISTORY_ATTEMPTS = 8;
     static final int MAX_ENRICHED_PUBLICATION_RECOVERY_EPOCHS = 3;
 
     static void initialize(MongoDatabase database, boolean owner) {
@@ -80,6 +84,8 @@ final class SourceLineageSchema {
                     new IndexOptions().name(ENRICHED_PUBLICATION_RECOVERY_INDEX));
             database.getCollection(name).createIndex(ENRICHED_PUBLICATION_HISTORY_KEY,
                     new IndexOptions().name(ENRICHED_PUBLICATION_HISTORY_INDEX));
+            database.getCollection(name).createIndex(ENRICHED_PUBLICATION_HISTORY_RETRY_KEY,
+                    new IndexOptions().name(ENRICHED_PUBLICATION_HISTORY_RETRY_INDEX));
             existing = database.listCollections().filter(eq("name", name)).first();
         }
         Document options = existing == null ? null : existing.get("options", Document.class);
@@ -87,10 +93,11 @@ final class SourceLineageSchema {
                 || !publicationValidator().equals(options.get("validator")) || !"strict".equals(options.getString("validationLevel"))
                 || !"error".equals(options.getString("validationAction"))) { throw invalid(); }
         var indexes = database.getCollection(name).listIndexes().into(new java.util.ArrayList<>());
-        if (indexes.size() != 3) { throw invalid(); }
+        if (indexes.size() != 4) { throw invalid(); }
         boolean id = false;
         boolean recovery = false;
         boolean history = false;
+        boolean historyRetry = false;
         for (Document index : indexes) {
             if (index.containsKey("expireAfterSeconds") || index.containsKey("partialFilterExpression")
                     || index.containsKey("collation") || Boolean.TRUE.equals(index.get("sparse"))
@@ -104,8 +111,12 @@ final class SourceLineageSchema {
                     && ENRICHED_PUBLICATION_HISTORY_KEY.equals(index.get("key")) && !Boolean.TRUE.equals(index.get("unique"))) {
                 history = true;
             }
+            if (ENRICHED_PUBLICATION_HISTORY_RETRY_INDEX.equals(index.getString("name"))
+                    && ENRICHED_PUBLICATION_HISTORY_RETRY_KEY.equals(index.get("key")) && !Boolean.TRUE.equals(index.get("unique"))) {
+                historyRetry = true;
+            }
         }
-        if (!id || !recovery || !history) { throw invalid(); }
+        if (!id || !recovery || !history || !historyRetry) { throw invalid(); }
     }
 
     /** Owner-run, additive migration. Mongo privileges enforce that the caller owns collMod/createIndex. */
@@ -117,6 +128,7 @@ final class SourceLineageSchema {
                 || !(publicationValidatorV1().equals(options.get("validator"))
                 || publicationValidatorRecoveryV1().equals(options.get("validator"))
                 || publicationValidatorHistoryV1().equals(options.get("validator"))
+                || publicationValidatorBeforeHistoryRetry().equals(options.get("validator"))
                 || publicationValidator().equals(options.get("validator")))
                 || !"strict".equals(options.getString("validationLevel")) || !"error".equals(options.getString("validationAction"))) {
             throw invalid();
@@ -128,16 +140,21 @@ final class SourceLineageSchema {
                 && ENRICHED_PUBLICATION_RECOVERY_KEY.equals(index.get("key")) && !Boolean.TRUE.equals(index.get("unique")));
         boolean history = indexes.stream().anyMatch(index -> ENRICHED_PUBLICATION_HISTORY_INDEX.equals(index.getString("name"))
                 && ENRICHED_PUBLICATION_HISTORY_KEY.equals(index.get("key")) && !Boolean.TRUE.equals(index.get("unique")));
+        boolean historyRetry = indexes.stream().anyMatch(index -> ENRICHED_PUBLICATION_HISTORY_RETRY_INDEX.equals(index.getString("name"))
+                && ENRICHED_PUBLICATION_HISTORY_RETRY_KEY.equals(index.get("key")) && !Boolean.TRUE.equals(index.get("unique")));
         boolean clean = indexes.stream().allMatch(index -> !index.containsKey("expireAfterSeconds")
                 && !index.containsKey("partialFilterExpression") && !index.containsKey("collation")
                 && !Boolean.TRUE.equals(index.get("sparse")) && !Boolean.TRUE.equals(index.get("hidden")));
-        if (!id || !clean || indexes.size() > 3 || indexes.stream().anyMatch(index -> !"_id_".equals(index.getString("name"))
+        if (!id || !clean || indexes.size() > 4 || indexes.stream().anyMatch(index -> !"_id_".equals(index.getString("name"))
                 && !ENRICHED_PUBLICATION_RECOVERY_INDEX.equals(index.getString("name"))
-                && !ENRICHED_PUBLICATION_HISTORY_INDEX.equals(index.getString("name")))
+                && !ENRICHED_PUBLICATION_HISTORY_INDEX.equals(index.getString("name"))
+                && !ENRICHED_PUBLICATION_HISTORY_RETRY_INDEX.equals(index.getString("name")))
                 || recovery && !ENRICHED_PUBLICATION_RECOVERY_KEY.equals(indexes.stream()
                 .filter(index -> ENRICHED_PUBLICATION_RECOVERY_INDEX.equals(index.getString("name"))).findFirst().orElseThrow().get("key"))
                 || history && !ENRICHED_PUBLICATION_HISTORY_KEY.equals(indexes.stream()
-                .filter(index -> ENRICHED_PUBLICATION_HISTORY_INDEX.equals(index.getString("name"))).findFirst().orElseThrow().get("key"))) {
+                .filter(index -> ENRICHED_PUBLICATION_HISTORY_INDEX.equals(index.getString("name"))).findFirst().orElseThrow().get("key"))
+                || historyRetry && !ENRICHED_PUBLICATION_HISTORY_RETRY_KEY.equals(indexes.stream()
+                .filter(index -> ENRICHED_PUBLICATION_HISTORY_RETRY_INDEX.equals(index.getString("name"))).findFirst().orElseThrow().get("key"))) {
             throw invalid();
         }
 
@@ -149,6 +166,10 @@ final class SourceLineageSchema {
             database.getCollection(name).createIndex(ENRICHED_PUBLICATION_HISTORY_KEY,
                     new IndexOptions().name(ENRICHED_PUBLICATION_HISTORY_INDEX));
         }
+        if (!historyRetry) {
+            database.getCollection(name).createIndex(ENRICHED_PUBLICATION_HISTORY_RETRY_KEY,
+                    new IndexOptions().name(ENRICHED_PUBLICATION_HISTORY_RETRY_INDEX));
+        }
         if (!publicationValidator().equals(options.get("validator"))) {
             Document result = database.runCommand(new Document("collMod", name).append("validator", publicationValidator())
                     .append("validationLevel", "strict").append("validationAction", "error"));
@@ -157,6 +178,10 @@ final class SourceLineageSchema {
         }
         database.getCollection(name).updateMany(new Document("historyState", new Document("$exists", false)),
                 new Document("$set", new Document("historyState", "PENDING").append("historyAppliedAt", null)));
+        database.getCollection(name).updateMany(new Document("historyAttempts", new Document("$exists", false)),
+                new Document("$set", new Document("historyAttempts", 0)));
+        database.getCollection(name).updateMany(new Document("historyNextAttemptAt", new Document("$exists", false)),
+                new Document("$set", new Document("historyNextAttemptAt", new java.util.Date())));
         initializeEnrichedPublications(database, false);
     }
     private static Document validator(String name) {
@@ -174,13 +199,17 @@ final class SourceLineageSchema {
                 .append("required", List.copyOf(properties.keySet())).append("properties", properties));
     }
     private static Document publicationValidator() {
-        return publicationValidator(List.of("PENDING", "APPLIED", "QUARANTINED"));
+        return publicationValidator(List.of("PENDING", "APPLIED", "QUARANTINED"), true);
     }
     /** Exact strict validator installed before history quarantine became an independent terminal state. */
     private static Document publicationValidatorHistoryV1() {
-        return publicationValidator(List.of("PENDING", "APPLIED"));
+        return publicationValidator(List.of("PENDING", "APPLIED"), false);
     }
-    private static Document publicationValidator(List<String> historyStates) {
+    /** Exact strict validator installed before history retries had their own budget. */
+    private static Document publicationValidatorBeforeHistoryRetry() {
+        return publicationValidator(List.of("PENDING", "APPLIED", "QUARANTINED"), false);
+    }
+    private static Document publicationValidator(List<String> historyStates, boolean historyRetries) {
         Document properties = new Document("_id", hash()).append("schemaVersion", type("int").append("enum", List.of(1)))
                 .append("receiptId", hash()).append("rawCommitment", hash()).append("enrichedCommitment", hash())
                 .append("eventId", type("string").append("pattern", "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"))
@@ -202,6 +231,11 @@ final class SourceLineageSchema {
                 .append("recoveryEpoch", type("int").append("minimum", 0).append("maximum", MAX_ENRICHED_PUBLICATION_RECOVERY_EPOCHS))
                 .append("lastRedriveAt", type("date"))
                 .append("redriveReason", type("string").append("enum", List.of("BROKER_RECOVERED", "OPERATOR_RECONCILIATION")));
+        if (historyRetries) {
+            properties.append("historyAttempts", type("int").append("minimum", 0).append("maximum", MAX_ENRICHED_HISTORY_ATTEMPTS))
+                    .append("historyNextAttemptAt", type("date"))
+                    .append("historyFailureCode", type("string").append("enum", List.of("HISTORY_RETRY_EXHAUSTED", "HISTORY_DATA_INVALID")));
+        }
         return new Document("$jsonSchema", type("object").append("additionalProperties", false)
                 .append("required", List.of("_id", "schemaVersion", "receiptId", "rawCommitment", "enrichedCommitment",
                         "eventId", "eventCreatedAt", "expiresAt", "state", "publishedAt", "keyId", "nonce", "ciphertext",

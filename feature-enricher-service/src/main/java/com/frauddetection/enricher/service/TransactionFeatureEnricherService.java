@@ -88,7 +88,7 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
 
         SourceEnrichedPublication publication = null;
         TransactionEnrichedEvent enrichedEvent;
-        if (!legacy && featureStore.hasRecordedTransaction(event, namespace)) {
+        if (!legacy) {
             var lookup = sourceLineage.findEnrichedPublication(event);
             if (lookup == null || lookup.authority() == null
                     || lookup.authority().state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED) {
@@ -100,12 +100,21 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                 throw new FeatureEnrichmentException("FEATURE_SOURCE_OBSERVATION_CONFLICT");
             }
             publication = lookup.publication();
-            if (publication == null) {
+            if (publication != null) {
+                requirePrepared(publication);
+                enrichedEvent = publication.event();
+            } else if (featureStore.hasRecordedTransaction(event, namespace)) {
                 // A business transaction ID is not proof that this exact source observation was already processed.
                 // The verified RAW lineage remains the durable reconciliation anchor for this conflict.
                 throw new FeatureEnrichmentException("FEATURE_BUSINESS_TRANSACTION_ID_CONFLICT");
+            } else {
+                FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(event, namespace);
+                EnrichedTransactionFeatures features = transactionFeatureCalculator.calculate(event, snapshot);
+                TransactionEnrichedEvent candidate = transactionEnrichedEventMapper.toAttestedEvent(event, features);
+                publication = sourceLineage.prepareEnrichedPublication(event, candidate);
+                requirePrepared(publication);
+                enrichedEvent = publication.event();
             }
-            enrichedEvent = publication.event();
         } else {
             FeatureStoreSnapshot snapshot = featureStore.loadSnapshot(event, namespace);
             EnrichedTransactionFeatures features = transactionFeatureCalculator.calculate(event, snapshot);
@@ -113,11 +122,6 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                     ? transactionEnrichedEventMapper.toEvent(event, features)
                     : transactionEnrichedEventMapper.toAttestedEvent(event, features);
             enrichedEvent = candidate;
-            if (!legacy) {
-                publication = sourceLineage.prepareEnrichedPublication(event, candidate);
-                requirePrepared(publication);
-                enrichedEvent = publication.event();
-            }
         }
         if (!legacy) {
             requirePrepared(publication);
@@ -125,11 +129,6 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                 throw new FeatureEnrichmentException("FEATURE_ORIGIN_UNRESOLVED");
             }
             enrichedEvent = publication.event();
-            if (publication.historyApplied()) {
-                featureStore.verifyAttestedTransaction(enrichedEvent, namespace,
-                        com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
-                                publication.authority().receiptId(), enrichedEvent));
-            }
             if (!publication.published() || !publication.historyApplied()) {
                 SourceEnrichedPublicationClaim claim = sourceLineage.claimEnrichedPublication(event, enrichedEvent);
                 if (claim.status() == SourceEnrichedPublicationClaim.Status.CLAIMED) {
@@ -144,13 +143,20 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                                 throw new FeatureEnrichmentException("FEATURE_LINEAGE_HISTORY_UNRESOLVED");
                             }
                         } catch (RuntimeException historyFailure) {
-                            sourceLineage.recordEnrichedHistoryFailure(claim);
+                            sourceLineage.recordEnrichedHistoryFailure(claim,
+                                    EnrichedHistoryFailureClassifier.isPermanent(historyFailure));
                             throw historyFailure;
                         }
                     } else {
-                        featureStore.verifyAttestedTransaction(claim.event(), namespace,
-                                com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
-                                        claim.authority().receiptId(), claim.event()));
+                        try {
+                            featureStore.verifyAttestedTransaction(claim.event(), namespace,
+                                    com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
+                                            claim.authority().receiptId(), claim.event()));
+                        } catch (RuntimeException historyFailure) {
+                            sourceLineage.recordEnrichedHistoryFailure(claim,
+                                    EnrichedHistoryFailureClassifier.isPermanent(historyFailure));
+                            throw historyFailure;
+                        }
                     }
                     if (!claim.published()) {
                         if (!sourceLineage.renewEnrichedPublicationLeaseForSend(claim, 10_000L)) {
@@ -171,9 +177,8 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
                         }
                     }
                 } else if (claim.status() == SourceEnrichedPublicationClaim.Status.ALREADY_PUBLISHED) {
-                    featureStore.verifyAttestedTransaction(enrichedEvent, namespace,
-                            com.frauddetection.common.events.source.SourceEventCommitment.attestedHistory(
-                                    claim.authority().receiptId(), enrichedEvent));
+                    // The receipt-bound canonical publication already completed. Replaying RAW must not
+                    // require ephemeral Redis survival markers or recreate historical feature state.
                 } else {
                     throw new FeatureEnrichmentException("FEATURE_LINEAGE_PUBLICATION_UNRESOLVED");
                 }

@@ -136,10 +136,13 @@ class SourceLineagePipelineIntegrationTest {
         receipts = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
                 new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, owner,
                 new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES);
+        SourceEnrichedPublicationCipher publicationCipher =
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY));
+        SourceEnrichedBusinessIdentityMigration.migrate(ownerClient.getDatabase(db), publicationCipher, CLOCK);
         enricherClient = MONGO.consumer(ownerClient, db, true);
         scorerClient = MONGO.consumer(ownerClient, db, false);
         enricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER, verifier, CLOCK,
-                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY)));
+                publicationCipher);
         scorer = new MongoSourceLineage(scorerClient, db, "scorer", MongoSourceLineage.Stage.SCORER, verifier, CLOCK);
     }
 
@@ -201,10 +204,12 @@ class SourceLineagePipelineIntegrationTest {
         Document preserved = database.getCollection("source_enriched_publications").find(eq("_id", legacy.getString("_id"))).first();
         assertThat(preserved).containsEntry("state", "PUBLISHED").containsEntry("eventId", "legacy-enriched-event")
                 .containsEntry("historyState", "PENDING").containsEntry("historyAppliedAt", null)
+                .containsEntry("historyAttempts", 0).containsKey("historyNextAttemptAt")
                 .doesNotContainKeys("attempts", "leaseToken", "recoveryEpoch", "preparedAt");
         var indexes = database.getCollection("source_enriched_publications").listIndexes().into(new ArrayList<>());
         assertThat(indexes).extracting(row -> row.getString("name"))
-                .containsExactlyInAnyOrder("_id_", "enriched_publication_recovery", "enriched_publication_history");
+                .containsExactlyInAnyOrder("_id_", "enriched_publication_recovery", "enriched_publication_history",
+                        "enriched_publication_history_retry");
         database.drop();
     }
 
@@ -230,6 +235,9 @@ class SourceLineagePipelineIntegrationTest {
         Document jsonSchema = previousValidator.get("$jsonSchema", Document.class);
         Document properties = jsonSchema.get("properties", Document.class);
         properties.get("historyState", Document.class).put("enum", List.of("PENDING", "APPLIED"));
+        properties.remove("historyAttempts");
+        properties.remove("historyNextAttemptAt");
+        properties.remove("historyFailureCode");
         database.runCommand(new Document("collMod", "source_enriched_publications").append("validator", previousValidator)
                 .append("validationLevel", "strict").append("validationAction", "error"));
 
@@ -468,6 +476,86 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(published).containsEntry("state", "PUBLISHED").containsEntry("historyState", "APPLIED");
     }
 
+    @Test void lateSendAfterSuccessfulLeaseRenewalCanDuplicateOnlyTheSameCanonicalEvent() throws Exception {
+        var raw = admit(Map.of("sourceEventId", "lease-renewal-late-send"));
+        var history = java.util.concurrent.ConcurrentHashMap.<String>newKeySet();
+        FeatureStore featureStore = new FeatureStore() {
+            @Override public boolean hasRecordedTransaction(TransactionRawEvent event) { return false; }
+            @Override public boolean hasRecordedTransaction(TransactionRawEvent event, FeatureNamespace namespace) { return false; }
+            @Override public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event) {
+                return new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
+            }
+            @Override public FeatureStoreSnapshot loadSnapshot(TransactionRawEvent event, FeatureNamespace namespace) {
+                return new FeatureStoreSnapshot(0, BigDecimal.ZERO, List.of(), 0, null, false);
+            }
+            @Override public void recordTransaction(TransactionRawEvent event) { }
+            @Override public void recordAttestedTransaction(TransactionEnrichedEvent event, FeatureNamespace namespace,
+                                                            String commitment) { history.add(commitment); }
+            @Override public void verifyAttestedTransaction(TransactionEnrichedEvent event, FeatureNamespace namespace,
+                                                            String commitment) {
+                if (!history.contains(commitment)) { throw new IllegalStateException("FEATURE_HISTORY_REBUILD_REQUIRED"); }
+            }
+        };
+        var pauseBeforeSend = new CountDownLatch(1);
+        var resumeLateSend = new CountDownLatch(1);
+        List<byte[]> brokerAccepts = Collections.synchronizedList(new ArrayList<>());
+        TransactionEnrichedEventPublisher workerAPublisher = new TransactionEnrichedEventPublisher() {
+            private void send(TransactionEnrichedEvent event) {
+                pauseBeforeSend.countDown();
+                awaitLatch(resumeLateSend);
+                brokerAccepts.add(serialize(event));
+            }
+            @Override public void publish(TransactionEnrichedEvent event) { send(event); }
+            @Override public void publish(TransactionEnrichedEvent event, SourceOriginProofs.Assertion origin) { send(event); }
+        };
+        TransactionEnrichedEventPublisher workerBPublisher = event -> brokerAccepts.add(serialize(event));
+        var serviceA = new TransactionFeatureEnricherService(featureStore,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                workerAPublisher, enricher, ORIGIN_PROOFS);
+        var workerB = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(31)), verifier);
+        var serviceB = new TransactionFeatureEnricherService(featureStore,
+                new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                workerBPublisher, workerB, ORIGIN_PROOFS);
+        String rawProof = ORIGIN_PROOFS.signRaw(raw, SourceOriginProofs.Assertion.KNOWN_ATTESTED);
+
+        try (var pool = Executors.newSingleThreadExecutor()) {
+            var firstWorker = pool.submit(() -> serviceA.enrich(raw, rawProof));
+            boolean enteredSend = pauseBeforeSend.await(10, TimeUnit.SECONDS);
+            if (!enteredSend) { firstWorker.get(1, TimeUnit.SECONDS); }
+            assertThat(enteredSend).as("worker A should reach the publisher after renewing its Mongo lease").isTrue();
+            var publications = ownerClient.getDatabase(db).getCollection("source_enriched_publications");
+            Document afterRenewal = publications.find(eq("rawCommitment", SourceEventCommitment.raw(raw))).first();
+            assertThat(afterRenewal).containsEntry("state", "PUBLISHING").containsEntry("historyState", "APPLIED");
+            assertThat(afterRenewal.getDate("leaseUntil").toInstant()).isEqualTo(TestSourceIssuer.NOW.plusSeconds(30));
+
+            serviceB.enrich(raw, rawProof);
+            assertThat(brokerAccepts).hasSize(1);
+            Document publishedByB = publications.find(eq("_id", afterRenewal.getString("_id"))).first();
+            assertThat(publishedByB).containsEntry("state", "PUBLISHED").containsEntry("historyState", "APPLIED")
+                    .doesNotContainKeys("leaseToken", "leaseUntil");
+            Date publishedAt = publishedByB.getDate("publishedAt");
+
+            // Mongo and Kafka cannot share a transaction: A's late broker send is an allowed at-least-once duplicate.
+            // The immutable publication, receipt, event bytes, and business identity stay the same.
+            resumeLateSend.countDown();
+            firstWorker.get(10, TimeUnit.SECONDS);
+            Document afterLateAck = publications.find(eq("_id", afterRenewal.getString("_id"))).first();
+            assertThat(afterLateAck.getDate("publishedAt")).isEqualTo(publishedAt);
+            assertThat(afterLateAck.getString("enrichedCommitment")).isEqualTo(SourceEventCommitment.enriched(
+                    new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY))
+                            .decrypt(afterLateAck)));
+            assertThat(brokerAccepts).hasSize(2);
+            assertThat(brokerAccepts.get(0)).isEqualTo(brokerAccepts.get(1));
+            assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_business_identities")
+                    .countDocuments(eq("rawCommitment", SourceEventCommitment.raw(raw)))).isEqualTo(1);
+            assertThat(afterLateAck.getString("_id")).isEqualTo(afterRenewal.getString("_id"));
+            assertThat(afterLateAck.getString("rawCommitment")).isEqualTo(SourceEventCommitment.raw(raw));
+            assertThat(afterLateAck.getString("receiptId")).isEqualTo(enricher.raw(raw).receiptId());
+        } finally {
+            resumeLateSend.countDown();
+        }
+    }
+
     @Test void realRawListenerDltAndIndependentRecoveryDrainTheOriginalEnrichedOutbox() throws Exception {
         FraudPlatformContainers.startAll();
         String suffix = UUID.randomUUID().toString().replace("-", "");
@@ -506,7 +594,10 @@ class SourceLineagePipelineIntegrationTest {
         AtomicInteger publisherCalls = new AtomicInteger();
         AtomicInteger serviceCalls = new AtomicInteger();
         AtomicReference<byte[]> firstAttemptBytes = new AtomicReference<>();
-        AtomicReference<byte[]> successfulBytes = new AtomicReference<>();
+        List<byte[]> successfulBytes = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch successfulSends = new CountDownLatch(1);
+        AtomicReference<String> rawEventToAwait = new AtomicReference<>();
+        CountDownLatch awaitedRawProcessed = new CountDownLatch(1);
         TransactionEnrichedEventPublisher realKafkaPublisher = new TransactionEnrichedEventPublisher() {
             @Override public void publish(TransactionEnrichedEvent event) { send(event, null); }
             @Override public void publish(TransactionEnrichedEvent event, SourceOriginProofs.Assertion origin) { send(event, origin); }
@@ -527,7 +618,8 @@ class SourceLineagePipelineIntegrationTest {
                 }
                 try {
                     enrichedTemplate.send(record).get(10, TimeUnit.SECONDS);
-                    successfulBytes.set(bytes);
+                    successfulBytes.add(bytes);
+                    successfulSends.countDown();
                 } catch (Exception failure) {
                     throw new IllegalStateException("controlled ENRICHED broker send failed", failure);
                 }
@@ -545,6 +637,7 @@ class SourceLineagePipelineIntegrationTest {
             @Override public void enrich(TransactionRawEvent event, String proof) {
                 serviceCalls.incrementAndGet();
                 realEnricher.enrich(event, proof);
+                if (event.eventId().equals(rawEventToAwait.get())) { awaitedRawProcessed.countDown(); }
             }
         };
         TransactionRawEventListener listener = new TransactionRawEventListener(countedEnricher,
@@ -605,31 +698,81 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(realRedis.opsForSet().size(historyKeys.stream().filter(k -> k.endsWith(":customer:transaction-ids")).findFirst().orElseThrow()))
                     .isEqualTo(1L);
 
+            // Advance the customer's one-minute velocity window with a distinct, authenticated observation.
+            byte[] laterPayload = payload(raw.transactionId() + "-later", raw.transactionTimestamp().plus(Duration.ofMinutes(2)));
+            TransactionRawEvent laterRaw = admit(laterPayload, Map.of("sourceEventId", "kafka-recovery-later-" + suffix));
+            container.start();
+            ProducerRecord<String, TransactionRawEvent> laterRecord = new ProducerRecord<>(rawTopic, laterRaw.transactionId(), laterRaw);
+            laterRecord.headers().add(new RecordHeader(SourceOriginProofs.KAFKA_HEADER,
+                    ORIGIN_PROOFS.signRaw(laterRaw, SourceOriginProofs.Assertion.KNOWN_ATTESTED)
+                            .getBytes(StandardCharsets.US_ASCII)));
+            rawTemplate.send(laterRecord).get(10, TimeUnit.SECONDS);
+            assertThat(successfulSends.await(20, TimeUnit.SECONDS)).isTrue();
+            container.stop();
+
+            var laterOutbox = enricher.findEnrichedPublication(laterRaw).publication();
+            assertThat(laterOutbox).isNotNull();
+            assertThat(laterOutbox.historyApplied()).isTrue();
+            assertThat(laterOutbox.published()).isTrue();
+            historyKeys = realRedis.keys("feature:v3:attested:*");
+            assertThat(realRedis.opsForZSet().zCard(historyKeys.stream().filter(k -> k.endsWith(":customer:transactions")).findFirst().orElseThrow()))
+                    .isEqualTo(1L);
+            assertThat(realRedis.opsForZSet().zCard(historyKeys.stream().filter(k -> k.endsWith(":transactions") && k.contains(":merchant:")).findFirst().orElseThrow()))
+                    .isEqualTo(2L);
+            assertThat(realRedis.opsForHash().size(historyKeys.stream().filter(k -> k.endsWith(":customer:processed-transactions")).findFirst().orElseThrow()))
+                    .isEqualTo(2L);
+            assertThat(realRedis.opsForSet().size(historyKeys.stream().filter(k -> k.endsWith(":customer:transaction-ids")).findFirst().orElseThrow()))
+                    .isEqualTo(2L);
+
             int callsAtDlt = serviceCalls.get();
+            Document pendingRecovery = ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                    .find(eq("rawCommitment", SourceEventCommitment.raw(raw))).first();
+            assertThat(pendingRecovery.getString("state")).isEqualTo("PENDING");
+            assertThat(pendingRecovery.getDate("nextAttemptAt").toInstant())
+                    .isBeforeOrEqualTo(CLOCK.instant().plusSeconds(5));
+            realFeatureStore.verifyAttestedTransaction(canonical, namespace,
+                    SourceEventCommitment.attestedHistory(enricher.raw(raw).receiptId(), canonical));
             var independentRecovery = new SourceEnrichedPublicationRecovery(newEnricher(
                     Clock.offset(CLOCK, Duration.ofSeconds(5)), policy(false)), realKafkaPublisher, realFeatureStore,
                     new SourceEnrichedPublicationRecoveryProperties(true, 1, 0, 1_000));
             independentRecovery.recover();
             assertThat(serviceCalls.get()).isEqualTo(callsAtDlt);
-            assertThat(publisherCalls.get()).isEqualTo(2);
+            Document recoveredRow = ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                    .find(eq("rawCommitment", SourceEventCommitment.raw(raw))).first();
+            assertThat(publisherCalls.get()).as("recovery row state=%s attempts=%s nextAttemptAt=%s historyState=%s failureCode=%s",
+                    recoveredRow.getString("state"), recoveredRow.getInteger("attempts"), recoveredRow.getDate("nextAttemptAt"),
+                    recoveredRow.getString("historyState"), recoveredRow.getString("failureCode")).isEqualTo(3);
 
-            ConsumerRecord<String, TransactionEnrichedEvent> recovered = pollKafkaRecord(
-                    enrichedTopic, TransactionEnrichedEvent.class, Duration.ofSeconds(15));
-            assertThat(recovered.value()).isEqualTo(canonical);
-            assertThat(successfulBytes.get()).containsExactly(firstAttemptBytes.get());
+            List<ConsumerRecord<String, TransactionEnrichedEvent>> published = pollKafkaRecords(
+                    enrichedTopic, TransactionEnrichedEvent.class, 2, Duration.ofSeconds(15));
+            assertThat(published).extracting(ConsumerRecord::value).containsExactly(laterOutbox.event(), canonical);
+            assertThat(successfulBytes).hasSize(2);
+            assertThat(successfulBytes.get(1)).containsExactly(firstAttemptBytes.get());
             var stored = enricher.findEnrichedPublication(raw).publication();
             assertThat(stored.published()).isTrue();
             assertThat(SourceEventCommitment.enriched(stored.event())).isEqualTo(SourceEventCommitment.enriched(canonical));
 
-            TransactionRawEvent next = nextTransaction(raw);
+            // Replaying the exact RAW A after B pruned its minute-window membership remains idempotent.
+            container.start();
+            rawEventToAwait.set(raw.eventId());
+            rawRecord = new ProducerRecord<>(rawTopic, raw.transactionId(), raw);
+            rawRecord.headers().add(new RecordHeader(SourceOriginProofs.KAFKA_HEADER,
+                    ORIGIN_PROOFS.signRaw(raw, SourceOriginProofs.Assertion.KNOWN_ATTESTED)
+                            .getBytes(StandardCharsets.US_ASCII)));
+            rawTemplate.send(rawRecord).get(10, TimeUnit.SECONDS);
+            assertThat(awaitedRawProcessed.await(20, TimeUnit.SECONDS)).isTrue();
+            assertThat(publisherCalls.get()).isEqualTo(3);
+            assertThat(successfulBytes).hasSize(2);
+
+            TransactionRawEvent next = nextTransaction(laterRaw);
             FeatureStoreSnapshot nextSnapshot = realFeatureStore.loadSnapshot(next, namespace);
             assertThat(nextSnapshot.recentTransactionCount()).isEqualTo(1);
             assertThat(nextSnapshot.recentAmountSumPln()).isEqualByComparingTo(new CurrencyAmountConverter()
-                    .toPln(raw.transactionAmount().amount(), raw.transactionAmount().currency()));
-            assertThat(nextSnapshot.merchantFrequency7d()).isEqualTo(1);
+                    .toPln(laterRaw.transactionAmount().amount(), laterRaw.transactionAmount().currency()));
+            assertThat(nextSnapshot.merchantFrequency7d()).isEqualTo(2);
             assertThat(nextSnapshot.knownDevice()).isTrue();
-            assertThat(nextSnapshot.lastTransactionTimestamp()).isEqualTo(raw.transactionTimestamp());
-            Scored scored = score(recovered.value());
+            assertThat(nextSnapshot.lastTransactionTimestamp()).isEqualTo(laterRaw.transactionTimestamp());
+            Scored scored = score(published.get(1).value());
             assertThat(scored.context.sourceLineage().state()).isEqualTo(VERIFIED);
             assertThat(scored.context.sourceLineage().source().sourceEventId()).isEqualTo("kafka-recovery-" + suffix);
         } finally {
@@ -639,6 +782,96 @@ class SourceLineagePipelineIntegrationTest {
             rawFactory.destroy();
             enrichedFactory.destroy();
             dltFactory.destroy();
+        }
+    }
+
+    @Test void durableBusinessIdentityFenceRejectsReusedTransactionIdAfterRedisMarkerLoss() throws Exception {
+        FraudPlatformContainers.startAll();
+        LettuceConnectionFactory redisFactory = new LettuceConnectionFactory(
+                FraudPlatformContainers.redis().getHost(), FraudPlatformContainers.redis().getMappedPort(6379));
+        redisFactory.afterPropertiesSet();
+        StringRedisTemplate realRedis = new StringRedisTemplate(redisFactory);
+        realRedis.afterPropertiesSet();
+        realRedis.getConnectionFactory().getConnection().serverCommands().flushAll();
+        try {
+            FeatureStore realFeatureStore = new RedisFeatureStore(realRedis,
+                    new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8),
+                            Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
+            List<TransactionEnrichedEvent> published = new ArrayList<>();
+            TransactionEnrichedEventPublisher publisher = new TransactionEnrichedEventPublisher() {
+                @Override public void publish(TransactionEnrichedEvent event) { published.add(event); }
+                @Override public void publish(TransactionEnrichedEvent event, SourceOriginProofs.Assertion origin) {
+                    published.add(event);
+                }
+            };
+            var realEnricher = new TransactionFeatureEnricherService(realFeatureStore,
+                    new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                    publisher, enricher, ORIGIN_PROOFS);
+
+            String suffix = UUID.randomUUID().toString().replace("-", "");
+            byte[] payloadA = payload("collision-transaction", TestSourceIssuer.NOW, "100.00", "merchant-a");
+            byte[] payloadB = payload("collision-transaction", TestSourceIssuer.NOW.plus(Duration.ofMinutes(2)), "200.00", "merchant-b");
+            TransactionRawEvent a = admit(payloadA, Map.of("sourceEventId", "collision-a-" + suffix));
+            TransactionRawEvent b = admit(payloadB, Map.of("sourceEventId", "collision-b-" + suffix));
+            String proofA = ORIGIN_PROOFS.signRaw(a, SourceOriginProofs.Assertion.KNOWN_ATTESTED);
+            String proofB = ORIGIN_PROOFS.signRaw(b, SourceOriginProofs.Assertion.KNOWN_ATTESTED);
+            realEnricher.enrich(a, proofA);
+            assertThat(published).hasSize(1);
+
+            // Simulate upgrade with a pre-existing active canonical outbox and verify owner backfill.
+            ownerClient.getDatabase(db).getCollection("source_enriched_business_identities").drop();
+            SourceEnrichedPublicationCipher publicationCipher =
+                    new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY));
+            SourceEnrichedBusinessIdentityMigration.migrate(ownerClient.getDatabase(db), publicationCipher, CLOCK);
+            assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_business_identities")
+                    .countDocuments(eq("recordType", "FENCE"))).isEqualTo(1L);
+
+            FeatureNamespace namespace = FeatureNamespace.attested(enricher.raw(a));
+            Set<String> keys = realRedis.keys("feature:v3:attested:*");
+            String commitmentHash = keys.stream().filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
+            String businessIds = keys.stream().filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow();
+            realRedis.delete(List.of(commitmentHash, businessIds));
+            assertThat(realFeatureStore.hasRecordedTransaction(b, namespace)).isFalse();
+
+            assertThatThrownBy(() -> realEnricher.enrich(b, proofB))
+                    .hasMessage("FEATURE_LINEAGE_UNRESOLVED");
+            assertThat(enricher.findEnrichedPublication(b).publication()).isNull();
+            assertThat(published).hasSize(1);
+
+            var source = TestSourceIssuer.policy(0, false);
+            var otherInstitution = new SourceVerificationProperties.TrustedKey("second-test-issuer", "institution-b", source.source(),
+                    source.sourceEpoch(), source.signingKeyVersion(), source.algorithm(), source.publicKeyBase64(),
+                    source.notBefore(), source.notAfter(), false, source.purpose(), source.audience(), source.policyVersion());
+            verifier = new SourceSignatureVerifier(new SourceVerificationProperties(List.of(source, otherInstitution)), CLOCK);
+            owner = new MongoSourceLineage(ownerClient, db, "source_owner", MongoSourceLineage.Stage.INGEST, verifier, CLOCK);
+            receipts = new MongoSourceReceiptStore(ownerClient, db, CLOCK,
+                    new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, owner,
+                    new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES);
+            enricher = new MongoSourceLineage(enricherClient, db, "enricher", MongoSourceLineage.Stage.ENRICHER, verifier, CLOCK,
+                    publicationCipher);
+            TransactionRawEvent c = admit(payloadB, Map.of("issuer", otherInstitution.issuer(), "institution", otherInstitution.institution(),
+                    "sourceEventId", "collision-c-" + suffix));
+            String proofC = ORIGIN_PROOFS.signRaw(c, SourceOriginProofs.Assertion.KNOWN_ATTESTED);
+            var institutionAwareEnricher = new TransactionFeatureEnricherService(realFeatureStore,
+                    new TransactionFeatureCalculator(new CurrencyAmountConverter()), new TransactionEnrichedEventMapper(),
+                    publisher, enricher, ORIGIN_PROOFS);
+            assertThatCode(() -> institutionAwareEnricher.enrich(c, proofC)).doesNotThrowAnyException();
+            assertThat(published).hasSize(2);
+            assertThat(FeatureNamespace.attested(enricher.raw(c))).isNotEqualTo(namespace);
+            assertThat(ownerClient.getDatabase(db).getCollection("source_enriched_business_identities")
+                    .countDocuments(eq("recordType", "FENCE"))).isEqualTo(2L);
+
+            // The published canonical A is recognized durably even though both Redis identity markers are gone.
+            assertThatCode(() -> institutionAwareEnricher.enrich(a, proofA)).doesNotThrowAnyException();
+            assertThat(published).hasSize(2);
+            assertThat(realRedis.opsForZSet().zCard(keys.stream().filter(key -> key.endsWith(":customer:transactions"))
+                    .findFirst().orElseThrow())).isZero();
+            List<String> merchantHistory = keys.stream().filter(key -> key.endsWith(":transactions") && key.contains(":merchant:")).toList();
+            assertThat(merchantHistory).hasSize(1);
+            assertThat(realRedis.opsForZSet().zCard(merchantHistory.getFirst())).isEqualTo(1L);
+        } finally {
+            realRedis.getConnectionFactory().getConnection().serverCommands().flushAll();
+            redisFactory.destroy();
         }
     }
 
@@ -659,6 +892,26 @@ class SourceLineagePipelineIntegrationTest {
             }
         }
         throw new AssertionError("No Kafka record arrived on " + topic + " within " + timeout);
+    }
+
+    private <T> List<ConsumerRecord<String, T>> pollKafkaRecords(String topic, Class<T> type, int count, Duration timeout) {
+        Map<String, Object> properties = Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, FraudPlatformContainers.kafka().getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG, "source-poll-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false
+        );
+        try (KafkaConsumer<String, T> consumer = new KafkaConsumer<>(properties, new StringDeserializer(),
+                new JacksonKafkaDeserializer<>(type))) {
+            consumer.subscribe(List.of(topic));
+            List<ConsumerRecord<String, T>> received = new ArrayList<>();
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (System.nanoTime() < deadline && received.size() < count) {
+                consumer.poll(Duration.ofMillis(250)).forEach(received::add);
+            }
+            if (received.size() >= count) { return List.copyOf(received.subList(0, count)); }
+        }
+        throw new AssertionError("Expected " + count + " Kafka records on " + topic + " within " + timeout);
     }
 
     private TransactionRawEvent nextTransaction(TransactionRawEvent raw) {
@@ -709,6 +962,190 @@ class SourceLineagePipelineIntegrationTest {
         var nextCycle = enricher.claimNextEnrichedPublications(1);
         assertThat(nextCycle).hasSize(1);
         assertThat(nextCycle.getFirst().publicationId()).isEqualTo(healthyId);
+    }
+
+    @Test void historyRetryBudgetIsIndependentBackedOffAndOperatorReconciliationKeepsExactIntent() throws Exception {
+        var failedRaw = admit(payload("history-retry-failed", TestSourceIssuer.NOW),
+                Map.of("sourceEventId", "history-retry-failed"));
+        var failedPrepared = enricher.prepareEnrichedPublication(failedRaw, enrichedCandidate(failedRaw));
+        var publications = ownerClient.getDatabase(db).getCollection("source_enriched_publications");
+        String failedId = publications.find(eq("rawCommitment", SourceEventCommitment.raw(failedRaw))).first().getString("_id");
+
+        var unavailableFactory = new LettuceConnectionFactory("127.0.0.1", 1);
+        unavailableFactory.afterPropertiesSet();
+        var unavailableRedis = new StringRedisTemplate(unavailableFactory);
+        unavailableRedis.afterPropertiesSet();
+        var unavailableStore = new RedisFeatureStore(unavailableRedis,
+                new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8),
+                        Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
+        var recoveryProperties = new SourceEnrichedPublicationRecoveryProperties(true, 1, 0, 30_000, 5_000);
+        try {
+            var firstRecovery = new SourceEnrichedPublicationRecovery(newEnricher(CLOCK, verifier), event -> { },
+                    unavailableStore, recoveryProperties);
+            firstRecovery.recover();
+            Document firstFailure = publications.find(eq("_id", failedId)).first();
+            assertThat(firstFailure).containsEntry("historyAttempts", 1).containsEntry("attempts", 0)
+                    .containsEntry("state", "PENDING").containsEntry("historyState", "PENDING");
+            assertThat(firstFailure.getDate("historyNextAttemptAt").toInstant())
+                    .isEqualTo(TestSourceIssuer.NOW.plusSeconds(1));
+
+            var healthyRaw = admit(payload("history-retry-healthy", TestSourceIssuer.NOW.plusSeconds(1)),
+                    Map.of("sourceEventId", "history-retry-healthy"));
+            enricher.prepareEnrichedPublication(healthyRaw, enrichedCandidate(healthyRaw));
+            var healthyStore = mock(FeatureStore.class);
+            doNothing().when(healthyStore).recordAttestedTransaction(any(), any(), anyString());
+            var healthyRecovery = new SourceEnrichedPublicationRecovery(enricher, event -> { }, healthyStore, recoveryProperties);
+            healthyRecovery.recover();
+            Document healthy = publications.find(eq("rawCommitment", SourceEventCommitment.raw(healthyRaw))).first();
+            assertThat(healthy).containsEntry("state", "PUBLISHED").containsEntry("historyState", "APPLIED")
+                    .containsEntry("historyAttempts", 0).containsEntry("attempts", 1);
+            assertThat(publications.find(eq("_id", failedId)).first()).containsEntry("historyAttempts", 1)
+                    .containsEntry("attempts", 0);
+
+            var permanentRaw = admit(payload("history-retry-permanent", TestSourceIssuer.NOW.plusSeconds(2)),
+                    Map.of("sourceEventId", "history-retry-permanent"));
+            enricher.prepareEnrichedPublication(permanentRaw, enrichedCandidate(permanentRaw));
+            var corruptStore = mock(FeatureStore.class);
+            doThrow(new com.frauddetection.enricher.exception.FeatureEnrichmentException("FEATURE_HISTORY_REDIS_SCHEMA_CONFLICT"))
+                    .when(corruptStore).recordAttestedTransaction(any(), any(), anyString());
+            new SourceEnrichedPublicationRecovery(enricher, event -> { }, corruptStore, recoveryProperties).recover();
+            Document permanent = publications.find(eq("rawCommitment", SourceEventCommitment.raw(permanentRaw))).first();
+            assertThat(permanent).containsEntry("historyState", "QUARANTINED")
+                    .containsEntry("historyFailureCode", "HISTORY_DATA_INVALID")
+                    .containsEntry("historyAttempts", 1).containsEntry("attempts", 0);
+
+            long clockOffsetSeconds = 1;
+            for (int expectedAttempt = 2; expectedAttempt <= 8; expectedAttempt++) {
+                var worker = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(clockOffsetSeconds)), verifier);
+                new SourceEnrichedPublicationRecovery(worker, event -> { }, unavailableStore, recoveryProperties).recover();
+                Document retried = publications.find(eq("_id", failedId)).first();
+                assertThat(retried.getInteger("historyAttempts")).isEqualTo(expectedAttempt);
+                assertThat(retried.getInteger("attempts")).isZero();
+                if (expectedAttempt < 8) {
+                    assertThat(retried.getString("historyState")).isEqualTo("PENDING");
+                    assertThat(worker.claimNextEnrichedPublications(1)).isEmpty();
+                    clockOffsetSeconds += 1L << (expectedAttempt - 1);
+                } else {
+                    assertThat(retried).containsEntry("historyState", "QUARANTINED")
+                            .containsEntry("historyFailureCode", "HISTORY_RETRY_EXHAUSTED");
+                }
+            }
+            var terminalWorker = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(clockOffsetSeconds + 1)), verifier);
+            assertThat(terminalWorker.claimNextEnrichedPublications(1)).isEmpty();
+            assertThat(terminalWorker.enrichedPublicationHealth().quarantined()).isEqualTo(2);
+            var identities = ownerClient.getDatabase(db).getCollection("source_enriched_business_identities");
+            long identityFencesBeforeRedrive = identities.countDocuments(eq("rawCommitment", SourceEventCommitment.raw(failedRaw)));
+            assertThat(identityFencesBeforeRedrive).isEqualTo(1);
+
+            var redrive = terminalWorker.redriveEnrichedPublication(failedId, "OPERATOR_RECONCILIATION");
+            assertThat(redrive.status()).isEqualTo(SourceLineageAccess.EnrichedPublicationRedriveStatus.REQUEUED);
+            assertThat(redrive.recoveryEpoch()).isEqualTo(1);
+            Document requeued = publications.find(eq("_id", failedId)).first();
+            assertThat(requeued).containsEntry("historyState", "PENDING").containsEntry("historyAttempts", 0)
+                    .containsEntry("state", "PENDING").containsEntry("attempts", 0)
+                    .containsEntry("redriveReason", "OPERATOR_RECONCILIATION");
+            assertThat(new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY))
+                    .decrypt(requeued)).isEqualTo(failedPrepared.event());
+            assertThat(identities.countDocuments(eq("rawCommitment", SourceEventCommitment.raw(failedRaw))))
+                    .isEqualTo(identityFencesBeforeRedrive);
+            assertThat(publications.find(eq("_id", failedId)).first().getString("enrichedCommitment"))
+                    .isEqualTo(SourceEventCommitment.enriched(failedPrepared.event()));
+        } finally {
+            unavailableFactory.destroy();
+        }
+    }
+
+    @Test void publishedHistoryFailureUsesItsOwnRetryScheduleWithoutChangingKafkaAttempts() throws Exception {
+        var raw = admit(payload("published-history-retry", TestSourceIssuer.NOW),
+                Map.of("sourceEventId", "published-history-retry"));
+        var prepared = enricher.prepareEnrichedPublication(raw, enrichedCandidate(raw));
+        var claim = enricher.claimEnrichedPublication(raw, prepared.event());
+        assertThat(claim.status()).isEqualTo(SourceEnrichedPublicationClaim.Status.CLAIMED);
+        assertThat(enricher.markEnrichedHistoryApplied(claim).state()).isEqualTo(VERIFIED);
+        assertThat(enricher.markEnrichedPublished(claim).state()).isEqualTo(VERIFIED);
+        String id = ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .find(eq("rawCommitment", SourceEventCommitment.raw(raw))).first().getString("_id");
+        ownerClient.getDatabase(db).getCollection("source_enriched_publications").updateOne(eq("_id", id),
+                new Document("$set", new Document("historyState", "PENDING").append("historyAppliedAt", null)
+                        .append("historyAttempts", 0).append("historyNextAttemptAt", Date.from(TestSourceIssuer.NOW))));
+        int kafkaAttemptsBefore = ownerClient.getDatabase(db).getCollection("source_enriched_publications")
+                .find(eq("_id", id)).first().getInteger("attempts");
+
+        var unavailableFactory = new LettuceConnectionFactory("127.0.0.1", 1);
+        unavailableFactory.afterPropertiesSet();
+        var template = new StringRedisTemplate(unavailableFactory);
+        template.afterPropertiesSet();
+        try {
+            var unavailableStore = new RedisFeatureStore(template,
+                    new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8),
+                            Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
+            var worker = newEnricher(CLOCK, verifier);
+            new SourceEnrichedPublicationRecovery(worker, event -> { }, unavailableStore,
+                    new SourceEnrichedPublicationRecoveryProperties(true, 1, 0, 30_000, 5_000)).recover();
+            Document failed = ownerClient.getDatabase(db).getCollection("source_enriched_publications").find(eq("_id", id)).first();
+            assertThat(failed).containsEntry("state", "PUBLISHED").containsEntry("historyState", "PENDING")
+                    .containsEntry("historyAttempts", 1).containsEntry("attempts", kafkaAttemptsBefore);
+            assertThat(failed.getDate("historyNextAttemptAt").toInstant()).isEqualTo(TestSourceIssuer.NOW.plusSeconds(1));
+            assertThat(worker.claimNextEnrichedPublications(1)).isEmpty();
+        } finally {
+            unavailableFactory.destroy();
+        }
+    }
+
+    @Test void appliedHistoryVerificationFailureBacksOffAndQuarantinesWithoutStarvingRecovery() throws Exception {
+        var failedRaw = admit(payload("applied-history-retry", TestSourceIssuer.NOW),
+                Map.of("sourceEventId", "applied-history-retry"));
+        var failedPrepared = enricher.prepareEnrichedPublication(failedRaw, enrichedCandidate(failedRaw));
+        var initialClaim = enricher.claimEnrichedPublication(failedRaw, failedPrepared.event());
+        assertThat(initialClaim.status()).isEqualTo(SourceEnrichedPublicationClaim.Status.CLAIMED);
+        assertThat(enricher.markEnrichedHistoryApplied(initialClaim).state()).isEqualTo(VERIFIED);
+        enricher.recordEnrichedPublishFailure(initialClaim);
+
+        var publications = ownerClient.getDatabase(db).getCollection("source_enriched_publications");
+        Document failedBeforeRetry = publications.find(eq("rawCommitment", SourceEventCommitment.raw(failedRaw))).first();
+        String failedId = failedBeforeRetry.getString("_id");
+        assertThat(failedBeforeRetry).containsEntry("state", "PENDING").containsEntry("historyState", "APPLIED");
+        publications.updateOne(eq("_id", failedId), new Document("$set", new Document("nextAttemptAt", Date.from(TestSourceIssuer.NOW))
+                .append("historyNextAttemptAt", Date.from(TestSourceIssuer.NOW))));
+        int kafkaAttemptsBefore = failedBeforeRetry.getInteger("attempts");
+
+        var unavailableStore = mock(FeatureStore.class);
+        doThrow(new IllegalStateException("Redis unavailable"))
+                .when(unavailableStore).verifyAttestedTransaction(any(), any(), anyString());
+        var recoveryProperties = new SourceEnrichedPublicationRecoveryProperties(true, 1, 0, 30_000, 5_000);
+        new SourceEnrichedPublicationRecovery(enricher, event -> { }, unavailableStore, recoveryProperties).recover();
+        Document failedAfterRetry = publications.find(eq("_id", failedId)).first();
+        assertThat(failedAfterRetry).containsEntry("state", "PENDING").containsEntry("historyState", "APPLIED")
+                .containsEntry("historyAttempts", 1).containsEntry("attempts", kafkaAttemptsBefore)
+                .containsEntry("historyAppliedAt", failedBeforeRetry.get("historyAppliedAt"));
+        assertThat(failedAfterRetry.getDate("historyNextAttemptAt").toInstant()).isEqualTo(TestSourceIssuer.NOW.plusSeconds(1));
+
+        var healthyRaw = admit(payload("applied-history-healthy", TestSourceIssuer.NOW.plusSeconds(1)),
+                Map.of("sourceEventId", "applied-history-healthy"));
+        enricher.prepareEnrichedPublication(healthyRaw, enrichedCandidate(healthyRaw));
+        var healthyStore = mock(FeatureStore.class);
+        doNothing().when(healthyStore).recordAttestedTransaction(any(), any(), anyString());
+        new SourceEnrichedPublicationRecovery(enricher, event -> { }, healthyStore, recoveryProperties).recover();
+        Document healthy = publications.find(eq("rawCommitment", SourceEventCommitment.raw(healthyRaw))).first();
+        assertThat(healthy).containsEntry("state", "PUBLISHED").containsEntry("historyState", "APPLIED");
+
+        var laterWorker = newEnricher(Clock.offset(CLOCK, Duration.ofSeconds(1)), verifier);
+        var permanentStore = mock(FeatureStore.class);
+        doThrow(new com.frauddetection.enricher.exception.FeatureEnrichmentException("FEATURE_HISTORY_REDIS_SCHEMA_CONFLICT"))
+                .when(permanentStore).verifyAttestedTransaction(any(), any(), anyString());
+        new SourceEnrichedPublicationRecovery(laterWorker, event -> { }, permanentStore, recoveryProperties).recover();
+        Document quarantined = publications.find(eq("_id", failedId)).first();
+        assertThat(quarantined).containsEntry("state", "PENDING").containsEntry("historyState", "QUARANTINED")
+                .containsEntry("historyFailureCode", "HISTORY_DATA_INVALID")
+                .containsEntry("historyAppliedAt", failedBeforeRetry.get("historyAppliedAt"));
+
+        var redrive = laterWorker.redriveEnrichedPublication(failedId, "OPERATOR_RECONCILIATION");
+        assertThat(redrive.status()).isEqualTo(SourceLineageAccess.EnrichedPublicationRedriveStatus.REQUEUED);
+        Document requeued = publications.find(eq("_id", failedId)).first();
+        assertThat(requeued).containsEntry("historyState", "PENDING").containsEntry("historyAttempts", 0)
+                .containsEntry("historyAppliedAt", null);
+        assertThat(new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_KEY))
+                .decrypt(requeued)).isEqualTo(failedPrepared.event());
     }
 
     private String preparePublishedWithAppliedHistory(TransactionRawEvent raw) {
@@ -1358,7 +1795,10 @@ class SourceLineagePipelineIntegrationTest {
     }
     private TransactionRawEventProducer publisher() { return event -> rawWire.add(serialize(event)); }
     private TransactionRawEvent admit(Map<String, Object> claims) throws Exception {
-        service(publisher()).ingest(encodedProof(payload(), claims), payload());
+        return admit(payload(), claims);
+    }
+    private TransactionRawEvent admit(byte[] payload, Map<String, Object> claims) throws Exception {
+        service(publisher()).ingest(encodedProof(payload, claims), payload);
         TransactionRawEvent admitted = lastRaw(); attestedRawEventIds.add(admitted.eventId()); return admitted;
     }
     private TransactionRawEvent lastRaw() { return new JacksonKafkaDeserializer<>(TransactionRawEvent.class).deserialize("transactions.raw", rawWire.getLast()); }
@@ -1498,5 +1938,19 @@ class SourceLineagePipelineIntegrationTest {
                  "customerContext":{"customerId":"customer-1","accountId":"account-1","segment":"PREMIUM","emailDomain":"example.com","accountAgeDays":620,"emailVerified":true,"phoneVerified":true,"homeCountryCode":"PL","preferredCurrency":"PLN","knownDeviceIds":["device-old"],"attributes":{}},
                  "transactionType":"PURCHASE","authorizationMethod":"3DS","sourceSystem":"PAYMENT_GATEWAY","traceId":"trace-1","attributes":{}}
                 """.getBytes(StandardCharsets.UTF_8);
+    }
+    private static byte[] payload(String transactionId, Instant timestamp) throws Exception {
+        ObjectNode changed = (ObjectNode) JSON.readTree(payload());
+        changed.put("transactionId", transactionId);
+        changed.put("transactionTimestamp", timestamp.toString());
+        return JSON.writeValueAsBytes(changed);
+    }
+    private static byte[] payload(String transactionId, Instant timestamp, String amount, String merchantId) throws Exception {
+        ObjectNode changed = (ObjectNode) JSON.readTree(payload());
+        changed.put("transactionId", transactionId);
+        changed.put("transactionTimestamp", timestamp.toString());
+        ((ObjectNode) changed.get("transactionAmount")).put("amount", new BigDecimal(amount));
+        ((ObjectNode) changed.get("merchantInfo")).put("merchantId", merchantId);
+        return JSON.writeValueAsBytes(changed);
     }
 }

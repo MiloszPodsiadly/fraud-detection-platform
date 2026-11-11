@@ -142,10 +142,13 @@ class SourceScoredOccurrenceIntegrationTest {
         receipts = new MongoSourceReceiptStore(ownerClient, database, Clock.systemUTC(),
                 new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), policy, owner,
                 new SourceRawPublicationCipher("raw-key-1", RAW_PUBLICATION_PROPERTIES.encryptionKeys()), RAW_PUBLICATION_PROPERTIES);
+        SourceEnrichedPublicationCipher publicationCipher =
+                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_ENCRYPTION_KEY));
+        SourceEnrichedBusinessIdentityMigration.migrate(ownerClient.getDatabase(database), publicationCipher, Clock.systemUTC());
         enricherClient = MONGO.consumer(ownerClient, database, true);
         scorerClient = MONGO.occurrenceWriter(ownerClient, database);
         enricher = new MongoSourceLineage(enricherClient, database, "enricher", MongoSourceLineage.Stage.ENRICHER, policy, Clock.systemUTC(),
-                new SourceEnrichedPublicationCipher("enriched-key-1", Map.of("enriched-key-1", ENRICHED_ENCRYPTION_KEY)));
+                publicationCipher);
         reader = new MongoSourceLineage(scorerClient, database, "scorer", MongoSourceLineage.Stage.SCORER, policy, Clock.systemUTC());
         store = newStore(scorerClient, policy, Clock.systemUTC());
         kafkaPublisher = new KafkaTransactionScoredEventPublisher(template(), new KafkaTopicProperties(enrichedTopic, scoredTopic, database + ".dlt"));

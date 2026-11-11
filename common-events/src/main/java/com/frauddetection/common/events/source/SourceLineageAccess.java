@@ -48,6 +48,11 @@ public interface SourceLineageAccess {
     /** Releases or backs off a failed Redis finalization without spending a Kafka publication attempt. */
     default void recordEnrichedHistoryFailure(SourceEnrichedPublicationClaim claim) { }
 
+    /** Records a durable history retry; permanent integrity failures are quarantined immediately. */
+    default void recordEnrichedHistoryFailure(SourceEnrichedPublicationClaim claim, boolean permanent) {
+        recordEnrichedHistoryFailure(claim);
+    }
+
     /** Releases a claimed event with a bounded retry or terminal/quarantine state. */
     default void recordEnrichedPublishFailure(SourceEnrichedPublicationClaim claim) { }
 

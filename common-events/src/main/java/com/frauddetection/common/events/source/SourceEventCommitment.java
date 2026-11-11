@@ -26,6 +26,17 @@ public final class SourceEventCommitment {
         }
         return SourceReceiptIdentity.digest("source-enriched-history/v1", receiptId, enriched(event));
     }
+    /** Stable private identity for enforcing one business transaction per verified source scope. */
+    public static String businessTransaction(SourceScope scope, String customerId, String transactionId) {
+        if (scope == null || customerId == null || customerId.isBlank() || customerId.length() > 512
+                || transactionId == null || transactionId.isBlank() || transactionId.length() > 512) {
+            throw new IllegalArgumentException("SOURCE_BUSINESS_IDENTITY_INVALID");
+        }
+        String identity = SourceReceiptIdentity.digest("source-business-transaction-identity/v1", scope.issuer(),
+                scope.institution(), scope.source(), scope.sourceEpoch(), customerId, transactionId);
+        if (identity.equals("0".repeat(64))) { throw new IllegalArgumentException("SOURCE_BUSINESS_IDENTITY_INVALID"); }
+        return identity;
+    }
     static String eventIdentity(String kind, String eventId, java.time.Instant time) {
         SourceScope.requireReference(eventId);
         if (time == null) { throw new IllegalArgumentException("SOURCE_EVENT_TIME_REQUIRED"); }

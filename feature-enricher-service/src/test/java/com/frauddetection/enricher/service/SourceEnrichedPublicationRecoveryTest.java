@@ -45,7 +45,7 @@ class SourceEnrichedPublicationRecoveryTest {
 
         verify(publisher, never()).publish(any(), any());
         verify(lineage, never()).recordEnrichedPublishFailure(claim);
-        verify(lineage, never()).recordEnrichedHistoryFailure(claim);
+        verify(lineage).recordEnrichedHistoryFailure(claim, false);
     }
 
     private static SourceLineage verifiedAuthority() {
