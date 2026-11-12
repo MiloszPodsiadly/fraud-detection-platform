@@ -1,6 +1,8 @@
 # Device Risk Exact-Payload Delivery Gate
 
-Status: engineering NO-GO for A05; the Device Risk admission path remains disabled and no production outbox is implemented.
+Status: engineering NO-GO; the Device Risk admission path remains disabled and no production outbox is implemented.
+
+Implementation reconciliation (2026-11-12): the current implementation adds test-only signed admission and a private read after the existing SCORED publication. It does not create a Device payload outbox, alter the source outbox, or authorize Device publication. Existing source recovery does not automatically clear this gate. Current implementation evidence is in [Device Verified Source Admission](device_verified_source_admission.md).
 
 ## Current operations and durable boundaries
 
@@ -48,7 +50,7 @@ call, and that a Redis recording exception occurs after the publisher call has c
 unit-level executable demonstrations of the current service boundary; they do not simulate an
 ambiguous real broker acknowledgment or prove cross-system delivery.
 
-## Blockers before A05 can be reconsidered
+## Blockers before reconsideration
 
 - An independently authenticated institution/source identity and a verified binding from that
   principal to the immutable occurrence and source sequence.
@@ -63,6 +65,6 @@ ambiguous real broker acknowledgment or prove cross-system delivery.
 - Proof that the outbox path preserves baseline Rules/ML effects and repairs Redis from the committed
   occurrence without fallback publication or a double effect.
 
-Until these gates have evidence, A05 remains **engineering NO-GO**. The disabled-foundation Mongo
+Until these gates have evidence, Device publication remains **engineering NO-GO**. The disabled-foundation Mongo
 tests do not authorize production delivery, and the baseline publish/Redis sequence makes no
 exactly-once, distributed-ACID, or broker-ack-reconciliation claim.

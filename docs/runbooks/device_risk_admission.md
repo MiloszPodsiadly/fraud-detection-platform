@@ -2,25 +2,27 @@
 
 ## Purpose and scope
 
-Use this runbook for the disabled Device Risk observation and diagnostic candidate. The Mongo adapter and pure policy
-are not connected to the running pipeline. This runbook does not authorize data collection or runtime activation.
+Use this runbook for the Device Risk trust path. Independently signed admission and private diagnostics are implemented
+behind package-private test-only adapters. They are exercised against real Mongo/Kafka test infrastructure but are not
+registered as production beans, endpoints, or scoring paths. This runbook does not authorize data collection or runtime
+activation.
 
 ## Current status
 
 | Status | Evidence |
 | --- | --- |
-| IMPLEMENTED | Bounded Mongo adapter foundation, diagnostic-only predicates, and synthetic replay identity controls. |
-| TESTED | Focused policy, persistence-adapter, contract, and deterministic replay cases; structural fixtures do not prove issuer authenticity. |
-| DISABLED BY DESIGN | Admission defaults to `false`; enabling it fails startup. Device Risk is not registered in the scoring engine. |
-| EXTERNAL DEPENDENCY | Authenticated issuer and coverage seal, occurrence/device binding, approved key custody and retention, durable delivery and recovery. |
+| IMPLEMENTED IN TEST-ONLY PATH | Independent source, Device and coverage signature verification; epoch-aware Mongo v2 stage/seal/commit; exact initial SCORED binding; private read-only diagnostic. |
+| TESTED | Ed25519 test signers, authenticated Mongo replica sets and Kafka Testcontainers cover selected lifecycle, recovery, revocation, authorization, privacy and contract boundaries. These do not prove production issuer authenticity or population completeness. |
+| DISABLED BY DESIGN | `fraud.device-risk.admission.enabled=false` and `fraud.scoring.engines.device.enabled=false`; both services fail startup if their respective flag is enabled without authorization. Device remains absent from the active registry. |
+| EXTERNAL DEPENDENCY | Production issuer and population authority, approved key custody, legal/privacy retention, production Mongo roles and additive schema/index migration, operational ownership and external monitoring. |
 | DEPLOYMENT ATTESTATION REQUIRED | Consumer compatibility, access controls, retention, recovery ownership, and measured performance. |
 
-Binary decision: `CODE-FOUNDATION-MERGE-READY`; `DEVICE-RUNTIME-ACTIVATION-NO-GO`. No real authenticated
-institutional issuer is available in the current ingress path. A structural enum, hash, request field, local fixture,
-or self-signed seal does not change that result.
+Status: code-merge decision is pending review; Device runtime activation is **NO-GO**. No production issuer or
+population authority is configured. Test signers are disposable keys generated in memory and do not establish a
+production trust anchor. A structural enum, hash, request field, local fixture, or self-signed test assertion does not
+change that result. The current design and release gates are in [Device Verified Source Admission](../adr/device_verified_source_admission.md).
 
-Accountable role owners and the concrete evidence required for each of the five candidate signals are listed in the
-[Device Risk evidence boundaries](../architecture/device_risk_evidence_boundaries.md#activation-owners-and-evidence-required).
+The pure policy's supported and unsupported signals are described in [Device Risk signal policy](../architecture/device_risk_signal_policy.md).
 The repository contains no named approvers or recorded external approvals; keep both admission and scoring flags off.
 
 ## Symptoms and impact
@@ -32,10 +34,17 @@ The repository contains no named approvers or recorded external approvals; keep 
 - The running application exports no Device Risk query, lifecycle, conflict, or latency metrics. An opt-in local
   Mongo query-plan/load measurement is recorded below; lock conflicts, transaction retry counts, and worst-case retry
   latency remain **NOT MEASURED**.
-- `revokeDeviceFromOperationalHistory` in the un-wired adapter removes active membership and blocks replay, but
+- `revokeDeviceFromOperationalHistory` in the test-only adapter removes active membership and blocks replay, but
   intentionally retains bounded receipts. It is operational revocation, not legal or complete erasure.
 
-## Opt-in local Mongo measurement
+## Historical and current Mongo measurements
+
+The table below is a historical local baseline from 2026-10-28 against the earlier implementation. It is retained as
+historical evidence only; it is not a performance result for the current epoch-aware v2 schema. The current v2
+27,000-row capacity fixture described in [device_resilience.md](../architecture/device_resilience.md) is **NOT MEASURED**.
+No current latency, saturation, contention, or production-capacity claim is made.
+
+### Historical opt-in local baseline
 
 The reproducible Testcontainers measurement is opt-in and uses a disposable single-member Mongo replica set with
 `mongo:7.0`. It seeds 10,000 device-window rows, 25,000 customer-window rows (with overlap), and 2,000 distinct
@@ -86,7 +95,7 @@ and its metrics remain unwired in production.
 index, rewrite data, or recount a counter. Only after stopping every user of a dedicated local/dev/test database may
 an approved operator reset these Device Risk-only collections: `device_observation_candidates`,
 `device_observations`, `device_occurrences`, `device_source_coverage`, `device_scope_fences`,
-`device_operational_revocation_tombstones`, and historical `device_erasure_tombstones`. Do not use this procedure for
+and `device_operational_revocation_tombstones`. Do not use this procedure for
 shared, production, retained, alert, audit, governance, or model data; escalate those cases to the data owner.
 
 ## Forbidden actions

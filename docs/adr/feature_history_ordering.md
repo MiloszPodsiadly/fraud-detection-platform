@@ -1,4 +1,4 @@
-# FDP-152-027: attested feature-history ordering
+# Attested Feature-History Ordering
 
 **Status:** accepted runtime safeguard; the pre-fix race was reproduced against live MongoDB and Redis, and the regression is covered by the authenticated integration suite.
 
