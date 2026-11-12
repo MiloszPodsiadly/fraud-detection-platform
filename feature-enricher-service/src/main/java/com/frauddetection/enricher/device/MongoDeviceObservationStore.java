@@ -342,6 +342,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 }
                 throw terminal("CANDIDATE_MISSING");
             }
+            requireCandidateStateIntegrity(candidate);
             if (terminalCandidateExpired(candidate, clock.instant())) {
                 throw terminal("CANDIDATE_EXPIRED");
             }
@@ -414,6 +415,8 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (candidate == null) {
             throw terminal("CANDIDATE_MISSING");
         }
+        requireCandidateIntegrity(candidate);
+        requireCandidateStateIntegrity(candidate);
         if (terminalCandidateExpired(candidate, clock.instant())) {
             throw terminal("CANDIDATE_EXPIRED");
         }
@@ -426,7 +429,6 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (!"STAGED".equals(candidate.getString("status"))) {
             throw terminal("CANDIDATE_STATE");
         }
-        requireCandidateIntegrity(candidate);
         if (!authority.current(Provenance.from(candidate), candidate.getInteger("keyVersion"))) { throw terminal("AUTHORITY_REVOKED"); }
         if (hasActiveOperationalRevocation(session, revocationId(candidate), clock.instant())) {
             throw terminal("DEVICE_OPERATIONALLY_REVOKED");
@@ -469,6 +471,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         HistoryFact prior;
         HistoryFact other;
         HistoryFact switches;
+        DeviceHistoryMembershipCommitment.Value historyMembership = null;
         if (complete) {
             Bson base = and(scope, eq("keyVersion", version), gte("eventTime", Date.from(windowStart)),
                     lt("eventTime", Date.from(time)), gt("expireAt", Date.from(clock.instant())));
@@ -494,6 +497,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             if (otherCustomers.size() > DeviceRiskEvidence.MAX_OTHER_CUSTOMERS) {
                 transitionOutOfPending(session, candidate, "QUARANTINED", true);
                 return quarantined();
+            }
+            if (integrityKey != null) {
+                List<Document> membershipRows = new ArrayList<>(deviceRows);
+                membershipRows.addAll(customerRows);
+                historyMembership = DeviceHistoryMembershipCommitment.compute(integrityKey, epoch, institution, source,
+                        customer, device, version, windowStart, time, membershipRows);
             }
             int transitions = 0;
             String previousDevice = null;
@@ -571,6 +580,10 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 .append("populationCommitment", progress.getString("populationCommitment"))
                 .append("evidenceJson", mapper.writeValueAsString(evidence))
                 .append("evidenceCommitment", commitment(evidence)).append("expireAt", expiry);
+        if (historyMembership != null) {
+            occurrence.append("historyMembershipCount", historyMembership.size())
+                    .append("historyMembershipCommitment", historyMembership.commitment());
+        }
         if (integrityKey != null) {
             occurrence.append("candidateIntegrityCommitment", candidate.getString("candidateIntegrityCommitment"))
                     .append("membershipIntegrityCommitment", DeviceRecordIntegrity.membership(integrityKey, occurrence));
@@ -606,11 +619,21 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                         new com.mongodb.client.model.UpdateOptions().upsert(true));
 
                 Bson stagedDevice = and(scopedDevice, eq("status", "STAGED"));
+                List<Document> stagedCandidates = candidates.find(session, stagedDevice)
+                        .limit(MAX_PENDING_CANDIDATES + 1).into(new ArrayList<>());
+                if (stagedCandidates.size() > MAX_PENDING_CANDIDATES) {
+                    throw terminal("PENDING_CANDIDATE_CAPACITY");
+                }
+                Date terminalExpiry = Date.from(clock.instant().plus(RECEIPT_RETENTION));
+                for (Document candidate : stagedCandidates) {
+                    requireCandidateIntegrity(candidate);
+                    requireCandidateStateIntegrity(candidate);
+                    long changed = candidates.updateOne(session, and(eq("_id", candidate.getString("_id")), eq("status", "STAGED")),
+                            candidateTransitionUpdate(candidate, "QUARANTINED", "OPERATIONAL_REVOCATION_REQUESTED", terminalExpiry)).getModifiedCount();
+                    if (changed != 1) { throw retryable("OPERATIONAL_REVOCATION_CANDIDATE_RACE"); }
+                }
                 long stagedBefore = candidates.countDocuments(session, stagedDevice);
-                long quarantined = candidates.updateMany(session, stagedDevice,
-                        combine(set("status", "QUARANTINED"), set("terminalReason", "OPERATIONAL_REVOCATION_REQUESTED"),
-                                set("terminalExpireAt", Date.from(clock.instant().plus(RECEIPT_RETENTION))))).getModifiedCount();
-                if (quarantined != stagedBefore) {
+                if (stagedBefore != 0) {
                     throw retryable("OPERATIONAL_REVOCATION_CANDIDATE_RACE");
                 }
                 observations.deleteMany(session, scopedDevice);
@@ -650,6 +673,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 .append("stagedAt", Date.from(stagedAt));
         if (integrityKey != null) {
             candidate.put("candidateIntegrityCommitment", DeviceRecordIntegrity.candidate(integrityKey, candidate));
+            candidate.put("candidateStateIntegrityCommitment", DeviceRecordIntegrity.candidateState(integrityKey, candidate));
         }
         return candidate;
     }
@@ -657,6 +681,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private StageResult duplicateOrConflict(Document existing, Observation input) {
         if (!epoch.matches(existing)) { throw terminal("IDENTITY_CONFLICT"); }
         requireCandidateIntegrity(existing);
+        requireCandidateStateIntegrity(existing);
         if ("QUARANTINED".equals(existing.getString("status"))) {
             throw terminal("CANDIDATE_QUARANTINED");
         }
@@ -754,7 +779,10 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (!epoch.matches(persisted) || candidate != null && !epoch.matches(candidate)) { throw terminal("OCCURRENCE_IDENTITY_CONFLICT"); }
         requireCandidateIntegrity(persisted);
         requireSnapshotIntegrity(persisted);
-        if (candidate != null) { requireCandidateIntegrity(candidate); }
+        if (candidate != null) {
+            requireCandidateIntegrity(candidate);
+            requireCandidateStateIntegrity(candidate);
+        }
         DeviceSnapshotVersion.require(persisted);
         if (!authority.current(Provenance.from(persisted), persisted.getInteger("keyVersion"))) { throw terminal("AUTHORITY_REVOKED"); }
         requireCoverageAuthority(persisted);
@@ -824,6 +852,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         }
     }
 
+    private void requireCandidateStateIntegrity(Document row) {
+        if (integrityKey != null && !DeviceRecordIntegrity.candidateStateMatches(integrityKey, row)) {
+            throw terminal("CANDIDATE_STATE_INTEGRITY_INVALID");
+        }
+    }
+
     private void requireSnapshotIntegrity(Document row) {
         if (integrityKey != null && !DeviceRecordIntegrity.snapshotMatches(integrityKey, row)) {
             throw terminal("SNAPSHOT_INTEGRITY_INVALID");
@@ -844,12 +878,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
 
     private void transitionOutOfPending(ClientSession session, Document candidate, String nextState,
                                         boolean invalidateSource) {
+        requireCandidateIntegrity(candidate);
+        requireCandidateStateIntegrity(candidate);
         Bson candidateFilter = and(eq("_id", candidate.getString("_id")), eq("status", "STAGED"));
-        Bson candidateUpdate = nextState.equals("QUARANTINED")
-                ? combine(set("status", nextState), set("terminalReason", "CAPACITY_EXCEEDED"),
-                    set("terminalExpireAt", Date.from(clock.instant().plus(RECEIPT_RETENTION))))
-                : combine(set("status", nextState),
-                    set("terminalExpireAt", Date.from(clock.instant().plus(RECEIPT_RETENTION))));
+        Bson candidateUpdate = candidateTransitionUpdate(candidate, nextState,
+                nextState.equals("QUARANTINED") ? "CAPACITY_EXCEEDED" : null,
+                Date.from(clock.instant().plus(RECEIPT_RETENTION)));
         if (candidates.updateOne(session, candidateFilter, candidateUpdate).getModifiedCount() != 1) {
             throw retryable("CANDIDATE_STATE_RACE");
         }
@@ -870,6 +904,17 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (coverage.updateOne(session, coverageFilter, coverageUpdate).getModifiedCount() != 1) {
             throw terminal("PENDING_COUNT_INVARIANT");
         }
+    }
+
+    private Bson candidateTransitionUpdate(Document candidate, String nextState, String terminalReason, Date terminalExpiry) {
+        Document next = new Document(candidate).append("status", nextState).append("terminalExpireAt", terminalExpiry);
+        if (terminalReason != null) { next.put("terminalReason", terminalReason); }
+        Bson update = combine(set("status", nextState), set("terminalExpireAt", terminalExpiry));
+        if (terminalReason != null) { update = combine(update, set("terminalReason", terminalReason)); }
+        if (integrityKey != null) {
+            update = combine(update, set("candidateStateIntegrityCommitment", DeviceRecordIntegrity.candidateState(integrityKey, next)));
+        }
+        return update;
     }
 
     private static CommitResult quarantined() {

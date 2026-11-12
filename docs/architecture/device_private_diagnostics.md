@@ -16,7 +16,25 @@ The snapshot has a deterministic Stage A commitment over its identity, evidence,
 
 A binding never rewrites Stage A evidence. The Mongo validator accepts an optional binding with an exact field set, and the store only writes it when absent; an existing equal binding is idempotent and a different one conflicts. The validator binds every source-scope field. Databases with an earlier validator require a deliberate owner-run `collMod` after review; the service does not repair validators or migrate data at startup.
 
-The diagnostic reader verifies the source receipt and lineage again, resolves the exact published scored occurrence through the read-only source capability, checks the initial run and exact ID/time/fingerprint, and checks the Device binding and Stage A version. It reads a majority snapshot and rechecks source authority, scored occurrence, Device/coverage grants, coverage revision, revocation tombstone, retained history and immutable bindings before returning. Historical Device rows are joined back to their immutable occurrences and each Stage A version, source authorization and coverage grant is rechecked. The bounded history scan returns unavailable above 1,000 rows or after its five-second budget. Missing staged facts return PENDING; missing, incomplete, expired, revoked, inconsistent or unavailable facts fail closed.
+The diagnostic reader verifies the source receipt and lineage again, resolves the exact published scored occurrence through the read-only source capability, checks the initial run and exact ID/time/fingerprint, and checks the Device binding and Stage A version. Each Device pass reads the current occurrence, candidate, observations, historical occurrences, coverage and revocation tombstone in one majority snapshot transaction. Before returning, a second fresh snapshot repeats the bounded three-set comparison and checks that the current Stage A commitment, exact SCORED binding, coverage revision/generation and tombstone state still match. Source lineage, the initial SCORED occurrence and historical source grants are revalidated outside the Device transaction; this is not a distributed snapshot across the source and Device databases. Any inconsistent or unavailable revalidation returns `UNAVAILABLE`.
+
+For supported history, Stage A stores a private HMAC commitment and count for the exact union of historical observation members used to derive its bounded facts. The anchor lives on the current immutable occurrence in the existing collection; it stores no raw event IDs or duplicate history. Stage B requires the observation, occurrence and candidate ID sets to match and recomputes the anchor. Candidate status and terminal metadata also have a separate HMAC, so a BSON status edit cannot manufacture a committed history member. Missing anchors on older rows, one-sided deletion, deletion of both history copies, deletion of a candidate, or deletion of all three historical copies returns `UNAVAILABLE`. The anchor detects gaps only while the current occurrence and application integrity key remain trusted; it does not prove upstream population completeness and does not protect against compromise of that key. The signed population claim still cannot prove that the source omitted nothing.
+
+The bounded history scan returns unavailable above 1,000 rows or after its five-second end-to-end budget. Missing staged facts return PENDING; missing, incomplete, expired, revoked, inconsistent or unavailable facts fail closed.
+
+## Capacity and query budget
+
+These limits serve different purposes and are not interchangeable:
+
+| Limit | Value | Meaning |
+| --- | ---: | --- |
+| Policy available window | 30 days | Required complete pre-event interval; not a row capacity |
+| Persisted Stage A device/customer history | 10,000 / 25,000 rows | Ledger bounds used while creating immutable evidence |
+| Persisted evidence observations | 25,000 | Evidence representation bound |
+| Private reader verification cap | 1,000 members per queried representation | Every observation, occurrence and candidate set must fit and match exactly; 1,001 returns `UNAVAILABLE` |
+| Reader time and Mongo operation budget | 5 seconds | End-to-end verification budget; Mongo client timeout must be positive and no greater than this limit |
+
+The reader queries the device/customer union with the existing epoch, institution, source, key-version and event-time indexes for each customer/device branch. It sorts by `eventTime` and `sourceEvent` for deterministic traversal. The `MAX + 1` read detects overflow before interpreting a truncated set. Startup remains read-only; no index is created or repaired by the reader. The exact index keys are covered by Mongo schema/startup guards. This repository has not yet captured representative 100/500/1,000-row latency percentiles or database-operation counts: performance is **NOT MEASURED**, and no runtime SLO is claimed.
 
 The result exposes only the private bounded policy interpretation and fixed outcome. Its string representation, the fact reference, grant and proof classes redact content. The reader emits no logs, metrics, traces, API payloads or Kafka records.
 
@@ -36,12 +54,15 @@ Both private readers check the authenticated principal and the complete allowed 
 
 `PrivateDeviceDiagnosticReaderIntegrationTest` uses disposable Ed25519 source, Device and coverage signers, the real receipt owner and RAW/ENRICHED chain from `VerifiedDeviceAdmissionIntegrationTest`, an authenticated Mongo replica set, the actual Mongo scored-occurrence store, and a real Kafka broker. It sends a version-2 `TransactionScoredEvent`, waits for the broker acknowledgement, confirms the exact outbox claim, consumes the Kafka bytes, and derives the read reference from that consumed event. The values are test fixtures; this is not production issuer, population or key custody evidence.
 
-The four integration cases verify:
+The five integration tests verify:
 
 - complete pre-event history yields novelty and switching interpretations while the other three signals stay unsupported; score remains null and the existing SCORED bytes and EI omission contract remain unchanged;
 - a scored event published while Stage A is still staged returns PENDING; a later initial score can bind, but a rescore, wrong fingerprint/event ID, wrong customer or wrong epoch cannot read or replace the binding; revoked coverage authority returns UNAVAILABLE;
 - a short-coverage empty history returns UNAVAILABLE with null observed values, never a false novelty result; read-only Mongo identities cannot update Device, source or scored-occurrence rows, and writer credentials cannot construct the private reader.
-- deleting either side of linked history invalidates subsequent reads, and changing persisted coverage or occurrence fields remains unavailable even after recomputing the unkeyed snapshot and scored-binding digests.
+- changing either side of linked history, the candidate status, or all three historical copies invalidates subsequent reads; the persisted Stage A member anchor detects complete deletion, including after a reader restart;
+- controlled post-snapshot races that delete a history row, change coverage revision/generation, add an operational revocation tombstone, or revoke the source receipt all return `UNAVAILABLE` during final revalidation.
+
+Before the persisted Stage A history-membership commitment was added, the authenticated Mongo reproducer deleted both the prior observation and its occurrence while retaining the candidate. The reader returned `EVALUATED`, showing that matching surviving collections alone did not detect a dual deletion (**RED**). With the commitment included in the immutable Stage A version, the same test now returns `UNAVAILABLE` with no evaluation, including on repeated reads and after a reader restart (**GREEN**).
 
 Targeted integration command:
 
@@ -49,7 +70,7 @@ Targeted integration command:
 mvn "-Dmaven.repo.local=C:\Users\mpods\IdeaProjects\fraud-detection-platform\.m2repo" -pl feature-enricher-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=PrivateDeviceDiagnosticReaderIntegrationTest" test
 ```
 
-On 2026-11-12 this finished **BUILD SUCCESS; 4 tests, 0 failures, 0 errors, 0 skipped**. The pre-existing startup guard also passed in the targeted regression batch, so attempted production activation remains rejected.
+On 2026-11-12 this finished **BUILD SUCCESS; 5 tests, 0 failures, 0 errors, 0 skipped**. The pre-existing startup guard also passed in the targeted regression batch, so attempted production activation remains rejected.
 
 The immutable Stage A corruption case returns `DEVICE_STORE_CORRUPT_SNAPSHOT` before attempting a stale identity read. The shared policy, mapper, engine, runtime graph and reason-code regression selection ran **28 tests, 0 failures, 0 errors, 0 skipped**. Stage A schema, identity and recovery evidence is recorded in [verified admission](device_verified_admission.md).
 

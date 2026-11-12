@@ -20,7 +20,7 @@ final class PrivateDeviceDiagnosticReader {
     static final String AUDIENCE = "device-diagnostics-private";
     static final Set<String> COLLECTIONS = Set.of("device_occurrences", "device_observation_candidates", "device_source_coverage",
             "device_observations", "device_operational_revocation_tombstones");
-    private static final int MAX_HISTORY = 1_000;
+    private static final int MAX_VERIFIED_HISTORY_MEMBERS = 1_000;
     private static final Duration REPAIR_HORIZON = Duration.ofDays(1).plusMinutes(5);
     private final MongoClient client;
     private final MongoDatabase db;
@@ -31,13 +31,21 @@ final class PrivateDeviceDiagnosticReader {
     private final DeviceAssertionVerifier verifier;
     private final DevicePseudonyms pseudonyms;
     private final Clock clock;
+    private final Runnable afterSnapshotRead;
     private final DeviceRiskSignalPolicy policy = new DeviceRiskSignalPolicy();
 
     PrivateDeviceDiagnosticReader(MongoClient client, String database, ReadGrant grant, MongoSourceLineage source,
                                   SourceOccurrenceAccess scored, DeviceAssertionVerifier verifier, DevicePseudonyms pseudonyms, Clock clock) {
+        this(client, database, grant, source, scored, verifier, pseudonyms, clock, () -> { });
+    }
+
+    PrivateDeviceDiagnosticReader(MongoClient client, String database, ReadGrant grant, MongoSourceLineage source,
+                                  SourceOccurrenceAccess scored, DeviceAssertionVerifier verifier, DevicePseudonyms pseudonyms,
+                                  Clock clock, Runnable afterSnapshotRead) {
         this.client = Objects.requireNonNull(client); this.grant = Objects.requireNonNull(grant); this.source = Objects.requireNonNull(source);
         this.scored = Objects.requireNonNull(scored); this.verifier = Objects.requireNonNull(verifier); this.pseudonyms = Objects.requireNonNull(pseudonyms);
-        this.clock = Objects.requireNonNull(clock); this.epoch = new DeviceEpoch(grant.scope().sourceIssuer(), grant.scope().sourceEpoch());
+        this.clock = Objects.requireNonNull(clock); this.afterSnapshotRead = Objects.requireNonNull(afterSnapshotRead);
+        this.epoch = new DeviceEpoch(grant.scope().sourceIssuer(), grant.scope().sourceEpoch());
         if (database == null || !database.matches("[a-z][a-z0-9_]{0,63}") || pseudonyms.version() != grant.pseudonymVersion()) { throw unauthorized(); }
         db = client.getDatabase(database).withReadConcern(ReadConcern.MAJORITY).withReadPreference(ReadPreference.primary());
         Long timeout = db.getTimeout(TimeUnit.MILLISECONDS);
@@ -63,25 +71,29 @@ final class PrivateDeviceDiagnosticReader {
             View view;
             try (ClientSession session = client.startSession()) {
                 session.startTransaction(TransactionOptions.builder().readConcern(ReadConcern.SNAPSHOT).readPreference(ReadPreference.primary()).build());
-                view = read(session, fact, occurrence, id, institution, sourceCode, eventKey);
+                view = read(session, fact, occurrence, id, institution, sourceCode, eventKey, started);
                 session.commitTransaction(); // Read-only transaction; no Device/Source write method is available here.
             }
             if (view.outcome != null) { return Result.of(view.outcome); }
-            if (!current(view.row, fact, authorization) || !currentCoverage(view.row)
-                    || !currentHistory(view, institution, sourceCode, started)) { return Result.of(Outcome.UNAVAILABLE); }
+            if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5)
+                    || !currentHistorySources(view.history, started)
+                    || !current(view.row, fact, authorization) || !currentCoverage(view.coverage)) { return Result.of(Outcome.UNAVAILABLE); }
             var evaluation = policy.evaluate(view.evidence);
+            afterSnapshotRead.run(); // Deterministic race seam; production constructor supplies a no-op.
+            if (!stillCurrent(view, occurrence, id, institution, sourceCode, started)) {
+                return Result.of(Outcome.UNAVAILABLE);
+            }
             SourceLineage after = source.enrichedBinding(fact.receiptId(), fact.rawCommitment(), fact.enrichedCommitment());
             if (after.state() != SourceLineage.State.VERIFIED || !after.source().equals(authorization.source())
                     || !exactScore(scored.find(after, reference).orElse(null), after, reference)
-                    || !currentHistory(view, institution, sourceCode, started) || !stillCurrent(view, occurrence, id, institution, sourceCode)) {
-                return Result.of(Outcome.UNAVAILABLE);
-            }
+                    || System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5)) { return Result.of(Outcome.UNAVAILABLE); }
             return new Result(evaluation.status() == com.frauddetection.common.events.engine.FraudEngineStatus.UNAVAILABLE
                     ? Outcome.UNAVAILABLE : Outcome.EVALUATED, evaluation);
         } catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE); } // Do not propagate Mongo/proof/identity details.
     }
 
-    private View read(ClientSession session, FactReference fact, SourceScoredOccurrence score, String id, String institution, String sourceCode, String eventKey) {
+    private View read(ClientSession session, FactReference fact, SourceScoredOccurrence score, String id, String institution,
+                      String sourceCode, String eventKey, long started) {
         Document row = db.getCollection("device_occurrences").find(session, eq("_id", id)).first();
         Document candidate = db.getCollection("device_observation_candidates").find(session, eq("_id", id)).first();
         if (row == null) { return View.failed(candidate != null && "STAGED".equals(candidate.getString("status")) ? Outcome.PENDING : Outcome.UNAVAILABLE); }
@@ -90,6 +102,7 @@ final class PrivateDeviceDiagnosticReader {
         if (candidate == null || !"COMMITTED".equals(candidate.getString("status"))
                 || !Objects.equals(candidate.getString("provenanceCommitment"), row.getString("provenanceCommitment"))
                 || !DeviceRecordIntegrity.candidateMatches(pseudonyms, candidate)
+                || !DeviceRecordIntegrity.candidateStateMatches(pseudonyms, candidate)
                 || !Objects.equals(candidate.getString("candidateIntegrityCommitment"), row.getString("candidateIntegrityCommitment"))) {
             return View.failed(Outcome.UNAVAILABLE);
         }
@@ -123,25 +136,45 @@ final class PrivateDeviceDiagnosticReader {
         if (evidence.priorDevice().state() == DeviceRiskEvidence.State.AVAILABLE
                 && (progress.getDate("coverageStart").toInstant().isAfter(evidence.windowStart())
                 || progress.getDate("continuousSince").toInstant().isAfter(evidence.windowStart()))) { return View.failed(Outcome.UNAVAILABLE); }
-        List<Document> history = db.getCollection("device_observations").find(session, and(epoch.filter(institution, sourceCode), eq("keyVersion", evidence.keyVersion()),
-                gte("eventTime", Date.from(evidence.windowStart())), lt("eventTime", Date.from(evidence.asOf())), gt("expireAt", Date.from(clock.instant())),
-                or(eq("customer", evidence.customerToken()), eq("device", evidence.deviceToken()))))
-                .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_HISTORY + 1).into(new ArrayList<>());
-        List<Document> occurrences = db.getCollection("device_occurrences").find(session, and(epoch.filter(institution, sourceCode), eq("keyVersion", evidence.keyVersion()),
-                gte("eventTime", Date.from(evidence.windowStart())), lt("eventTime", Date.from(evidence.asOf())), gt("expireAt", Date.from(clock.instant())),
-                or(eq("customer", evidence.customerToken()), eq("device", evidence.deviceToken()))))
-                .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_HISTORY + 1).into(new ArrayList<>());
-        if (history.size() > MAX_HISTORY || occurrences.size() > MAX_HISTORY || !sameIds(history, occurrences)) {
+        History history = history(session, evidence, institution, sourceCode);
+        if (!history.withinLimit() || !sameIds(history.observations(), history.occurrences(), history.candidates())
+                || !committedCandidates(history.candidates())
+                || !committedCandidates(List.of(candidate))
+                || !historyMembershipMatches(row, evidence, history.observations(), institution, sourceCode)
+                || !historyRowsMatch(history.observations(), history.occurrences(), history.candidates())) {
             return View.failed(Outcome.UNAVAILABLE);
         }
-        return new View(null, row, progress, evidence);
+        return new View(null, row, candidate, progress, evidence, history.observations());
     }
+
+    private History history(ClientSession session, DeviceRiskEvidence evidence, String institution, String sourceCode) {
+        Bson observationFilter = and(epoch.filter(institution, sourceCode), eq("keyVersion", evidence.keyVersion()),
+                gte("eventTime", Date.from(evidence.windowStart())), lt("eventTime", Date.from(evidence.asOf())),
+                gt("expireAt", Date.from(clock.instant())), or(eq("customer", evidence.customerToken()), eq("device", evidence.deviceToken())));
+        Bson candidateFilter = and(epoch.filter(institution, sourceCode), eq("keyVersion", evidence.keyVersion()),
+                gte("eventTime", Date.from(evidence.windowStart())), lt("eventTime", Date.from(evidence.asOf())),
+                or(eq("customer", evidence.customerToken()), eq("device", evidence.deviceToken())));
+        List<Document> observations = db.getCollection("device_observations").find(session, observationFilter)
+                .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1).into(new ArrayList<>());
+        List<Document> occurrences = db.getCollection("device_occurrences").find(session, observationFilter)
+                .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1).into(new ArrayList<>());
+        List<Document> candidates = db.getCollection("device_observation_candidates").find(session, candidateFilter)
+                .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1).into(new ArrayList<>());
+        return new History(observations, occurrences, candidates,
+                withinHistoryLimit(observations.size()) && withinHistoryLimit(occurrences.size())
+                        && withinHistoryLimit(candidates.size()));
+    }
+
+    static boolean withinHistoryLimit(int size) { return size >= 0 && size <= MAX_VERIFIED_HISTORY_MEMBERS; }
 
     private static boolean sameIds(List<Document> observations, List<Document> occurrences) {
         if (observations.size() != occurrences.size()) { return false; }
         Set<String> ids = new HashSet<>();
         for (Document occurrence : occurrences) { ids.add(occurrence.getString("_id")); }
         return ids.size() == occurrences.size() && observations.stream().allMatch(row -> ids.contains(row.getString("_id")));
+    }
+    private static boolean sameIds(List<Document> observations, List<Document> occurrences, List<Document> candidates) {
+        return sameIds(observations, occurrences) && sameIds(observations, candidates);
     }
 
     private boolean current(Document row, FactReference fact, SourceLineage authorization) {
@@ -155,33 +188,51 @@ final class PrivateDeviceDiagnosticReader {
                 && verifier.currentStoredCoverage(DeviceObservationStore.CoverageAuthority.from(row), epoch, row.getString("institution"), row.getString("source"),
                 row.getString("populationCommitment"), row.getInteger("keyVersion"), row.getDate("coverageStart").toInstant(), pseudonyms);
     }
-    private boolean currentHistory(View view, String institution, String sourceCode, long started) {
-        DeviceRiskEvidence evidence = view.evidence;
-        try (ClientSession session = client.startSession()) {
-            session.startTransaction(TransactionOptions.builder().readConcern(ReadConcern.SNAPSHOT).readPreference(ReadPreference.primary()).build());
-            Bson filter = and(epoch.filter(institution, sourceCode), eq("keyVersion", evidence.keyVersion()),
-                    gte("eventTime", Date.from(evidence.windowStart())), lt("eventTime", Date.from(evidence.asOf())),
-                    gt("expireAt", Date.from(clock.instant())), or(eq("customer", evidence.customerToken()), eq("device", evidence.deviceToken())));
-            List<Document> observations = db.getCollection("device_observations").find(session, filter)
-                    .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_HISTORY + 1).into(new ArrayList<>());
-            List<Document> occurrences = db.getCollection("device_occurrences").find(session, filter)
-                    .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_HISTORY + 1).into(new ArrayList<>());
-            boolean complete = observations.size() <= MAX_HISTORY && occurrences.size() <= MAX_HISTORY
-                    && sameIds(observations, occurrences) && currentHistoryRows(observations, started);
-            session.commitTransaction();
-            return complete;
-        } catch (RuntimeException unavailable) { return false; }
+    private boolean committedCandidates(List<Document> candidates) {
+        Instant now = clock.instant();
+        for (Document candidate : candidates) {
+            Date terminalExpiry = candidate.getDate("terminalExpireAt");
+            if (!epoch.matches(candidate) || !"COMMITTED".equals(candidate.getString("status"))
+                    || terminalExpiry == null || !terminalExpiry.toInstant().isAfter(now)
+                    || !DeviceRecordIntegrity.candidateMatches(pseudonyms, candidate)
+                    || !DeviceRecordIntegrity.candidateStateMatches(pseudonyms, candidate)) { return false; }
+        }
+        return true;
     }
-    private boolean currentHistoryRows(List<Document> rows, long started) {
+    private boolean historyMembershipMatches(Document row, DeviceRiskEvidence evidence, List<Document> history,
+                                             String institution, String sourceCode) {
+        boolean hasSupportedHistory = evidence.priorDevice().state() == DeviceRiskEvidence.State.AVAILABLE
+                || evidence.otherCustomers().state() == DeviceRiskEvidence.State.AVAILABLE
+                || evidence.switches().state() == DeviceRiskEvidence.State.AVAILABLE;
+        if (!hasSupportedHistory) { return true; }
+        String stored = row.getString("historyMembershipCommitment");
+        Integer storedCount = row.getInteger("historyMembershipCount");
+        if (stored == null || storedCount == null) { return false; }
+        DeviceHistoryMembershipCommitment.Value expected = DeviceHistoryMembershipCommitment.compute(pseudonyms, epoch,
+                institution, sourceCode, evidence.customerToken(), evidence.deviceToken(), evidence.keyVersion(),
+                evidence.windowStart(), evidence.asOf(), history);
+        return storedCount == expected.size() && java.security.MessageDigest.isEqual(
+                stored.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
+                expected.commitment().getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    }
+    private boolean historyRowsMatch(List<Document> rows, List<Document> occurrences, List<Document> candidates) {
+        Map<String, Document> occurrencesById = byId(occurrences);
+        Map<String, Document> candidatesById = byId(candidates);
         for (Document row : rows) {
-            if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5) || !epoch.matches(row)) { return false; }
-            Document occurrence = db.getCollection("device_occurrences").find(eq("_id", row.getString("_id"))).first();
-            if (occurrence == null) { return false; }
+            if (!epoch.matches(row)) { return false; }
+            String rowId = row.getString("_id");
+            Document occurrence = occurrencesById.get(rowId);
+            Document candidate = candidatesById.get(rowId);
+            if (occurrence == null || candidate == null) { return false; }
             DeviceSnapshotVersion.require(occurrence);
             if (!DeviceRecordIntegrity.membershipMatches(pseudonyms, row)
                     || !DeviceRecordIntegrity.membershipMatches(pseudonyms, occurrence)
                     || !DeviceRecordIntegrity.candidateMatches(pseudonyms, occurrence)
                     || !DeviceRecordIntegrity.snapshotMatches(pseudonyms, occurrence)
+                    || !DeviceRecordIntegrity.candidateMatches(pseudonyms, candidate)
+                    || !DeviceRecordIntegrity.candidateStateMatches(pseudonyms, candidate)
+                    || !"COMMITTED".equals(candidate.getString("status"))
+                    || !Objects.equals(candidate.getString("candidateIntegrityCommitment"), occurrence.getString("candidateIntegrityCommitment"))
                     || !epoch.matches(occurrence) || !Objects.equals(row.getString("institution"), occurrence.getString("institution"))
                     || !Objects.equals(row.getString("source"), occurrence.getString("source"))
                     || !Objects.equals(row.getString("sourceEvent"), occurrence.getString("sourceEvent"))
@@ -191,9 +242,21 @@ final class PrivateDeviceDiagnosticReader {
                     || !Objects.equals(row.getDate("eventTime"), occurrence.getDate("eventTime"))
                     || !Objects.equals(row.get("provenance"), occurrence.get("provenance"))
                     || !Objects.equals(row.getString("provenanceCommitment"), occurrence.getString("provenanceCommitment"))
+                    || !Objects.equals(candidate.getString("sourceEvent"), occurrence.getString("sourceEvent"))
+                    || !Objects.equals(candidate.getString("customer"), occurrence.getString("customer"))
+                    || !Objects.equals(candidate.getString("device"), occurrence.getString("device"))
+                    || !Objects.equals(candidate.getInteger("keyVersion"), occurrence.getInteger("keyVersion"))
+                    || !Objects.equals(candidate.getDate("eventTime"), occurrence.getDate("eventTime"))
+                    || !Objects.equals(candidate.getString("provenanceCommitment"), occurrence.getString("provenanceCommitment"))
                     || !verifier.currentStoredCoverage(DeviceObservationStore.CoverageAuthority.from(occurrence), epoch,
                     occurrence.getString("institution"), occurrence.getString("source"), occurrence.getString("populationCommitment"),
                     occurrence.getInteger("keyVersion"), occurrence.getDate("coverageStart").toInstant(), pseudonyms)) { return false; }
+        }
+        return true;
+    }
+    private boolean currentHistorySources(List<Document> rows, long started) {
+        for (Document row : rows) {
+            if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5) || !epoch.matches(row)) { return false; }
             var p = DeviceObservationStore.Provenance.from(row);
             SourceLineage lineage = source.enrichedBinding(p.receiptId(), p.rawCommitment(), p.enrichedCommitment());
             if (lineage.state() != SourceLineage.State.VERIFIED || !authorizedSource(lineage.source())
@@ -203,18 +266,52 @@ final class PrivateDeviceDiagnosticReader {
         }
         return System.nanoTime() - started <= TimeUnit.SECONDS.toNanos(5);
     }
-    private boolean stillCurrent(View view, SourceScoredOccurrence scored, String id, String institution, String sourceCode) {
-        if (!retained(view.row, view.evidence) || !currentCoverage(view.row)) { return false; }
-        Document row = db.getCollection("device_occurrences").find(and(eq("_id", id), eq("evidenceCommitment", view.row.getString("evidenceCommitment")),
-                eq("provenanceCommitment", view.row.getString("provenanceCommitment")),
-                eq("stageACommitment", view.row.getString("stageACommitment")),
-                eq("scoredBinding.commitment", view.row.get("scoredBinding", Document.class).getString("commitment")))).first();
-        Document coverage = db.getCollection("device_source_coverage").find(and(eq("_id", epoch.scopeId(institution, sourceCode)),
-                eq("revision", view.coverage.getLong("revision")), ne("invalidated", true))).first();
-        return row != null && coverage != null && DeviceSnapshotVersion.commitment(row).equals(row.getString("stageACommitment"))
-                && DeviceRecordIntegrity.candidateMatches(pseudonyms, row) && DeviceRecordIntegrity.membershipMatches(pseudonyms, row)
-                && DeviceRecordIntegrity.snapshotMatches(pseudonyms, row) && DeviceScoredBinding.matches(row, scored) && currentCoverage(coverage)
-                && !activeRevocation(null, institution, sourceCode, view.row.getInteger("keyVersion"), view.row.getString("device"));
+    private Map<String, Document> byId(List<Document> rows) {
+        Map<String, Document> result = new HashMap<>();
+        for (Document row : rows) { if (result.put(row.getString("_id"), row) != null) { return Map.of(); } }
+        return result;
+    }
+    private boolean stillCurrent(View view, SourceScoredOccurrence scored, String id, String institution, String sourceCode, long started) {
+        if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5)) { return false; }
+        try (ClientSession session = client.startSession()) {
+            session.startTransaction(TransactionOptions.builder().readConcern(ReadConcern.SNAPSHOT).readPreference(ReadPreference.primary()).build());
+            Document row = db.getCollection("device_occurrences").find(session, eq("_id", id)).first();
+            Document candidate = db.getCollection("device_observation_candidates").find(session, eq("_id", id)).first();
+            Document coverage = db.getCollection("device_source_coverage").find(session,
+                    eq("_id", epoch.scopeId(institution, sourceCode))).first();
+            DeviceRiskEvidence evidence = view.evidence;
+            History history = history(session, evidence, institution, sourceCode);
+            boolean current = row != null && candidate != null && coverage != null && history.withinLimit()
+                    && sameIds(history.observations(), history.occurrences(), history.candidates())
+                    && committedCandidates(history.candidates())
+                    && historyRowsMatch(history.observations(), history.occurrences(), history.candidates())
+                    && historyMembershipMatches(row, evidence, history.observations(), institution, sourceCode)
+                    && Objects.equals(row.getString("stageACommitment"), view.row.getString("stageACommitment"))
+                    && Objects.equals(row.get("scoredBinding", Document.class).getString("commitment"),
+                    view.row.get("scoredBinding", Document.class).getString("commitment"))
+                    && Objects.equals(row.getString("evidenceCommitment"), view.row.getString("evidenceCommitment"))
+                    && Objects.equals(row.getString("provenanceCommitment"), view.row.getString("provenanceCommitment"))
+                    && Objects.equals(coverage.get("revision"), view.coverage.get("revision"))
+                    && Objects.equals(coverage.get("coverageGeneration"), view.coverage.get("coverageGeneration"))
+                    && !Boolean.TRUE.equals(coverage.getBoolean("invalidated"))
+                    && DeviceSnapshotVersion.commitment(row).equals(row.getString("stageACommitment"))
+                    && DeviceRecordIntegrity.candidateMatches(pseudonyms, row)
+                    && DeviceRecordIntegrity.membershipMatches(pseudonyms, row)
+                    && DeviceRecordIntegrity.snapshotMatches(pseudonyms, row)
+                    && DeviceRecordIntegrity.candidateMatches(pseudonyms, candidate)
+                    && DeviceRecordIntegrity.candidateStateMatches(pseudonyms, candidate)
+                    && "COMMITTED".equals(candidate.getString("status"))
+                    && committedCandidates(List.of(candidate))
+                    && Objects.equals(candidate.getString("candidateStateIntegrityCommitment"),
+                    view.candidate.getString("candidateStateIntegrityCommitment"))
+                    && Objects.equals(candidate.getString("candidateIntegrityCommitment"), row.getString("candidateIntegrityCommitment"))
+                    && DeviceScoredBinding.matches(row, scored) && currentCoverage(coverage)
+                    && retained(row, evidence)
+                    && !activeRevocation(session, institution, sourceCode, row.getInteger("keyVersion"), row.getString("device"));
+            session.commitTransaction();
+            return current && currentHistorySources(history.observations(), started)
+                    && System.nanoTime() - started <= TimeUnit.SECONDS.toNanos(5);
+        } catch (RuntimeException unavailable) { return false; }
     }
     private boolean retained(Document row, DeviceRiskEvidence evidence) {
         return row.getDate("expireAt").toInstant().isAfter(clock.instant()) && !clock.instant().isAfter(evidence.asOf().plus(REPAIR_HORIZON));
@@ -274,7 +371,9 @@ final class PrivateDeviceDiagnosticReader {
         static Result of(Outcome outcome) { return new Result(outcome, null); }
         @Override public String toString() { return "DevicePrivateDiagnostic[redacted]"; }
     }
-    private record View(Outcome outcome, Document row, Document coverage, DeviceRiskEvidence evidence) {
-        static View failed(Outcome outcome) { return new View(outcome, null, null, null); }
+    private record History(List<Document> observations, List<Document> occurrences, List<Document> candidates, boolean withinLimit) { }
+    private record View(Outcome outcome, Document row, Document candidate, Document coverage,
+                        DeviceRiskEvidence evidence, List<Document> history) {
+        static View failed(Outcome outcome) { return new View(outcome, null, null, null, null, List.of()); }
     }
 }

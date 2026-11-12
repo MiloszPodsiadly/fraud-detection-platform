@@ -25,6 +25,16 @@ final class DeviceRecordIntegrity {
         return matches(row.getString("candidateIntegrityCommitment"), candidate(key, row));
     }
 
+    static String candidateState(DevicePseudonyms key, Document row) {
+        return key.integrity("candidate-state", value(row.getString("_id")),
+                value(row.getString("candidateIntegrityCommitment")), value(row.getString("status")),
+                value(row.getString("terminalReason")), instant(row, "terminalExpireAt"));
+    }
+
+    static boolean candidateStateMatches(DevicePseudonyms key, Document row) {
+        return matches(row.getString("candidateStateIntegrityCommitment"), candidateState(key, row));
+    }
+
     static String membership(DevicePseudonyms key, Document row) {
         var provenance = DeviceObservationStore.Provenance.from(row);
         return key.integrity("membership", row.getString("_id"), row.getString("sourceIssuer"),

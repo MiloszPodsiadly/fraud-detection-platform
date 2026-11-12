@@ -184,7 +184,10 @@ final class MongoDeviceObservationSchema {
         List<String> required = new ArrayList<>(List.of("_id", "schemaVersion", "identityVersion", "sourceIssuer", "sourceEpoch", "institution", "source"));
         if (name.equals("device_observation_candidates")) {
             properties.append("status", new Document("enum", List.of("STAGED", "COMMITTED", "QUARANTINED")))
-                    .append("stagedAt", new Document("bsonType", "date"));
+                    .append("stagedAt", new Document("bsonType", "date"))
+                    .append("candidateStateIntegrityCommitment", token())
+                    .append("terminalReason", new Document("bsonType", "string").append("maxLength", 64))
+                    .append("terminalExpireAt", new Document("bsonType", "date"));
             required.addAll(List.of("status", "stagedAt"));
         }
         if (name.equals("device_observation_candidates") || name.equals("device_occurrences") || name.equals("device_observations")) {
@@ -204,6 +207,7 @@ final class MongoDeviceObservationSchema {
             properties.append("sourceObservedAt", new Document("bsonType", "date")).append("snapshotIntegrityCommitment", token())
                     .append("coverageCommitment", token()).append("evidenceCommitment", token())
                     .append("coverageAuthority", coverageAuthorityValidator()).append("coverageStart", new Document("bsonType", "date")).append("populationCommitment", token())
+                    .append("historyMembershipCommitment", token()).append("historyMembershipCount", number("int", 0))
                     .append("evidenceJson", new Document("bsonType", "string").append("maxLength", 16_384));
             properties.append("scoredBinding", scoredBindingValidator());
             properties.append("stageACommitment", token());

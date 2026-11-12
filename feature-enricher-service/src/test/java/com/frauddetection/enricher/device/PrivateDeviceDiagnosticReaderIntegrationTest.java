@@ -233,6 +233,45 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         assertThat(result.evaluation().score()).isNull();
     }
 
+    @Test void historyReaderCapIsInclusiveAtOneThousandAndOverflowFailsClosed() throws Exception {
+        assertThat(PrivateDeviceDiagnosticReader.withinHistoryLimit(1)).isTrue();
+        assertThat(PrivateDeviceDiagnosticReader.withinHistoryLimit(999)).isTrue();
+        assertThat(PrivateDeviceDiagnosticReader.withinHistoryLimit(1_000)).isTrue();
+        assertThat(PrivateDeviceDiagnosticReader.withinHistoryLimit(1_001)).isFalse();
+
+        var current = f.event(f.A, "source-cap-current", "transaction-cap-current", "customer-1", "device-cap", 1,
+                VerifiedDeviceAdmissionIntegrationTest.NOW);
+        var admission = f.adapter(f.A);
+        var ticket = f.stage(admission, current);
+        var seal = f.coverage(f.A, 1, f.A.start, VerifiedDeviceAdmissionIntegrationTest.NOW);
+        admission.seal(ticket, seal.proof(), seal.payload());
+        admission.commit(ticket);
+        var scored = publish(current, "initial", "score-cap-current");
+        admission.bindScored(ticket, occurrenceReader, scored.reference);
+
+        String institution = f.pseudonyms.institution(f.A.institution);
+        String sourceCode = DevicePseudonyms.sourceCode("BANK");
+        String customer = f.pseudonyms.customer(f.A.institution, "customer-1");
+        String device = f.pseudonyms.device(f.A.institution, "device-cap");
+        var observations = f.ownerClient.getDatabase(f.database).getCollection("device_observations");
+        List<org.bson.Document> overflow = new ArrayList<>();
+        for (int i = 0; i < 1_001; i++) {
+            overflow.add(new org.bson.Document(f.A.epoch().document("cap-member-" + i, institution, sourceCode))
+                    .append("keyVersion", 1).append("customer", customer).append("device", device)
+                    .append("eventTime", java.util.Date.from(VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(60)))
+                    .append("expireAt", java.util.Date.from(VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(3_600)))
+                    .append("sourceEvent", "cap-source-" + i));
+        }
+        observations.insertMany(overflow, new com.mongodb.client.model.InsertManyOptions().bypassDocumentValidation(true));
+        assertThat(observations.countDocuments(com.mongodb.client.model.Filters.and(f.A.epoch().filter(institution, sourceCode),
+                com.mongodb.client.model.Filters.eq("keyVersion", 1), com.mongodb.client.model.Filters.eq("customer", customer),
+                com.mongodb.client.model.Filters.lt("eventTime", java.util.Date.from(VerifiedDeviceAdmissionIntegrationTest.NOW))))).isEqualTo(1_001);
+
+        var result = diagnostic.evaluate(fact(current), scored.reference);
+        assertThat(result.outcome()).isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(result.evaluation()).isNull(); // 1,001 rows cannot turn a truncated read into an empty/novel history.
+    }
+
     @Test void partialDeletionOfLinkedHistoryInvalidatesEverySubsequentDiagnosticRead() throws Exception {
         Instant priorTime = VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(3_600);
         var prior = f.event(f.A, "source-retained", "transaction-retained", "customer-1", "device-old", 1, priorTime);
@@ -244,10 +283,20 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         var priorScore = publish(prior, "initial", "score-retained");
         admission.bindScored(priorTicket, occurrenceReader, priorScore.reference);
 
-        var current = f.event(f.A, "source-after-retention", "transaction-after-retention", "customer-1", "device-new", 2,
+        Instant sharedTime = VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(3_500);
+        var deviceOnlyPrior = f.event(f.A, "source-a-device-only", "transaction-device-only", "customer-2", "device-new", 2, sharedTime);
+        var overlappingPrior = f.event(f.A, "source-b-overlap", "transaction-overlap", "customer-1", "device-new", 3, sharedTime);
+        var deviceOnlyTicket = f.stage(admission, deviceOnlyPrior);
+        var overlappingTicket = f.stage(admission, overlappingPrior);
+        var sharedSeal = f.coverage(f.A, 3, f.A.start, sharedTime);
+        admission.seal(deviceOnlyTicket, sharedSeal.proof(), sharedSeal.payload());
+        admission.commit(deviceOnlyTicket);
+        admission.commit(overlappingTicket);
+
+        var current = f.event(f.A, "source-after-retention", "transaction-after-retention", "customer-1", "device-new", 4,
                 VerifiedDeviceAdmissionIntegrationTest.NOW);
         var currentTicket = f.stage(admission, current);
-        var currentSeal = f.coverage(f.A, 2, f.A.start, VerifiedDeviceAdmissionIntegrationTest.NOW);
+        var currentSeal = f.coverage(f.A, 4, f.A.start, VerifiedDeviceAdmissionIntegrationTest.NOW);
         admission.seal(currentTicket, currentSeal.proof(), currentSeal.payload());
         admission.commit(currentTicket);
         var currentScore = publish(current, "initial", "score-after-retention");
@@ -255,29 +304,123 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
 
         assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
+        String currentId = f.A.epoch().eventId(f.pseudonyms.institution(f.A.institution), DevicePseudonyms.sourceCode("BANK"),
+                f.pseudonyms.event(f.A.institution, current.id()));
         String priorId = f.A.epoch().eventId(f.pseudonyms.institution(f.A.institution), DevicePseudonyms.sourceCode("BANK"),
                 f.pseudonyms.event(f.A.institution, prior.id()));
-        var priorObservation = f.ownerClient.getDatabase(f.database).getCollection("device_observations")
-                .find(com.mongodb.client.model.Filters.eq("_id", priorId)).first();
+        var database = f.ownerClient.getDatabase(f.database);
+        var observations = database.getCollection("device_observations");
+        var occurrences = database.getCollection("device_occurrences");
+        var candidates = database.getCollection("device_observation_candidates");
+        var idFilter = com.mongodb.client.model.Filters.eq("_id", priorId);
+        var priorObservation = observations.find(idFilter).first();
+        var priorOccurrence = occurrences.find(idFilter).first();
+        var priorCandidate = candidates.find(idFilter).first();
         assertThat(priorObservation).isNotNull();
-        assertThat(f.ownerClient.getDatabase(f.database).getCollection("device_observations").deleteOne(
-                com.mongodb.client.model.Filters.eq("_id", priorId)).getDeletedCount()).isEqualTo(1);
+        assertThat(priorOccurrence).isNotNull();
+        assertThat(priorCandidate).isNotNull();
+        assertThat(priorCandidate.getString("status")).isEqualTo("COMMITTED");
+        assertThat(occurrences.find(com.mongodb.client.model.Filters.eq("_id", currentId)).first().getInteger("historyMembershipCount"))
+                .isEqualTo(3); // Customer-only, device-only and overlapping membership contributes a deduplicated union.
 
-        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+        // Mutations occur after a complete read snapshot and before the final fresh-snapshot revalidation.
+        var deleteDuringRead = readerAfterSnapshot(() -> observations.deleteOne(idFilter));
+        assertThat(deleteDuringRead.evaluate(fact(current), currentScore.reference).outcome())
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
-        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
-                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // No stale in-process diagnostic cache.
-
-        f.ownerClient.getDatabase(f.database).getCollection("device_observations").insertOne(priorObservation);
+        observations.insertOne(priorObservation);
         assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
-        assertThat(f.ownerClient.getDatabase(f.database).getCollection("device_occurrences").deleteOne(
-                com.mongodb.client.model.Filters.eq("_id", priorId)).getDeletedCount()).isEqualTo(1);
+
+        var coverageCollection = database.getCollection("device_source_coverage");
+        String coverageId = f.A.epoch().scopeId(f.pseudonyms.institution(f.A.institution), DevicePseudonyms.sourceCode("BANK"));
+        var coverageBeforeRace = coverageCollection.find(com.mongodb.client.model.Filters.eq("_id", coverageId)).first();
+        assertThat(coverageBeforeRace).isNotNull();
+        var changeCoverageDuringRead = readerAfterSnapshot(() -> coverageCollection.updateOne(
+                com.mongodb.client.model.Filters.eq("_id", coverageId),
+                com.mongodb.client.model.Updates.combine(
+                        com.mongodb.client.model.Updates.set("revision", coverageBeforeRace.getLong("revision") + 1),
+                        com.mongodb.client.model.Updates.set("coverageGeneration", coverageBeforeRace.getLong("coverageGeneration") + 1))));
+        assertThat(changeCoverageDuringRead.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        coverageCollection.replaceOne(com.mongodb.client.model.Filters.eq("_id", coverageId), coverageBeforeRace);
+
+        String currentDevice = f.pseudonyms.device(f.A.institution, "device-new");
+        String tombstoneId = f.A.epoch().scopeId(f.pseudonyms.institution(f.A.institution), DevicePseudonyms.sourceCode("BANK")) + ":1:" + currentDevice;
+        var tombstones = database.getCollection("device_operational_revocation_tombstones");
+        var revokeDuringRead = readerAfterSnapshot(() -> tombstones.insertOne(new org.bson.Document(
+                f.A.epoch().document(tombstoneId, f.pseudonyms.institution(f.A.institution), DevicePseudonyms.sourceCode("BANK")))
+                .append("expireAt", java.util.Date.from(VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(3_600)))));
+        assertThat(revokeDuringRead.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        tombstones.deleteOne(com.mongodb.client.model.Filters.eq("_id", tombstoneId));
+
+        var identityCollection = database.getCollection("source_admission_identities");
+        var identityFilter = com.mongodb.client.model.Filters.eq("_id", SourceReceiptIdentity.identity(current.origin().scope()));
+        var identityBeforeRace = identityCollection.find(identityFilter).first();
+        assertThat(identityBeforeRace).isNotNull();
+        var revokeSourceDuringRead = readerAfterSnapshot(() -> identityCollection.updateOne(identityFilter,
+                com.mongodb.client.model.Updates.set("state", "CONFLICT")));
+        assertThat(revokeSourceDuringRead.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        identityCollection.replaceOne(identityFilter, identityBeforeRace);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
+
+        candidates.updateOne(idFilter, com.mongodb.client.model.Updates.set("status", "STAGED"));
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // A BSON status label is not commit authority.
+        candidates.replaceOne(idFilter, priorCandidate);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
+
+        assertThat(observations.deleteOne(idFilter).getDeletedCount()).isEqualTo(1);
 
         assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
         assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // No stale in-process diagnostic cache.
+
+        observations.insertOne(priorObservation);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
+        assertThat(occurrences.deleteOne(idFilter).getDeletedCount()).isEqualTo(1);
+
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // No stale in-process diagnostic cache.
+
+        assertThat(candidates.find(idFilter).first().getString("status")).isEqualTo("COMMITTED");
+        assertThat(observations.deleteOne(idFilter).getDeletedCount()).isEqualTo(1);
+        var dualDeletion = diagnostic.evaluate(fact(current), currentScore.reference);
+        assertThat(dualDeletion.outcome()).isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(dualDeletion.evaluation()).isNull(); // Missing history cannot produce a false AVAILABLE signal.
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // Restart-free repeated reads stay fail-closed.
+
+        observations.insertOne(priorObservation);
+        occurrences.insertOne(priorOccurrence);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
+        assertThat(candidates.deleteOne(idFilter).getDeletedCount()).isEqualTo(1);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // Candidate loss is independently detected.
+        candidates.insertOne(priorCandidate);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
+
+        observations.deleteOne(idFilter);
+        occurrences.deleteOne(idFilter);
+        candidates.deleteOne(idFilter);
+        var allCopiesDeleted = diagnostic.evaluate(fact(current), currentScore.reference);
+        assertThat(allCopiesDeleted.outcome()).isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(allCopiesDeleted.evaluation()).isNull();
+        var restartedReader = new PrivateDeviceDiagnosticReader(clients.deviceReader, f.database,
+                readGrant(f.pseudonyms.customer(f.A.institution, "customer-1")), privateSource, occurrenceReader,
+                new DeviceAssertionVerifier(f.origins, f.grants, VerifiedDeviceAdmissionIntegrationTest.CLOCK), f.pseudonyms,
+                VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        assertThat(restartedReader.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // No persisted gap can be hidden by a reader restart.
     }
 
     private Published publish(VerifiedDeviceAdmissionIntegrationTest.Event source, String runId, String scoreId) throws Exception {
@@ -347,6 +490,13 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         return new PrivateDeviceDiagnosticReader.ReadGrant("device_reader", PrivateDeviceDiagnosticReader.PURPOSE,
                 PrivateDeviceDiagnosticReader.AUDIENCE, new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
                 "transaction-ingest", customerToken, 1);
+    }
+
+    private PrivateDeviceDiagnosticReader readerAfterSnapshot(Runnable hook) {
+        return new PrivateDeviceDiagnosticReader(clients.deviceReader, f.database,
+                readGrant(f.pseudonyms.customer(f.A.institution, "customer-1")), privateSource, occurrenceReader,
+                new DeviceAssertionVerifier(f.origins, f.grants, VerifiedDeviceAdmissionIntegrationTest.CLOCK),
+                f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK, hook);
     }
 
     private List<DeviceAssertionVerifier.Grant> revokedCoverageGrants() {
