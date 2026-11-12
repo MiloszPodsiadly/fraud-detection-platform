@@ -1,5 +1,8 @@
 package com.frauddetection.alert.engineintelligence.api;
 
+import com.frauddetection.alert.api.EngineIntelligenceResponse;
+import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
+import com.frauddetection.alert.api.ScoredTransactionDetailResponse;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
 import org.junit.jupiter.api.Test;
 
@@ -387,11 +390,12 @@ class EngineIntelligenceApiArchitectureGuardTest {
     void governanceIndexesScoredTransactionEngineIntelligenceDetailBoundary() throws Exception {
         String architectureIndex = sources("docs/architecture/index.md");
         String architectureDoc = sources("docs/architecture/engine_intelligence_scored_transaction_api.md");
+        String controller = sources("alert-service/src/main/java/com/frauddetection/alert/controller/ScoredTransactionController.java");
+        String openApi = sources("docs/openapi/alert_service.openapi.yaml");
 
         assertThat(architectureIndex)
                 .contains("engine_intelligence_scored_transaction_api.md")
-                .contains("Engine intelligence on scored transaction detail")
-                .contains("FDP-115");
+                .contains("Engine intelligence on scored transaction detail");
         assertThat(architectureDoc)
                 .contains("GET /api/v1/transactions/scored/{transactionId}")
                 .contains("ScoredTransactionDetailResponse.engineIntelligence")
@@ -399,7 +403,29 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 .contains("engineIntelligence.status=ABSENT")
                 .contains("engineIntelligence.status=UNAVAILABLE")
                 .contains("must not expose")
-                .contains("FDP-115 does not add");
+                .contains("No new scoring or decisioning route is introduced.");
+        assertThat(controller)
+                .contains("@RequestMapping(\"/api/v1/transactions\")")
+                .contains("@GetMapping(\"/scored/{transactionId}\")")
+                .contains("public ScoredTransactionDetailResponse getScoredTransaction")
+                .doesNotContain("@PostMapping", "@PutMapping", "@PatchMapping", "@DeleteMapping");
+        assertThat(Arrays.stream(ScoredTransactionDetailResponse.class.getRecordComponents())
+                        .filter(component -> component.getName().equals("engineIntelligence"))
+                        .map(RecordComponent::getType)
+                        .toList())
+                .containsExactly(EngineIntelligenceResponse.class);
+        assertThat(Arrays.stream(EngineIntelligenceResponse.class.getRecordComponents())
+                        .map(RecordComponent::getName)
+                        .toList())
+                .containsExactly("status", "contractVersion", "generatedAt", "comparison", "engines",
+                        "diagnosticSignals", "warnings");
+        assertThat(Arrays.stream(EngineIntelligenceResponseStatus.values()).map(Enum::name).toList())
+                .contains("ABSENT", "UNAVAILABLE");
+        assertThat(openApi)
+                .contains("/api/v1/transactions/scored/{transactionId}:")
+                .contains("summary: Read one scored transaction with bounded engine intelligence")
+                .contains("This is an analyst intelligence read only")
+                .contains("does not recompute scoring");
     }
 
     @Test

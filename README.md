@@ -72,25 +72,27 @@ Risk scoring modes:
 | `COMPARE` | Java rules | Compare rules and ML for operational analysis. |
 | `ML` | Python model | Use ML result with rule fallback when unavailable. |
 
-Device Risk remains a disabled diagnostic candidate. Its current policy can describe bounded history predicates,
-but has no authenticated production evidence path or calibrated risk score; any future diagnostic status must not
-change Rules/ML scores, alert decisions, or payment outcomes.
+Device Risk has a test-only verified source admission path and private diagnostic reader. They are not Spring beans,
+public endpoints, public Kafka producers, or part of the running scoring path. Admission and scoring activation stay
+disabled; attempts to enable them fail startup. The feature does not change Rules/ML scores, alerts, fraud cases,
+recommendations, or payment outcomes.
 
-Current binary outcome: `CODE-FOUNDATION-MERGE-READY`; `DEVICE-RUNTIME-ACTIVATION-NO-GO`. The simulator and canonical
-replay generators label device provenance `SYNTHETIC_UNTRUSTED`; their device IDs, flags, fingerprints, and replay
-metadata are never institutional credentials or admission evidence.
+Integration tests use disposable source, Device, and coverage signers with authenticated Mongo and Kafka. They do not
+prove real institutional onboarding, upstream population completeness, legal retention approval, or production key
+custody. Simulator and replay-generator Device metadata remains `SYNTHETIC_UNTRUSTED` and is never admission evidence.
 
 | Status | Device Risk state |
 | --- | --- |
-| IMPLEMENTED | Bounded Mongo adapter foundation and diagnostic-only policy; neither is wired into the running scoring path. |
-| TESTED | Focused contract, persistence-adapter, and synthetic replay cases; these do not prove issuer authenticity. |
-| DISABLED BY DESIGN | Admission defaults off and enabling it fails startup; the candidate engine is not registered. |
-| EXTERNAL DEPENDENCY | Independently authenticated issuer, bound occurrence/device evidence, approved retention/key custody, and durable delivery/recovery. |
-| DEPLOYMENT ATTESTATION REQUIRED | Compatibility rollout, access/retention controls, operational recovery, and measured load/performance. |
+| IMPLEMENTED | Test-only verified admission and private diagnostic read; no production runtime integration. |
+| TEST EVIDENCE | Disposable signers and authenticated Mongo/Kafka tests; not proof of institutional source completeness. |
+| DISABLED BY DESIGN | Admission and scoring flags default off and fail startup when enabled. |
+| OPEN PRODUCTION GATES | Real issuer/population evidence, retention approval, key custody, access controls, recovery, and measured load. |
 
-See [Device Risk policy](docs/architecture/device_risk_signal_policy.md),
-[observation delivery gates](docs/architecture/device_risk_observation_delivery.md), and the
-[Device Risk admission runbook](docs/runbooks/device_risk_admission.md).
+See [verified admission](docs/architecture/device_verified_admission.md),
+[private diagnostics](docs/architecture/device_private_diagnostics.md),
+[resilience evidence](docs/architecture/device_resilience.md),
+[the source admission ADR](docs/adr/device_verified_source_admission.md), and
+[the admission runbook](docs/runbooks/device_risk_admission.md).
 
 ## Security And Audit Boundaries
 

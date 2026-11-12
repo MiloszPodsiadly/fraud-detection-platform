@@ -10,8 +10,9 @@ FDP-11 freezes the public HTTP API surface for local services without changing s
 - Error responses use the platform `timestamp/status/error/message/details` envelope.
 - Validation details are always returned in `details`; clients must not depend on framework exception text.
 - Operational endpoints such as health and metrics remain operational contracts, not business APIs.
-- FDP-100 adds engine-intelligence operational metrics and runbook documentation only; it does not add public API
-  endpoints, dashboard endpoints, global feedback search, or new authorization requirements.
+- Engine-intelligence uses bounded operational metrics and the existing projection, feedback, and audit retention
+  boundaries. Its current index strategy supports those existing access patterns; it adds no public API or dashboard
+  endpoints or global feedback search, and introduces no new authorization requirements.
 
 ## ML Inference Service
 

@@ -19,7 +19,15 @@ class EngineIntelligenceOperationalHardeningArchitectureGuardTest {
         assertThat(docs)
                 .contains("Projection retention")
                 .contains("Feedback records follow analyst feedback governance retention")
-                .contains("FDP-100 documents retention policy and does not add automatic feedback deletion");
+                .contains("This document records retention policy and does not implement automatic feedback deletion");
+    }
+
+    @Test
+    void docsStateMetricLabelsAreLowCardinality() throws Exception {
+        assertThat(architectureDoc())
+                .contains("Label values are bounded")
+                .contains("Metric labels must not include transaction IDs")
+                .contains("Raw exception messages and raw validation details");
     }
 
     @Test
@@ -33,7 +41,7 @@ class EngineIntelligenceOperationalHardeningArchitectureGuardTest {
     void docsStateNoAutomaticFeedbackDeletionWithoutGovernanceApproval() throws Exception {
         assertThat(architectureDoc())
                 .contains("Automatic deletion requires explicit governance approval")
-                .contains("does not add automatic feedback deletion");
+                .contains("does not implement automatic feedback deletion");
     }
 
     @Test
@@ -271,7 +279,8 @@ class EngineIntelligenceOperationalHardeningArchitectureGuardTest {
     void architectureIndexIncludesOperationalHardeningDoc() throws Exception {
         assertThat(source("docs/architecture/index.md"))
                 .contains("engine_intelligence_operational_hardening.md")
-                .contains("FDP-100");
+                .contains("Low-cardinality operational metrics")
+                .contains("retention/audit relationship");
     }
 
     @Test
@@ -285,14 +294,15 @@ class EngineIntelligenceOperationalHardeningArchitectureGuardTest {
     @Test
     void apiSurfaceStatesNoNewPublicApiForOperationalHardening() throws Exception {
         assertThat(source("docs/api/api_surface_v1.md"))
-                .contains("FDP-100 adds engine-intelligence operational metrics and runbook documentation only")
-                .contains("does not add public API");
+                .contains("Engine-intelligence uses bounded operational metrics")
+                .contains("it adds no public API or dashboard")
+                .contains("global feedback search")
+                .contains("introduces no new authorization requirements");
     }
 
     @Test
     void securityMapUnchangedForNoNewEndpoint() throws Exception {
         assertThat(source("docs/security/endpoint_authorization_map.md"))
-                .doesNotContain("FDP-100")
                 .doesNotContain("engine_intelligence_operational");
     }
 
