@@ -1,8 +1,7 @@
 package com.frauddetection.common.events.observability;
 
-import org.slf4j.MDC;
-
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -18,43 +17,42 @@ public final class TraceContext {
     public static final String MDC_TRACE_ID = "traceId";
     public static final String MDC_TRANSACTION_ID = "transactionId";
     public static final String MDC_ALERT_ID = "alertId";
+    private static final List<String> SENSITIVE_MDC_KEYS = List.of(
+            MDC_CORRELATION_ID, MDC_TRACE_ID, MDC_TRANSACTION_ID, MDC_ALERT_ID);
+    private static final ThreadLocal<Context> CURRENT = new ThreadLocal<>();
 
     private TraceContext() {
     }
 
     public static Scope open(String correlationId, String traceId, String transactionId, String alertId) {
-        Map<String, String> previousValues = snapshot();
-        putOrRemove(MDC_CORRELATION_ID, correlationId);
-        putOrRemove(MDC_TRACE_ID, traceId);
-        putOrRemove(MDC_TRANSACTION_ID, transactionId);
-        putOrRemove(MDC_ALERT_ID, alertId);
-        return new Scope(previousValues);
+        Context previousContext = CURRENT.get();
+        Map<String, String> previousMdc = snapshotMdc();
+        SENSITIVE_MDC_KEYS.forEach(org.slf4j.MDC::remove);
+        CURRENT.set(new Context(normalize(correlationId), normalize(traceId), normalize(transactionId), normalize(alertId)));
+        return new Scope(previousContext, previousMdc);
     }
 
     public static String currentCorrelationId() {
-        return normalize(MDC.get(MDC_CORRELATION_ID));
+        Context context = CURRENT.get();
+        return context == null ? null : context.correlationId;
     }
 
     public static String currentTraceId() {
-        return normalize(MDC.get(MDC_TRACE_ID));
+        Context context = CURRENT.get();
+        return context == null ? null : context.traceId;
     }
 
-    private static Map<String, String> snapshot() {
+    private static Map<String, String> snapshotMdc() {
         Map<String, String> values = new LinkedHashMap<>();
-        values.put(MDC_CORRELATION_ID, MDC.get(MDC_CORRELATION_ID));
-        values.put(MDC_TRACE_ID, MDC.get(MDC_TRACE_ID));
-        values.put(MDC_TRANSACTION_ID, MDC.get(MDC_TRANSACTION_ID));
-        values.put(MDC_ALERT_ID, MDC.get(MDC_ALERT_ID));
+        SENSITIVE_MDC_KEYS.forEach(key -> values.put(key, org.slf4j.MDC.get(key)));
         return values;
     }
 
-    private static void putOrRemove(String key, String value) {
-        String normalized = normalize(value);
-        if (normalized == null) {
-            MDC.remove(key);
-            return;
-        }
-        MDC.put(key, normalized);
+    private static void restoreMdc(Map<String, String> values) {
+        values.forEach((key, value) -> {
+            if (value == null) { org.slf4j.MDC.remove(key); }
+            else { org.slf4j.MDC.put(key, value); }
+        });
     }
 
     private static String normalize(String value) {
@@ -64,12 +62,16 @@ public final class TraceContext {
         return value.trim();
     }
 
+    private record Context(String correlationId, String traceId, String transactionId, String alertId) { }
+
     public static final class Scope implements AutoCloseable {
 
         private final Map<String, String> previousValues;
+        private final Context previousContext;
         private boolean closed;
 
-        private Scope(Map<String, String> previousValues) {
+        private Scope(Context previousContext, Map<String, String> previousValues) {
+            this.previousContext = previousContext;
             this.previousValues = Objects.requireNonNull(previousValues, "previousValues must not be null");
         }
 
@@ -79,7 +81,9 @@ public final class TraceContext {
                 return;
             }
             closed = true;
-            previousValues.forEach(TraceContext::putOrRemove);
+            if (previousContext == null) { CURRENT.remove(); }
+            else { CURRENT.set(previousContext); }
+            restoreMdc(previousValues);
         }
     }
 }

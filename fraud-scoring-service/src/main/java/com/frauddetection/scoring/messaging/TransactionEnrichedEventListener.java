@@ -38,8 +38,6 @@ public class TransactionEnrichedEventListener {
     ) {
         try (TraceContext.Scope ignored = TraceContext.open(event.correlationId(), traceId, event.transactionId(), null)) {
             log.atInfo()
-                    .addKeyValue("transactionId", event.transactionId())
-                    .addKeyValue("correlationId", event.correlationId())
                     .addKeyValue("topic", kafkaTopicProperties.transactionEnriched())
                     .log("Received enriched transaction event for scoring.");
             transactionFraudScoringUseCase.score(event, originProof);

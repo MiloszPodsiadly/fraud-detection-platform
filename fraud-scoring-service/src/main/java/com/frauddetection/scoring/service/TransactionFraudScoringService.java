@@ -124,10 +124,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
 
     private void score(TransactionEnrichedEvent event, String proof, String runId) {
         long startedAt = System.nanoTime();
-        log.atInfo()
-                .addKeyValue("transactionId", event.transactionId())
-                .addKeyValue("correlationId", event.correlationId())
-                .log("Started transaction fraud scoring.");
+        log.info("Started transaction fraud scoring.");
 
         try {
             OriginResolution origin = resolveOrigin(event, proof);
@@ -172,8 +169,6 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
             }
 
             log.atInfo()
-                    .addKeyValue("transactionId", event.transactionId())
-                    .addKeyValue("correlationId", event.correlationId())
                     .addKeyValue("riskLevel", scoredEvent.riskLevel())
                     .addKeyValue("fraudScore", scoredEvent.fraudScore())
                     .log("Completed transaction fraud scoring.");

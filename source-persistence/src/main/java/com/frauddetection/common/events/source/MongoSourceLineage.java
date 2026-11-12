@@ -1227,6 +1227,19 @@ public final class MongoSourceLineage implements SourceLineageAccess {
     @Override public SourceLineage enriched(TransactionEnrichedEvent event) {
         return transaction(session -> enriched(session, event));
     }
+
+    /** Exact private receipt/RAW/ENRICHED authorization without retaining another copy of either event. */
+    public SourceLineage enrichedBinding(String receiptId, String rawCommitment, String enrichedCommitment) {
+        if (receiptId == null || !receiptId.matches("[0-9a-f]{64}") || rawCommitment == null || !rawCommitment.matches("[0-9a-f]{64}")
+                || enrichedCommitment == null || !enrichedCommitment.matches("[0-9a-f]{64}")) { return absent(UNVERIFIED); }
+        return transaction(session -> {
+            Document link = database.getCollection(ENRICHED).find(session,
+                    and(eq("receiptId", receiptId), eq("eventCommitment", enrichedCommitment))).first();
+            if (link == null) { return absent(UNAVAILABLE); }
+            if (!rawCommitment.equals(link.getString("parentCommitment"))) { return absent(CONFLICT); }
+            return enrichedLink(session, link, enrichedCommitment);
+        });
+    }
     SourceLineage enriched(ClientSession session, TransactionEnrichedEvent event) {
         if (session == null || !session.hasActiveTransaction()) { return absent(UNAVAILABLE); }
         String commitment = SourceEventCommitment.enriched(event);

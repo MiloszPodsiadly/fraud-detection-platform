@@ -4,7 +4,7 @@ import org.springframework.beans.factory.InitializingBean;
 
 import java.util.Objects;
 
-/** The flag cannot activate admission until a real issuer and scoped authorization are implemented. */
+/** Protocol implementation and test trust do not authorize production activation. */
 public final class DeviceRiskAdmissionConfigurationValidator implements InitializingBean {
     private final DeviceRiskAdmissionProperties properties;
 
@@ -16,8 +16,7 @@ public final class DeviceRiskAdmissionConfigurationValidator implements Initiali
     public void afterPropertiesSet() {
         if (properties.enabled()) {
             throw new IllegalStateException(DeviceRiskAdmissionProperties.PROPERTY_NAME
-                    + " is unsupported until an authenticated issuer, scoped authorization, and signed coverage "
-                    + "seal are implemented");
+                    + " remains disabled until production trust, population, and runtime activation are approved");
         }
     }
 }

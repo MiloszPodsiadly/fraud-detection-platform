@@ -3,7 +3,7 @@ package com.frauddetection.scoring.orchestration;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceReasonCodePolicy;
 import com.frauddetection.common.events.reason.ReasonCode;
-import com.frauddetection.scoring.device.DeviceRiskSignalReasonCode;
+import com.frauddetection.common.events.device.policy.DeviceRiskSignalReasonCode;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalReasonCode;
 import com.frauddetection.scoring.engine.rules.RuleBasedSignalReasonCode;
 import com.frauddetection.scoring.engine.velocity.VelocitySignalReasonCode;

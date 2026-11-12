@@ -1,4 +1,4 @@
-package com.frauddetection.scoring.device;
+package com.frauddetection.common.events.device.policy;
 
 import com.frauddetection.common.events.device.DeviceRiskEvidence;
 import com.frauddetection.common.events.engine.FraudEngineStatus;

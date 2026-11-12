@@ -41,6 +41,6 @@ class DeviceObservationStoreBoundaryTest {
     private static Observation observation(String institution, String device,
             DeviceRiskEvidence.SourceQuality quality) {
         return new Observation(institution, "BANK", TOKEN, TOKEN, TOKEN, device,
-                1, 1, TIME, TIME, TOKEN, quality);
+                1, 1, TIME, TIME, TOKEN, quality, DeviceStoreFixtures.provenance(TOKEN, TOKEN, TOKEN, TIME));
     }
 }

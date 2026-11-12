@@ -1,4 +1,4 @@
-package com.frauddetection.scoring.device;
+package com.frauddetection.common.events.device.policy;
 
 import java.util.Arrays;
 import java.util.Set;

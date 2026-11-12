@@ -102,15 +102,12 @@ public class AlertManagementService implements AlertManagementUseCase {
         FraudAlertEvent fraudAlertEvent = fraudAlertEventMapper.toEvent(alertDocumentMapper.toDomain(saved));
         fraudAlertEventPublisher.publish(fraudAlertEvent);
 
-        log.atInfo().addKeyValue("alertId", saved.getAlertId()).addKeyValue("transactionId", saved.getTransactionId()).log("Created fraud alert.");
+        log.info("Created fraud alert.");
     }
 
     private void reconcileCurrentAlert(AlertDocument existing, TransactionScoredEvent event) {
         if (AnalystDecisionEvidencePolicy.ownsHistoricalEvidence(existing)) {
             log.atInfo()
-                    .addKeyValue("alertId", existing.getAlertId())
-                    .addKeyValue("transactionId", existing.getTransactionId())
-                    .addKeyValue("sourceEventId", existing.getSourceEventId())
                     .log("Preserved finalized analyst decision evidence during scoring reconciliation.");
             return;
         }

@@ -75,8 +75,6 @@ public class KafkaTransactionRawEventProducer implements TransactionRawEventProd
             record.headers().add(new RecordHeader(TraceContext.KAFKA_TRANSACTION_ID_HEADER, event.transactionId().getBytes(StandardCharsets.UTF_8)));
             kafkaTemplate.send(record).get();
             log.atInfo()
-                    .addKeyValue("transactionId", event.transactionId())
-                    .addKeyValue("correlationId", event.correlationId())
                     .addKeyValue("topic", topic)
                     .log("Published raw transaction event.");
         } catch (Exception exception) {

@@ -59,6 +59,11 @@ public final class MongoSourceOccurrenceStore {
 
     public MongoSourceOccurrenceStore(MongoClient client, String database, String expectedUser, SourceSignatureVerifier policy,
                                       Clock clock, SourceOccurrenceCipher cipher, Duration payloadRetention) {
+        this(client, database, expectedUser, policy, clock, cipher, payloadRetention, true);
+    }
+
+    private MongoSourceOccurrenceStore(MongoClient client, String database, String expectedUser, SourceSignatureVerifier policy,
+                                       Clock clock, SourceOccurrenceCipher cipher, Duration payloadRetention, boolean writer) {
         this.client = Objects.requireNonNull(client); this.clock = Objects.requireNonNull(clock); this.cipher = Objects.requireNonNull(cipher);
         if (payloadRetention == null || payloadRetention.isNegative() || payloadRetention.isZero()
                 || payloadRetention.compareTo(Duration.ofDays(1)) > 0 || payloadRetention.getNano() % 1_000_000 != 0) {
@@ -66,10 +71,29 @@ public final class MongoSourceOccurrenceStore {
         }
         retention = payloadRetention;
         lineage = new MongoSourceLineage(client, database, expectedUser, MongoSourceLineage.Stage.SCORER, policy, clock);
-        lineage.requireOccurrenceWriter();
+        if (writer) { lineage.requireOccurrenceWriter(); }
         db = client.getDatabase(database).withReadConcern(ReadConcern.MAJORITY).withWriteConcern(WriteConcern.MAJORITY)
                 .withReadPreference(ReadPreference.primary());
         SourceOccurrenceSchema.initialize(db, false);
+        if (!writer) {
+            Document auth = db.runCommand(new Document("connectionStatus", 1).append("showPrivileges", true)).get("authInfo", Document.class);
+            boolean occurrenceRead = false;
+            for (Document privilege : auth.getList("authenticatedUserPrivileges", Document.class)) {
+                List<String> actions = privilege.getList("actions", String.class);
+                if (actions == null || !Set.of("find", "listCollections", "listIndexes").containsAll(actions)) {
+                    throw new IllegalArgumentException("SOURCE_OCCURRENCE_READ_ONLY_PRINCIPAL_REQUIRED");
+                }
+                Document resource = privilege.get("resource", Document.class);
+                if (resource != null && OCCURRENCES.equals(resource.getString("collection")) && actions.contains("find")) { occurrenceRead = true; }
+            }
+            if (!occurrenceRead) { throw new IllegalArgumentException("SOURCE_OCCURRENCE_READ_NOT_AUTHORIZED"); }
+        }
+    }
+
+    /** Private read capability; rejects writer/owner credentials and exposes no publication methods. */
+    public static SourceOccurrenceAccess readOnly(MongoClient client, String database, String expectedUser, SourceSignatureVerifier policy,
+                                                  Clock clock, SourceOccurrenceCipher cipher, SourceSignatureVerifier.Context expectedContext) {
+        return new MongoSourceOccurrenceStore(client, database, expectedUser, policy, clock, cipher, Duration.ofDays(1), false).readOnly(expectedContext);
     }
 
     public Result resume(TransactionEnrichedEvent input, String runId) {
@@ -274,7 +298,7 @@ public final class MongoSourceOccurrenceStore {
             if (current.state() != SourceLineage.State.VERIFIED || !current.source().equals(authorization.source())
                     || !current.eventCommitment().equals(authorization.eventCommitment())) { return absent(); }
             return new Lookup(SourceLineage.State.VERIFIED, new SourceScoredOccurrence(current.source(), current.receiptId(),
-                    current.eventCommitment(), occurrence.eventId(), occurrence.createdAt(), row.getString("fingerprint")));
+                    current.eventCommitment(), occurrence.eventId(), occurrence.createdAt(), row.getString("fingerprint"), row.getString("runId")));
         } catch (RuntimeException unavailable) { return absent(); }
     }
 
