@@ -1,9 +1,6 @@
 package com.frauddetection.common.events.observability;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 
 public final class TraceContext {
 
@@ -26,10 +23,9 @@ public final class TraceContext {
 
     public static Scope open(String correlationId, String traceId, String transactionId, String alertId) {
         Context previousContext = CURRENT.get();
-        Map<String, String> previousMdc = snapshotMdc();
         SENSITIVE_MDC_KEYS.forEach(org.slf4j.MDC::remove);
         CURRENT.set(new Context(normalize(correlationId), normalize(traceId), normalize(transactionId), normalize(alertId)));
-        return new Scope(previousContext, previousMdc);
+        return new Scope(previousContext);
     }
 
     public static String currentCorrelationId() {
@@ -40,19 +36,6 @@ public final class TraceContext {
     public static String currentTraceId() {
         Context context = CURRENT.get();
         return context == null ? null : context.traceId;
-    }
-
-    private static Map<String, String> snapshotMdc() {
-        Map<String, String> values = new LinkedHashMap<>();
-        SENSITIVE_MDC_KEYS.forEach(key -> values.put(key, org.slf4j.MDC.get(key)));
-        return values;
-    }
-
-    private static void restoreMdc(Map<String, String> values) {
-        values.forEach((key, value) -> {
-            if (value == null) { org.slf4j.MDC.remove(key); }
-            else { org.slf4j.MDC.put(key, value); }
-        });
     }
 
     private static String normalize(String value) {
@@ -66,24 +49,27 @@ public final class TraceContext {
 
     public static final class Scope implements AutoCloseable {
 
-        private final Map<String, String> previousValues;
         private final Context previousContext;
         private boolean closed;
 
-        private Scope(Context previousContext, Map<String, String> previousValues) {
+        private Scope(Context previousContext) {
             this.previousContext = previousContext;
-            this.previousValues = Objects.requireNonNull(previousValues, "previousValues must not be null");
         }
 
         @Override
         public void close() {
             if (closed) {
+                SENSITIVE_MDC_KEYS.forEach(org.slf4j.MDC::remove);
                 return;
             }
             closed = true;
-            if (previousContext == null) { CURRENT.remove(); }
-            else { CURRENT.set(previousContext); }
-            restoreMdc(previousValues);
+            try {
+                if (previousContext == null) { CURRENT.remove(); }
+                else { CURRENT.set(previousContext); }
+            } finally {
+                // Sensitive identifiers never return to the loggable MDC, including after nested scopes.
+                SENSITIVE_MDC_KEYS.forEach(org.slf4j.MDC::remove);
+            }
         }
     }
 }
