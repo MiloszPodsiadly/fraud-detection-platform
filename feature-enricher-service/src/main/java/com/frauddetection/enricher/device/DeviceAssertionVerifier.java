@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Private proof verification only, with no Spring bean, write capability, or history-read permission.
@@ -24,6 +25,8 @@ final class DeviceAssertionVerifier {
     private final SourceSignatureVerifier originVerifier;
     private final SourceSignatureVerifier assertionVerifier;
     private final Map<KeyId, Grant> grants;
+    private final Map<KeyId, GrantCommitment> grantCommitments;
+    private final Map<KeyId, String> grantInstitutionTokens = new ConcurrentHashMap<>();
     private final Clock clock;
 
     DeviceAssertionVerifier(SourceVerificationProperties originPolicy, List<Grant> grants, Clock clock) {
@@ -42,6 +45,11 @@ final class DeviceAssertionVerifier {
             if (previous != null && previous != grant.role()) { throw invalidPolicy(); }
         }
         this.grants = Map.copyOf(configured);
+        Map<KeyId, GrantCommitment> commitments = new HashMap<>();
+        configured.forEach((key, grant) -> commitments.put(key,
+                new GrantCommitment(authorizationCommitment(grant), populationCommitment(grant.population()),
+                        DevicePseudonyms.sourceCode(grant.sourceScope().source()))));
+        this.grantCommitments = Map.copyOf(commitments);
         this.assertionVerifier = new SourceSignatureVerifier(
                 new SourceVerificationProperties(copy.stream().map(Grant::key).toList()), clock);
     }
@@ -139,29 +147,34 @@ final class DeviceAssertionVerifier {
         if (lineage == null || lineage.state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED
                 || !p.receiptId().equals(lineage.receiptId()) || !p.enrichedCommitment().equals(lineage.eventCommitment())) { return false; }
         var origin = lineage.source();
-        Grant grant = grants.get(new KeyId(p.deviceIssuer(), origin.sourceEpoch(), p.deviceKeyVersion()));
+        KeyId key = new KeyId(p.deviceIssuer(), origin.sourceEpoch(), p.deviceKeyVersion());
+        Grant grant = grants.get(key);
+        GrantCommitment commitment = grantCommitments.get(key);
         if (grant == null || grant.role() != Role.OBSERVATION || grant.pseudonymKeyVersion() != pseudonymVersion
-                || !grant.sourceScope().equals(new DeviceAssertions.Scope(origin.issuer(), origin.institution(), origin.source(), origin.sourceEpoch()))
-                || !authorizationCommitment(grant).equals(p.authorizationCommitment())
-                || !populationCommitment(grant.population()).equals(p.populationCommitment()) || !origin.eventTime().equals(p.proofTime())) { return false; }
-        SourceScope signed = new SourceScope(p.deviceIssuer(), origin.institution(), origin.source(), origin.sourceEpoch(), p.deviceKeyVersion(),
-                origin.sourceEventId(), origin.eventTime(), Role.OBSERVATION.purpose, AUDIENCE, p.observationCommitment());
-        return assertionVerifier.receiptPolicyDenial(signed, p.deviceKeyCommitment(), p.devicePolicyVersion(), p.proofTime()) == null;
+                || !grant.sourceScope().matches(origin.issuer(), origin.institution(), origin.source(), origin.sourceEpoch())
+                || commitment == null || !commitment.authorization().equals(p.authorizationCommitment())
+                || !commitment.population().equals(p.populationCommitment()) || !origin.eventTime().equals(p.proofTime())) { return false; }
+        return assertionVerifier.receiptPolicyDenialForPersistedScope(p.deviceIssuer(), origin.institution(), origin.source(),
+                origin.sourceEpoch(), p.deviceKeyVersion(), origin.eventTime(), Role.OBSERVATION.purpose, AUDIENCE,
+                p.deviceKeyCommitment(), p.devicePolicyVersion(), p.proofTime()) == null;
     }
 
     boolean currentStoredCoverage(DeviceObservationStore.CoverageAuthority p, DeviceEpoch epoch, String institution, String source,
                                   String populationCommitment, int pseudonymVersion, Instant coverageStart, DevicePseudonyms pseudonyms) {
-        Grant grant = grants.get(new KeyId(p.issuer(), epoch.sourceEpoch(), p.keyVersion()));
+        KeyId key = new KeyId(p.issuer(), epoch.sourceEpoch(), p.keyVersion());
+        Grant grant = grants.get(key);
+        GrantCommitment commitment = grantCommitments.get(key);
         if (grant == null || grant.role() != Role.COVERAGE || !epoch.sourceIssuer().equals(grant.sourceScope().sourceIssuer())
                 || grant.pseudonymKeyVersion() != pseudonymVersion || pseudonyms.version() != pseudonymVersion
-                || !pseudonyms.institution(grant.sourceScope().institution()).equals(institution)
-                || !DevicePseudonyms.sourceCode(grant.sourceScope().source()).equals(source)
-                || !authorizationCommitment(grant).equals(p.authorizationCommitment())
-                || !populationCommitment(grant.population()).equals(populationCommitment)
+                || commitment == null || !commitment.authorization().equals(p.authorizationCommitment())
+                || !commitment.population().equals(populationCommitment)
                 || coverageStart.isBefore(grant.population().earliestCoverageStart())) { return false; }
-        SourceScope scope = new SourceScope(p.issuer(), grant.sourceScope().institution(), grant.sourceScope().source(), epoch.sourceEpoch(),
-                p.keyVersion(), p.coverageId(), p.proofTime(), Role.COVERAGE.purpose, AUDIENCE, p.payloadCommitment());
-        return assertionVerifier.receiptPolicyDenial(scope, p.keyCommitment(), p.policyVersion(), p.proofTime()) == null;
+        String grantInstitutionToken = grantInstitutionTokens.computeIfAbsent(key,
+                ignored -> pseudonyms.institution(grant.sourceScope().institution()));
+        if (!grantInstitutionToken.equals(institution) || !commitment.sourceCode().equals(source)) { return false; }
+        return assertionVerifier.receiptPolicyDenialForPersistedScope(p.issuer(), grant.sourceScope().institution(),
+                grant.sourceScope().source(), epoch.sourceEpoch(), p.keyVersion(), p.proofTime(), Role.COVERAGE.purpose, AUDIENCE,
+                p.keyCommitment(), p.policyVersion(), p.proofTime()) == null;
     }
 
     private SourceSignatureVerifier.Verified signature(byte[] proof, byte[] payload, Role role) {
@@ -178,7 +191,7 @@ final class DeviceAssertionVerifier {
         SourceScope source = origin.scope();
         return grant != null && grant.role() == role
                 && !proof.keyCommitment().equals(origin.keyCommitment())
-                && grant.sourceScope().equals(new DeviceAssertions.Scope(source.issuer(), source.institution(), source.source(), source.sourceEpoch()));
+                && grant.sourceScope().matches(source.issuer(), source.institution(), source.source(), source.sourceEpoch());
     }
 
     private static boolean population(Population allowed, String id, String version, String commitment) {
@@ -293,4 +306,6 @@ final class DeviceAssertionVerifier {
         static KeyId from(SourceVerificationProperties.TrustedKey key) { return new KeyId(key.issuer(), key.sourceEpoch(), key.signingKeyVersion()); }
         static KeyId from(SourceScope scope) { return new KeyId(scope.issuer(), scope.sourceEpoch(), scope.signingKeyVersion()); }
     }
+
+    private record GrantCommitment(String authorization, String population, String sourceCode) { }
 }

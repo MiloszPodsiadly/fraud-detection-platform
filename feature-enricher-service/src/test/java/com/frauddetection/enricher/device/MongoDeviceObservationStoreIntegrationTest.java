@@ -642,12 +642,15 @@ class MongoDeviceObservationStoreIntegrationTest {
                 "_id_", "candidate_source_event_unique", "candidate_transaction_unique", "candidate_sequence_unique",
                 "candidate_customer_event_status_sequence", "candidate_status_staged_at",
                 "candidate_status_event_source_event",
-                "candidate_device_status", "candidate_terminal_expiry_ttl");
+                "candidate_device_status", "candidate_device_window", "candidate_customer_window",
+                "candidate_terminal_expiry_ttl");
         assertThat(indexNames("device_observations")).containsExactlyInAnyOrder(
                 "_id_", "observation_device_window", "observation_customer_window", "observation_expiry_ttl");
         assertThat(indexNames("device_occurrences")).containsExactlyInAnyOrder(
                 "_id_", "occurrence_transaction_unique", "occurrence_device", "occurrence_device_window",
                 "occurrence_customer_window", "occurrence_expiry_ttl");
+        assertThat(indexNames("device_history_member_anchors")).containsExactlyInAnyOrder(
+                "_id_", "history_member_device_window", "history_member_customer_window", "history_member_expiry_ttl");
         assertThat(indexNames("device_operational_revocation_tombstones")).containsExactlyInAnyOrder(
                 "_id_", "tombstone_expiry_ttl");
 

@@ -1,5 +1,6 @@
 package com.frauddetection.enricher.device;
 
+import com.mongodb.ExplainVerbosity;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
@@ -18,6 +19,7 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -25,12 +27,19 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.LongAdder;
 
 import static org.assertj.core.api.Assertions.*;
 
 /** Private diagnostic proof: real signed source, authenticated Mongo, published SCORED bytes and exact binding. */
 @Tag("UNTRUSTED_TEST_ONLY")
 class PrivateDeviceDiagnosticReaderIntegrationTest {
+    private static final int PERFORMANCE_WARMUPS = 2;
+    private static final int PERFORMANCE_SAMPLES = 20;
+    private static final Duration PERFORMANCE_FIXTURE_WRITER_TIMEOUT = Duration.ofSeconds(30);
     private static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
     private VerifiedDeviceAdmissionIntegrationTest f;
     private MongoSourceOccurrenceStore occurrenceWriter;
@@ -148,6 +157,49 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                         com.mongodb.client.model.Updates.set("stageACommitment", forged.getString("stageACommitment")),
                         com.mongodb.client.model.Updates.set("scoredBinding", forged.get("scoredBinding"))));
         assertThat(diagnostic.evaluate(fact(current), scored.reference).outcome()).isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+    }
+
+    @Test void lossOfAllPriorRepresentationsBeforeNextStageACannotBecomeFalseNovelty() throws Exception {
+        Instant priorTime = VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(3_600);
+        var prior = f.event(f.A, "source-pre-stage-loss", "transaction-pre-stage-loss", "customer-1", "device-shared", 1, priorTime);
+        var admission = f.adapter(f.A);
+        var priorTicket = f.stage(admission, prior);
+        var priorSeal = f.coverage(f.A, 1, f.A.start, priorTime);
+        admission.seal(priorTicket, priorSeal.proof(), priorSeal.payload());
+        assertThat(admission.commit(priorTicket).status()).isEqualTo(DeviceObservationStore.CommitStatus.COMMITTED);
+
+        String institution = f.pseudonyms.institution(f.A.institution);
+        String sourceCode = DevicePseudonyms.sourceCode("BANK");
+        String priorId = f.A.epoch().eventId(institution, sourceCode, f.pseudonyms.event(f.A.institution, prior.id()));
+        var database = f.ownerClient.getDatabase(f.database);
+        for (String collection : List.of("device_observations", "device_occurrences", "device_observation_candidates")) {
+            assertThat(database.getCollection(collection).deleteOne(com.mongodb.client.model.Filters.eq("_id", priorId)).getDeletedCount())
+                    .as("remove prior event from %s before the next Stage A transaction", collection).isEqualTo(1);
+        }
+        var coverage = database.getCollection("device_source_coverage").find(com.mongodb.client.model.Filters.eq("_id",
+                f.A.epoch().scopeId(institution, sourceCode))).first();
+        assertThat(coverage).isNotNull();
+        assertThat(coverage.getLong("sealedSequence")).isEqualTo(1L);
+        assertThat(coverage.getBoolean("invalidated", false)).isFalse();
+
+        var current = f.event(f.A, "source-after-pre-stage-loss", "transaction-after-pre-stage-loss", "customer-1", "device-shared", 2,
+                VerifiedDeviceAdmissionIntegrationTest.NOW);
+        var currentTicket = f.stage(admission, current);
+        var currentSeal = f.coverage(f.A, 2, f.A.start, VerifiedDeviceAdmissionIntegrationTest.NOW);
+        admission.seal(currentTicket, currentSeal.proof(), currentSeal.payload());
+        admission.commit(currentTicket);
+        var scored = publish(current, "initial", "score-after-pre-stage-loss");
+        admission.bindScored(currentTicket, occurrenceReader, scored.reference);
+
+        var result = diagnostic.evaluate(fact(current), scored.reference);
+        assertThat(result.outcome()).as("a previously sealed in-window member vanished before Stage A")
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(result.evaluation()).isNotNull();
+        assertThat(result.evaluation().signals().getFirst().status())
+                .isEqualTo(com.frauddetection.common.events.engine.FraudEngineStatus.UNAVAILABLE);
+        assertThat(result.evaluation().signals().getFirst().observed()).isNull();
+        assertThat(result.evaluation().signals().get(1).status())
+                .isEqualTo(com.frauddetection.common.events.engine.FraudEngineStatus.UNAVAILABLE);
     }
 
     @Test void rescoreAndUnprivilegedPrincipalsCannotReadOrRebindTheInitialOccurrence() throws Exception {
@@ -272,6 +324,287 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         assertThat(result.evaluation()).isNull(); // 1,001 rows cannot turn a truncated read into an empty/novel history.
     }
 
+    @Test
+    @EnabledIfSystemProperty(named = "fraud.device-risk.performance", matches = "true")
+    void benchmarksAuthenticatedPrivateDiagnosticAtOneHundredFiveHundredAndOneThousandMembers() throws Exception {
+        LongAdder sourceGrantRevalidations = new LongAdder();
+        LongAdder coverageGrantRevalidations = new LongAdder();
+        f.useBenchmarkLedgerTimeout(PERFORMANCE_FIXTURE_WRITER_TIMEOUT);
+        var admission = f.adapter(f.A);
+        f.sourceReceiptCapacity = 2_000;
+        long sequence = 1;
+        for (int historySize : List.of(100, 500, 1_000)) {
+            String customerId = "benchmark-customer-" + historySize;
+            String historyDeviceId = "benchmark-history-device-" + historySize;
+            Instant historyTime = switch (historySize) {
+                case 100 -> VerifiedDeviceAdmissionIntegrationTest.NOW.minus(Duration.ofHours(5));
+                case 500 -> VerifiedDeviceAdmissionIntegrationTest.NOW.minus(Duration.ofHours(3));
+                default -> VerifiedDeviceAdmissionIntegrationTest.NOW.minus(Duration.ofHours(1));
+            };
+            Instant currentTime = switch (historySize) {
+                case 100 -> historyTime.plus(Duration.ofMinutes(10));
+                case 500 -> historyTime.plus(Duration.ofMinutes(10));
+                default -> VerifiedDeviceAdmissionIntegrationTest.NOW;
+            };
+
+            List<VerifiedDeviceAdmission.Ticket> historyTickets = new ArrayList<>(historySize);
+            for (int member = 0; member < historySize; member++) {
+                var event = f.event(f.A, "benchmark-history-" + historySize + '-' + member,
+                        "benchmark-history-transaction-" + historySize + '-' + member, customerId, historyDeviceId,
+                        sequence++, historyTime);
+                historyTickets.add(f.stage(admission, event));
+            }
+            var historySeal = f.coverage(f.A, sequence - 1, f.A.start, historyTime);
+            admission.seal(historyTickets.getLast(), historySeal.proof(), historySeal.payload());
+            for (VerifiedDeviceAdmission.Ticket historyTicket : historyTickets) {
+                assertThat(admission.commit(historyTicket).status()).isEqualTo(DeviceObservationStore.CommitStatus.COMMITTED);
+            }
+
+            var current = f.event(f.A, "benchmark-current-" + historySize,
+                    "benchmark-current-transaction-" + historySize, customerId, "benchmark-current-device-" + historySize,
+                    sequence++, currentTime);
+            var currentTicket = f.stage(admission, current);
+            var currentSeal = f.coverage(f.A, sequence - 1, f.A.start, currentTime);
+            admission.seal(currentTicket, currentSeal.proof(), currentSeal.payload());
+            assertThat(admission.commit(currentTicket).status()).isEqualTo(DeviceObservationStore.CommitStatus.COMMITTED);
+
+            var readGrant = new PrivateDeviceDiagnosticReader.ReadGrant("device_reader", PrivateDeviceDiagnosticReader.PURPOSE,
+                    PrivateDeviceDiagnosticReader.AUDIENCE,
+                    new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
+                    "transaction-ingest", f.pseudonyms.customer(f.A.institution, customerId), 1);
+            var measuredReader = new PrivateDeviceDiagnosticReader(clients.deviceReader, f.database, readGrant, privateSource,
+                    occurrenceReader, new DeviceAssertionVerifier(f.origins, f.grants, VerifiedDeviceAdmissionIntegrationTest.CLOCK),
+                    f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK, () -> { },
+                    sourceGrantRevalidations::increment, coverageGrantRevalidations::increment);
+            benchmarkHistorySize(historySize, current, currentTicket, admission, measuredReader,
+                    sourceGrantRevalidations, coverageGrantRevalidations);
+        }
+    }
+
+    private void benchmarkHistorySize(int historySize, VerifiedDeviceAdmissionIntegrationTest.Event current,
+                                      VerifiedDeviceAdmission.Ticket currentTicket, VerifiedDeviceAdmission admission,
+                                      PrivateDeviceDiagnosticReader measuredReader, LongAdder sourceGrantRevalidations,
+                                      LongAdder coverageGrantRevalidations) throws Exception {
+        var scored = publish(current, "initial", "benchmark-score-" + historySize);
+        admission.bindScored(currentTicket, occurrenceReader, scored.reference);
+        printHistoryQueryPlans(historySize, current);
+        for (int concurrency : List.of(1, 2)) {
+            List<BenchmarkSample> samples = measureDiagnostic(measuredReader, current, scored.reference,
+                    PERFORMANCE_WARMUPS, PERFORMANCE_SAMPLES, concurrency,
+                    sourceGrantRevalidations, coverageGrantRevalidations);
+            var reads = f.MONGO.readOperationCounts();
+            long unavailable = samples.stream().filter(sample -> sample.outcome() == PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE).count();
+            double divisor = samples.size();
+            double p95Millis = percentileMillis(samples, 95);
+            assertThat(unavailable).as("history=%d concurrency=%d unavailable results", historySize, concurrency).isZero();
+            assertThat(p95Millis).as("history=%d concurrency=%d p95 latency", historySize, concurrency)
+                    .isLessThan(1_000.0);
+            for (String collection : List.of("source_admission_receipts", "source_lineage_raw",
+                    "source_lineage_enriched", "source_admission_identities")) {
+                assertThat(readsFor(reads, collection) / divisor)
+                        .as("history=%d concurrency=%d %s read commands per evaluation", historySize, concurrency, collection)
+                        .isLessThanOrEqualTo(8.0);
+            }
+            System.out.printf(Locale.ROOT,
+                    "DEVICE_PRIVATE_DIAGNOSTIC_BENCHMARK os=%s java=%s processors=%d mongo=mongo:7.0 kafka=apache/kafka:3.8.0 "
+                            + "fixture_writer_timeout_s=%d reader_client_timeout_s=%d "
+                            + "history_members=%d concurrency=%d samples=%d p50_ms=%.3f p95_ms=%.3f p99_ms=%.3f "
+                            + "min_ms=%.3f max_ms=%.3f unavailable_or_timeout=%d unavailable_or_timeout_rate=%.3f "
+                            + "device_observations_reads_per_eval=%.1f device_occurrences_reads_per_eval=%.1f "
+                            + "device_candidates_reads_per_eval=%.1f device_history_member_anchors_reads_per_eval=%.1f "
+                            + "source_receipts_reads_per_eval=%.1f "
+                            + "source_raw_reads_per_eval=%.1f source_enriched_reads_per_eval=%.1f "
+                            + "source_identity_reads_per_eval=%.1f scored_occurrence_reads_per_eval=%.1f "
+                            + "source_grant_revalidations_per_eval=%.1f coverage_grant_revalidations_per_eval=%.1f "
+                            + "runtime_slo=NOT_MEASURED%n",
+                    System.getProperty("os.name"), System.getProperty("java.version"), Runtime.getRuntime().availableProcessors(),
+                    PERFORMANCE_FIXTURE_WRITER_TIMEOUT.toSeconds(), DeviceAuthenticatedMongo.DEFAULT_CLIENT_TIMEOUT.toSeconds(),
+                    historySize, concurrency, samples.size(), percentileMillis(samples, 50), p95Millis,
+                    percentileMillis(samples, 99), minimumMillis(samples), maximumMillis(samples), unavailable,
+                    unavailable / divisor, readsFor(reads, "device_observations") / divisor,
+                    readsFor(reads, "device_occurrences") / divisor, readsFor(reads, "device_observation_candidates") / divisor,
+                    readsFor(reads, "device_history_member_anchors") / divisor,
+                    readsFor(reads, "source_admission_receipts") / divisor, readsFor(reads, "source_lineage_raw") / divisor,
+                    readsFor(reads, "source_lineage_enriched") / divisor, readsFor(reads, "source_admission_identities") / divisor,
+                    readsFor(reads, "source_scored_occurrences") / divisor,
+                    sourceGrantRevalidations.sum() / divisor, coverageGrantRevalidations.sum() / divisor);
+        }
+    }
+
+    private void printHistoryQueryPlans(int historySize, VerifiedDeviceAdmissionIntegrationTest.Event current) {
+        String institution = f.pseudonyms.institution(f.A.institution);
+        String sourceCode = DevicePseudonyms.sourceCode("BANK");
+        String customer = f.pseudonyms.customer(f.A.institution, current.raw().customerId());
+        String device = f.pseudonyms.device(f.A.institution, current.raw().deviceInfo().deviceId());
+        Instant asOfInstant = current.raw().transactionTimestamp();
+        Date windowStart = Date.from(asOfInstant.minus(Duration.ofDays(30)));
+        Date asOf = Date.from(asOfInstant);
+        Date now = Date.from(VerifiedDeviceAdmissionIntegrationTest.NOW);
+        var base = com.mongodb.client.model.Filters.and(f.A.epoch().filter(institution, sourceCode),
+                com.mongodb.client.model.Filters.eq("keyVersion", 1),
+                com.mongodb.client.model.Filters.gte("eventTime", windowStart),
+                com.mongodb.client.model.Filters.lt("eventTime", asOf),
+                com.mongodb.client.model.Filters.or(com.mongodb.client.model.Filters.eq("customer", customer),
+                        com.mongodb.client.model.Filters.eq("device", device)));
+        var database = f.ownerClient.getDatabase(f.database);
+        var eventOrder = com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent");
+        QueryPlan observations = explain(database.getCollection("device_observations"),
+                com.mongodb.client.model.Filters.and(base, com.mongodb.client.model.Filters.gt("expireAt", now)), eventOrder);
+        QueryPlan occurrences = explain(database.getCollection("device_occurrences"),
+                com.mongodb.client.model.Filters.and(base, com.mongodb.client.model.Filters.gt("expireAt", now)), eventOrder);
+        QueryPlan candidates = explain(database.getCollection("device_observation_candidates"),
+                com.mongodb.client.model.Filters.and(base, com.mongodb.client.model.Filters.eq("status", "COMMITTED"),
+                        com.mongodb.client.model.Filters.gt("terminalExpireAt", now)), eventOrder);
+        QueryPlan anchors = explain(database.getCollection("device_history_member_anchors"),
+                com.mongodb.client.model.Filters.and(base, com.mongodb.client.model.Filters.gt("expireAt", now)), eventOrder);
+        assertThat(observations.indexes()).contains("observation_customer_window", "observation_device_window");
+        assertThat(occurrences.indexes()).contains("occurrence_customer_window", "occurrence_device_window");
+        assertThat(candidates.indexes()).containsAnyOf("candidate_status_event_source_event",
+                "candidate_customer_window", "candidate_device_window");
+        assertThat(anchors.indexes()).contains("history_member_customer_window", "history_member_device_window");
+        assertThat(observations.collectionScan() || occurrences.collectionScan() || candidates.collectionScan()
+                || anchors.collectionScan()).isFalse();
+        System.out.printf(Locale.ROOT,
+                "DEVICE_PRIVATE_HISTORY_QUERY_PLAN history_members=%d observations_indexes=%s observations_docs_examined=%d observations_sort=%s "
+                        + "occurrences_indexes=%s occurrences_docs_examined=%d occurrences_sort=%s "
+                        + "candidates_indexes=%s candidates_docs_examined=%d candidates_sort=%s "
+                        + "anchors_indexes=%s anchors_docs_examined=%d anchors_sort=%s collection_scan=false%n",
+                historySize, observations.indexes(), observations.documentsExamined(), observations.inMemorySort(),
+                occurrences.indexes(), occurrences.documentsExamined(), occurrences.inMemorySort(),
+                candidates.indexes(), candidates.documentsExamined(), candidates.inMemorySort(),
+                anchors.indexes(), anchors.documentsExamined(), anchors.inMemorySort());
+    }
+
+    private QueryPlan explain(com.mongodb.client.MongoCollection<org.bson.Document> collection,
+                              org.bson.conversions.Bson filter, org.bson.conversions.Bson sort) {
+        org.bson.Document explain = collection.find(filter).sort(sort).limit(1_001)
+                .explain(ExplainVerbosity.EXECUTION_STATS);
+        org.bson.Document queryPlanner = findDocument(explain, "queryPlanner");
+        org.bson.Document winningPlan = queryPlanner == null ? null : queryPlanner.get("winningPlan", org.bson.Document.class);
+        List<String> indexes = new ArrayList<>();
+        collectPlanIndexes(winningPlan, indexes);
+        org.bson.Document stats = findDocument(explain, "executionStats");
+        Object examined = stats == null ? null : stats.get("totalDocsExamined");
+        return new QueryPlan(indexes.stream().distinct().toList(), examined instanceof Number number ? number.longValue() : -1,
+                containsPlanStage(winningPlan, "SORT"), containsPlanStage(winningPlan, "COLLSCAN"));
+    }
+
+    private List<BenchmarkSample> measureDiagnostic(PrivateDeviceDiagnosticReader reader,
+                                                     VerifiedDeviceAdmissionIntegrationTest.Event event,
+                                                     SourceOccurrenceAccess.Reference reference, int warmups,
+                                                     int sampleCount, int concurrency, LongAdder sourceGrantRevalidations,
+                                                     LongAdder coverageGrantRevalidations) throws Exception {
+        for (int i = 0; i < warmups; i++) {
+            if (concurrency == 1) {
+                timedEvaluation(reader, event, reference);
+            } else {
+                runConcurrentBatch(reader, event, reference, concurrency);
+            }
+        }
+        sourceGrantRevalidations.reset();
+        coverageGrantRevalidations.reset();
+        f.MONGO.resetReadOperations();
+        List<BenchmarkSample> samples = new ArrayList<>(sampleCount);
+        if (concurrency == 1) {
+            for (int i = 0; i < sampleCount; i++) { samples.add(timedEvaluation(reader, event, reference)); }
+            return samples;
+        }
+        ExecutorService workers = Executors.newFixedThreadPool(concurrency);
+        try {
+            for (int round = 0; round < sampleCount / concurrency; round++) {
+                List<Future<BenchmarkSample>> batch = new ArrayList<>(concurrency);
+                for (int worker = 0; worker < concurrency; worker++) {
+                    batch.add(workers.submit(() -> timedEvaluation(reader, event, reference)));
+                }
+                for (Future<BenchmarkSample> sample : batch) { samples.add(sample.get(12, TimeUnit.SECONDS)); }
+            }
+        } finally {
+            workers.shutdownNow();
+        }
+        return samples;
+    }
+
+    private List<BenchmarkSample> runConcurrentBatch(PrivateDeviceDiagnosticReader reader,
+                                                     VerifiedDeviceAdmissionIntegrationTest.Event event,
+                                                     SourceOccurrenceAccess.Reference reference, int concurrency) throws Exception {
+        ExecutorService workers = Executors.newFixedThreadPool(concurrency);
+        try {
+            List<Future<BenchmarkSample>> batch = new ArrayList<>(concurrency);
+            for (int worker = 0; worker < concurrency; worker++) {
+                batch.add(workers.submit(() -> timedEvaluation(reader, event, reference)));
+            }
+            List<BenchmarkSample> results = new ArrayList<>(concurrency);
+            for (Future<BenchmarkSample> sample : batch) { results.add(sample.get(12, TimeUnit.SECONDS)); }
+            return results;
+        } finally {
+            workers.shutdownNow();
+        }
+    }
+
+    private BenchmarkSample timedEvaluation(PrivateDeviceDiagnosticReader reader,
+                                            VerifiedDeviceAdmissionIntegrationTest.Event event,
+                                            SourceOccurrenceAccess.Reference reference) {
+        long started = System.nanoTime();
+        PrivateDeviceDiagnosticReader.Result result = reader.evaluate(fact(event), reference);
+        return new BenchmarkSample(System.nanoTime() - started, result.outcome());
+    }
+
+    private static long readsFor(Map<String, Long> counts, String collection) {
+        return counts.entrySet().stream().filter(entry -> entry.getKey().startsWith(collection + "."))
+                .mapToLong(Map.Entry::getValue).sum();
+    }
+
+    private static double percentileMillis(List<BenchmarkSample> samples, int percentile) {
+        List<Long> sorted = samples.stream().map(BenchmarkSample::elapsedNanos).sorted().toList();
+        int index = Math.max(0, (int) Math.ceil(percentile / 100.0 * sorted.size()) - 1);
+        return sorted.get(index) / 1_000_000.0;
+    }
+
+    private static double minimumMillis(List<BenchmarkSample> samples) {
+        return samples.stream().mapToLong(BenchmarkSample::elapsedNanos).min().orElseThrow() / 1_000_000.0;
+    }
+
+    private static double maximumMillis(List<BenchmarkSample> samples) {
+        return samples.stream().mapToLong(BenchmarkSample::elapsedNanos).max().orElseThrow() / 1_000_000.0;
+    }
+
+    private static org.bson.Document findDocument(Object value, String fieldName) {
+        if (value instanceof org.bson.Document document) {
+            Object nested = document.get(fieldName);
+            if (nested instanceof org.bson.Document found) { return found; }
+            for (Object child : document.values()) {
+                org.bson.Document found = findDocument(child, fieldName);
+                if (found != null) { return found; }
+            }
+        } else if (value instanceof List<?> list) {
+            for (Object child : list) {
+                org.bson.Document found = findDocument(child, fieldName);
+                if (found != null) { return found; }
+            }
+        }
+        return null;
+    }
+
+    private static void collectPlanIndexes(Object value, List<String> indexes) {
+        if (value instanceof org.bson.Document document) {
+            if ("IXSCAN".equals(document.getString("stage")) && document.getString("indexName") != null) {
+                indexes.add(document.getString("indexName"));
+            }
+            document.values().forEach(child -> collectPlanIndexes(child, indexes));
+        } else if (value instanceof List<?> list) {
+            list.forEach(child -> collectPlanIndexes(child, indexes));
+        }
+    }
+
+    private static boolean containsPlanStage(Object value, String stage) {
+        if (value instanceof org.bson.Document document) {
+            if (stage.equals(document.getString("stage"))) { return true; }
+            return document.values().stream().anyMatch(child -> containsPlanStage(child, stage));
+        }
+        if (value instanceof List<?> list) { return list.stream().anyMatch(child -> containsPlanStage(child, stage)); }
+        return false;
+    }
+
     @Test void partialDeletionOfLinkedHistoryInvalidatesEverySubsequentDiagnosticRead() throws Exception {
         Instant priorTime = VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(3_600);
         var prior = f.event(f.A, "source-retained", "transaction-retained", "customer-1", "device-old", 1, priorTime);
@@ -369,6 +702,20 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         candidates.updateOne(idFilter, com.mongodb.client.model.Updates.set("status", "STAGED"));
         assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // A BSON status label is not commit authority.
+        candidates.replaceOne(idFilter, priorCandidate);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
+
+        candidates.updateOne(idFilter, com.mongodb.client.model.Updates.set("transaction", "f".repeat(64)));
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // Candidate MAC inputs must still match the authenticated occurrence.
+        candidates.replaceOne(idFilter, priorCandidate);
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
+
+        candidates.updateOne(idFilter, com.mongodb.client.model.Updates.set("provenance.receiptId", "f".repeat(64)));
+        assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // Copies still require identical, committed provenance.
         candidates.replaceOne(idFilter, priorCandidate);
         assertThat(diagnostic.evaluate(fact(current), currentScore.reference).outcome())
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.EVALUATED);
@@ -517,6 +864,8 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
 
     private record Published(TransactionScoredEvent event, SourceOccurrenceAccess.Reference reference, byte[] wireBytes) { }
     private record ScoredRecord(TransactionScoredEvent event, byte[] bytes) { }
+    private record BenchmarkSample(long elapsedNanos, PrivateDeviceDiagnosticReader.Outcome outcome) { }
+    private record QueryPlan(List<String> indexes, long documentsExamined, boolean inMemorySort, boolean collectionScan) { }
     private record MongoClientHandle(com.mongodb.client.MongoClient writer, com.mongodb.client.MongoClient sourceReader,
                                     com.mongodb.client.MongoClient deviceReader) {
         void close() { writer.close(); sourceReader.close(); deviceReader.close(); }

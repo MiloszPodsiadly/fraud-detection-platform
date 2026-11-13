@@ -31,6 +31,7 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -60,6 +61,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private static final int MAX_PENDING_CANDIDATES = 10_000;
     private static final int MAX_DEVICE_ROWS = 10_000;
     private static final int MAX_CUSTOMER_ROWS = 25_000;
+    private static final int MAX_HISTORY_MEMBERSHIP_ROWS = MAX_DEVICE_ROWS + MAX_CUSTOMER_ROWS;
     private static final TransactionOptions TRANSACTION_OPTIONS = TransactionOptions.builder()
             .readConcern(ReadConcern.SNAPSHOT).writeConcern(WriteConcern.MAJORITY).build();
     private final MongoClient client;
@@ -67,6 +69,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private final MongoCollection<Document> candidates;
     private final MongoCollection<Document> observations;
     private final MongoCollection<Document> occurrences;
+    private final MongoCollection<Document> historyMemberAnchors;
     private final MongoCollection<Document> coverage;
     private final MongoCollection<Document> fences;
     private final MongoCollection<Document> revocationTombstones;
@@ -123,6 +126,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         candidates = database.getCollection("device_observation_candidates");
         observations = database.getCollection("device_observations");
         occurrences = database.getCollection("device_occurrences");
+        historyMemberAnchors = database.getCollection("device_history_member_anchors");
         coverage = database.getCollection("device_source_coverage");
         fences = database.getCollection("device_scope_fences");
         revocationTombstones = database.getCollection("device_operational_revocation_tombstones");
@@ -285,6 +289,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 if (candidates.find(session, and(epoch.filter(seal.institutionToken(), seal.sourceCode()), gt("sequence", seal.throughSequence()),
                         lte("eventTime", Date.from(seal.watermark())))).first() != null) {
                     throw terminal("SEAL_OMITS_EARLIER_EVENT");
+                }
+                if (integrityKey != null) {
+                    List<Document> anchors = batch.stream()
+                            .map(candidate -> DeviceHistoryMemberAnchor.fromSealedCandidate(integrityKey, epoch, candidate, seal.proof()))
+                            .toList();
+                    historyMemberAnchors.insertMany(session, anchors);
                 }
                 Instant oldStart = dateInstant(progress, "coverageStart");
                 Instant effectiveStart = oldStart == null || seal.coverageStart().isAfter(oldStart)
@@ -467,7 +477,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 && version == progress.getInteger("keyVersion")
                 && !dateInstant(progress, "coverageStart").isAfter(windowStart)
                 && !dateInstant(progress, "continuousSince").isAfter(windowStart)
-                && !clock.instant().isAfter(time.plus(LATE_AND_REPAIR));
+                && clock.instant().isBefore(time.plus(LATE_AND_REPAIR));
         HistoryFact prior;
         HistoryFact other;
         HistoryFact switches;
@@ -498,11 +508,15 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 transitionOutOfPending(session, candidate, "QUARANTINED", true);
                 return quarantined();
             }
+            List<Document> membershipRows = new ArrayList<>(deviceRows);
+            membershipRows.addAll(customerRows);
+            boolean sealedMembershipComplete = integrityKey == null || sealedMembershipMatches(session, membershipRows,
+                    institution, source, customer, device, version, windowStart, time);
             if (integrityKey != null) {
-                List<Document> membershipRows = new ArrayList<>(deviceRows);
-                membershipRows.addAll(customerRows);
-                historyMembership = DeviceHistoryMembershipCommitment.compute(integrityKey, epoch, institution, source,
-                        customer, device, version, windowStart, time, membershipRows);
+                if (sealedMembershipComplete) {
+                    historyMembership = DeviceHistoryMembershipCommitment.compute(integrityKey, epoch, institution, source,
+                            customer, device, version, windowStart, time, membershipRows);
+                }
             }
             int transitions = 0;
             String previousDevice = null;
@@ -537,11 +551,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             switches = ambiguousSwitchOrder
                     ? new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null)
                     : new HistoryFact(State.AVAILABLE, Reason.NONE, transitions);
-            if (java.util.stream.Stream.concat(deviceRows.stream(), customerRows.stream())
+            if (!sealedMembershipComplete || java.util.stream.Stream.concat(deviceRows.stream(), customerRows.stream())
                     .anyMatch(row -> !currentMembership(row))) {
                 prior = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
                 other = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
                 switches = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
+                historyMembership = null;
             }
         } else {
             prior = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
@@ -561,7 +576,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 .append("customer", customer).append("device", device).append("keyVersion", version)
                 .append("eventTime", Date.from(time)).append("provenance", candidate.get("provenance", Document.class))
                 .append("provenanceCommitment", candidate.getString("provenanceCommitment"))
-                .append("expireAt", Date.from(time.plus(WINDOW).plus(LATE_AND_REPAIR)));
+                .append("expireAt", Date.from(time.plus(DeviceHistoryMemberAnchor.RETENTION)));
         if (integrityKey != null) {
             observation.put("membershipIntegrityCommitment", DeviceRecordIntegrity.membership(integrityKey, observation));
         }
@@ -637,6 +652,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                     throw retryable("OPERATIONAL_REVOCATION_CANDIDATE_RACE");
                 }
                 observations.deleteMany(session, scopedDevice);
+                historyMemberAnchors.deleteMany(session, scopedDevice);
                 int remainingPending = Math.toIntExact(candidates.countDocuments(session,
                         and(epoch.filter(institutionToken, sourceCode), eq("status", "STAGED"))));
                 Document progressBefore = coverage.find(session, eq("_id", sourceScope)).first();
@@ -844,6 +860,75 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 row.getString("populationCommitment"), row.getInteger("keyVersion"), row.getDate("coverageStart").toInstant())) {
             throw terminal("COVERAGE_AUTHORITY_REVOKED");
         }
+    }
+
+    private boolean sealedMembershipMatches(ClientSession session, List<Document> observationRows,
+                                           String institution, String source, String customer, String device,
+                                           int version, Instant windowStart, Instant asOf) {
+        Bson scope = epoch.filter(institution, source);
+        Bson window = and(scope, eq("keyVersion", version), gte("eventTime", Date.from(windowStart)),
+                lt("eventTime", Date.from(asOf)), or(eq("customer", customer), eq("device", device)));
+        Date now = Date.from(clock.instant());
+        List<Document> anchors = historyMemberAnchors.find(session, and(window, gt("expireAt", now)))
+                .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
+                .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
+        List<Document> historicalOccurrences = occurrences.find(session, and(window, gt("expireAt", now)))
+                .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
+                .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
+        List<Document> historicalCandidates = candidates.find(session, and(window, eq("status", "COMMITTED"),
+                        gt("terminalExpireAt", now)))
+                .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
+                .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
+        if (anchors.size() > MAX_HISTORY_MEMBERSHIP_ROWS || historicalOccurrences.size() > MAX_HISTORY_MEMBERSHIP_ROWS
+                || historicalCandidates.size() > MAX_HISTORY_MEMBERSHIP_ROWS) { return false; }
+
+        Map<String, Document> expectedById = uniqueHistoryMembers(observationRows);
+        Map<String, Document> anchorsById = uniqueHistoryMembers(anchors);
+        Map<String, Document> occurrencesById = uniqueHistoryMembers(historicalOccurrences);
+        Map<String, Document> candidatesById = uniqueHistoryMembers(historicalCandidates);
+        if (expectedById == null || anchorsById == null || occurrencesById == null || candidatesById == null
+                || expectedById.size() != anchorsById.size() || expectedById.size() != occurrencesById.size()
+                || expectedById.size() != candidatesById.size()) { return false; }
+
+        for (Map.Entry<String, Document> entry : expectedById.entrySet()) {
+            String id = entry.getKey();
+            Document observation = entry.getValue();
+            Document anchor = anchorsById.get(id);
+            Document occurrence = occurrencesById.get(id);
+            Document historicalCandidate = candidatesById.get(id);
+            if (anchor == null || occurrence == null || historicalCandidate == null
+                    || !epoch.matches(observation) || !epoch.matches(occurrence) || !epoch.matches(historicalCandidate)
+                    || !"COMMITTED".equals(historicalCandidate.getString("status"))
+                    || !DeviceHistoryMemberAnchor.matchesCopies(integrityKey, epoch, anchor, observation, occurrence, historicalCandidate)
+                    || !DeviceRecordIntegrity.membershipMatches(integrityKey, observation)
+                    || !DeviceRecordIntegrity.membershipMatches(integrityKey, occurrence)
+                    || !DeviceRecordIntegrity.candidateMatches(integrityKey, occurrence)
+                    || !DeviceRecordIntegrity.snapshotMatches(integrityKey, occurrence)
+                    || !DeviceRecordIntegrity.candidateMatches(integrityKey, historicalCandidate)
+                    || !DeviceRecordIntegrity.candidateStateMatches(integrityKey, historicalCandidate)) { return false; }
+            DeviceSnapshotVersion.require(occurrence);
+            DeviceObservationStore.CoverageAuthority historicalCoverage = DeviceObservationStore.CoverageAuthority.from(occurrence);
+            if (!authority.coverageCurrent(historicalCoverage, institution, source, occurrence.getString("populationCommitment"),
+                    occurrence.getInteger("keyVersion"), occurrence.getDate("coverageStart").toInstant())) { return false; }
+        }
+        return true;
+    }
+
+    private static Map<String, Document> uniqueHistoryMembers(List<Document> rows) {
+        Map<String, Document> result = new java.util.HashMap<>();
+        for (Document row : rows) {
+            String id = row.getString("_id");
+            if (id == null) { return null; }
+            Document previous = result.putIfAbsent(id, row);
+            if (previous != null && (!Objects.equals(previous.getString("sourceEvent"), row.getString("sourceEvent"))
+                    || !Objects.equals(previous.getString("customer"), row.getString("customer"))
+                    || !Objects.equals(previous.getString("device"), row.getString("device"))
+                    || !Objects.equals(previous.getDate("eventTime"), row.getDate("eventTime"))
+                    || !Objects.equals(previous.getString("provenanceCommitment"), row.getString("provenanceCommitment")))) {
+                return null;
+            }
+        }
+        return result;
     }
 
     private void requireCandidateIntegrity(Document row) {

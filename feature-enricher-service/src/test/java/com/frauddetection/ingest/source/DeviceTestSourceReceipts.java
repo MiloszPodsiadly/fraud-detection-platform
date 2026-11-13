@@ -11,8 +11,13 @@ public final class DeviceTestSourceReceipts {
     private DeviceTestSourceReceipts() { }
     public static void admit(MongoClient client, String database, Clock clock, SourceSignatureVerifier policy,
                              MongoSourceLineage lineage, SourceSignatureVerifier.Verified evidence, TransactionRawEvent raw) {
+        admit(client, database, clock, policy, lineage, evidence, raw, 1_000);
+    }
+    public static void admit(MongoClient client, String database, Clock clock, SourceSignatureVerifier policy,
+                             MongoSourceLineage lineage, SourceSignatureVerifier.Verified evidence, TransactionRawEvent raw,
+                             int maximumReceipts) {
         var receipts = new MongoSourceReceiptStore(client, database, clock,
-                new SourceReceiptStore.Limits(Duration.ofDays(30), Duration.ofDays(45), 1_000), policy);
+                new SourceReceiptStore.Limits(Duration.ofDays(30), Duration.ofDays(45), maximumReceipts), policy);
         var result = receipts.admit(evidence);
         if (result.status() != SourceReceiptStore.Status.ADMITTED && result.status() != SourceReceiptStore.Status.EXISTING) {
             throw new IllegalStateException("TEST_SOURCE_ADMISSION_FAILED");

@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Private v1 assertion payloads. Parsing a claim never grants admission or history access. */
 final class DeviceAssertions {
@@ -24,6 +25,8 @@ final class DeviceAssertions {
                     .streamReadConstraints(StreamReadConstraints.builder()
                             .maxNestingDepth(2).maxStringLength(128).maxNumberLength(19).build()).build())
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    private static final Pattern REFERENCE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}");
+    private static final Pattern TOKEN = Pattern.compile("[0-9a-f]{64}");
     private static final Set<String> OBSERVATION_FIELDS = Set.of("assertionVersion", "sourceIssuer", "institution",
             "source", "sourceEpoch", "sourceEventId", "transactionKey", "receiptId", "rawCommitment",
             "enrichedCommitment", "customerToken", "deviceToken", "pseudonymKeyVersion", "sourceSequence",
@@ -97,11 +100,11 @@ final class DeviceAssertions {
     private static String reference(JsonNode root, String field) { return reference(text(root, field)); }
     private static String token(JsonNode root, String field) { return token(text(root, field)); }
     static String reference(String value) {
-        if (value == null || !value.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")) { throw invalid(); }
+        if (value == null || !REFERENCE.matcher(value).matches()) { throw invalid(); }
         return value;
     }
     static String token(String value) {
-        if (value == null || !value.matches("[0-9a-f]{64}")) { throw invalid(); }
+        if (value == null || !TOKEN.matcher(value).matches()) { throw invalid(); }
         return value;
     }
     private static long number(JsonNode root, String field) {
@@ -133,6 +136,10 @@ final class DeviceAssertions {
     record Scope(String sourceIssuer, String institution, String source, String sourceEpoch) {
         Scope {
             reference(sourceIssuer); reference(institution); reference(source); reference(sourceEpoch);
+        }
+        boolean matches(String issuer, String institution, String source, String epoch) {
+            return sourceIssuer.equals(issuer) && this.institution.equals(institution)
+                    && this.source.equals(source) && sourceEpoch.equals(epoch);
         }
         @Override public String toString() { return "DeviceSourceScope[redacted]"; }
     }

@@ -9,6 +9,9 @@ import java.util.regex.Pattern;
 
 /** Internal persistence seam only. This type does not authenticate observations or coverage seals. */
 interface DeviceObservationStore {
+    Pattern TOKEN = Pattern.compile("[0-9a-f]{64}");
+    Pattern SOURCE_CODE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
+
     StageResult stage(Observation input);
 
     void seal(CoverageSeal seal);
@@ -100,13 +103,24 @@ interface DeviceObservationStore {
     record Provenance(String receiptId, String rawCommitment, String enrichedCommitment, String observationCommitment,
                       String populationCommitment, String originPolicyVersion, String deviceIssuer,
                       String deviceKeyVersion, String devicePolicyVersion, String deviceKeyCommitment,
-                      String authorizationCommitment, Instant proofTime, long sequenceOrigin) {
+                      String authorizationCommitment, Instant proofTime, long sequenceOrigin, String commitment) {
+        Provenance(String receiptId, String rawCommitment, String enrichedCommitment, String observationCommitment,
+                   String populationCommitment, String originPolicyVersion, String deviceIssuer,
+                   String deviceKeyVersion, String devicePolicyVersion, String deviceKeyCommitment,
+                   String authorizationCommitment, Instant proofTime, long sequenceOrigin) {
+            this(receiptId, rawCommitment, enrichedCommitment, observationCommitment, populationCommitment,
+                    originPolicyVersion, deviceIssuer, deviceKeyVersion, devicePolicyVersion, deviceKeyCommitment,
+                    authorizationCommitment, proofTime, sequenceOrigin, null);
+        }
         public Provenance {
             token(receiptId); token(rawCommitment); token(enrichedCommitment); token(observationCommitment); token(populationCommitment); token(deviceKeyCommitment);
             DeviceAssertions.reference(originPolicyVersion); DeviceAssertions.reference(deviceIssuer);
             DeviceAssertions.reference(deviceKeyVersion); DeviceAssertions.reference(devicePolicyVersion);
             token(authorizationCommitment);
             if (sequenceOrigin < 1 || proofTime == null || proofTime.getNano() % 1_000_000 != 0) { throw new IllegalArgumentException("DEVICE_STORE_SEQUENCE_ORIGIN"); }
+            commitment = DeviceEpoch.digest("device-provenance/v1", receiptId, rawCommitment, enrichedCommitment, observationCommitment,
+                    populationCommitment, originPolicyVersion, deviceIssuer, deviceKeyVersion, devicePolicyVersion, deviceKeyCommitment,
+                    authorizationCommitment, proofTime.toString(), Long.toString(sequenceOrigin));
         }
         org.bson.Document document() {
             return new org.bson.Document("receiptId", receiptId).append("rawCommitment", rawCommitment).append("enrichedCommitment", enrichedCommitment)
@@ -114,11 +128,6 @@ interface DeviceObservationStore {
                     .append("originPolicyVersion", originPolicyVersion).append("deviceIssuer", deviceIssuer).append("deviceKeyVersion", deviceKeyVersion)
                     .append("devicePolicyVersion", devicePolicyVersion).append("deviceKeyCommitment", deviceKeyCommitment)
                     .append("authorizationCommitment", authorizationCommitment).append("proofTime", java.util.Date.from(proofTime)).append("sequenceOrigin", sequenceOrigin);
-        }
-        String commitment() {
-            return DeviceEpoch.digest("device-provenance/v1", receiptId, rawCommitment, enrichedCommitment, observationCommitment,
-                    populationCommitment, originPolicyVersion, deviceIssuer, deviceKeyVersion, devicePolicyVersion, deviceKeyCommitment,
-                    authorizationCommitment, proofTime.toString(), Long.toString(sequenceOrigin));
         }
         static Provenance from(org.bson.Document row) {
             org.bson.Document p = row.get("provenance", org.bson.Document.class);
@@ -174,14 +183,14 @@ interface DeviceObservationStore {
     }
 
     private static String token(String value) {
-        if (value == null || !Pattern.matches("[0-9a-f]{64}", value)) {
+        if (value == null || !TOKEN.matcher(value).matches()) {
             throw new IllegalArgumentException("DEVICE_STORE_TOKEN");
         }
         return value;
     }
 
     private static String code(String value) {
-        if (value == null || !Pattern.matches("[A-Z][A-Z0-9_]{0,63}", value)) {
+        if (value == null || !SOURCE_CODE.matcher(value).matches()) {
             throw new IllegalArgumentException("DEVICE_STORE_SOURCE");
         }
         return value;

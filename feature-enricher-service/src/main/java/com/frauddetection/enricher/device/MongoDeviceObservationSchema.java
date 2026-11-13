@@ -25,13 +25,18 @@ import static com.mongodb.client.model.Filters.type;
 /** Owns the startup schema and index compatibility contract for the device observation store. */
 final class MongoDeviceObservationSchema {
     static final List<String> COLLECTIONS = List.of("device_observation_candidates", "device_observations",
-            "device_occurrences", "device_source_coverage", "device_scope_fences", "device_operational_revocation_tombstones");
+            "device_occurrences", "device_history_member_anchors", "device_source_coverage", "device_scope_fences",
+            "device_operational_revocation_tombstones");
     private static final List<IndexSpec> CANDIDATE_INDEXES = List.of(
             index("candidate_source_event_unique", true, false, "institution", "source", "sourceEvent"),
             index("candidate_transaction_unique", true, false, "institution", "source", "transaction"),
             index("candidate_sequence_unique", true, false, "institution", "source", "sequence"),
             index("candidate_customer_event_status_sequence", false, false,
                     "institution", "source", "customer", "eventTime", "status", "sequence"),
+            index("candidate_device_window", false, false,
+                    "institution", "source", "keyVersion", "device", "eventTime", "sourceEvent"),
+            index("candidate_customer_window", false, false,
+                    "institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"),
             index("candidate_status_staged_at", false, false, "status", "stagedAt"),
             index("candidate_status_event_source_event", false, false,
                     "institution", "source", "status", "eventTime", "sourceEvent"),
@@ -51,6 +56,12 @@ final class MongoDeviceObservationSchema {
             index("occurrence_customer_window", false, false,
                     "institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"),
             index("occurrence_expiry_ttl", false, true, "expireAt"));
+    private static final List<IndexSpec> HISTORY_MEMBER_ANCHOR_INDEXES = List.of(
+            index("history_member_device_window", false, false,
+                    "institution", "source", "keyVersion", "device", "eventTime", "sourceEvent"),
+            index("history_member_customer_window", false, false,
+                    "institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"),
+            index("history_member_expiry_ttl", false, true, "expireAt"));
     private static final List<IndexSpec> TOMBSTONE_INDEXES = List.of(
             index("tombstone_expiry_ttl", false, true, "expireAt"));
 
@@ -64,6 +75,7 @@ final class MongoDeviceObservationSchema {
         MongoCollection<Document> candidates = database.getCollection("device_observation_candidates");
         MongoCollection<Document> observations = database.getCollection("device_observations");
         MongoCollection<Document> occurrences = database.getCollection("device_occurrences");
+        MongoCollection<Document> historyMemberAnchors = database.getCollection("device_history_member_anchors");
         MongoCollection<Document> coverage = database.getCollection("device_source_coverage");
         MongoCollection<Document> fences = database.getCollection("device_scope_fences");
         MongoCollection<Document> revocationTombstones =
@@ -87,12 +99,14 @@ final class MongoDeviceObservationSchema {
                     throw schemaIncompatible();
                 }
             }
-            validateExistingSchema(existingCollections, candidates, observations, occurrences, coverage, fences, revocationTombstones);
+            validateExistingSchema(existingCollections, candidates, observations, occurrences, historyMemberAnchors,
+                    coverage, fences, revocationTombstones);
             return; // A runtime writer validates existing DDL; only a fresh-schema owner bootstraps it.
         }
         createIndexes(candidates, CANDIDATE_INDEXES);
         createIndexes(observations, OBSERVATION_INDEXES);
         createIndexes(occurrences, OCCURRENCE_INDEXES);
+        createIndexes(historyMemberAnchors, HISTORY_MEMBER_ANCHOR_INDEXES);
         createIndexes(revocationTombstones, TOMBSTONE_INDEXES);
     }
 
@@ -100,6 +114,7 @@ final class MongoDeviceObservationSchema {
                                         MongoCollection<Document> candidates,
                                         MongoCollection<Document> observations,
                                         MongoCollection<Document> occurrences,
+                                        MongoCollection<Document> historyMemberAnchors,
                                         MongoCollection<Document> coverage,
                                         MongoCollection<Document> fences,
                                         MongoCollection<Document> revocationTombstones) {
@@ -107,6 +122,8 @@ final class MongoDeviceObservationSchema {
                 CANDIDATE_INDEXES, "expireAt");
         validateCollection(existingCollections, "device_observations", observations, OBSERVATION_INDEXES);
         validateCollection(existingCollections, "device_occurrences", occurrences, OCCURRENCE_INDEXES);
+        validateCollection(existingCollections, "device_history_member_anchors", historyMemberAnchors,
+                HISTORY_MEMBER_ANCHOR_INDEXES);
         validateCollection(existingCollections, "device_source_coverage", coverage, List.of(), "pendingCounterVersion");
         validateCollection(existingCollections, "device_scope_fences", fences, List.of());
         if (existingCollections.contains("device_erasure_tombstones")) {
@@ -213,6 +230,17 @@ final class MongoDeviceObservationSchema {
             properties.append("stageACommitment", token());
             required.addAll(List.of("sourceObservedAt", "coverageCommitment", "evidenceCommitment", "evidenceJson", "coverageAuthority", "coverageStart", "populationCommitment", "stageACommitment"));
         }
+        if (name.equals("device_history_member_anchors")) {
+            properties.append("sourceEvent", token()).append("customer", token()).append("device", token())
+                    .append("keyVersion", new Document("bsonType", "int").append("minimum", 1).append("maximum", 65_535))
+                    .append("sequence", number("long", 1)).append("eventTime", new Document("bsonType", "date"))
+                    .append("provenanceCommitment", token()).append("candidateIntegrityCommitment", token())
+                    .append("coverageGeneration", number("long", 1)).append("coverageCommitment", token())
+                    .append("sealAssertionCommitment", token()).append("memberAnchorIntegrityCommitment", token());
+            required.addAll(List.of("sourceEvent", "customer", "device", "keyVersion", "sequence", "eventTime",
+                    "provenanceCommitment", "candidateIntegrityCommitment", "coverageGeneration", "coverageCommitment",
+                    "sealAssertionCommitment", "memberAnchorIntegrityCommitment"));
+        }
         if (name.equals("device_source_coverage")) {
             properties.append("sealedSequence", number("long", 0)).append("pendingCount", number("int", 0))
                     .append("sequenceOrigin", number("long", 1)).append("populationCommitment", token())
@@ -225,7 +253,8 @@ final class MongoDeviceObservationSchema {
         if (name.equals("device_source_coverage") || name.equals("device_scope_fences")) {
             properties.append("revision", number("long", 1)); required.add("revision");
         }
-        if (name.equals("device_occurrences") || name.equals("device_observations") || name.equals("device_operational_revocation_tombstones")) {
+        if (name.equals("device_occurrences") || name.equals("device_observations")
+                || name.equals("device_history_member_anchors") || name.equals("device_operational_revocation_tombstones")) {
             properties.append("expireAt", new Document("bsonType", "date")); required.add("expireAt");
         }
         Document schema = new Document("bsonType", "object").append("required", required).append("properties", properties);

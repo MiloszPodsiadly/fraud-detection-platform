@@ -4,7 +4,10 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
 import org.bson.Document;
+import org.bson.BsonValue;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -12,14 +15,32 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.Set;
 
 /** Real replica set with authentication enabled; credentials exist only in this ephemeral test server. */
 final class DeviceAuthenticatedMongo implements AutoCloseable {
+    static final Duration DEFAULT_CLIENT_TIMEOUT = Duration.ofSeconds(5);
     private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0"))
             .withExposedPorts(27017).withStartupTimeout(Duration.ofSeconds(60))
             .withCommand("bash", "-c", "openssl rand -base64 756 > /tmp/lineage-key; chmod 400 /tmp/lineage-key; "
                     + "exec mongod --replSet lineage-rs --bind_ip_all --keyFile /tmp/lineage-key --setParameter enableTestCommands=1");
     private final List<MongoClient> clients = new ArrayList<>();
+    private final ConcurrentMap<String, LongAdder> readOperations = new ConcurrentHashMap<>();
+    private final CommandListener readOperationListener = new CommandListener() {
+        @Override public void commandStarted(CommandStartedEvent event) {
+            String name = event.getCommandName();
+            if (!Set.of("find", "aggregate", "count", "distinct", "getMore").contains(name)) { return; }
+            BsonValue target = event.getCommand().get(name);
+            if (target == null) { target = event.getCommand().get("collection"); }
+            if (target == null || !target.isString()) { return; }
+            readOperations.computeIfAbsent(target.asString().getValue() + "." + name, ignored -> new LongAdder()).increment();
+        }
+    };
 
     void start() throws Exception {
         server.start();
@@ -35,18 +56,29 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
     }
 
     MongoClient owner() { return connect("source_owner", "ephemeral-owner-only", "admin"); }
+    void resetReadOperations() { readOperations.clear(); }
+    Map<String, Long> readOperationCounts() {
+        Map<String, Long> snapshot = new TreeMap<>();
+        readOperations.forEach((key, value) -> snapshot.put(key, value.sum()));
+        return Map.copyOf(snapshot);
+    }
     MongoClient ledgerWriter(MongoClient owner, String database) {
         var db = owner.getDatabase(database);
         List<Document> privileges = new ArrayList<>();
         privileges.add(privilege(database, "", List.of("listCollections")));
         for (String collection : MongoDeviceObservationSchema.COLLECTIONS) {
             List<String> actions = new ArrayList<>(List.of("find", "listIndexes", "insert", "update"));
-            if (collection.equals("device_observations")) { actions.add("remove"); }
+            if (collection.equals("device_observations") || collection.equals("device_history_member_anchors")) {
+                actions.add("remove");
+            }
             privileges.add(privilege(database, collection, actions));
         }
         db.runCommand(new Document("createRole", "device_ledger").append("privileges", privileges).append("roles", List.of()));
         db.runCommand(new Document("createUser", "device_ledger").append("pwd", "ephemeral-device-only").append("roles", List.of("device_ledger")));
         return connect("device_ledger", "ephemeral-device-only", database, "device-ledger-test");
+    }
+    MongoClient ledgerWriterWithTimeout(String database, Duration timeout) {
+        return connect("device_ledger", "ephemeral-device-only", database, "device-ledger-benchmark", timeout);
     }
     MongoClient anonymous() { return connect(null, null, null); }
 
@@ -121,11 +153,15 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
         return connect(user, password, authDatabase, null);
     }
     private MongoClient connect(String user, String password, String authDatabase, String applicationName) {
+        return connect(user, password, authDatabase, applicationName, DEFAULT_CLIENT_TIMEOUT);
+    }
+    private MongoClient connect(String user, String password, String authDatabase, String applicationName, Duration timeout) {
         String address = server.getHost() + ":" + server.getMappedPort(27017);
         String uri = "mongodb://" + (user == null ? "" : user + ":" + password + "@") + address
                 + "/?directConnection=true" + (authDatabase == null ? "" : "&authSource=" + authDatabase);
-        MongoClient client = MongoClients.create(MongoClientSettings.builder().applicationName(applicationName).applyConnectionString(new ConnectionString(uri))
-                .timeout(5, TimeUnit.SECONDS).build());
+        MongoClient client = MongoClients.create(MongoClientSettings.builder().applicationName(applicationName)
+                .addCommandListener(readOperationListener).applyConnectionString(new ConnectionString(uri))
+                .timeout(timeout.toMillis(), TimeUnit.MILLISECONDS).build());
         clients.add(client);
         return client;
     }

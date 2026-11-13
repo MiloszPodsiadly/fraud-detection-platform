@@ -42,6 +42,7 @@ class VerifiedDeviceAdmissionIntegrationTest {
     MongoSourceLineage owner, enricher, reader;
     SourceSignatureVerifier originVerifier;
     String database;
+    int sourceReceiptCapacity = 1_000;
 
     @BeforeAll static void start() throws Exception { MONGO.start(); }
     @AfterAll static void stop() { MONGO.close(); }
@@ -134,6 +135,28 @@ class VerifiedDeviceAdmissionIntegrationTest {
         assertThat(b.commit(newTicket).status()).isEqualTo(DeviceObservationStore.CommitStatus.EXISTING);
         assertThat(rows("device_observations")).hasSize(1);
         assertThat(rows("device_observations").getFirst().getString("sourceEpoch")).isEqualTo("epoch-b");
+    }
+
+    @Test void operationalRevocationRemovesTheSealedMembershipAnchorWithItsObservation() {
+        Event event = event(A, "source-revoke-anchor", "transaction-revoke-anchor", "customer-1", "device-revoke-anchor", 1, NOW);
+        var admission = adapter(A);
+        var ticket = stage(admission, event);
+        Signed seal = coverage(A, 1, A.start, NOW);
+        admission.seal(ticket, seal.proof, seal.payload);
+        admission.commit(ticket);
+
+        String institution = pseudonyms.institution(A.institution);
+        String sourceCode = DevicePseudonyms.sourceCode("BANK");
+        String device = pseudonyms.device(A.institution, "device-revoke-anchor");
+        assertThat(count("device_history_member_anchors")).isEqualTo(1);
+        var operationalStore = new MongoDeviceObservationStore(deviceClient, database, CLOCK, A.epoch(),
+                DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS);
+        operationalStore.revokeDeviceFromOperationalHistory(institution, sourceCode, 1, device);
+
+        assertThat(count("device_history_member_anchors")).isZero();
+        assertThat(count("device_observations")).isZero();
+        assertThat(ownerClient.getDatabase(database).getCollection("device_source_coverage")
+                .find(eq("_id", A.epoch().scopeId(institution, sourceCode))).first().getBoolean("invalidated")).isTrue();
     }
 
     @Test void gapAndPendingPredecessorNeverCreateFalseHistory() {
@@ -310,6 +333,10 @@ class VerifiedDeviceAdmissionIntegrationTest {
     }
 
     VerifiedDeviceAdmission adapter(Realm realm) { return new VerifiedDeviceAdmission(deviceClient, database, CLOCK, realm.epoch(), reader, origins, grants, pseudonyms); }
+    void useBenchmarkLedgerTimeout(Duration timeout) {
+        deviceClient.close();
+        deviceClient = MONGO.ledgerWriterWithTimeout(database, timeout);
+    }
     VerifiedDeviceAdmission.Ticket stage(VerifiedDeviceAdmission adapter, Event event) {
         Signed observation = signObservation(event, observation(event));
         return adapter.stage(event.sourceProof, event.sourcePayload, observation.proof, observation.payload, event.raw, event.enriched);
@@ -322,7 +349,7 @@ class VerifiedDeviceAdmissionIntegrationTest {
         SourceScope scope = scope(realm.originPolicy(), id, time, payload);
         byte[] proof = sign(scope, payload, originKey);
         var origin = (SourceSignatureVerifier.Verified) originVerifier.verify(proof, payload, new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
-        DeviceTestSourceReceipts.admit(ownerClient, database, CLOCK, originVerifier, owner, origin, raw);
+        DeviceTestSourceReceipts.admit(ownerClient, database, CLOCK, originVerifier, owner, origin, raw, sourceReceiptCapacity);
         Map<String, Object> features = new LinkedHashMap<>(); FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES.forEach(name -> features.put(name, 0));
         var enriched = new TransactionEnrichedEventMapper().toAttestedEvent(raw, new EnrichedTransactionFeatures(features));
         var publication = enricher.prepareEnrichedPublication(raw, enriched);
