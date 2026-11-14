@@ -32,7 +32,7 @@ interface DeviceObservationStore {
                                             String deviceToken);
 
     enum StageResult { CREATED, DUPLICATE }
-    /** EXISTING means a verified replay with its committed candidate and occurrence both still present. */
+    /** EXISTING means the committed candidate and occurrence both passed one snapshot-consistent replay check. */
     enum CommitStatus { COMMITTED, EXISTING, WAITING_FOR_SEAL, WAITING_FOR_EARLIER_EVENT, QUARANTINED }
 
     /** Aggregate only: deliberately contains no institution, source, event, customer, or device identity. */

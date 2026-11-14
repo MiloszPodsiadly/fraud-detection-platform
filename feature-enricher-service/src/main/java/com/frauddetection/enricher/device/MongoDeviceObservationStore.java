@@ -351,7 +351,15 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 throw terminal("CANDIDATE_MISSING");
             }
             if ("COMMITTED".equals(candidate.getString("status"))) {
-                return existing(id, candidate);
+                // Re-read the committed candidate and its occurrence at one snapshot point. The
+                // earlier lookup selects this fast path only; it is not replay evidence.
+                return transaction(session -> {
+                    Document committedCandidate = candidates.find(session, eq("_id", id)).first();
+                    if (committedCandidate == null) {
+                        throw terminal("CANDIDATE_MISSING");
+                    }
+                    return existing(session, id, committedCandidate);
+                });
             }
             if ("QUARANTINED".equals(candidate.getString("status"))) {
                 requireCandidateStateIntegrity(candidate);
@@ -779,20 +787,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     }
 
     private CommitResult existing(String id) {
-        Document persisted = occurrences.find(eq("_id", id)).first();
-        if (persisted == null) {
-            throw terminal("OCCURRENCE_MISSING");
-        }
-        Document candidate = candidates.find(eq("_id", id)).first();
-        return existingResult(null, candidate, persisted);
-    }
-
-    private CommitResult existing(String id, Document candidate) {
-        Document persisted = occurrences.find(eq("_id", id)).first();
-        if (persisted == null) {
-            throw terminal("OCCURRENCE_MISSING");
-        }
-        return existingResult(null, candidate, persisted);
+        return transaction(session -> existing(session, id));
     }
 
     private CommitResult existing(ClientSession session, String id) {

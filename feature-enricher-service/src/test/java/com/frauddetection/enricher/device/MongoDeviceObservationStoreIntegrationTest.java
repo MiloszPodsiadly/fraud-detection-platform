@@ -5,13 +5,18 @@ import com.frauddetection.enricher.device.DeviceObservationStore.CommitStatus;
 import com.frauddetection.enricher.device.DeviceObservationStore.CoverageSeal;
 import com.frauddetection.enricher.device.DeviceObservationStore.Observation;
 import com.frauddetection.enricher.device.DeviceObservationStore.StageResult;
+import com.mongodb.ConnectionString;
 import com.mongodb.ExplainVerbosity;
+import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.IndexOptions;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
+import com.mongodb.event.CommandSucceededEvent;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,11 +35,15 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static com.mongodb.client.model.Filters.eq;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -108,6 +117,80 @@ class MongoDeviceObservationStoreIntegrationTest {
         Observation sameTransaction = observation(INSTITUTION, CUSTOMER, DEVICE, '3', '2', 2, 1, A_TIME);
         assertThatThrownBy(() -> store.stage(sameTransaction)).hasMessage("DEVICE_STORE_IDENTITY_CONFLICT");
         assertThat(count("device_observation_candidates")).isEqualTo(1);
+    }
+
+    @Test
+    void replayDoesNotUseCandidateRemovedAfterInitialCommittedRead() throws Exception {
+        Observation input = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
+        assertThat(store.stage(input)).isEqualTo(StageResult.CREATED);
+        store.seal(seal(INSTITUTION, 1, B_TIME, 1));
+        assertThat(store.commit(INSTITUTION, SOURCE, input.sourceEventKey()).status()).isEqualTo(CommitStatus.COMMITTED);
+
+        String id = DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, input.sourceEventKey());
+        CountDownLatch candidateRead = new CountDownLatch(1);
+        CountDownLatch resumeReplay = new CountDownLatch(1);
+        Set<Integer> candidateFindRequests = ConcurrentHashMap.newKeySet();
+        CommandListener listener = new CommandListener() {
+            @Override
+            public void commandStarted(CommandStartedEvent event) {
+                if (!"find".equals(event.getCommandName())) return;
+                var collection = event.getCommand().get("find");
+                var filter = event.getCommand().get("filter");
+                if (collection != null && collection.isString()
+                        && "device_observation_candidates".equals(collection.asString().getValue())
+                        && filter != null && filter.isDocument()
+                        && filter.asDocument().get("_id") != null
+                        && filter.asDocument().get("_id").isString()
+                        && id.equals(filter.asDocument().get("_id").asString().getValue())) {
+                    candidateFindRequests.add(event.getRequestId());
+                }
+            }
+
+            @Override
+            public void commandSucceeded(CommandSucceededEvent event) {
+                if (!candidateFindRequests.remove(event.getRequestId())) return;
+                candidateRead.countDown();
+                try {
+                    if (!resumeReplay.await(20, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting to resume committed replay");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("interrupted while coordinating committed replay", exception);
+                }
+            }
+
+            @Override
+            public void commandFailed(com.mongodb.event.CommandFailedEvent event) {
+                candidateFindRequests.remove(event.getRequestId());
+            }
+        };
+        MongoClient replayClient = MongoClients.create(MongoClientSettings.builder()
+                .applyConnectionString(new ConnectionString(MONGO.getReplicaSetUrl(databaseName)))
+                .addCommandListener(listener)
+                .build());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            MongoDeviceObservationStore replayStore = new MongoDeviceObservationStore(
+                    replayClient, databaseName, Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH,
+                    DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS);
+            Future<DeviceObservationStore.CommitResult> replay = executor.submit(
+                    () -> replayStore.commit(INSTITUTION, SOURCE, input.sourceEventKey()));
+
+            assertThat(candidateRead.await(20, TimeUnit.SECONDS)).isTrue();
+            assertThat(client.getDatabase(databaseName).getCollection("device_observation_candidates")
+                    .deleteOne(eq("_id", id)).getDeletedCount()).isEqualTo(1);
+            assertThat(count("device_occurrences")).isEqualTo(1);
+            resumeReplay.countDown();
+
+            assertThatThrownBy(replay::get)
+                    .hasCauseInstanceOf(IllegalStateException.class)
+                    .hasRootCauseMessage("DEVICE_STORE_CANDIDATE_MISSING");
+        } finally {
+            resumeReplay.countDown();
+            executor.shutdownNow();
+            replayClient.close();
+        }
     }
 
     @Test
