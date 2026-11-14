@@ -8,7 +8,7 @@ Status: open PR #240; the branch is not synchronized with `master`. This reposit
 
 Keep Device evidence behind three separate authorities: transaction source, Device observation, and source-population coverage. Existing transaction-source authority does not grant Device binding or history access. Implement a test-only private path that verifies those authorities, commits an immutable pre-event snapshot, and permits a diagnostic read only after the actual SCORED occurrence is published and matched. Keep Device admission and scoring disabled in production.
 
-This repository record was written from checked-out code and tests. The Library scope, independent reviewer note, institutional masterplan R2, and an approved architecture decision were not found locally. Google Drive searches for the named records returned `Unknown tool({"name":"google_drive.search"})`. The canonical masterplan has not been edited. A reviewer must reconcile those sources before institutional approval.
+This repository record was written from checked-out code and tests. The canonical institutional masterplan and related approval records were not verified as part of this PR. Independent owner review and reconciliation are required before any institutional or production authorization. The canonical masterplan has not been edited.
 
 ## Authority boundaries
 
@@ -60,9 +60,20 @@ The outer `TransactionScoredEvent` remains version 2. Strict ML evidence XOR/omi
 | Public Engine Intelligence change | Blocked | Current nested v2 is unchanged. Any public Device result needs a separate contract and consumer decision. |
 | Fraud-score influence | Blocked | Device evidence does not affect Rules/ML/Velocity, fraud score, risk level, alerts, cases, feedback or recommendations. |
 | Device publication/recovery | Blocked | The existing source recovery path remains in use. No Device exact-payload outbox or public producer exists; the historical exact-payload NO-GO remains in force. |
-| Capacity and operations | Partial local Stage A measurement | Stage A was measured at 100 and 500 history members; Stage A at 1,000, the 10,000/25,000 high-density limits, contention, production capacity, alerting, paging and SLOs remain `NOT MEASURED`. Stage B has separate local 100/500/1,000-member measurements dated 2026-11-13. |
+| Capacity and operations | Partial local measurements only | Stage A was measured at 100 and 500 history members; Stage A at 1,000, the 10,000/25,000 high-density limits, contention, production capacity, alerting, paging and SLOs remain `NOT MEASURED`. Stage B has separate local 100/500/1,000-member measurements dated 2026-11-13. Neither stage's local measurements establish a production SLO. |
 
-The exact-payload gate remains documented in [Device delivery and recovery](device_risk_exact_payload_delivery_gate.md). Merchant admission, graph work, a future Engine Intelligence version and later recommendation phases remain separate decisions.
+The exact-payload gate remains documented in [Device delivery and recovery](device_risk_exact_payload_delivery_gate.md). Merchant admission, graph work, a future Engine Intelligence version and later recommendation phases remain separate decisions. Committed-candidate replay now verifies the candidate and occurrence in one Mongo snapshot transaction; the replay-specific latency impact has not been measured.
+
+### Future activation evidence checklist
+
+Production activation remains **NO-GO** until an independent owner reviews and records evidence for every item below. The current local Stage A measurements cover only 100 and 500 history members (at 500, commit p95/p99 was 216.839/286.730 ms); Stage A at 1,000, 10,000 and 25,000 members and production SLOs remain `NOT MEASURED`. The 5-second reader validation budget is soft and does not bound an in-flight operation or total request wall-clock time.
+
+- Complete Stage A measurements at 1,000, 10,000 and 25,000 members, including concurrent writes, saturation, write conflicts, retries and unknown commit acknowledgements.
+- Record Mongo index readiness, query plans, documents/keys examined, rows returned, source read amplification, and p50/p95/p99 latency for the admitted workload.
+- Measure peak process/container memory and define bounded wall-clock behavior at the API boundary, including slow and unavailable dependencies.
+- Approve production Mongo permissions, startup/migration procedures, monitoring, alerting, paging, rollback and operational ownership.
+- Independently verify source authority, population completeness, key custody/rotation/revocation, privacy purpose, retention/erasure and data-owner approvals.
+- Reconcile the evidence with the canonical institutional masterplan and obtain explicit owner authorization before considering either Device flag for production.
 
 ## Verification evidence
 
