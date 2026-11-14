@@ -22,7 +22,9 @@ Two distinct integrity records protect history membership. The existing Stage A 
 
 This protection detects loss only while at least one sealed anchor and the application integrity key remain trusted. A database administrator able to erase every representation, including anchors, or compromise of the integrity key is outside this guarantee. Anchors do not prove upstream population completeness; the signed population claim still cannot prove that the source omitted nothing. Existing databases must pass the exact strict schema and index guard for the new collection. There is no startup migration or validator repair; any owner-run migration/backfill must derive anchors from independently verified original seal/source artifacts. Where those artifacts are unavailable, the store must fail closed rather than reconstruct a completeness claim from surviving rows.
 
-The bounded history scan returns unavailable above 1,000 rows or after its five-second end-to-end budget. Missing staged facts return PENDING; missing, incomplete, expired, revoked, inconsistent or unavailable facts fail closed.
+The bounded history scan returns unavailable above 1,000 rows or when its soft five-second logical validation budget is exceeded. The reader checks the budget between synchronous source and Mongo operations; it cannot interrupt an operation already in flight, so this is not a five-second wall-clock request deadline. A slow dependency can make the total request exceed five seconds before the next check returns `UNAVAILABLE`. Missing staged facts return PENDING; missing, incomplete, expired, revoked, inconsistent or unavailable facts fail closed.
+
+Stage A replay and Stage B diagnostic authorization are separate decisions. A commit replay returns `EXISTING` only when both the committed candidate and its current, unexpired occurrence are present and valid. A missing candidate returns `CANDIDATE_MISSING`, even if an occurrence remains; missing or expired occurrences cannot be treated as a successful replay. Stage B additionally requires the exact initially published SCORED event binding and current source/Device authority. A SCORED binding alone does not authorize a new Stage A commit or Device scoring.
 
 ## Capacity and query budget
 
@@ -34,9 +36,19 @@ These limits serve different purposes and are not interchangeable:
 | Persisted Stage A device/customer history | 10,000 / 25,000 rows | Ledger bounds used while creating immutable evidence |
 | Persisted evidence observations | 25,000 | Evidence representation bound |
 | Private reader verification cap | 1,000 members per queried representation | Every observation, occurrence and candidate set must fit and match exactly; 1,001 returns `UNAVAILABLE` |
-| Reader time and Mongo operation budget | 5 seconds | End-to-end verification budget; Mongo client timeout must be positive and no greater than this limit |
+| Reader validation budget | 5 seconds | Soft/logical fail-closed checks between operations; not a hard end-to-end request deadline |
+| Mongo client timeout | At most 5 seconds | Per-client-operation ceiling; it does not bound the sum of sequential source and Mongo operations |
 
-Stage A checks sealed anchors with the `history_member_*_window` indexes and uses the customer/device window indexes on observations and occurrences. The private reader queries the device/customer union across observations, occurrences and candidates; MongoDB sorts by `eventTime` and `sourceEvent` where the selected index supports it. The `MAX + 1` read detects overflow before interpreting a truncated set. Startup remains read-only for an existing schema; it does not create or repair indexes and rejects a schema missing the anchor collection, strict validator or required indexes. The opt-in Testcontainers benchmark records actual query plans and examined rows for all four collections, but only Stage A reads the anchor collection. The benchmark command is:
+Stage A reads the device/customer observation union with one indexed `$or` query, then reads anchors, occurrences and committed candidates with the exact membership filters. It sorts customer-matched observation rows in Java and does not request a MongoDB sort. The four actual Stage A query plans on 2026-11-13 were:
+
+| Stage A query | 100 members | 500 members |
+| --- | --- | --- |
+| Observation device/customer union | `observation_device_window`; 100 documents / 100 keys | `observation_customer_window`, `observation_device_window`; 500 documents / 1,000 keys |
+| Sealed anchors | `history_member_device_window`; 100 documents / 100 keys | `history_member_customer_window`, `history_member_device_window`; 500 documents / 1,000 keys |
+| Occurrences | `occurrence_device`; 100 documents / 100 keys | `occurrence_customer_window`, `occurrence_device`; 500 documents / 1,000 keys |
+| Committed candidates | `candidate_status_event_source_event`; 100 documents / 100 keys | `candidate_customer_event_status_sequence`, `candidate_device_window`; 500 documents / 1,000 keys |
+
+Each plan returned exactly the profile's member count and had no in-memory `SORT` or `COLLSCAN`. Stage A checks sealed anchors with the `history_member_*_window` indexes. The private reader queries the device/customer union across observations, occurrences and all matching candidates; `MAX + 1` detects overflow before interpreting a truncated set. Startup remains read-only for an existing schema; it does not create or repair indexes and rejects a schema missing the anchor collection, strict validator or required indexes. The opt-in Testcontainers benchmark explains Stage A's four actual query shapes and Stage B observations/occurrences/all matching candidates separately. It reports index names, rows returned, keys and documents examined, in-memory sort, and collection scan. Stage B intentionally includes every matching candidate so staged, quarantined, or expired candidates reach the completeness checks rather than being filtered out. Only Stage A reads the anchor collection. The benchmark command is:
 
 ```powershell
 mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfraud.device-risk.performance=true" -pl feature-enricher-service -am "-Dtest=PrivateDeviceDiagnosticReaderIntegrationTest#benchmarksAuthenticatedPrivateDiagnosticAtOneHundredFiveHundredAndOneThousandMembers" test
@@ -64,7 +76,7 @@ Average Mongo read commands and authorization revalidations per evaluation:
 | 1,000 | 1 | 2.0 / 4.0 / 4.0 / 0.0 | 8.0 / 8.0 / 8.0 / 8.0 | 2.0 | 2,000.0 / 2,000.0 |
 | 1,000 | 2 | 2.0 / 4.0 / 4.0 / 0.0 | 8.0 / 8.0 / 8.0 / 8.0 | 2.0 | 2,000.0 / 2,000.0 |
 
-The measured query plans used indexes and had no collection scan or in-memory sort. Observations, occurrences and anchors examined 100, 500 and 1,000 rows at the matching fixture sizes. Candidate reads used candidate_status_event_source_event at 100 and 500 (100 and 601 documents examined), then candidate_device_window plus candidate_customer_window at 1,000 (1,000 documents examined). Stage B issued zero anchor reads by design.
+The 2026-11-13 Stage B profile used indexed observation, occurrence and candidate reads and issued zero anchor reads by design. The candidate filter has since been aligned with the production membership predicate so staged, quarantined and expired rows are not filtered out before completeness checks; its explain uses the same shared filter and expects the customer/device window indexes. The earlier candidate-plan details from the 100/500/1,000 timing run are historical and are not claimed as fresh execution statistics for this corrected filter. No Stage B performance profile was rerun after that query-shape correction.
 
 The earlier unbatched run on this same local fixture had p95 above five seconds at 500 and 1,000 members, with every evaluation at those sizes returning UNAVAILABLE. The reader now resolves each history's exact ENRICHED, RAW, receipt and identity bindings with bounded indexed reads in a fresh source snapshot on each of the two verification passes. It still checks every member's receipt policy, lineage binding, scope, grant and epoch, and does not reuse authorization between passes. Historical candidates receive their MAC, state, epoch and expiry checks once per pass. HMAC and SHA-256 digest/UTF-8 state is reused only within the calling thread, preserving each protocol's existing length-prefixed representation and strict pseudonym-input validation. In this latest run, 500-member p95 was 232.213 ms at concurrency 1 and 440.096 ms at concurrency 2; 1,000-member p95 was 567.246 ms and 867.731 ms respectively. All sizes remained below the benchmark's 1,000 ms threshold with zero UNAVAILABLE results. Other JVM workloads were active on the local workstation during the run, so the concurrency-2 figures are noisy. These are local test-fixture measurements, not production capacity or SLO evidence; the configured 1,000-member cap remains unchanged.
 
@@ -77,8 +89,8 @@ The test proves three separate identities against authenticated Mongo:
 | Principal | Access |
 | --- | --- |
 | `scored_writer` | Existing source read path and scored outbox find/insert/update required to prepare, claim and confirm publication |
-| `source_diagnostic_reader` | Source identity/receipt/RAW/ENRICHED reads and scored-occurrence find; no source or outbox writes |
-| `device_reader` | `find`, `listIndexes` on the five Device read collections and database `listCollections`; no writes, source access, fences or schema operations |
+| `source_diagnostic_reader` | Database `listCollections`; `find` on `source_admission_identities`, `source_admission_receipts`, `source_lineage_raw`, `source_lineage_enriched`, and `source_scored_occurrences`; `listIndexes` on `source_lineage_raw`, `source_lineage_enriched`, `source_lineage_raw_counts`, `source_lineage_enriched_counts`, `source_scored_occurrences`, and `source_scored_occurrence_counts`; no other effective privilege |
+| `device_reader` | Database `listCollections`; `find` and `listIndexes` on `device_occurrences`, `device_observation_candidates`, `device_source_coverage`, `device_observations`, and `device_operational_revocation_tombstones`; no writes, source access, anchors, fences, or schema operations |
 
 Both private readers check the authenticated principal and the complete allowed privilege set at construction. They reject extra actions, databases or collections. The code path does not construct a reader with an owner or writer client.
 
@@ -106,7 +118,7 @@ Targeted integration command:
 mvn "-Dmaven.repo.local=C:\Users\mpods\IdeaProjects\fraud-detection-platform\.m2repo" -pl feature-enricher-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=PrivateDeviceDiagnosticReaderIntegrationTest" test
 ```
 
-On 2026-11-13 this finished **BUILD SUCCESS; 7 tests, 0 failures, 0 errors, 1 skipped**; the single skip is the explicitly opt-in performance benchmark, which is run separately. The pre-existing startup guard also passed in the targeted regression batch, so attempted production activation remains rejected.
+On 2026-11-13 the focused suite finished **BUILD SUCCESS; 11 tests, 0 failures, 0 errors, 1 skipped**; the single skip is the explicitly opt-in Stage B performance benchmark, which is run separately. The combined Stage A/Stage B/store regression batch on 2026-11-13 finished **BUILD SUCCESS; 68 tests, 0 failures, 0 errors, 2 explicitly opt-in skips**. The broader targeted regression selection on 2026-11-14 finished **BUILD SUCCESS; 236 tests, 0 failures, 0 errors, 3 opt-in skips**. The startup guard also passed in the targeted batch, so attempted production activation remains rejected.
 
 The immutable Stage A corruption case returns `DEVICE_STORE_CORRUPT_SNAPSHOT` before attempting a stale identity read. The shared policy, mapper, engine, runtime graph and reason-code regression selection ran **28 tests, 0 failures, 0 errors, 0 skipped**. Stage A schema, identity and recovery evidence is recorded in [verified admission](device_verified_admission.md).
 

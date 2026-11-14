@@ -74,7 +74,8 @@ Risk scoring modes:
 
 Device Risk has a test-only verified source admission path and private diagnostic reader. They are not Spring beans,
 public endpoints, public Kafka producers, or part of the running scoring path. Admission and scoring activation stay
-disabled; attempts to enable them fail startup. The feature does not change Rules/ML scores, alerts, fraud cases,
+disabled; `fraud.device-risk.admission.enabled=false` and `fraud.scoring.engines.device.enabled=false`; attempts to enable
+them fail startup. The feature does not change Rules/ML scores, alerts, fraud cases,
 recommendations, or payment outcomes.
 
 Integration tests use disposable source, Device, and coverage signers with authenticated Mongo and Kafka. They do not
@@ -86,7 +87,7 @@ custody. Simulator and replay-generator Device metadata remains `SYNTHETIC_UNTRU
 | IMPLEMENTED | Test-only verified admission and private diagnostic read; no production runtime integration. |
 | TEST EVIDENCE | Disposable signers and authenticated Mongo/Kafka tests; not proof of institutional source completeness. |
 | DISABLED BY DESIGN | Admission and scoring flags default off and fail startup when enabled. |
-| OPEN PRODUCTION GATES | Real issuer/population evidence, retention approval, key custody, access controls, recovery, and measured load. |
+| OPEN PRODUCTION GATES | Real issuer/population evidence, retention approval, key custody, access controls, recovery, and production capacity/SLO evidence. Local Stage A 100/500-member profiles do not establish production capacity; higher-density profiles and production SLOs remain unmeasured. |
 
 See [verified admission](docs/architecture/device_verified_admission.md),
 [private diagnostics](docs/architecture/device_private_diagnostics.md),
