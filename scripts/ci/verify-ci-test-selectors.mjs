@@ -40,7 +40,11 @@ export function validateCiTestSelectors({ suites, workflows, javaTestClasses, ex
   for (const workflow of workflows) {
     for (const command of collectWorkflowRunCommands(workflow.source)) {
       for (const selector of extractMavenTestSelectors(command)) {
-        for (const classSelector of selector.split(",").map((entry) => entry.trim()).filter(Boolean)) {
+        const classSelectors = selector.split(",").map((entry) => entry.trim());
+        if (classSelectors.some((entry) => entry.length === 0)) {
+          failures.push(`${workflow.path} Maven -Dtest: empty class selector`);
+        }
+        for (const classSelector of classSelectors.filter(Boolean)) {
           validateJavaSelector(classSelector, `${workflow.path} Maven -Dtest`, classes, failures);
         }
       }
@@ -84,9 +88,19 @@ export function collectWorkflowRunCommands(source) {
 
 export function extractMavenTestSelectors(command) {
   const selectors = [];
-  const pattern = /(?:^|\s)-Dtest\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+))/g;
+  const pattern = /(?:^|\s)(?:"(-Dtest(?:=[^"]*)?)"(?=$|\s)|'(-Dtest(?:=[^']*)?)'(?=$|\s)|(-Dtest(?:=(?:"[^"]*"|'[^']*'|[^\s"']*))?)(?=$|\s))/g;
   for (const match of command.matchAll(pattern)) {
-    selectors.push(match[1] ?? match[2] ?? match[3] ?? "");
+    const argument = match[1] ?? match[2] ?? match[3] ?? "";
+    const equalsIndex = argument.indexOf("=");
+    if (equalsIndex < 0) {
+      selectors.push("");
+      continue;
+    }
+    let value = argument.slice(equalsIndex + 1);
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    selectors.push(value);
   }
   return selectors;
 }
