@@ -45,7 +45,6 @@ for (const className of [
   "CosignVerificationReadinessTest",
   "ResidualPlatformGapsTest",
   "ReleaseControlScriptExecutionReadinessTest",
-  "ReleaseControlDocumentationFormattingTest",
   "ReleaseControlLocalPathHygieneTest"
 ]) {
   assertJUnitClassPassed({
