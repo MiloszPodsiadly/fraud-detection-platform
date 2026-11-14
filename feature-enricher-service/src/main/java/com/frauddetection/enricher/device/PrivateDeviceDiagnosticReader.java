@@ -11,6 +11,7 @@ import org.bson.conversions.Bson;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Projections.include;
@@ -21,17 +22,17 @@ final class PrivateDeviceDiagnosticReader {
     static final String AUDIENCE = "device-diagnostics-private";
     static final Set<String> COLLECTIONS = Set.of("device_occurrences", "device_observation_candidates", "device_source_coverage",
             "device_observations", "device_operational_revocation_tombstones");
-    private static final int MAX_VERIFIED_HISTORY_MEMBERS = 1_000;
-    private static final Bson OBSERVATION_HISTORY_PROJECTION = include("_id", "schemaVersion", "identityVersion", "sourceIssuer",
+    static final int MAX_VERIFIED_HISTORY_MEMBERS = 1_000;
+    static final Bson OBSERVATION_HISTORY_PROJECTION = include("_id", "schemaVersion", "identityVersion", "sourceIssuer",
             "sourceEpoch", "institution", "source", "sourceEvent", "customer", "device", "keyVersion", "eventTime", "expireAt",
             "provenance", "provenanceCommitment", "membershipIntegrityCommitment");
-    private static final Bson OCCURRENCE_HISTORY_PROJECTION = include("_id", "schemaVersion", "identityVersion", "sourceIssuer",
+    static final Bson OCCURRENCE_HISTORY_PROJECTION = include("_id", "schemaVersion", "identityVersion", "sourceIssuer",
             "sourceEpoch", "institution", "source", "sourceEvent", "transaction", "customer", "device", "keyVersion", "sequence",
             "eventTime", "sourceObservedAt", "payloadCommitment", "evidenceCommitment", "provenance", "provenanceCommitment",
             "candidateIntegrityCommitment", "membershipIntegrityCommitment", "stageACommitment", "snapshotIntegrityCommitment",
             "populationCommitment", "coverageCommitment", "coverageAuthority", "coverageStart", "expireAt",
             "historyMembershipCount", "historyMembershipCommitment");
-    private static final Bson CANDIDATE_HISTORY_PROJECTION = include("_id", "schemaVersion", "identityVersion", "sourceIssuer",
+    static final Bson CANDIDATE_HISTORY_PROJECTION = include("_id", "schemaVersion", "identityVersion", "sourceIssuer",
             "sourceEpoch", "institution", "source", "sourceEvent", "transaction", "customer", "device", "keyVersion", "sequence",
             "eventTime", "sourceObservedAt", "payloadCommitment", "provenance", "provenanceCommitment", "candidateIntegrityCommitment",
             "candidateStateIntegrityCommitment", "status", "terminalReason", "terminalExpireAt");
@@ -48,6 +49,10 @@ final class PrivateDeviceDiagnosticReader {
     private final Runnable afterSnapshotRead;
     private final Runnable afterHistoricalGrantVerification;
     private final Runnable afterHistoricalCoverageVerification;
+    private final Runnable afterInitialSourceLookup;
+    private final Runnable afterMongoSnapshotRead;
+    private final Runnable afterFinalSourceBinding;
+    private final LongSupplier nanoTime;
     private final DeviceRiskSignalPolicy policy = new DeviceRiskSignalPolicy();
 
     PrivateDeviceDiagnosticReader(MongoClient client, String database, ReadGrant grant, MongoSourceLineage source,
@@ -72,11 +77,24 @@ final class PrivateDeviceDiagnosticReader {
                                   SourceOccurrenceAccess scored, DeviceAssertionVerifier verifier, DevicePseudonyms pseudonyms,
                                   Clock clock, Runnable afterSnapshotRead, Runnable afterHistoricalGrantVerification,
                                   Runnable afterHistoricalCoverageVerification) {
+        this(client, database, grant, source, scored, verifier, pseudonyms, clock, afterSnapshotRead,
+                afterHistoricalGrantVerification, afterHistoricalCoverageVerification, () -> { }, () -> { }, () -> { }, System::nanoTime);
+    }
+
+    PrivateDeviceDiagnosticReader(MongoClient client, String database, ReadGrant grant, MongoSourceLineage source,
+                                  SourceOccurrenceAccess scored, DeviceAssertionVerifier verifier, DevicePseudonyms pseudonyms,
+                                  Clock clock, Runnable afterSnapshotRead, Runnable afterHistoricalGrantVerification,
+                                  Runnable afterHistoricalCoverageVerification, Runnable afterInitialSourceLookup,
+                                  Runnable afterMongoSnapshotRead, Runnable afterFinalSourceBinding, LongSupplier nanoTime) {
         this.client = Objects.requireNonNull(client); this.grant = Objects.requireNonNull(grant); this.source = Objects.requireNonNull(source);
         this.scored = Objects.requireNonNull(scored); this.verifier = Objects.requireNonNull(verifier); this.pseudonyms = Objects.requireNonNull(pseudonyms);
         this.clock = Objects.requireNonNull(clock); this.afterSnapshotRead = Objects.requireNonNull(afterSnapshotRead);
         this.afterHistoricalGrantVerification = Objects.requireNonNull(afterHistoricalGrantVerification);
         this.afterHistoricalCoverageVerification = Objects.requireNonNull(afterHistoricalCoverageVerification);
+        this.afterInitialSourceLookup = Objects.requireNonNull(afterInitialSourceLookup);
+        this.afterMongoSnapshotRead = Objects.requireNonNull(afterMongoSnapshotRead);
+        this.afterFinalSourceBinding = Objects.requireNonNull(afterFinalSourceBinding);
+        this.nanoTime = Objects.requireNonNull(nanoTime);
         this.epoch = new DeviceEpoch(grant.scope().sourceIssuer(), grant.scope().sourceEpoch());
         if (database == null || !database.matches("[a-z][a-z0-9_]{0,63}") || pseudonyms.version() != grant.pseudonymVersion()) { throw unauthorized(); }
         db = client.getDatabase(database).withReadConcern(ReadConcern.MAJORITY).withReadPreference(ReadPreference.primary());
@@ -87,14 +105,17 @@ final class PrivateDeviceDiagnosticReader {
 
     Result evaluate(FactReference fact, SourceOccurrenceAccess.Reference reference) {
         if (fact == null || reference == null) { return Result.of(Outcome.DENIED); }
-        long started = System.nanoTime();
+        long started = nanoTime.getAsLong();
         try {
             SourceLineage authorization = source.enrichedBinding(fact.receiptId(), fact.rawCommitment(), fact.enrichedCommitment());
+            afterInitialSourceLookup.run();
+            if (!withinValidationBudget(started)) { return Result.of(Outcome.UNAVAILABLE); }
             if (authorization.state() != SourceLineage.State.VERIFIED) {
                 return Result.of(authorization.state() == SourceLineage.State.UNAVAILABLE ? Outcome.UNAVAILABLE : Outcome.DENIED);
             }
             if (!authorizedSource(authorization.source())) { return Result.of(Outcome.DENIED); }
             SourceScoredOccurrence occurrence = scored.find(authorization, reference).orElse(null);
+            if (!withinValidationBudget(started)) { return Result.of(Outcome.UNAVAILABLE); }
             if (!exactScore(occurrence, authorization, reference)) { return Result.of(Outcome.DENIED); }
             String institution = pseudonyms.institution(occurrence.source().institution());
             String sourceCode = DevicePseudonyms.sourceCode(occurrence.source().source());
@@ -106,22 +127,30 @@ final class PrivateDeviceDiagnosticReader {
                 view = read(session, fact, occurrence, id, institution, sourceCode, eventKey, started);
                 session.commitTransaction(); // Read-only transaction; no Device/Source write method is available here.
             }
+            afterMongoSnapshotRead.run();
+            if (!withinValidationBudget(started)) { return Result.of(Outcome.UNAVAILABLE); }
             if (view.outcome != null) { return Result.of(view.outcome); }
-            if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5)
+            if (!withinValidationBudget(started)
                     || !currentHistorySources(view.history, view.historyProvenances, started)
                     || !current(view.row, fact, authorization) || !currentCoverage(view.coverage)) { return Result.of(Outcome.UNAVAILABLE); }
             var evaluation = policy.evaluate(view.evidence);
             afterSnapshotRead.run(); // Deterministic race seam; production constructor supplies a no-op.
+            if (!withinValidationBudget(started)) { return Result.of(Outcome.UNAVAILABLE); }
             if (!stillCurrent(view, occurrence, id, institution, sourceCode, started)) {
                 return Result.of(Outcome.UNAVAILABLE);
             }
             SourceLineage after = source.enrichedBinding(fact.receiptId(), fact.rawCommitment(), fact.enrichedCommitment());
+            afterFinalSourceBinding.run();
             if (after.state() != SourceLineage.State.VERIFIED || !after.source().equals(authorization.source())
                     || !exactScore(scored.find(after, reference).orElse(null), after, reference)
-                    || System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5)) { return Result.of(Outcome.UNAVAILABLE); }
+                    || !withinValidationBudget(started)) { return Result.of(Outcome.UNAVAILABLE); }
             return new Result(evaluation.status() == com.frauddetection.common.events.engine.FraudEngineStatus.UNAVAILABLE
                     ? Outcome.UNAVAILABLE : Outcome.EVALUATED, evaluation);
         } catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE); } // Do not propagate Mongo/proof/identity details.
+    }
+
+    private boolean withinValidationBudget(long started) {
+        return nanoTime.getAsLong() - started <= TimeUnit.SECONDS.toNanos(5);
     }
 
     private View read(ClientSession session, FactReference fact, SourceScoredOccurrence score, String id, String institution,
@@ -180,23 +209,23 @@ final class PrivateDeviceDiagnosticReader {
     }
 
     private History history(ClientSession session, DeviceRiskEvidence evidence, String institution, String sourceCode) {
-        Bson observationFilter = and(epoch.filter(institution, sourceCode), eq("keyVersion", evidence.keyVersion()),
-                gte("eventTime", Date.from(evidence.windowStart())), lt("eventTime", Date.from(evidence.asOf())),
-                gt("expireAt", Date.from(clock.instant())), or(eq("customer", evidence.customerToken()), eq("device", evidence.deviceToken())));
-        Bson candidateFilter = and(epoch.filter(institution, sourceCode), eq("keyVersion", evidence.keyVersion()),
-                gte("eventTime", Date.from(evidence.windowStart())), lt("eventTime", Date.from(evidence.asOf())),
-                or(eq("customer", evidence.customerToken()), eq("device", evidence.deviceToken())));
+        Instant now = clock.instant();
+        Bson observationFilter = DeviceHistoryQueries.retainedMembership(epoch, institution, sourceCode, evidence.keyVersion(),
+                evidence.windowStart(), evidence.asOf(), evidence.customerToken(), evidence.deviceToken(), now);
+        // Keep the candidate read broad: staged, quarantined, and expired matching rows must be detected and fail closed.
+        Bson candidateFilter = DeviceHistoryQueries.membership(epoch, institution, sourceCode, evidence.keyVersion(),
+                evidence.windowStart(), evidence.asOf(), evidence.customerToken(), evidence.deviceToken());
         List<Document> observations = db.getCollection("device_observations").find(session, observationFilter)
                 .projection(OBSERVATION_HISTORY_PROJECTION)
-                .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1)
+                .sort(DeviceHistoryQueries.historySort()).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1)
                 .batchSize(MAX_VERIFIED_HISTORY_MEMBERS + 1).into(new ArrayList<>());
         List<Document> occurrences = db.getCollection("device_occurrences").find(session, observationFilter)
                 .projection(OCCURRENCE_HISTORY_PROJECTION)
-                .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1)
+                .sort(DeviceHistoryQueries.historySort()).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1)
                 .batchSize(MAX_VERIFIED_HISTORY_MEMBERS + 1).into(new ArrayList<>());
         List<Document> candidates = db.getCollection("device_observation_candidates").find(session, candidateFilter)
                 .projection(CANDIDATE_HISTORY_PROJECTION)
-                .sort(new Document("eventTime", 1).append("sourceEvent", 1)).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1)
+                .sort(DeviceHistoryQueries.historySort()).limit(MAX_VERIFIED_HISTORY_MEMBERS + 1)
                 .batchSize(MAX_VERIFIED_HISTORY_MEMBERS + 1).into(new ArrayList<>());
         return new History(observations, occurrences, candidates,
                 withinHistoryLimit(observations.size()) && withinHistoryLimit(occurrences.size())
@@ -287,7 +316,7 @@ final class PrivateDeviceDiagnosticReader {
         return true;
     }
     private boolean currentHistorySources(List<Document> rows, List<DeviceObservationStore.Provenance> provenances, long started) {
-        if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5) || rows.size() > MAX_VERIFIED_HISTORY_MEMBERS
+        if (!withinValidationBudget(started) || rows.size() > MAX_VERIFIED_HISTORY_MEMBERS
                 || rows.size() != provenances.size()) { return false; }
         List<MongoSourceLineage.EnrichedBinding> bindings = new ArrayList<>(rows.size());
         for (DeviceObservationStore.Provenance provenance : provenances) {
@@ -295,7 +324,7 @@ final class PrivateDeviceDiagnosticReader {
                     provenance.enrichedCommitment()));
         }
         List<SourceLineage> lineages = source.enrichedBindings(bindings);
-        if (lineages.size() != rows.size() || System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5)) { return false; }
+        if (lineages.size() != rows.size() || !withinValidationBudget(started)) { return false; }
         for (int index = 0; index < rows.size(); index++) {
             Document row = rows.get(index);
             SourceLineage lineage = lineages.get(index);
@@ -305,11 +334,12 @@ final class PrivateDeviceDiagnosticReader {
                     || !lineage.source().eventTime().equals(row.getDate("eventTime").toInstant())
                     || !verifier.currentStoredObservation(provenance, lineage, row.getInteger("keyVersion"))) { return false; }
             afterHistoricalGrantVerification.run();
+            if (!withinValidationBudget(started)) { return false; }
         }
-        return System.nanoTime() - started <= TimeUnit.SECONDS.toNanos(5);
+        return withinValidationBudget(started);
     }
     private boolean stillCurrent(View view, SourceScoredOccurrence scored, String id, String institution, String sourceCode, long started) {
-        if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(5)) { return false; }
+        if (!withinValidationBudget(started)) { return false; }
         try (ClientSession session = client.startSession()) {
             session.startTransaction(TransactionOptions.builder().readConcern(ReadConcern.SNAPSHOT).readPreference(ReadPreference.primary()).build());
             Document row = db.getCollection("device_occurrences").find(session, eq("_id", id)).first();
@@ -346,7 +376,7 @@ final class PrivateDeviceDiagnosticReader {
                     && !activeRevocation(session, institution, sourceCode, row.getInteger("keyVersion"), row.getString("device"));
             session.commitTransaction();
             return current && currentHistorySources(history.observations(), historyProvenances, started)
-                    && System.nanoTime() - started <= TimeUnit.SECONDS.toNanos(5);
+                    && withinValidationBudget(started);
         } catch (RuntimeException unavailable) { return false; }
     }
     private boolean retained(Document row, DeviceRiskEvidence evidence) {

@@ -18,6 +18,7 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.bson.conversions.Bson;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.testcontainers.kafka.KafkaContainer;
@@ -86,6 +87,88 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     @AfterEach void cleanUp() {
         if (f != null) { f.cleanup(); }
         if (clients != null) { clients.close(); }
+    }
+
+    @Test void occurrenceReaderRejectsUnneededFindPrivileges() {
+        var overprivileged = VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceReader(f.ownerClient, f.database,
+                "source_diagnostic_reader_overprivileged", List.of(new org.bson.Document("resource",
+                        new org.bson.Document("db", f.database).append("collection", "source_enriched_publications"))
+                        .append("actions", List.of("find"))));
+        try {
+            assertThatThrownBy(() -> MongoSourceOccurrenceStore.readOnly(overprivileged, f.database,
+                    "source_diagnostic_reader_overprivileged", f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK,
+                    sourceCipher(), new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("SOURCE_OCCURRENCE_READ_ONLY_PRINCIPAL_REQUIRED");
+        } finally {
+            overprivileged.close();
+        }
+    }
+
+    @Test void stageBExplainsAllMatchingCandidatesWhileStageAFiltersToCommittedLiveCandidates() {
+        Instant asOf = VerifiedDeviceAdmissionIntegrationTest.NOW;
+        Instant windowStart = asOf.minus(Duration.ofDays(30));
+        Bson stageB = DeviceHistoryQueries.membership(f.A.epoch(), "institution-token", "BANK", 1, windowStart, asOf,
+                "customer-token", "device-token");
+        Bson stageA = DeviceHistoryQueries.committedStageAMembership(f.A.epoch(), "institution-token", "BANK", 1,
+                windowStart, asOf, "customer-token", "device-token", asOf);
+        String stageBShape = stageB.toBsonDocument(org.bson.Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        String stageAShape = stageA.toBsonDocument(org.bson.Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry()).toJson();
+
+        assertThat(stageBShape).contains("customer", "device", "keyVersion", "eventTime", "sourceEpoch")
+                .doesNotContain("status", "terminalExpireAt");
+        assertThat(stageAShape).contains("status", "COMMITTED", "terminalExpireAt");
+    }
+
+    @Test void validationBudgetFailsClosedAtSourceHistorySnapshotRebindAndMongoCheckpoints() throws Exception {
+        Instant priorTime = VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(3_600);
+        var prior = f.event(f.A, "budget-prior", "budget-prior-transaction", "customer-1", "budget-device-prior", 1, priorTime);
+        var admission = f.adapter(f.A);
+        var priorTicket = f.stage(admission, prior);
+        var priorSeal = f.coverage(f.A, 1, f.A.start, priorTime);
+        admission.seal(priorTicket, priorSeal.proof(), priorSeal.payload());
+        admission.commit(priorTicket);
+        var priorScore = publish(prior, "initial", "budget-score-prior");
+        admission.bindScored(priorTicket, occurrenceReader, priorScore.reference);
+
+        var current = f.event(f.A, "budget-current", "budget-current-transaction", "customer-1", "budget-device-current", 2,
+                VerifiedDeviceAdmissionIntegrationTest.NOW);
+        var currentTicket = f.stage(admission, current);
+        var currentSeal = f.coverage(f.A, 2, f.A.start, VerifiedDeviceAdmissionIntegrationTest.NOW);
+        admission.seal(currentTicket, currentSeal.proof(), currentSeal.payload());
+        admission.commit(currentTicket);
+        var currentScore = publish(current, "initial", "budget-score-current");
+        admission.bindScored(currentTicket, occurrenceReader, currentScore.reference);
+
+        long overBudget = TimeUnit.SECONDS.toNanos(5) + 1;
+        for (String checkpoint : List.of("initial-source", "history-grant", "between-snapshots", "final-rebind", "mongo-read")) {
+            java.util.concurrent.atomic.AtomicLong logicalTime = new java.util.concurrent.atomic.AtomicLong();
+            Runnable expire = () -> logicalTime.addAndGet(overBudget);
+            var reader = new PrivateDeviceDiagnosticReader(clients.deviceReader, f.database,
+                    readGrant(f.pseudonyms.customer(f.A.institution, "customer-1")), privateSource, occurrenceReader,
+                    new DeviceAssertionVerifier(f.origins, f.grants, VerifiedDeviceAdmissionIntegrationTest.CLOCK), f.pseudonyms,
+                    VerifiedDeviceAdmissionIntegrationTest.CLOCK,
+                    checkpoint.equals("between-snapshots") ? expire : () -> { },
+                    checkpoint.equals("history-grant") ? expire : () -> { }, () -> { },
+                    checkpoint.equals("initial-source") ? expire : () -> { },
+                    checkpoint.equals("mongo-read") ? expire : () -> { },
+                    checkpoint.equals("final-rebind") ? expire : () -> { }, logicalTime::get);
+
+            assertThat(reader.evaluate(fact(current), currentScore.reference).outcome()).as(checkpoint)
+                    .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        }
+
+        var delayedReader = new PrivateDeviceDiagnosticReader(clients.deviceReader, f.database,
+                readGrant(f.pseudonyms.customer(f.A.institution, "customer-1")), privateSource, occurrenceReader,
+                new DeviceAssertionVerifier(f.origins, f.grants, VerifiedDeviceAdmissionIntegrationTest.CLOCK), f.pseudonyms,
+                VerifiedDeviceAdmissionIntegrationTest.CLOCK, () -> { }, () -> { }, () -> { }, () -> {
+                    try { Thread.sleep(5_050); }
+                    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new RuntimeException(interrupted); }
+                }, () -> { }, () -> { }, System::nanoTime);
+        long wallStarted = System.nanoTime();
+        assertThat(delayedReader.evaluate(fact(current), currentScore.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - wallStarted)).isGreaterThanOrEqualTo(5_000);
     }
 
     @Test void publishedScoredFactAuthorizesOnlyExactCompletePreEventSnapshotAndBoundedPredicates() throws Exception {
@@ -200,6 +283,37 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         assertThat(result.evaluation().signals().getFirst().observed()).isNull();
         assertThat(result.evaluation().signals().get(1).status())
                 .isEqualTo(com.frauddetection.common.events.engine.FraudEngineStatus.UNAVAILABLE);
+    }
+
+    @Test void missingCommittedCandidateCannotBeReportedAsExistingAfterAdapterRestart() throws Exception {
+        var event = f.event(f.A, "source-candidate-loss", "transaction-candidate-loss", "customer-1", "device-candidate-loss", 1,
+                VerifiedDeviceAdmissionIntegrationTest.NOW);
+        var admission = f.adapter(f.A);
+        var ticket = f.stage(admission, event);
+        var seal = f.coverage(f.A, 1, f.A.start, VerifiedDeviceAdmissionIntegrationTest.NOW);
+        admission.seal(ticket, seal.proof(), seal.payload());
+        assertThat(admission.commit(ticket).status()).isEqualTo(DeviceObservationStore.CommitStatus.COMMITTED);
+        var scored = publish(event, "initial", "score-candidate-loss");
+        admission.bindScored(ticket, occurrenceReader, scored.reference);
+
+        String id = f.A.epoch().eventId(f.pseudonyms.institution(f.A.institution), DevicePseudonyms.sourceCode("BANK"),
+                f.pseudonyms.event(f.A.institution, event.id()));
+        var candidates = f.ownerClient.getDatabase(f.database).getCollection("device_observation_candidates");
+        assertThat(candidates.deleteOne(com.mongodb.client.model.Filters.eq("_id", id)).getDeletedCount()).isEqualTo(1);
+        assertThat(f.ownerClient.getDatabase(f.database).getCollection("device_occurrences")
+                .find(com.mongodb.client.model.Filters.eq("_id", id)).first()).isNotNull();
+        assertThat(diagnostic.evaluate(fact(event), scored.reference).outcome())
+                .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+
+        var restartedAdmission = f.adapter(f.A);
+        var replayTicket = f.stage(restartedAdmission, event);
+        assertThatThrownBy(() -> restartedAdmission.commit(replayTicket))
+                .hasMessage("DEVICE_STORE_CANDIDATE_MISSING");
+        assertThat(candidates.countDocuments(com.mongodb.client.model.Filters.eq("_id", id))).isZero();
+        assertThat(f.ownerClient.getDatabase(f.database).getCollection("device_occurrences")
+                .countDocuments(com.mongodb.client.model.Filters.eq("_id", id))).isEqualTo(1);
+        assertThat(f.ownerClient.getDatabase(f.database).getCollection("device_history_member_anchors")
+                .countDocuments(com.mongodb.client.model.Filters.eq("_id", id))).isEqualTo(1);
     }
 
     @Test void rescoreAndUnprivilegedPrincipalsCannotReadOrRebindTheInitialOccurrence() throws Exception {
@@ -437,47 +551,62 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         String customer = f.pseudonyms.customer(f.A.institution, current.raw().customerId());
         String device = f.pseudonyms.device(f.A.institution, current.raw().deviceInfo().deviceId());
         Instant asOfInstant = current.raw().transactionTimestamp();
-        Date windowStart = Date.from(asOfInstant.minus(Duration.ofDays(30)));
-        Date asOf = Date.from(asOfInstant);
-        Date now = Date.from(VerifiedDeviceAdmissionIntegrationTest.NOW);
-        var base = com.mongodb.client.model.Filters.and(f.A.epoch().filter(institution, sourceCode),
-                com.mongodb.client.model.Filters.eq("keyVersion", 1),
-                com.mongodb.client.model.Filters.gte("eventTime", windowStart),
-                com.mongodb.client.model.Filters.lt("eventTime", asOf),
-                com.mongodb.client.model.Filters.or(com.mongodb.client.model.Filters.eq("customer", customer),
-                        com.mongodb.client.model.Filters.eq("device", device)));
+        Instant windowStart = asOfInstant.minus(Duration.ofDays(30));
+        Instant now = VerifiedDeviceAdmissionIntegrationTest.NOW;
         var database = f.ownerClient.getDatabase(f.database);
-        var eventOrder = com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent");
-        QueryPlan observations = explain(database.getCollection("device_observations"),
-                com.mongodb.client.model.Filters.and(base, com.mongodb.client.model.Filters.gt("expireAt", now)), eventOrder);
-        QueryPlan occurrences = explain(database.getCollection("device_occurrences"),
-                com.mongodb.client.model.Filters.and(base, com.mongodb.client.model.Filters.gt("expireAt", now)), eventOrder);
-        QueryPlan candidates = explain(database.getCollection("device_observation_candidates"),
-                com.mongodb.client.model.Filters.and(base, com.mongodb.client.model.Filters.eq("status", "COMMITTED"),
-                        com.mongodb.client.model.Filters.gt("terminalExpireAt", now)), eventOrder);
-        QueryPlan anchors = explain(database.getCollection("device_history_member_anchors"),
-                com.mongodb.client.model.Filters.and(base, com.mongodb.client.model.Filters.gt("expireAt", now)), eventOrder);
-        assertThat(observations.indexes()).contains("observation_customer_window", "observation_device_window");
-        assertThat(occurrences.indexes()).contains("occurrence_customer_window", "occurrence_device_window");
-        assertThat(candidates.indexes()).containsAnyOf("candidate_status_event_source_event",
-                "candidate_customer_window", "candidate_device_window");
-        assertThat(anchors.indexes()).contains("history_member_customer_window", "history_member_device_window");
-        assertThat(observations.collectionScan() || occurrences.collectionScan() || candidates.collectionScan()
-                || anchors.collectionScan()).isFalse();
+        var observationFilter = DeviceHistoryQueries.retainedMembership(f.A.epoch(), institution, sourceCode, 1,
+                windowStart, asOfInstant, customer, device, now);
+        var candidateReadFilter = DeviceHistoryQueries.membership(f.A.epoch(), institution, sourceCode, 1,
+                windowStart, asOfInstant, customer, device);
+        var stageACandidateFilter = DeviceHistoryQueries.committedStageAMembership(f.A.epoch(), institution, sourceCode, 1,
+                windowStart, asOfInstant, customer, device, now);
+        var eventOrder = DeviceHistoryQueries.historySort();
+        QueryPlan stageBObservations = explain(database.getCollection("device_observations"), observationFilter,
+                PrivateDeviceDiagnosticReader.OBSERVATION_HISTORY_PROJECTION,
+                PrivateDeviceDiagnosticReader.MAX_VERIFIED_HISTORY_MEMBERS + 1, eventOrder);
+        QueryPlan stageBOccurrences = explain(database.getCollection("device_occurrences"), observationFilter,
+                PrivateDeviceDiagnosticReader.OCCURRENCE_HISTORY_PROJECTION,
+                PrivateDeviceDiagnosticReader.MAX_VERIFIED_HISTORY_MEMBERS + 1, eventOrder);
+        QueryPlan stageBCandidates = explain(database.getCollection("device_observation_candidates"), candidateReadFilter,
+                PrivateDeviceDiagnosticReader.CANDIDATE_HISTORY_PROJECTION,
+                PrivateDeviceDiagnosticReader.MAX_VERIFIED_HISTORY_MEMBERS + 1, eventOrder);
+        QueryPlan stageAAnchors = explain(database.getCollection("device_history_member_anchors"), observationFilter,
+                null, MongoDeviceObservationStore.MAX_HISTORY_MEMBERSHIP_ROWS + 1, eventOrder);
+        QueryPlan stageAOccurrences = explain(database.getCollection("device_occurrences"), observationFilter,
+                null, MongoDeviceObservationStore.MAX_HISTORY_MEMBERSHIP_ROWS + 1, eventOrder);
+        QueryPlan stageACandidates = explain(database.getCollection("device_observation_candidates"), stageACandidateFilter,
+                null, MongoDeviceObservationStore.MAX_HISTORY_MEMBERSHIP_ROWS + 1, eventOrder);
+        assertThat(stageBObservations.indexes()).contains("observation_customer_window", "observation_device_window");
+        assertThat(stageBOccurrences.indexes()).contains("occurrence_customer_window", "occurrence_device_window");
+        assertThat(stageBCandidates.indexes()).containsAnyOf("candidate_customer_window", "candidate_device_window");
+        assertThat(stageAAnchors.indexes()).contains("history_member_customer_window", "history_member_device_window");
+        assertThat(stageAOccurrences.indexes()).contains("occurrence_customer_window", "occurrence_device_window");
+        assertThat(stageACandidates.indexes()).containsAnyOf("candidate_customer_window", "candidate_device_window",
+                "candidate_status_event_source_event");
+        assertThat(List.of(stageBObservations, stageBOccurrences, stageBCandidates, stageAAnchors, stageAOccurrences,
+                stageACandidates).stream().anyMatch(QueryPlan::collectionScan)).isFalse();
+        printQueryPlan("STAGE_B", "observations", historySize, stageBObservations);
+        printQueryPlan("STAGE_B", "occurrences", historySize, stageBOccurrences);
+        printQueryPlan("STAGE_B", "all_candidates", historySize, stageBCandidates);
+        printQueryPlan("STAGE_A", "anchors", historySize, stageAAnchors);
+        printQueryPlan("STAGE_A", "occurrences", historySize, stageAOccurrences);
+        printQueryPlan("STAGE_A", "committed_candidates", historySize, stageACandidates);
+    }
+
+    private void printQueryPlan(String stage, String collection, int historySize, QueryPlan plan) {
         System.out.printf(Locale.ROOT,
-                "DEVICE_PRIVATE_HISTORY_QUERY_PLAN history_members=%d observations_indexes=%s observations_docs_examined=%d observations_sort=%s "
-                        + "occurrences_indexes=%s occurrences_docs_examined=%d occurrences_sort=%s "
-                        + "candidates_indexes=%s candidates_docs_examined=%d candidates_sort=%s "
-                        + "anchors_indexes=%s anchors_docs_examined=%d anchors_sort=%s collection_scan=false%n",
-                historySize, observations.indexes(), observations.documentsExamined(), observations.inMemorySort(),
-                occurrences.indexes(), occurrences.documentsExamined(), occurrences.inMemorySort(),
-                candidates.indexes(), candidates.documentsExamined(), candidates.inMemorySort(),
-                anchors.indexes(), anchors.documentsExamined(), anchors.inMemorySort());
+                "DEVICE_HISTORY_QUERY_PLAN stage=%s collection=%s history_members=%d indexes=%s docs_examined=%d "
+                        + "keys_examined=%d docs_returned=%d in_memory_sort=%s collection_scan=%s%n",
+                stage, collection, historySize, plan.indexes(), plan.documentsExamined(), plan.keysExamined(),
+                plan.documentsReturned(), plan.inMemorySort(), plan.collectionScan());
     }
 
     private QueryPlan explain(com.mongodb.client.MongoCollection<org.bson.Document> collection,
-                              org.bson.conversions.Bson filter, org.bson.conversions.Bson sort) {
-        org.bson.Document explain = collection.find(filter).sort(sort).limit(1_001)
+                              org.bson.conversions.Bson filter, org.bson.conversions.Bson projection,
+                              int limit, org.bson.conversions.Bson sort) {
+        var query = collection.find(filter);
+        if (projection != null) { query.projection(projection); }
+        org.bson.Document explain = query.sort(sort).limit(limit)
                 .explain(ExplainVerbosity.EXECUTION_STATS);
         org.bson.Document queryPlanner = findDocument(explain, "queryPlanner");
         org.bson.Document winningPlan = queryPlanner == null ? null : queryPlanner.get("winningPlan", org.bson.Document.class);
@@ -485,7 +614,11 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         collectPlanIndexes(winningPlan, indexes);
         org.bson.Document stats = findDocument(explain, "executionStats");
         Object examined = stats == null ? null : stats.get("totalDocsExamined");
+        Object keys = stats == null ? null : stats.get("totalKeysExamined");
+        Object returned = stats == null ? null : stats.get("nReturned");
         return new QueryPlan(indexes.stream().distinct().toList(), examined instanceof Number number ? number.longValue() : -1,
+                keys instanceof Number number ? number.longValue() : -1,
+                returned instanceof Number number ? number.longValue() : -1,
                 containsPlanStage(winningPlan, "SORT"), containsPlanStage(winningPlan, "COLLSCAN"));
     }
 
@@ -865,7 +998,8 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private record Published(TransactionScoredEvent event, SourceOccurrenceAccess.Reference reference, byte[] wireBytes) { }
     private record ScoredRecord(TransactionScoredEvent event, byte[] bytes) { }
     private record BenchmarkSample(long elapsedNanos, PrivateDeviceDiagnosticReader.Outcome outcome) { }
-    private record QueryPlan(List<String> indexes, long documentsExamined, boolean inMemorySort, boolean collectionScan) { }
+    private record QueryPlan(List<String> indexes, long documentsExamined, long keysExamined, long documentsReturned,
+                             boolean inMemorySort, boolean collectionScan) { }
     private record MongoClientHandle(com.mongodb.client.MongoClient writer, com.mongodb.client.MongoClient sourceReader,
                                     com.mongodb.client.MongoClient deviceReader) {
         void close() { writer.close(); sourceReader.close(); deviceReader.close(); }

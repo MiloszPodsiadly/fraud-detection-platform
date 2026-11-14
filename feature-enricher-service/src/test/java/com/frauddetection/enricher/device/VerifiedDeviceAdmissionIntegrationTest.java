@@ -100,6 +100,72 @@ class VerifiedDeviceAdmissionIntegrationTest {
         assertThat(count("device_occurrences")).isEqualTo(1);
     }
 
+    @Test void committedReplayRejectsMissingOccurrenceInsteadOfRecreatingHistory() {
+        Event event = event(A, "missing-occurrence", "missing-occurrence-transaction", "customer-1", "missing-occurrence-device", 1, NOW);
+        var first = adapter(A);
+        var ticket = stage(first, event);
+        Signed seal = coverage(A, 1, A.start, NOW);
+        first.seal(ticket, seal.proof, seal.payload);
+        assertThat(first.commit(ticket).status()).isEqualTo(DeviceObservationStore.CommitStatus.COMMITTED);
+
+        String id = rows("device_occurrences").getFirst().getString("_id");
+        ownerClient.getDatabase(database).getCollection("device_occurrences").deleteOne(eq("_id", id));
+        var restarted = adapter(A);
+        var replay = stage(restarted, event);
+        assertThatThrownBy(() -> restarted.commit(replay)).hasMessage("DEVICE_STORE_OCCURRENCE_MISSING");
+        assertThat(ownerClient.getDatabase(database).getCollection("device_observation_candidates")
+                .find(eq("_id", id)).first().getString("status")).isEqualTo("COMMITTED");
+        assertThat(ownerClient.getDatabase(database).getCollection("device_occurrences").countDocuments(eq("_id", id))).isZero();
+        assertThat(ownerClient.getDatabase(database).getCollection("device_history_member_anchors").countDocuments(eq("_id", id))).isEqualTo(1);
+    }
+
+    @Test void committedReplayRejectsTamperedCandidateStateAndExpiredTerminalRetention() {
+        Event event = event(A, "candidate-state-replay", "candidate-state-replay-transaction", "customer-1", "candidate-state-device", 1, NOW);
+        var admission = adapter(A);
+        var ticket = stage(admission, event);
+        Signed seal = coverage(A, 1, A.start, NOW);
+        admission.seal(ticket, seal.proof, seal.payload);
+        assertThat(admission.commit(ticket).status()).isEqualTo(DeviceObservationStore.CommitStatus.COMMITTED);
+
+        String id = rows("device_observation_candidates").getFirst().getString("_id");
+        var candidates = ownerClient.getDatabase(database).getCollection("device_observation_candidates");
+        Document original = candidates.find(eq("_id", id)).first();
+        assertThat(original).isNotNull();
+
+        Document tamperedState = new Document(original).append("candidateStateIntegrityCommitment", "0".repeat(64));
+        candidates.replaceOne(eq("_id", id), tamperedState);
+        assertThatThrownBy(() -> admission.commit(ticket)).hasMessage("DEVICE_STORE_CANDIDATE_STATE_INTEGRITY_INVALID");
+        assertThat(count("device_observations")).isEqualTo(1);
+
+        Document expired = new Document(original).append("terminalExpireAt", Date.from(NOW.minusSeconds(1)));
+        expired.put("candidateStateIntegrityCommitment", DeviceRecordIntegrity.candidateState(pseudonyms, expired));
+        candidates.replaceOne(eq("_id", id), expired);
+        assertThatThrownBy(() -> admission.commit(ticket)).hasMessage("DEVICE_STORE_CANDIDATE_EXPIRED");
+        assertThat(count("device_observations")).isEqualTo(1);
+        assertThat(count("device_occurrences")).isEqualTo(1);
+    }
+
+    @Test void committedReplayRejectsExpiredOccurrenceEvenWhenItsIntegrityIsValid() {
+        Event event = event(A, "expired-occurrence", "expired-occurrence-transaction", "customer-1", "expired-occurrence-device", 1, NOW);
+        var admission = adapter(A);
+        var ticket = stage(admission, event);
+        Signed seal = coverage(A, 1, A.start, NOW);
+        admission.seal(ticket, seal.proof, seal.payload);
+        assertThat(admission.commit(ticket).status()).isEqualTo(DeviceObservationStore.CommitStatus.COMMITTED);
+
+        var occurrences = ownerClient.getDatabase(database).getCollection("device_occurrences");
+        Document occurrence = rows("device_occurrences").getFirst();
+        occurrence.put("expireAt", Date.from(NOW.minusSeconds(1)));
+        occurrence.put("membershipIntegrityCommitment", DeviceRecordIntegrity.membership(pseudonyms, occurrence));
+        occurrence.put("stageACommitment", DeviceSnapshotVersion.commitment(occurrence));
+        occurrence.put("snapshotIntegrityCommitment", DeviceRecordIntegrity.snapshot(pseudonyms, occurrence));
+        occurrences.replaceOne(eq("_id", occurrence.getString("_id")), occurrence);
+
+        assertThatThrownBy(() -> admission.commit(ticket)).hasMessage("DEVICE_STORE_OCCURRENCE_EXPIRED");
+        assertThat(count("device_observations")).isEqualTo(1);
+        assertThat(count("device_occurrences")).isEqualTo(1);
+    }
+
     @Test void conflictingSignedEventOrReusedSequenceCannotReplaceCommittedEvidence() {
         Event e = event(A, "source-1", "txn-1", "customer-1", "device-1", 1, NOW.minusSeconds(1));
         var a = adapter(A); var ticket = stage(a, e); Signed seal = coverage(A, 1, A.start, e.raw.transactionTimestamp());

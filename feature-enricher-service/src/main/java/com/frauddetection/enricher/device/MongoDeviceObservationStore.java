@@ -27,7 +27,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
@@ -59,9 +61,9 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private static final int MAX_COMMIT_ACK_ATTEMPTS = 3;
     private static final int MAX_SEAL_BATCH = 1_000;
     private static final int MAX_PENDING_CANDIDATES = 10_000;
-    private static final int MAX_DEVICE_ROWS = 10_000;
-    private static final int MAX_CUSTOMER_ROWS = 25_000;
-    private static final int MAX_HISTORY_MEMBERSHIP_ROWS = MAX_DEVICE_ROWS + MAX_CUSTOMER_ROWS;
+    static final int MAX_DEVICE_ROWS = 10_000;
+    static final int MAX_CUSTOMER_ROWS = 25_000;
+    static final int MAX_HISTORY_MEMBERSHIP_ROWS = MAX_DEVICE_ROWS + MAX_CUSTOMER_ROWS;
     private static final TransactionOptions TRANSACTION_OPTIONS = TransactionOptions.builder()
             .readConcern(ReadConcern.SNAPSHOT).writeConcern(WriteConcern.MAJORITY).build();
     private final MongoClient client;
@@ -346,25 +348,23 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         try {
             Document candidate = candidates.find(eq("_id", id)).first();
             if (candidate == null) {
-                Document persisted = occurrences.find(eq("_id", id)).first();
-                if (persisted != null && !occurrenceExpired(persisted, clock.instant())) {
-                    return existing(id);
-                }
                 throw terminal("CANDIDATE_MISSING");
             }
-            requireCandidateStateIntegrity(candidate);
-            if (terminalCandidateExpired(candidate, clock.instant())) {
-                throw terminal("CANDIDATE_EXPIRED");
-            }
-            if (hasActiveOperationalRevocation(revocationId(candidate), clock.instant())) {
-                throw terminal("DEVICE_OPERATIONALLY_REVOKED");
-            }
             if ("COMMITTED".equals(candidate.getString("status"))) {
-                return existing(id);
+                return existing(id, candidate);
             }
             if ("QUARANTINED".equals(candidate.getString("status"))) {
+                requireCandidateStateIntegrity(candidate);
+                if (terminalCandidateExpired(candidate, clock.instant())) {
+                    throw terminal("CANDIDATE_EXPIRED");
+                }
+                if (hasActiveOperationalRevocation(revocationId(candidate), clock.instant())) {
+                    throw terminal("DEVICE_OPERATIONALLY_REVOKED");
+                }
                 return quarantined();
             }
+            // Staged candidates are fully re-read and verified in the transaction. Avoid doing
+            // the same MAC and revocation lookup once before opening that transaction.
             return transaction(session -> commitInside(session, id));
         } catch (MongoException exception) {
             Document persisted = safeRead(occurrences, id);
@@ -431,7 +431,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             throw terminal("CANDIDATE_EXPIRED");
         }
         if ("COMMITTED".equals(candidate.getString("status"))) {
-            return existing(session, id);
+            return existing(session, id, candidate);
         }
         if ("QUARANTINED".equals(candidate.getString("status"))) {
             return quarantined();
@@ -485,12 +485,20 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (complete) {
             Bson base = and(scope, eq("keyVersion", version), gte("eventTime", Date.from(windowStart)),
                     lt("eventTime", Date.from(time)), gt("expireAt", Date.from(clock.instant())));
-            List<Document> deviceRows = observations.find(session, and(base, eq("device", device)))
-                    .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
-                    .limit(MAX_DEVICE_ROWS + 1).into(new ArrayList<>());
-            List<Document> customerRows = observations.find(session, and(base, eq("customer", customer)))
-                    .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
-                    .limit(MAX_CUSTOMER_ROWS + 1).into(new ArrayList<>());
+            List<Document> membershipRows = observations.find(session,
+                            DeviceHistoryQueries.observationMembership(base, customer, device))
+                    .projection(DeviceHistoryQueries.observationMembershipProjection())
+                    .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
+            List<Document> deviceRows = new ArrayList<>();
+            List<Document> customerRows = new ArrayList<>();
+            for (Document row : membershipRows) {
+                if (device.equals(row.getString("device"))) { deviceRows.add(row); }
+                if (customer.equals(row.getString("customer"))) { customerRows.add(row); }
+            }
+            // Only customer history needs chronological order for transition counting; let the OR query use both
+            // selective indexes without forcing MongoDB to sort the combined result.
+            customerRows.sort(Comparator.comparing((Document row) -> row.getDate("eventTime"))
+                    .thenComparing(row -> row.getString("sourceEvent")));
             if (deviceRows.size() > MAX_DEVICE_ROWS || customerRows.size() > MAX_CUSTOMER_ROWS) {
                 transitionOutOfPending(session, candidate, "QUARANTINED", true);
                 return quarantined();
@@ -508,8 +516,6 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 transitionOutOfPending(session, candidate, "QUARANTINED", true);
                 return quarantined();
             }
-            List<Document> membershipRows = new ArrayList<>(deviceRows);
-            membershipRows.addAll(customerRows);
             boolean sealedMembershipComplete = integrityKey == null || sealedMembershipMatches(session, membershipRows,
                     institution, source, customer, device, version, windowStart, time);
             if (integrityKey != null) {
@@ -551,8 +557,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             switches = ambiguousSwitchOrder
                     ? new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null)
                     : new HistoryFact(State.AVAILABLE, Reason.NONE, transitions);
-            if (!sealedMembershipComplete || java.util.stream.Stream.concat(deviceRows.stream(), customerRows.stream())
-                    .anyMatch(row -> !currentMembership(row))) {
+            if (!sealedMembershipComplete || !currentMemberships(membershipRows)) {
                 prior = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
                 other = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
                 switches = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
@@ -782,6 +787,14 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         return existingResult(null, candidate, persisted);
     }
 
+    private CommitResult existing(String id, Document candidate) {
+        Document persisted = occurrences.find(eq("_id", id)).first();
+        if (persisted == null) {
+            throw terminal("OCCURRENCE_MISSING");
+        }
+        return existingResult(null, candidate, persisted);
+    }
+
     private CommitResult existing(ClientSession session, String id) {
         Document persisted = occurrences.find(session, eq("_id", id)).first();
         if (persisted == null) {
@@ -791,14 +804,21 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         return existingResult(session, candidate, persisted);
     }
 
+    private CommitResult existing(ClientSession session, String id, Document candidate) {
+        Document persisted = occurrences.find(session, eq("_id", id)).first();
+        if (persisted == null) {
+            throw terminal("OCCURRENCE_MISSING");
+        }
+        return existingResult(session, candidate, persisted);
+    }
+
     private CommitResult existingResult(ClientSession session, Document candidate, Document persisted) {
-        if (!epoch.matches(persisted) || candidate != null && !epoch.matches(candidate)) { throw terminal("OCCURRENCE_IDENTITY_CONFLICT"); }
+        if (candidate == null) { throw terminal("CANDIDATE_MISSING"); }
+        if (!epoch.matches(persisted) || !epoch.matches(candidate)) { throw terminal("OCCURRENCE_IDENTITY_CONFLICT"); }
         requireCandidateIntegrity(persisted);
         requireSnapshotIntegrity(persisted);
-        if (candidate != null) {
-            requireCandidateIntegrity(candidate);
-            requireCandidateStateIntegrity(candidate);
-        }
+        requireCandidateIntegrity(candidate);
+        requireCandidateStateIntegrity(candidate);
         DeviceSnapshotVersion.require(persisted);
         if (!authority.current(Provenance.from(persisted), persisted.getInteger("keyVersion"))) { throw terminal("AUTHORITY_REVOKED"); }
         requireCoverageAuthority(persisted);
@@ -806,7 +826,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (occurrenceExpired(persisted, now)) {
             throw terminal("OCCURRENCE_EXPIRED");
         }
-        if (candidate != null && terminalCandidateExpired(candidate, now)) {
+        if (terminalCandidateExpired(candidate, now)) {
             throw terminal("CANDIDATE_EXPIRED");
         }
         DeviceRiskEvidence evidence = decode(persisted);
@@ -829,7 +849,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                         + evidence.keyVersion() + ':' + evidence.deviceToken(), now)) {
             throw terminal("DEVICE_OPERATIONALLY_REVOKED");
         }
-        if (candidate != null && (!"COMMITTED".equals(candidate.getString("status"))
+        if (!"COMMITTED".equals(candidate.getString("status"))
                 || !Objects.equals(candidate.get("provenance"), persisted.get("provenance"))
                 || !Objects.equals(candidate.getString("provenanceCommitment"), persisted.getString("provenanceCommitment"))
                 || !Objects.equals(candidate.getString("institution"), persisted.getString("institution"))
@@ -843,7 +863,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 || !Objects.equals(dateInstant(candidate, "eventTime"), evidence.eventTime())
                 || !Objects.equals(dateInstant(candidate, "sourceObservedAt"), evidence.source().observedAt())
                 || persisted.containsKey("sequence")
-                    && !Objects.equals(candidate.getLong("sequence"), persisted.getLong("sequence")))) {
+                    && !Objects.equals(candidate.getLong("sequence"), persisted.getLong("sequence"))) {
             throw terminal("OCCURRENCE_IDENTITY_CONFLICT");
         }
         return new CommitResult(CommitStatus.EXISTING, evidence);
@@ -865,19 +885,19 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private boolean sealedMembershipMatches(ClientSession session, List<Document> observationRows,
                                            String institution, String source, String customer, String device,
                                            int version, Instant windowStart, Instant asOf) {
-        Bson scope = epoch.filter(institution, source);
-        Bson window = and(scope, eq("keyVersion", version), gte("eventTime", Date.from(windowStart)),
-                lt("eventTime", Date.from(asOf)), or(eq("customer", customer), eq("device", device)));
-        Date now = Date.from(clock.instant());
-        List<Document> anchors = historyMemberAnchors.find(session, and(window, gt("expireAt", now)))
-                .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
+        Instant now = clock.instant();
+        // Membership is compared by _id and the commitment hashes a TreeMap; Mongo result order is not part of this proof.
+        List<Document> anchors = historyMemberAnchors.find(session, DeviceHistoryQueries.retainedMembership(epoch,
+                        institution, source, version, windowStart, asOf, customer, device, now))
+                .projection(DeviceHistoryQueries.historyMemberAnchorProjection())
                 .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
-        List<Document> historicalOccurrences = occurrences.find(session, and(window, gt("expireAt", now)))
-                .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
+        List<Document> historicalOccurrences = occurrences.find(session, DeviceHistoryQueries.retainedMembership(epoch,
+                        institution, source, version, windowStart, asOf, customer, device, now))
+                .projection(DeviceHistoryQueries.occurrenceMembershipProjection())
                 .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
-        List<Document> historicalCandidates = candidates.find(session, and(window, eq("status", "COMMITTED"),
-                        gt("terminalExpireAt", now)))
-                .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
+        List<Document> historicalCandidates = candidates.find(session, DeviceHistoryQueries.committedStageAMembership(epoch,
+                        institution, source, version, windowStart, asOf, customer, device, now))
+                .projection(DeviceHistoryQueries.candidateMembershipProjection())
                 .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
         if (anchors.size() > MAX_HISTORY_MEMBERSHIP_ROWS || historicalOccurrences.size() > MAX_HISTORY_MEMBERSHIP_ROWS
                 || historicalCandidates.size() > MAX_HISTORY_MEMBERSHIP_ROWS) { return false; }
@@ -956,9 +976,14 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         }
     }
 
-    private boolean currentMembership(Document row) {
-        return (integrityKey == null || DeviceRecordIntegrity.membershipMatches(integrityKey, row))
-                && authority.current(Provenance.from(row), row.getInteger("keyVersion"));
+    private boolean currentMemberships(List<Document> rows) {
+        Map<Integer, List<Provenance>> byVersion = new HashMap<>();
+        for (Document row : rows) {
+            if (integrityKey != null && !DeviceRecordIntegrity.membershipMatches(integrityKey, row)) { return false; }
+            byVersion.computeIfAbsent(row.getInteger("keyVersion"), ignored -> new ArrayList<>())
+                    .add(Provenance.from(row));
+        }
+        return byVersion.entrySet().stream().allMatch(entry -> authority.currentHistory(entry.getValue(), entry.getKey()));
     }
 
     private void transitionOutOfPending(ClientSession session, Document candidate, String nextState,

@@ -4,6 +4,7 @@ import com.frauddetection.common.events.device.DeviceRiskEvidence;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -31,6 +32,7 @@ interface DeviceObservationStore {
                                             String deviceToken);
 
     enum StageResult { CREATED, DUPLICATE }
+    /** EXISTING means a verified replay with its committed candidate and occurrence both still present. */
     enum CommitStatus { COMMITTED, EXISTING, WAITING_FOR_SEAL, WAITING_FOR_EARLIER_EVENT, QUARANTINED }
 
     /** Aggregate only: deliberately contains no institution, source, event, customer, or device identity. */
@@ -178,6 +180,9 @@ interface DeviceObservationStore {
     @FunctionalInterface
     interface HistoryAuthority {
         boolean current(Provenance provenance, int pseudonymKeyVersion);
+        default boolean currentHistory(List<Provenance> provenance, int pseudonymKeyVersion) {
+            return provenance.stream().allMatch(item -> current(item, pseudonymKeyVersion));
+        }
         default boolean coverageCurrent(CoverageAuthority proof, String institution, String source, String populationCommitment,
                                         int pseudonymKeyVersion, Instant coverageStart) { return false; }
     }

@@ -55,7 +55,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             FraudFeatureContract.PROXY_OR_VPN_DETECTED, FraudFeatureContract.CUSTOMER_SEGMENT,
             FraudFeatureContract.MERCHANT_CATEGORY, FraudFeatureContract.CURRENCY);
     private static final int MAX_ENRICHED_PUBLICATION_BATCH = 50;
-    private static final int MAX_ENRICHED_BINDING_BATCH = 1_000;
+    public static final int MAX_ENRICHED_BINDING_BATCH = 1_000;
     private static final Pattern COMMITMENT_HASH = Pattern.compile("[0-9a-f]{64}");
     private static final Duration ENRICHED_PUBLICATION_LEASE = Duration.ofSeconds(30);
     private final MongoClient client;

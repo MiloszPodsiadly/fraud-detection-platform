@@ -74,19 +74,46 @@ public final class MongoSourceOccurrenceStore {
         if (writer) { lineage.requireOccurrenceWriter(); }
         db = client.getDatabase(database).withReadConcern(ReadConcern.MAJORITY).withWriteConcern(WriteConcern.MAJORITY)
                 .withReadPreference(ReadPreference.primary());
+        if (!writer) { requireOccurrenceReaderPrincipal(expectedUser); }
         SourceOccurrenceSchema.initialize(db, false);
-        if (!writer) {
-            Document auth = db.runCommand(new Document("connectionStatus", 1).append("showPrivileges", true)).get("authInfo", Document.class);
-            boolean occurrenceRead = false;
-            for (Document privilege : auth.getList("authenticatedUserPrivileges", Document.class)) {
-                List<String> actions = privilege.getList("actions", String.class);
-                if (actions == null || !Set.of("find", "listCollections", "listIndexes").containsAll(actions)) {
-                    throw new IllegalArgumentException("SOURCE_OCCURRENCE_READ_ONLY_PRINCIPAL_REQUIRED");
-                }
-                Document resource = privilege.get("resource", Document.class);
-                if (resource != null && OCCURRENCES.equals(resource.getString("collection")) && actions.contains("find")) { occurrenceRead = true; }
+    }
+
+    private void requireOccurrenceReaderPrincipal(String expectedUser) {
+        Document auth = db.runCommand(new Document("connectionStatus", 1).append("showPrivileges", true)).get("authInfo", Document.class);
+        List<Document> users = auth == null ? null : auth.getList("authenticatedUsers", Document.class);
+        List<Document> privileges = auth == null ? null : auth.getList("authenticatedUserPrivileges", Document.class);
+        if (users == null || users.size() != 1 || !expectedUser.equals(users.getFirst().getString("user")) || privileges == null) {
+            throw new IllegalArgumentException("SOURCE_OCCURRENCE_READ_ONLY_PRINCIPAL_REQUIRED");
+        }
+
+        java.util.Map<String, Set<String>> allowed = new java.util.HashMap<>();
+        allowed.put("", Set.of("listCollections"));
+        for (String collection : List.of("source_admission_identities", "source_admission_receipts", "source_lineage_raw",
+                "source_lineage_enriched", OCCURRENCES)) {
+            allowed.put(collection, Set.of("find"));
+        }
+        for (String collection : List.of("source_lineage_raw", "source_lineage_enriched", "source_lineage_raw_counts",
+                "source_lineage_enriched_counts", OCCURRENCES, COUNTS)) {
+            allowed.merge(collection, Set.of("listIndexes"), (existing, additional) -> {
+                Set<String> combined = new java.util.HashSet<>(existing);
+                combined.addAll(additional);
+                return Set.copyOf(combined);
+            });
+        }
+
+        java.util.Map<String, Set<String>> observed = new java.util.HashMap<>();
+        for (Document privilege : privileges) {
+            Document resource = privilege.get("resource", Document.class);
+            List<String> actions = privilege.getList("actions", String.class);
+            String collection = resource == null ? null : resource.getString("collection");
+            if (resource == null || !db.getName().equals(resource.getString("db")) || collection == null || actions == null
+                    || !allowed.containsKey(collection) || !allowed.get(collection).containsAll(actions) || actions.isEmpty()) {
+                throw new IllegalArgumentException("SOURCE_OCCURRENCE_READ_ONLY_PRINCIPAL_REQUIRED");
             }
-            if (!occurrenceRead) { throw new IllegalArgumentException("SOURCE_OCCURRENCE_READ_NOT_AUTHORIZED"); }
+            observed.computeIfAbsent(collection, ignored -> new java.util.HashSet<>()).addAll(actions);
+        }
+        if (!observed.equals(allowed)) {
+            throw new IllegalArgumentException("SOURCE_OCCURRENCE_READ_ONLY_PRINCIPAL_REQUIRED");
         }
     }
 

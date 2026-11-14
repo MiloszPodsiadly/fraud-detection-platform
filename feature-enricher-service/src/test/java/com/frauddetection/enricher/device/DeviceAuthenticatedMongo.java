@@ -1,11 +1,14 @@
 package com.frauddetection.enricher.device;
 
 import com.mongodb.ConnectionString;
+import com.mongodb.MongoException;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.event.CommandFailedEvent;
 import com.mongodb.event.CommandListener;
 import com.mongodb.event.CommandStartedEvent;
+import com.mongodb.event.CommandSucceededEvent;
 import org.bson.Document;
 import org.bson.BsonValue;
 import org.testcontainers.containers.GenericContainer;
@@ -31,6 +34,10 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
                     + "exec mongod --replSet lineage-rs --bind_ip_all --keyFile /tmp/lineage-key --setParameter enableTestCommands=1");
     private final List<MongoClient> clients = new ArrayList<>();
     private final ConcurrentMap<String, LongAdder> readOperations = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, LongAdder> readDocuments = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Integer, String> readRequestCollections = new ConcurrentHashMap<>();
+    private final LongAdder transientTransactionRetryEvents = new LongAdder();
+    private final LongAdder unknownCommitResultEvents = new LongAdder();
     private final CommandListener readOperationListener = new CommandListener() {
         @Override public void commandStarted(CommandStartedEvent event) {
             String name = event.getCommandName();
@@ -38,7 +45,33 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
             BsonValue target = event.getCommand().get(name);
             if (target == null) { target = event.getCommand().get("collection"); }
             if (target == null || !target.isString()) { return; }
-            readOperations.computeIfAbsent(target.asString().getValue() + "." + name, ignored -> new LongAdder()).increment();
+            String collection = target.asString().getValue();
+            readOperations.computeIfAbsent(collection + "." + name, ignored -> new LongAdder()).increment();
+            readRequestCollections.put(event.getRequestId(), collection);
+        }
+        @Override public void commandSucceeded(CommandSucceededEvent event) {
+            String collection = readRequestCollections.remove(event.getRequestId());
+            if (collection == null) { return; }
+            var cursorValue = event.getResponse().get("cursor");
+            if (cursorValue == null || !cursorValue.isDocument()) { return; }
+            var cursor = cursorValue.asDocument();
+            var batch = cursor.get("firstBatch");
+            if (batch == null) { batch = cursor.get("nextBatch"); }
+            if (batch != null && batch.isArray()) {
+                readDocuments.computeIfAbsent(collection, ignored -> new LongAdder()).add(batch.asArray().size());
+            }
+        }
+        @Override public void commandFailed(CommandFailedEvent event) {
+            readRequestCollections.remove(event.getRequestId());
+            if (event.getThrowable() instanceof MongoException exception) {
+                if (exception.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)) {
+                    transientTransactionRetryEvents.increment();
+                }
+                if ("commitTransaction".equals(event.getCommandName())
+                        && exception.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) {
+                    unknownCommitResultEvents.increment();
+                }
+            }
         }
     };
 
@@ -62,6 +95,13 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
         readOperations.forEach((key, value) -> snapshot.put(key, value.sum()));
         return Map.copyOf(snapshot);
     }
+    Map<String, Long> readDocumentCounts() {
+        Map<String, Long> snapshot = new TreeMap<>();
+        readDocuments.forEach((key, value) -> snapshot.put(key, value.sum()));
+        return Map.copyOf(snapshot);
+    }
+    long transientTransactionRetryEvents() { return transientTransactionRetryEvents.sum(); }
+    long unknownCommitResultEvents() { return unknownCommitResultEvents.sum(); }
     MongoClient ledgerWriter(MongoClient owner, String database) {
         var db = owner.getDatabase(database);
         List<Document> privileges = new ArrayList<>();
@@ -118,6 +158,10 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
     }
 
     MongoClient occurrenceReader(MongoClient owner, String database) {
+        return occurrenceReader(owner, database, "source_diagnostic_reader", List.of());
+    }
+
+    MongoClient occurrenceReader(MongoClient owner, String database, String user, List<Document> additionalPrivileges) {
         List<Document> privileges = new ArrayList<>();
         privileges.add(privilege(database, "", List.of("listCollections")));
         for (String collection : List.of("source_admission_identities", "source_admission_receipts", "source_lineage_raw", "source_lineage_enriched")) {
@@ -127,7 +171,8 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
                 "source_scored_occurrences", "source_scored_occurrence_counts")) {
             privileges.add(privilege(database, collection, collection.equals("source_scored_occurrences") ? List.of("find", "listIndexes") : List.of("listIndexes")));
         }
-        return readPrincipal(owner, database, "source_diagnostic_reader", privileges);
+        privileges.addAll(additionalPrivileges);
+        return readPrincipal(owner, database, user, privileges);
     }
 
     MongoClient diagnosticReader(MongoClient owner, String database) {

@@ -32,7 +32,26 @@ final class VerifiedDeviceAdmission {
         this.store = new MongoDeviceObservationStore(client, database, clock, epoch, new DeviceObservationStore.HistoryAuthority() {
             @Override public boolean current(DeviceObservationStore.Provenance p, int version) {
                 SourceLineage lineage = source.enrichedBinding(p.receiptId(), p.rawCommitment(), p.enrichedCommitment());
-                return lineage.state() == SourceLineage.State.VERIFIED && epoch.equals(new DeviceEpoch(lineage.source().issuer(), lineage.source().sourceEpoch()))
+                return currentLineage(p, version, lineage);
+            }
+            @Override public boolean currentHistory(List<DeviceObservationStore.Provenance> provenance, int version) {
+                for (int start = 0; start < provenance.size(); start += MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH) {
+                    List<DeviceObservationStore.Provenance> batch = provenance.subList(start,
+                            Math.min(start + MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH, provenance.size()));
+                    List<MongoSourceLineage.EnrichedBinding> bindings = batch.stream()
+                            .map(item -> new MongoSourceLineage.EnrichedBinding(item.receiptId(), item.rawCommitment(), item.enrichedCommitment()))
+                            .toList();
+                    List<SourceLineage> lineages = source.enrichedBindings(bindings);
+                    if (lineages.size() != batch.size()) { return false; }
+                    for (int index = 0; index < batch.size(); index++) {
+                        if (!currentLineage(batch.get(index), version, lineages.get(index))) { return false; }
+                    }
+                }
+                return true;
+            }
+            private boolean currentLineage(DeviceObservationStore.Provenance p, int version, SourceLineage lineage) {
+                return lineage.state() == SourceLineage.State.VERIFIED
+                        && epoch.equals(new DeviceEpoch(lineage.source().issuer(), lineage.source().sourceEpoch()))
                         && verifier.currentStoredObservation(p, lineage, version);
             }
             @Override public boolean coverageCurrent(DeviceObservationStore.CoverageAuthority proof, String institution, String sourceCode,
