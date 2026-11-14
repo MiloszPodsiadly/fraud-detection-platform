@@ -24,6 +24,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set up Node for CI selector validation
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Validate CI test selectors
+        run: node scripts/ci/verify-ci-test-selectors.mjs
+
+      - name: Test CI selector guard fail-closed behavior
+        run: node --test scripts/ci/verify-ci-test-selectors.test.mjs
+
       - name: Set up Java
         uses: actions/setup-java@v6
         with:
