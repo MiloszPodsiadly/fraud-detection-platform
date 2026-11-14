@@ -19,10 +19,12 @@ public final class SourceScoredOccurrence {
     private final String scoredEventId;
     private final Instant scoredCreatedAt;
     private final String scoredFingerprint;
+    private final String runId;
     SourceScoredOccurrence(SourceScope source, String receiptId, String enrichedCommitment,
-                           String scoredEventId, Instant scoredCreatedAt, String scoredFingerprint) {
+                           String scoredEventId, Instant scoredCreatedAt, String scoredFingerprint, String runId) {
         this.source = source; this.receiptId = receiptId; this.enrichedCommitment = enrichedCommitment;
         this.scoredEventId = scoredEventId; this.scoredCreatedAt = scoredCreatedAt; this.scoredFingerprint = scoredFingerprint;
+        this.runId = runId;
     }
     public SourceScope source() { return source; }
     public String receiptId() { return receiptId; }
@@ -30,6 +32,7 @@ public final class SourceScoredOccurrence {
     public String scoredEventId() { return scoredEventId; }
     public Instant scoredCreatedAt() { return scoredCreatedAt; }
     public String scoredFingerprint() { return scoredFingerprint; }
+    public String runId() { return runId; }
     private static final JsonMapper CANONICAL = JsonMapper.builder().findAndAddModules()
             .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS).build();
     public static String fingerprint(TransactionScoredEvent event) {

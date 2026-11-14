@@ -46,7 +46,7 @@ class MongoDeviceObservationPendingMetricsBenchmarkTest {
             String databaseName = "device_pending_metrics_" + UUID.randomUUID().toString().replace("-", "");
             MongoDatabase database = client.getDatabase(databaseName);
             MongoDeviceObservationStore store = new MongoDeviceObservationStore(
-                    client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC));
+                    client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS);
             MongoCollection<Document> candidates = database.getCollection("device_observation_candidates");
             MongoCollection<Document> coverage = database.getCollection("device_source_coverage");
 
@@ -144,15 +144,17 @@ class MongoDeviceObservationPendingMetricsBenchmarkTest {
         for (int sourceIndex = 0; sourceIndex < scenario.sourceCount(); sourceIndex++) {
             String institution = token(sourceIndex + 1L);
             String source = "SYNTHETIC_SOURCE_" + sourceIndex;
-            String scope = institution + ':' + source;
-            coverage.insertOne(new Document("_id", scope)
+            String scope = DeviceStoreFixtures.EPOCH.scopeId(institution, source);
+            coverage.insertOne(DeviceStoreFixtures.EPOCH.document(scope, institution, source)
                     .append("pendingCount", scenario.pendingPerSource())
                     .append("revision", (long) scenario.pendingPerSource())
-                    .append("sealedSequence", 0L));
+                    .append("sealedSequence", 0L).append("sequenceOrigin", 1L).append("populationCommitment", "9".repeat(64))
+                    .append("coverageGeneration", 0L).append("coverageCommitment", "0".repeat(64)));
             for (int pendingIndex = 1; pendingIndex <= scenario.pendingPerSource(); pendingIndex++) {
                 eventNumber++;
                 String sourceEvent = token(eventNumber);
-                Document candidate = new Document("_id", scope + ':' + sourceEvent)
+                var provenance = DeviceStoreFixtures.provenance(sourceEvent, token(totalStaged + eventNumber), token(totalStaged * 2 + eventNumber), NOW.minusMillis(eventNumber));
+                Document candidate = DeviceStoreFixtures.EPOCH.document(DeviceStoreFixtures.EPOCH.eventId(institution, source, sourceEvent), institution, source)
                         .append("institution", institution)
                         .append("source", source)
                         .append("sourceEvent", sourceEvent)
@@ -164,6 +166,7 @@ class MongoDeviceObservationPendingMetricsBenchmarkTest {
                         .append("eventTime", Date.from(NOW.minusMillis(eventNumber)))
                         .append("sourceObservedAt", Date.from(NOW.minusMillis(eventNumber)))
                         .append("payloadCommitment", token(totalStaged * 2 + eventNumber))
+                        .append("provenance", provenance.document()).append("provenanceCommitment", provenance.commitment())
                         .append("sourceQuality", "SYNTHETIC_UNTRUSTED")
                         .append("status", "STAGED")
                         .append("stagedAt", Date.from(NOW.minusMillis(eventNumber)));

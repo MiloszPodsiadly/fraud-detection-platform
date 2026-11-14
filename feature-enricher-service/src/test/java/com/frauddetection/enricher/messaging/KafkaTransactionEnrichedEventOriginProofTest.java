@@ -2,6 +2,7 @@ package com.frauddetection.enricher.messaging;
 
 import com.frauddetection.common.events.source.SourceOriginProofs;
 import com.frauddetection.common.events.source.SourceOriginProperties;
+import com.frauddetection.common.events.observability.TraceContext;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.KafkaTopicProperties;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -34,7 +35,9 @@ class KafkaTransactionEnrichedEventOriginProofTest {
                 factory.getBeanProvider(SourceOriginProofs.class));
         var event = TransactionFixtures.enrichedTransaction().build();
 
-        publisher.publish(event, SourceOriginProofs.Assertion.PROVEN_LEGACY);
+        try (TraceContext.Scope ignored = TraceContext.open(event.correlationId(), "trace-enriched", event.transactionId(), null)) {
+            publisher.publish(event, SourceOriginProofs.Assertion.PROVEN_LEGACY);
+        }
 
         ArgumentCaptor<ProducerRecord<String, com.frauddetection.common.events.contract.TransactionEnrichedEvent>> record =
                 ArgumentCaptor.forClass(ProducerRecord.class);
@@ -42,5 +45,12 @@ class KafkaTransactionEnrichedEventOriginProofTest {
         String token = new String(record.getValue().headers().lastHeader(SourceOriginProofs.KAFKA_HEADER).value(), StandardCharsets.US_ASCII);
         assertThat(proofs.verifyEnriched(event, token).assertion()).isEqualTo(SourceOriginProofs.Assertion.PROVEN_LEGACY);
         assertThat(record.getValue().value()).isEqualTo(event);
+        assertThat(header(record.getValue(), TraceContext.KAFKA_CORRELATION_ID_HEADER)).isEqualTo(event.correlationId());
+        assertThat(header(record.getValue(), TraceContext.KAFKA_TRANSACTION_ID_HEADER)).isEqualTo(event.transactionId());
+        assertThat(header(record.getValue(), TraceContext.KAFKA_TRACE_ID_HEADER)).isEqualTo("trace-enriched");
+    }
+
+    private String header(ProducerRecord<?, ?> record, String name) {
+        return new String(record.headers().lastHeader(name).value(), StandardCharsets.UTF_8);
     }
 }

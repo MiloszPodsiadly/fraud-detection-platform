@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
 class KafkaFraudDecisionEventPublisherTest {
 
     @Test
-    void shouldPropagateTraceIdFromMdcIntoKafkaHeaders() throws Exception {
+    void preservesDecisionIdentifiersInHeadersAndPropagatesScopedTraceId() throws Exception {
         @SuppressWarnings("unchecked")
         KafkaTemplate<String, com.frauddetection.common.events.contract.FraudDecisionEvent> kafkaTemplate = mock(KafkaTemplate.class);
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(CompletableFuture.completedFuture(null));
@@ -55,6 +55,12 @@ class KafkaFraudDecisionEventPublisherTest {
 
         ArgumentCaptor<ProducerRecord<String, com.frauddetection.common.events.contract.FraudDecisionEvent>> captor = ArgumentCaptor.forClass(ProducerRecord.class);
         verify(kafkaTemplate).send(captor.capture());
+        assertThat(new String(captor.getValue().headers().lastHeader(TraceContext.KAFKA_CORRELATION_ID_HEADER).value(), StandardCharsets.UTF_8))
+                .isEqualTo(event.correlationId());
+        assertThat(new String(captor.getValue().headers().lastHeader(TraceContext.KAFKA_TRANSACTION_ID_HEADER).value(), StandardCharsets.UTF_8))
+                .isEqualTo(event.transactionId());
+        assertThat(new String(captor.getValue().headers().lastHeader(TraceContext.KAFKA_ALERT_ID_HEADER).value(), StandardCharsets.UTF_8))
+                .isEqualTo(event.alertId());
         assertThat(new String(captor.getValue().headers().lastHeader(TraceContext.KAFKA_TRACE_ID_HEADER).value(), StandardCharsets.UTF_8))
                 .isEqualTo("trace-456");
     }

@@ -52,9 +52,7 @@ public class HttpMlModelScoringClient implements MlModelScoringClient {
         } catch (RestClientException exception) {
             scoringMetrics.recordMlClientFailure(System.nanoTime() - startedAt);
             log.atWarn()
-                    .addKeyValue("transactionId", input.transactionId())
-                    .addKeyValue("correlationId", input.correlationId())
-                    .setCause(exception)
+                    .addKeyValue("exceptionType", exception.getClass().getSimpleName())
                     .log("ML inference request failed; rule-based fallback remains available.");
             return unavailable("ML inference service request failed.");
         }

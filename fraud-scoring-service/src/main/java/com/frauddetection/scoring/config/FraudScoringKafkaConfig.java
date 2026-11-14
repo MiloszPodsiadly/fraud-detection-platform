@@ -140,7 +140,6 @@ public class FraudScoringKafkaConfig {
                         .addKeyValue("topic", record.topic())
                         .addKeyValue("partition", record.partition())
                         .addKeyValue("offset", record.offset())
-                        .addKeyValue("key", record.key())
                         .addKeyValue("deliveryAttempt", deliveryAttempt)
                         .setCause(exception)
                         .log("Retrying Kafka record processing before dead-letter handoff."));

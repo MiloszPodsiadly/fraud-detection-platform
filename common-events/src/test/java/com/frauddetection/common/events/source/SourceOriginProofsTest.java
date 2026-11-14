@@ -18,6 +18,11 @@ class SourceOriginProofsTest {
             new SourceOriginProperties(true, "origin-key-1", Map.of("origin-key-1", KEY)));
     private static final Instant TIME = Instant.parse("2026-11-09T10:00:00Z");
 
+    @Test void receiptIdentityDigestKeepsItsLengthPrefixedUtf8Encoding() {
+        assertThat(SourceReceiptIdentity.digest("domain", "alpha", "β"))
+                .isEqualTo("98a9491a24baa6268fc219278ab7cffdc89499e365760779396d4121cfcce2c1");
+    }
+
     @Test void exactStageBoundLegacyAndAttestedProofsVerifyWithoutExposingEventIdentity() {
         var raw = raw();
         String legacy = PROOFS.signRaw(raw, PROVEN_LEGACY);

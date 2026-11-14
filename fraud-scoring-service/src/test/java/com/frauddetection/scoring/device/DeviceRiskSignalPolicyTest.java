@@ -1,5 +1,7 @@
 package com.frauddetection.scoring.device;
 
+import com.frauddetection.common.events.device.policy.DeviceRiskSignalPolicy;
+
 import com.frauddetection.common.events.device.DeviceRiskEvidence;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.HistoryFact;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.Reason;

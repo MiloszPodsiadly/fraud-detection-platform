@@ -45,8 +45,6 @@ public class TransactionScoredEventListener {
     ) {
         try (TraceContext.Scope ignored = TraceContext.open(event.correlationId(), traceId, event.transactionId(), null)) {
             log.atInfo()
-                    .addKeyValue("transactionId", event.transactionId())
-                    .addKeyValue("correlationId", event.correlationId())
                     .addKeyValue("topic", kafkaTopicProperties.transactionScored())
                     .log("Received scored transaction event for alert handling.");
             ScoringOccurrenceAdmissionResult admission = transactionMonitoringUseCase.recordScoredTransaction(event);

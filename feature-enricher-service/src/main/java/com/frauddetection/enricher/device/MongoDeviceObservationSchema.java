@@ -3,6 +3,10 @@ package com.frauddetection.enricher.device;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.CreateCollectionOptions;
+import com.mongodb.client.model.ValidationOptions;
+import com.mongodb.client.model.ValidationLevel;
+import com.mongodb.client.model.ValidationAction;
 import org.bson.BsonType;
 import org.bson.Document;
 
@@ -20,12 +24,19 @@ import static com.mongodb.client.model.Filters.type;
 
 /** Owns the startup schema and index compatibility contract for the device observation store. */
 final class MongoDeviceObservationSchema {
+    static final List<String> COLLECTIONS = List.of("device_observation_candidates", "device_observations",
+            "device_occurrences", "device_history_member_anchors", "device_source_coverage", "device_scope_fences",
+            "device_operational_revocation_tombstones");
     private static final List<IndexSpec> CANDIDATE_INDEXES = List.of(
             index("candidate_source_event_unique", true, false, "institution", "source", "sourceEvent"),
             index("candidate_transaction_unique", true, false, "institution", "source", "transaction"),
             index("candidate_sequence_unique", true, false, "institution", "source", "sequence"),
             index("candidate_customer_event_status_sequence", false, false,
                     "institution", "source", "customer", "eventTime", "status", "sequence"),
+            index("candidate_device_window", false, false,
+                    "institution", "source", "keyVersion", "device", "eventTime", "sourceEvent"),
+            index("candidate_customer_window", false, false,
+                    "institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"),
             index("candidate_status_staged_at", false, false, "status", "stagedAt"),
             index("candidate_status_event_source_event", false, false,
                     "institution", "source", "status", "eventTime", "sourceEvent"),
@@ -40,7 +51,17 @@ final class MongoDeviceObservationSchema {
     private static final List<IndexSpec> OCCURRENCE_INDEXES = List.of(
             index("occurrence_transaction_unique", true, false, "institution", "source", "transaction"),
             index("occurrence_device", false, false, "institution", "source", "keyVersion", "device"),
+            index("occurrence_device_window", false, false,
+                    "institution", "source", "keyVersion", "device", "eventTime", "sourceEvent"),
+            index("occurrence_customer_window", false, false,
+                    "institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"),
             index("occurrence_expiry_ttl", false, true, "expireAt"));
+    private static final List<IndexSpec> HISTORY_MEMBER_ANCHOR_INDEXES = List.of(
+            index("history_member_device_window", false, false,
+                    "institution", "source", "keyVersion", "device", "eventTime", "sourceEvent"),
+            index("history_member_customer_window", false, false,
+                    "institution", "source", "keyVersion", "customer", "eventTime", "sourceEvent"),
+            index("history_member_expiry_ttl", false, true, "expireAt"));
     private static final List<IndexSpec> TOMBSTONE_INDEXES = List.of(
             index("tombstone_expiry_ttl", false, true, "expireAt"));
 
@@ -54,17 +75,38 @@ final class MongoDeviceObservationSchema {
         MongoCollection<Document> candidates = database.getCollection("device_observation_candidates");
         MongoCollection<Document> observations = database.getCollection("device_observations");
         MongoCollection<Document> occurrences = database.getCollection("device_occurrences");
+        MongoCollection<Document> historyMemberAnchors = database.getCollection("device_history_member_anchors");
         MongoCollection<Document> coverage = database.getCollection("device_source_coverage");
         MongoCollection<Document> fences = database.getCollection("device_scope_fences");
         MongoCollection<Document> revocationTombstones =
                 database.getCollection("device_operational_revocation_tombstones");
 
         Set<String> existingCollections = new HashSet<>(database.listCollectionNames().into(new ArrayList<>()));
-        validateExistingSchema(existingCollections, candidates, observations, occurrences, coverage, fences,
-                revocationTombstones);
+        long present = COLLECTIONS.stream().filter(existingCollections::contains).count();
+        if (existingCollections.contains("device_erasure_tombstones") || present != 0 && present != COLLECTIONS.size()) { throw schemaIncompatible(); }
+        if (present == 0) {
+            for (String name : COLLECTIONS) {
+                database.createCollection(name, new CreateCollectionOptions().validationOptions(new ValidationOptions()
+                        .validator(validator(name)).validationLevel(ValidationLevel.STRICT).validationAction(ValidationAction.ERROR)));
+            }
+        } else {
+            for (String name : COLLECTIONS) {
+                Document options = database.listCollections().filter(eq("name", name)).first().get("options", Document.class);
+                if (options == null || !options.keySet().equals(Set.of("validator", "validationLevel", "validationAction"))
+                        || !validator(name).equals(options.get("validator")) || !"strict".equals(options.getString("validationLevel"))
+                        || !"error".equals(options.getString("validationAction"))
+                        || database.getCollection(name).find(new Document("$nor", List.of(validator(name)))).limit(1).first() != null) {
+                    throw schemaIncompatible();
+                }
+            }
+            validateExistingSchema(existingCollections, candidates, observations, occurrences, historyMemberAnchors,
+                    coverage, fences, revocationTombstones);
+            return; // A runtime writer validates existing DDL; only a fresh-schema owner bootstraps it.
+        }
         createIndexes(candidates, CANDIDATE_INDEXES);
         createIndexes(observations, OBSERVATION_INDEXES);
         createIndexes(occurrences, OCCURRENCE_INDEXES);
+        createIndexes(historyMemberAnchors, HISTORY_MEMBER_ANCHOR_INDEXES);
         createIndexes(revocationTombstones, TOMBSTONE_INDEXES);
     }
 
@@ -72,6 +114,7 @@ final class MongoDeviceObservationSchema {
                                         MongoCollection<Document> candidates,
                                         MongoCollection<Document> observations,
                                         MongoCollection<Document> occurrences,
+                                        MongoCollection<Document> historyMemberAnchors,
                                         MongoCollection<Document> coverage,
                                         MongoCollection<Document> fences,
                                         MongoCollection<Document> revocationTombstones) {
@@ -79,6 +122,8 @@ final class MongoDeviceObservationSchema {
                 CANDIDATE_INDEXES, "expireAt");
         validateCollection(existingCollections, "device_observations", observations, OBSERVATION_INDEXES);
         validateCollection(existingCollections, "device_occurrences", occurrences, OCCURRENCE_INDEXES);
+        validateCollection(existingCollections, "device_history_member_anchors", historyMemberAnchors,
+                HISTORY_MEMBER_ANCHOR_INDEXES);
         validateCollection(existingCollections, "device_source_coverage", coverage, List.of(), "pendingCounterVersion");
         validateCollection(existingCollections, "device_scope_fences", fences, List.of());
         if (existingCollections.contains("device_erasure_tombstones")) {
@@ -138,11 +183,117 @@ final class MongoDeviceObservationSchema {
 
     private static IndexSpec index(String name, boolean unique, boolean ttl, String... fields) {
         Document keys = new Document();
+        if (java.util.Arrays.asList(fields).contains("institution")) {
+            keys.append("sourceIssuer", 1).append("sourceEpoch", 1).append("identityVersion", 1);
+        }
         for (String field : fields) {
             keys.append(field, 1);
         }
         return new IndexSpec(name, keys, unique, ttl);
     }
+
+    static Document validator(String name) {
+        Document properties = new Document("_id", new Document("bsonType", "string").append("maxLength", 265))
+                .append("schemaVersion", new Document("enum", List.of(DeviceEpoch.VERSION)))
+                .append("identityVersion", new Document("enum", List.of(DeviceEpoch.VERSION)))
+                .append("sourceIssuer", reference()).append("sourceEpoch", reference())
+                .append("institution", token()).append("source", new Document("bsonType", "string").append("pattern", "^[A-Z][A-Z0-9_]{0,63}$"));
+        List<String> required = new ArrayList<>(List.of("_id", "schemaVersion", "identityVersion", "sourceIssuer", "sourceEpoch", "institution", "source"));
+        if (name.equals("device_observation_candidates")) {
+            properties.append("status", new Document("enum", List.of("STAGED", "COMMITTED", "QUARANTINED")))
+                    .append("stagedAt", new Document("bsonType", "date"))
+                    .append("candidateStateIntegrityCommitment", token())
+                    .append("terminalReason", new Document("bsonType", "string").append("maxLength", 64))
+                    .append("terminalExpireAt", new Document("bsonType", "date"));
+            required.addAll(List.of("status", "stagedAt"));
+        }
+        if (name.equals("device_observation_candidates") || name.equals("device_occurrences") || name.equals("device_observations")) {
+            properties.append("sourceEvent", token()).append("customer", token()).append("device", token())
+                    .append("keyVersion", new Document("bsonType", "int").append("minimum", 1).append("maximum", 65_535))
+                    .append("eventTime", new Document("bsonType", "date")).append("provenance", provenanceValidator()).append("provenanceCommitment", token())
+                    .append("membershipIntegrityCommitment", token());
+            required.addAll(List.of("sourceEvent", "customer", "device", "keyVersion", "eventTime", "provenance", "provenanceCommitment"));
+        }
+        if (name.equals("device_observation_candidates") || name.equals("device_occurrences")) {
+            properties.append("transaction", token()).append("payloadCommitment", token()).append("sequence", number("long", 1))
+                    .append("candidateIntegrityCommitment", token());
+            required.addAll(List.of("transaction", "payloadCommitment", "sequence"));
+        }
+        if (name.equals("device_observation_candidates")) { properties.append("sourceObservedAt", new Document("bsonType", "date")); required.add("sourceObservedAt"); }
+        if (name.equals("device_occurrences")) {
+            properties.append("sourceObservedAt", new Document("bsonType", "date")).append("snapshotIntegrityCommitment", token())
+                    .append("coverageCommitment", token()).append("evidenceCommitment", token())
+                    .append("coverageAuthority", coverageAuthorityValidator()).append("coverageStart", new Document("bsonType", "date")).append("populationCommitment", token())
+                    .append("historyMembershipCommitment", token()).append("historyMembershipCount", number("int", 0))
+                    .append("evidenceJson", new Document("bsonType", "string").append("maxLength", 16_384));
+            properties.append("scoredBinding", scoredBindingValidator());
+            properties.append("stageACommitment", token());
+            required.addAll(List.of("sourceObservedAt", "coverageCommitment", "evidenceCommitment", "evidenceJson", "coverageAuthority", "coverageStart", "populationCommitment", "stageACommitment"));
+        }
+        if (name.equals("device_history_member_anchors")) {
+            properties.append("sourceEvent", token()).append("customer", token()).append("device", token())
+                    .append("keyVersion", new Document("bsonType", "int").append("minimum", 1).append("maximum", 65_535))
+                    .append("sequence", number("long", 1)).append("eventTime", new Document("bsonType", "date"))
+                    .append("provenanceCommitment", token()).append("candidateIntegrityCommitment", token())
+                    .append("coverageGeneration", number("long", 1)).append("coverageCommitment", token())
+                    .append("sealAssertionCommitment", token()).append("memberAnchorIntegrityCommitment", token());
+            required.addAll(List.of("sourceEvent", "customer", "device", "keyVersion", "sequence", "eventTime",
+                    "provenanceCommitment", "candidateIntegrityCommitment", "coverageGeneration", "coverageCommitment",
+                    "sealAssertionCommitment", "memberAnchorIntegrityCommitment"));
+        }
+        if (name.equals("device_source_coverage")) {
+            properties.append("sealedSequence", number("long", 0)).append("pendingCount", number("int", 0))
+                    .append("sequenceOrigin", number("long", 1)).append("populationCommitment", token())
+                    .append("coverageGeneration", number("long", 0)).append("coverageCommitment", token())
+                    .append("coverageIntegrityCommitment", token());
+            properties.append("coverageAuthority", coverageAuthorityValidator()).append("coverageStart", new Document("bsonType", "date"))
+                    .append("watermark", new Document("bsonType", "date")).append("keyVersion", number("int", 1)).append("sealAssertionCommitment", token());
+            required.addAll(List.of("sealedSequence", "pendingCount", "sequenceOrigin", "populationCommitment", "coverageGeneration", "coverageCommitment"));
+        }
+        if (name.equals("device_source_coverage") || name.equals("device_scope_fences")) {
+            properties.append("revision", number("long", 1)); required.add("revision");
+        }
+        if (name.equals("device_occurrences") || name.equals("device_observations")
+                || name.equals("device_history_member_anchors") || name.equals("device_operational_revocation_tombstones")) {
+            properties.append("expireAt", new Document("bsonType", "date")); required.add("expireAt");
+        }
+        Document schema = new Document("bsonType", "object").append("required", required).append("properties", properties);
+        if (name.equals("device_source_coverage")) {
+            schema.append("oneOf", List.of(new Document("properties", new Document("coverageGeneration", new Document("enum", List.of(0L)))),
+                    new Document("required", List.of("coverageAuthority", "coverageStart", "watermark", "keyVersion", "sealAssertionCommitment"))
+                            .append("properties", new Document("coverageGeneration", new Document("minimum", 1)))));
+        }
+        return new Document("$jsonSchema", schema);
+    }
+    private static Document provenanceValidator() {
+        Document fields = new Document();
+        for (String field : List.of("receiptId", "rawCommitment", "enrichedCommitment", "observationCommitment", "populationCommitment",
+                "deviceKeyCommitment", "authorizationCommitment")) { fields.append(field, token()); }
+        for (String field : List.of("originPolicyVersion", "deviceIssuer", "deviceKeyVersion", "devicePolicyVersion")) { fields.append(field, reference()); }
+        fields.append("proofTime", new Document("bsonType", "date")).append("sequenceOrigin", number("long", 1));
+        return new Document("bsonType", "object").append("required", new ArrayList<>(fields.keySet()))
+                .append("additionalProperties", false).append("properties", fields);
+    }
+    private static Document number(String type, int minimum) { return new Document("bsonType", type).append("minimum", minimum); }
+    private static Document coverageAuthorityValidator() {
+        Document fields = new Document();
+        for (String field : List.of("issuer", "keyVersion", "policyVersion", "coverageId")) { fields.append(field, reference()); }
+        for (String field : List.of("keyCommitment", "authorizationCommitment", "payloadCommitment")) { fields.append(field, token()); }
+        fields.append("proofTime", new Document("bsonType", "date"));
+        return new Document("bsonType", "object").append("required", new ArrayList<>(fields.keySet())).append("additionalProperties", false).append("properties", fields);
+    }
+    private static Document scoredBindingValidator() {
+        Document fields = new Document("version", new Document("enum", List.of(1)))
+                .append("eventId", new Document("bsonType", "string").append("pattern", "^[A-Za-z0-9._:-]{1,128}$"))
+                .append("createdAt", new Document("bsonType", "string").append("maxLength", 64))
+                .append("fingerprint", token()).append("runId", reference()).append("snapshotCommitment", token())
+                .append("sourceScopeCommitment", token()).append("provenanceCommitment", token())
+                .append("stageACommitment", token()).append("commitment", token());
+        return new Document("bsonType", "object").append("required", new ArrayList<>(fields.keySet()))
+                .append("additionalProperties", false).append("properties", fields);
+    }
+    private static Document reference() { return new Document("bsonType", "string").append("pattern", "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"); }
+    private static Document token() { return new Document("bsonType", "string").append("pattern", "^[0-9a-f]{64}$"); }
 
     private static IllegalStateException schemaIncompatible() {
         return new IllegalStateException("DEVICE_STORE_SCHEMA_INCOMPATIBLE");

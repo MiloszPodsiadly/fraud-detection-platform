@@ -11,6 +11,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceReasonCod
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.networknt.schema.Error;
 import com.networknt.schema.InputFormat;
 import com.networknt.schema.Schema;
@@ -65,6 +66,38 @@ class EngineIntelligenceFeedbackDatasetRecordSchemaParityTest {
         assertThat(missing.build().projectionStatus())
                 .isEqualTo(EngineIntelligenceFeedbackDatasetProjectionStatus.MISSING);
         assertSchemaValid(payload(missing.build()));
+    }
+
+    @Test
+    void schemaBoundsAndProjectionRequirementsMatchTheJavaContract() throws Exception {
+        Map<String, Object> schemaDocument = OBJECT_MAPPER.readValue(
+                Files.readString(SCHEMA_PATH),
+                new TypeReference<LinkedHashMap<String, Object>>() { }
+        );
+        List<?> allOf = (List<?>) schemaDocument.get("allOf");
+        Map<String, Object> availableProperties = object(object(allOf.get(0)).get("then"));
+        availableProperties = object(availableProperties.get("properties"));
+        Map<String, Object> missingProperties = object(object(allOf.get(1)).get("then"));
+        missingProperties = object(missingProperties.get("properties"));
+        Map<String, Object> recordProperties = object(schemaDocument.get("properties"));
+        Map<String, Object> definitions = object(schemaDocument.get("$defs"));
+
+        int schemaContractVersion = (int) object(availableProperties.get("engineIntelligenceContractVersion")).get("const");
+        assertThat(schemaContractVersion).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION)
+                .isEqualTo(FraudEngineIdentityContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION);
+        assertThat(object(recordProperties.get("reasonCodes")).get("maxItems")).isEqualTo(20);
+        for (String definition : List.of("rulesReasonCodes", "mlReasonCodes", "velocityReasonCodes", "deviceReasonCodes")) {
+            assertThat(object(definitions.get(definition)).get("maxItems")).as(definition).isEqualTo(5);
+        }
+        assertThat(object(recordProperties.get("diagnosticSignals")).get("maxItems")).isEqualTo(5);
+
+        Map<String, Object> availableGroups = object(availableProperties.get("reasonCodesByEngine"));
+        assertThat(availableGroups.get("minProperties")).isEqualTo(2);
+        assertThat(strings(availableGroups.get("required")))
+                .contains("rules.primary", "ml.python.primary");
+        assertThat(object(missingProperties.get("reasonCodes")).get("maxItems")).isEqualTo(0);
+        assertThat(object(missingProperties.get("reasonCodesByEngine")).get("maxProperties")).isEqualTo(0);
+        assertThat(object(missingProperties.get("diagnosticSignals")).get("maxItems")).isEqualTo(0);
     }
 
     @Test
@@ -369,6 +402,33 @@ class EngineIntelligenceFeedbackDatasetRecordSchemaParityTest {
             groups.remove("ml.python.primary");
             json.put("reasonCodes", List.of("HIGH_RISK_FLAGS_PRESENT"));
         });
+
+        Fixture missingRules = new Fixture();
+        missingRules.reasonCodesByEngine.remove("rules.primary");
+        missingRules.reasonCodes = List.of("ML_MODEL_SIGNAL");
+        assertRejectedByJavaAndSchema(missingRules, json -> {
+            Map<String, Object> groups = object(json.get("reasonCodesByEngine"));
+            groups.remove("rules.primary");
+            json.put("reasonCodes", List.of("ML_MODEL_SIGNAL"));
+        });
+    }
+
+    @Test
+    void missingProjectionCannotContainReasonCodesGroupsOrDiagnostics() throws Exception {
+        Fixture missingWithReasonCodes = Fixture.missing();
+        missingWithReasonCodes.reasonCodes = List.of("ML_MODEL_SIGNAL");
+        assertRejectedByJavaAndSchema(missingWithReasonCodes,
+                json -> json.put("reasonCodes", List.of("ML_MODEL_SIGNAL")));
+
+        Fixture missingWithGroups = Fixture.missing();
+        missingWithGroups.reasonCodesByEngine = Map.of("rules.primary", List.of("HIGH_RISK_FLAGS_PRESENT"));
+        assertRejectedByJavaAndSchema(missingWithGroups,
+                json -> json.put("reasonCodesByEngine", Map.of("rules.primary", List.of("HIGH_RISK_FLAGS_PRESENT"))));
+
+        Fixture missingWithDiagnostics = Fixture.missing();
+        missingWithDiagnostics.diagnosticSignals = List.of("ML_MODEL_SIGNAL");
+        assertRejectedByJavaAndSchema(missingWithDiagnostics,
+                json -> json.put("diagnosticSignals", List.of("ML_MODEL_SIGNAL")));
     }
 
     @Test

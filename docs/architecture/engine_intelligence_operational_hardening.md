@@ -2,13 +2,13 @@
 
 ## Purpose
 
-FDP-100 adds operational metrics, retention policy documentation, and index strategy documentation for the existing
+This document describes operational metrics, retention boundaries, and the current index strategy for the existing
 engine-intelligence projection, feedback submit, and feedback read surfaces.
 
 ## Scope
 
-This is operational hardening only. FDP-100 does not add public API endpoints, UI features, dashboards, global
-feedback search, case aggregation, feedback export, model retraining, rule updates, alert severity changes,
+This is operational hardening only. It does not add public API endpoints, UI features, dashboards, global feedback
+search, case aggregation, feedback export, model retraining, rule updates, alert severity changes,
 fraud-case status changes, approve/decline/block workflows, or payment-authorization behavior.
 
 ## Operational Metrics
@@ -66,9 +66,9 @@ Audit records may outlive projection and feedback records according to regulated
 Audit retention is separate from projection and feedback retention.
 Audit evidence must not be deleted as part of projection or feedback rollback.
 
-FDP-100 documents retention policy and does not add automatic feedback deletion, projection deletion, cleanup
-schedulers, or TTL indexes. Automatic deletion requires explicit governance approval, retention acceptance, and a
-separate implementation review.
+This document records retention policy and does not implement automatic feedback deletion, projection deletion,
+cleanup schedulers, or TTL indexes. Automatic deletion requires explicit governance approval, retention acceptance,
+and a separate implementation review.
 
 If a projection expires in a future governed retention policy, scored transaction reads must continue to work and
 engine-intelligence read behavior must remain unavailable/not-projected rather than inventing data.
@@ -79,16 +79,16 @@ If audit outlives projection or feedback, audit remains the retained record of a
 
 ## Index Strategy
 
-The index strategy table columns are collection, access pattern, index, introduced in, risk if missing, and owner.
+The index strategy table records each collection, access pattern, index, current status, risk if missing, and owner.
 
-| Collection | Access pattern | Index | Introduced in | Risk if missing | Owner |
+| Collection | Access pattern | Index | Status | Risk if missing | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `engine_intelligence_projections` | Lookup/upsert by transactionId | transactionId as document id / Mongo `_id` | FDP-95 | Projection lookup or read degradation | Alert-service projection owner |
-| `engine_intelligence_feedback` | Idempotent feedback submit | `submittedBy + transactionId + idempotencyKeyHash` unique, `engine_intelligence_feedback_idempotency_idx` | FDP-98 | Duplicate feedback or idempotency break | Feedback submit owner |
-| `engine_intelligence_feedback` | Latest feedback read for one transaction | `transactionId + submittedAt DESC + feedbackId ASC`, `engine_intelligence_feedback_transaction_submitted_feedback_idx` | FDP-99 | Expensive transaction-scoped sort | Feedback read owner |
-| `engine_intelligence_feedback` | Operational historical inspection by transaction | `transactionId + createdAt DESC`, `engine_intelligence_feedback_transaction_created_idx` | FDP-98/FDP-99 | Operational historical inspection degradation | Feedback storage owner |
+| `engine_intelligence_projections` | Lookup/upsert by transactionId | transactionId as document id / Mongo `_id` | Existing | Projection lookup or read degradation | Alert-service projection owner |
+| `engine_intelligence_feedback` | Idempotent feedback submit | `submittedBy + transactionId + idempotencyKeyHash` unique, `engine_intelligence_feedback_idempotency_idx` | Existing | Duplicate feedback or idempotency break | Feedback submit owner |
+| `engine_intelligence_feedback` | Latest feedback read for one transaction | `transactionId + submittedAt DESC + feedbackId ASC`, `engine_intelligence_feedback_transaction_submitted_feedback_idx` | Existing | Expensive transaction-scoped sort | Feedback read owner |
+| `engine_intelligence_feedback` | Operational historical inspection by transaction | `transactionId + createdAt DESC`, `engine_intelligence_feedback_transaction_created_idx` | Existing | Operational historical inspection degradation | Feedback storage owner |
 
-FDP-100 does not add new indexes, remove existing indexes, or introduce a global feedback search or analytics index.
+This work adds no indexes, removes no existing indexes, and introduces no global feedback search or analytics index.
 
 ## Audit Relationship
 
@@ -98,6 +98,6 @@ reads or writes succeed.
 
 ## Operational Boundaries
 
-FDP-100 does not call ML, rules, scoring, payment authorization, fraud-case mutation, alert severity mutation,
+This work does not call ML, rules, scoring, payment authorization, fraud-case mutation, alert severity mutation,
 outbox publication, model training, training export, or dashboard code. Feedback remains analyst perception and
 governance review input only.

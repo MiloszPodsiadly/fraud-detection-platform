@@ -169,6 +169,22 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
     }
 
     @Test
+    void enablingScoringDeviceAlongsideAdmissionStillFailsScoringStartup() {
+        contextRunner()
+                .withPropertyValues(
+                        DeviceRiskEngineProperties.PROPERTY_NAME + "=true",
+                        "fraud.device-risk.admission.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(IllegalStateException.class)
+                            .hasRootCauseMessage(DeviceRiskEngineProperties.PROPERTY_NAME
+                                    + " requires independently authenticated occurrence ownership and a verifiable evidence binding "
+                                    + "contract");
+                });
+    }
+
+    @Test
     void disabledDeviceFlagNeverCreatesAnEngineOrFourthRegistryEntry() {
         assertThat(FraudEngineIdentityContract.engineOrder()).containsExactly(
                 FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,

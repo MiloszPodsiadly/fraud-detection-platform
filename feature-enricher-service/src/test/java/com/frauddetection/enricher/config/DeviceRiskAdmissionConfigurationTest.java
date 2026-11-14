@@ -64,9 +64,21 @@ class DeviceRiskAdmissionConfigurationTest {
                 .run(context -> {
                     assertThat(context).hasFailed();
                     assertThat(context.getStartupFailure())
-                            .hasRootCauseMessage("fraud.device-risk.admission.enabled is unsupported until an "
-                                    + "authenticated issuer, scoped authorization, and signed coverage seal are "
-                                    + "implemented");
+                            .hasRootCauseMessage("fraud.device-risk.admission.enabled remains disabled until "
+                                    + "production trust, population, and runtime activation are approved");
+                });
+    }
+
+    @Test
+    void enablingAdmissionAlongsideScoringDeviceStillFailsAdmissionStartup() {
+        contextRunner.withPropertyValues(
+                        DeviceRiskAdmissionProperties.PROPERTY_NAME + "=true",
+                        "fraud.scoring.engines.device.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseMessage("fraud.device-risk.admission.enabled remains disabled until "
+                                    + "production trust, population, and runtime activation are approved");
                 });
     }
 

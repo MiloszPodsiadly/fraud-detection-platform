@@ -23,14 +23,10 @@ public class StructuredAuditEventPublisher implements AuditEventPublisher {
         log.atInfo()
                 .addKeyValue("auditAction", event.action())
                 .addKeyValue("resourceType", event.resourceType())
-                .addKeyValue("resourceId", event.resourceId())
-                .addKeyValue("actorUserId", event.actor().userId())
                 .addKeyValue("actorRoles", event.actor().roles())
                 .addKeyValue("actorAuthorities", event.actor().authorities())
                 .addKeyValue("auditTimestamp", event.timestamp())
-                .addKeyValue("correlationId", event.correlationId())
                 .addKeyValue("auditOutcome", event.outcome())
-                .addKeyValue("failureReason", event.failureReason())
                 .log("Audit event recorded.");
         metrics.recordAuditEventPublished(event.action(), event.outcome());
     }

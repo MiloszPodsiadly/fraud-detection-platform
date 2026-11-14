@@ -1,10 +1,10 @@
 # Engine Intelligence On Scored Transaction Detail
 
-Status: FDP-115 implemented read API boundary.
+Status: Current bounded read API behavior.
 
 ## Scope
 
-FDP-115 exposes already-projected engine intelligence on the single scored transaction detail API:
+The scored transaction detail API exposes already-projected engine intelligence:
 
 - `GET /api/v1/transactions/scored/{transactionId}`
 - `ScoredTransactionDetailResponse.engineIntelligence`
@@ -14,6 +14,7 @@ without engine intelligence diagnostics.
 
 This is an analyst diagnostic read surface. It is not a scoring path, decisioning path, recommendation path,
 promotion path, threshold-management path, payment-authorization path, or workflow execution path.
+No new scoring or decisioning route is introduced.
 
 ## Source Of Truth
 
@@ -71,7 +72,7 @@ The response is a bounded DTO contract, not a serialization of projection docume
 
 ## Non-Claims
 
-FDP-115 does not add:
+This read surface does not provide:
 
 - final bank authorization
 - payment authorization

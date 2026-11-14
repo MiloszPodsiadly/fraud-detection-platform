@@ -64,10 +64,8 @@ public class OllamaCaseNarrativeClient {
             return Optional.of(parseNarrative(response.response()));
         } catch (RestClientException | JacksonException exception) {
             log.atWarn()
-                    .addKeyValue("alertId", alert.alertId())
-                    .addKeyValue("transactionId", alert.transactionId())
                     .addKeyValue("ollamaModel", assistantProperties.ollamaModel())
-                    .setCause(exception)
+                    .addKeyValue("exceptionType", exception.getClass().getSimpleName())
                     .log("Ollama assistant narrative failed; deterministic assistant summary will be used.");
             return Optional.empty();
         }

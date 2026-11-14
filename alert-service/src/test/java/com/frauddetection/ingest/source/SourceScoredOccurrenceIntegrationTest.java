@@ -331,8 +331,13 @@ class SourceScoredOccurrenceIntegrationTest {
             String tags = metrics.getMeters().stream().map(meter -> meter.getId().toString()).collect(java.util.stream.Collectors.joining("\n"));
             for (String output : List.of(lastIngestResponse, rejected, logs, tags)) {
                 assertThat(output).doesNotContain(proof, ENCRYPTION_KEY, TestSourceIssuer.publicKey(0), TestSourceIssuer.ISSUER,
-                        "institution-a", "source-event-42", "private-proof-canary-invalid", "Northwind Electronics", "Mozilla/5.0", "203.0.113.24", "example.com");
+                        "institution-a", "source-event-42", "private-proof-canary-invalid",
+                        "Northwind Electronics", "Mozilla/5.0", "203.0.113.24", "example.com");
             }
+            assertThat(logs).doesNotContain(input.transactionId(), input.correlationId(), input.customerId(), input.accountId(),
+                    input.eventId(), input.deviceInfo().deviceId());
+            assertThat(tags).doesNotContain(input.transactionId(), input.correlationId(), input.customerId(), input.accountId(),
+                    input.eventId(), input.deviceInfo().deviceId());
         } finally { logger.detachAppender(captured); captured.stop(); }
     }
 

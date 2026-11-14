@@ -35,9 +35,6 @@ public class KafkaFraudAlertEventPublisher implements FraudAlertEventPublisher {
             addTraceHeaderIfPresent(record, TraceContext.currentTraceId());
             kafkaTemplate.send(record).get();
             log.atInfo()
-                    .addKeyValue("alertId", event.alertId())
-                    .addKeyValue("transactionId", event.transactionId())
-                    .addKeyValue("correlationId", event.correlationId())
                     .addKeyValue("topic", kafkaTopicProperties.fraudAlerts())
                     .log("Published fraud alert event.");
         } catch (Exception exception) {

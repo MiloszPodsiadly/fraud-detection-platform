@@ -2,6 +2,7 @@ package com.frauddetection.ingest.messaging;
 
 import com.frauddetection.common.events.source.SourceOriginProofs;
 import com.frauddetection.common.events.source.SourceOriginProperties;
+import com.frauddetection.common.events.observability.TraceContext;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.ingest.config.KafkaTopicProperties;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -47,6 +48,9 @@ class KafkaTransactionRawEventOriginProofTest {
         assertThat(proofs.verifyRaw(event, token).assertion()).isEqualTo(SourceOriginProofs.Assertion.PROVEN_LEGACY);
         assertThat(record.getValue().value()).isEqualTo(event);
         assertThat(record.getValue().key()).isEqualTo(event.transactionId());
+        assertThat(header(record.getValue(), TraceContext.KAFKA_CORRELATION_ID_HEADER)).isEqualTo(event.correlationId());
+        assertThat(header(record.getValue(), TraceContext.KAFKA_TRACE_ID_HEADER)).isEqualTo(event.traceId());
+        assertThat(header(record.getValue(), TraceContext.KAFKA_TRANSACTION_ID_HEADER)).isEqualTo(event.transactionId());
     }
 
     @Test void attestedRawRecordsUseAStableHashedCustomerPartitionKey() throws Exception {
@@ -75,5 +79,9 @@ class KafkaTransactionRawEventOriginProofTest {
                 .digest(("source-customer-partition/v1\u0000" + first.customerId()).getBytes(StandardCharsets.UTF_8)));
         assertThat(records.getAllValues()).extracting(ProducerRecord::key).containsExactly(expectedKey, expectedKey);
         assertThat(expectedKey).doesNotContain(first.customerId()).doesNotContain(first.transactionId());
+    }
+
+    private String header(ProducerRecord<?, ?> record, String name) {
+        return new String(record.headers().lastHeader(name).value(), StandardCharsets.UTF_8);
     }
 }

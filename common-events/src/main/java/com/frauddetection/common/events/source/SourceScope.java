@@ -9,14 +9,19 @@ public record SourceScope(String issuer, String institution, String source, Stri
                           String signingKeyVersion, String sourceEventId, Instant eventTime,
                           String purpose, String audience, String payloadCommitment) {
     private static final Pattern REFERENCE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}");
+    private static final Pattern PAYLOAD_COMMITMENT = Pattern.compile("[0-9a-f]{64}");
 
     public SourceScope {
-        for (String value : new String[] {issuer, institution, source, sourceEpoch, signingKeyVersion,
-                sourceEventId, purpose, audience}) {
-            requireReference(value);
-        }
+        requireReference(issuer);
+        requireReference(institution);
+        requireReference(source);
+        requireReference(sourceEpoch);
+        requireReference(signingKeyVersion);
+        requireReference(sourceEventId);
+        requireReference(purpose);
+        requireReference(audience);
         Objects.requireNonNull(eventTime, "SOURCE_EVENT_TIME_REQUIRED");
-        if (payloadCommitment == null || !payloadCommitment.matches("[0-9a-f]{64}")) {
+        if (payloadCommitment == null || !PAYLOAD_COMMITMENT.matcher(payloadCommitment).matches()) {
             throw new IllegalArgumentException("SOURCE_PAYLOAD_COMMITMENT_INVALID");
         }
     }

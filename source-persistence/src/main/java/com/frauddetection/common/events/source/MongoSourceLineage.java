@@ -22,9 +22,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 import static com.frauddetection.common.events.source.SourceLineage.State.*;
 import static com.frauddetection.common.events.source.SourceLineageSchema.*;
@@ -51,6 +55,8 @@ public final class MongoSourceLineage implements SourceLineageAccess {
             FraudFeatureContract.PROXY_OR_VPN_DETECTED, FraudFeatureContract.CUSTOMER_SEGMENT,
             FraudFeatureContract.MERCHANT_CATEGORY, FraudFeatureContract.CURRENCY);
     private static final int MAX_ENRICHED_PUBLICATION_BATCH = 50;
+    public static final int MAX_ENRICHED_BINDING_BATCH = 1_000;
+    private static final Pattern COMMITMENT_HASH = Pattern.compile("[0-9a-f]{64}");
     private static final Duration ENRICHED_PUBLICATION_LEASE = Duration.ofSeconds(30);
     private final MongoClient client;
     private final MongoDatabase database;
@@ -1227,6 +1233,96 @@ public final class MongoSourceLineage implements SourceLineageAccess {
     @Override public SourceLineage enriched(TransactionEnrichedEvent event) {
         return transaction(session -> enriched(session, event));
     }
+
+    /** Exact private receipt/RAW/ENRICHED authorization without retaining another copy of either event. */
+    public SourceLineage enrichedBinding(String receiptId, String rawCommitment, String enrichedCommitment) {
+        if (!hash(receiptId) || !hash(rawCommitment) || !hash(enrichedCommitment)) { return absent(UNVERIFIED); }
+        return transaction(session -> {
+            Document link = database.getCollection(ENRICHED).find(session,
+                    and(eq("receiptId", receiptId), eq("eventCommitment", enrichedCommitment))).first();
+            if (link == null) { return absent(UNAVAILABLE); }
+            if (!rawCommitment.equals(link.getString("parentCommitment"))) { return absent(CONFLICT); }
+            return enrichedLink(session, link, enrichedCommitment);
+        });
+    }
+
+    /** Resolves a bounded set of exact source bindings in one source snapshot, while rechecking each receipt policy. */
+    public List<SourceLineage> enrichedBindings(List<EnrichedBinding> bindings) {
+        if (bindings == null || bindings.isEmpty()) { return List.of(); }
+        if (bindings.size() > MAX_ENRICHED_BINDING_BATCH) {
+            return Collections.nCopies(bindings.size(), absent(UNAVAILABLE));
+        }
+        List<SourceLineage> results = new ArrayList<>(Collections.nCopies(bindings.size(), absent(UNVERIFIED)));
+        List<EnrichedBinding> valid = new ArrayList<>(bindings.size());
+        int[] positions = new int[bindings.size()];
+        int validCount = 0;
+        for (int index = 0; index < bindings.size(); index++) {
+            EnrichedBinding binding = bindings.get(index);
+            if (binding == null || !hash(binding.receiptId()) || !hash(binding.rawCommitment())
+                    || !hash(binding.enrichedCommitment())) { continue; }
+            valid.add(binding);
+            positions[validCount++] = index;
+        }
+        if (valid.isEmpty()) { return List.copyOf(results); }
+        List<SourceLineage> resolved = transaction(session -> enrichedBindings(session, valid),
+                Collections.nCopies(valid.size(), absent(UNAVAILABLE)));
+        for (int index = 0; index < validCount; index++) { results.set(positions[index], resolved.get(index)); }
+        return List.copyOf(results);
+    }
+
+    private List<SourceLineage> enrichedBindings(ClientSession session, List<EnrichedBinding> bindings) {
+        if (session == null || !session.hasActiveTransaction()) {
+            return Collections.nCopies(bindings.size(), absent(UNAVAILABLE));
+        }
+        List<String> enrichedCommitments = bindings.stream().map(EnrichedBinding::enrichedCommitment).distinct().toList();
+        Map<String, Document> links = documentsBy(session, ENRICHED, "eventCommitment", enrichedCommitments);
+        if (links == null) { return Collections.nCopies(bindings.size(), absent(UNAVAILABLE)); }
+
+        List<String> rawCommitments = links.values().stream().map(row -> row.getString("parentCommitment"))
+                .filter(MongoSourceLineage::hash).distinct().toList();
+        List<String> receiptIds = links.values().stream().map(row -> row.getString("receiptId"))
+                .filter(MongoSourceLineage::hash).distinct().toList();
+        Map<String, Document> raw = documentsBy(session, RAW, "eventCommitment", rawCommitments);
+        Map<String, Document> receipts = documentsBy(session, RECEIPTS, "_id", receiptIds);
+        Map<String, Document> identities = documentsBy(session, IDENTITIES, "_id", receiptIds);
+        if (raw == null || receipts == null || identities == null) {
+            return Collections.nCopies(bindings.size(), absent(UNAVAILABLE));
+        }
+
+        List<SourceLineage> results = new ArrayList<>(bindings.size());
+        for (EnrichedBinding binding : bindings) {
+            Document link = links.get(binding.enrichedCommitment());
+            if (link == null || !binding.receiptId().equals(link.getString("receiptId"))) {
+                results.add(absent(UNAVAILABLE));
+                continue;
+            }
+            if (!binding.rawCommitment().equals(link.getString("parentCommitment"))) {
+                results.add(absent(CONFLICT));
+                continue;
+            }
+            Document rawRow = raw.get(binding.rawCommitment());
+            Receipt receipt = receipt(identities.get(binding.receiptId()), receipts.get(binding.receiptId()), binding.receiptId());
+            results.add(enrichedLink(link, rawRow, receipt, binding.enrichedCommitment()));
+        }
+        return List.copyOf(results);
+    }
+
+    private Map<String, Document> documentsBy(ClientSession session, String collection, String field, List<String> values) {
+        if (values.isEmpty()) { return Map.of(); }
+        List<Document> rows = database.getCollection(collection).find(session, in(field, values))
+                .batchSize(MAX_ENRICHED_BINDING_BATCH).into(new ArrayList<>());
+        Map<String, Document> result = new HashMap<>(rows.size());
+        for (Document row : rows) {
+            String value = row.getString(field);
+            if (value == null || result.putIfAbsent(value, row) != null) { return null; }
+        }
+        return result;
+    }
+
+    private static boolean hash(String value) { return value != null && COMMITMENT_HASH.matcher(value).matches(); }
+
+    public record EnrichedBinding(String receiptId, String rawCommitment, String enrichedCommitment) { }
+
     SourceLineage enriched(ClientSession session, TransactionEnrichedEvent event) {
         if (session == null || !session.hasActiveTransaction()) { return absent(UNAVAILABLE); }
         String commitment = SourceEventCommitment.enriched(event);
@@ -1238,18 +1334,26 @@ public final class MongoSourceLineage implements SourceLineageAccess {
     }
 
     private SourceLineage enrichedLink(ClientSession session, Document link, String commitment) {
-        if (!validLink(link, link.getString("eventId"), canonicalTime(link.getString("eventCreatedAt")), commitment)
-                || !SourceEventCommitment.eventIdentity("enriched", link.getString("eventId"), canonicalTime(link.getString("eventCreatedAt")))
-                .equals(link.getString("_id"))) { return absent(CONFLICT); }
         Document raw = database.getCollection(RAW).find(session, eq("eventCommitment", link.getString("parentCommitment"))).first();
+        Receipt receipt = receipt(session, link.getString("receiptId"));
+        return enrichedLink(link, raw, receipt, commitment);
+    }
+
+    private SourceLineage enrichedLink(Document link, Document raw, Receipt receipt, String commitment) {
+        if (link == null) { return absent(CONFLICT); }
+        String linkEventId = link.getString("eventId");
+        Instant linkCreatedAt = canonicalTime(link.getString("eventCreatedAt"));
+        if (!validLink(link, linkEventId, linkCreatedAt, commitment)
+                || !SourceEventCommitment.eventIdentity("enriched", linkEventId, linkCreatedAt).equals(link.getString("_id"))) {
+            return absent(CONFLICT);
+        }
         if (raw == null || raw.getInteger("schemaVersion", 0) != 1 || !"BOUND".equals(raw.getString("state"))
                 || !SourceEventCommitment.eventIdentity("raw", raw.getString("eventId"), canonicalTime(raw.getString("eventCreatedAt")))
                 .equals(raw.getString("_id")) || !Objects.equals(raw.get("receiptId"), link.get("receiptId"))) {
             return absent(UNAVAILABLE);
         }
-        Receipt receipt = receipt(session, link.getString("receiptId"));
         if (receipt.state != VERIFIED) { return absent(receipt.state); }
-        if (!SourceReceiptIdentity.binding(receipt.scope, receipt.keyCommitment).equals(raw.getString("parentCommitment"))
+        if (!receipt.bindingCommitment.equals(raw.getString("parentCommitment"))
                 || !receipt.expiresAt.equals(raw.getDate("expiresAt").toInstant())
                 || !receipt.expiresAt.equals(link.getDate("expiresAt").toInstant())) { return absent(CONFLICT); }
         return SourceLineage.verified(receipt.id, receipt.scope, commitment);
@@ -1294,6 +1398,10 @@ public final class MongoSourceLineage implements SourceLineageAccess {
     private Receipt receipt(ClientSession session, String id) {
         Document identity = database.getCollection(IDENTITIES).find(session, eq("_id", id)).first();
         Document row = database.getCollection(RECEIPTS).find(session, eq("_id", id)).first();
+        return receipt(identity, row, id);
+    }
+
+    private Receipt receipt(Document identity, Document row, String id) {
         if (identity == null || row == null) { return Receipt.absent(UNAVAILABLE); }
         if (identity.getInteger("schemaVersion", 0) != 1 || row.getInteger("schemaVersion", 0) != 1) { return Receipt.absent(UNAVAILABLE); }
         if ("CONFLICT".equals(identity.getString("state"))) { return Receipt.absent(CONFLICT); }
@@ -1306,8 +1414,10 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         SourceScope scope = new SourceScope(identity.getString("issuer"), identity.getString("institution"), identity.getString("source"),
                 identity.getString("sourceEpoch"), row.getString("signingKeyVersion"), identity.getString("sourceEventId"),
                 canonicalTime(row.getString("eventTime")), row.getString("purpose"), row.getString("audience"), row.getString("payloadCommitment"));
-        String binding = SourceReceiptIdentity.binding(scope, row.getString("keyCommitment"));
-        if (!SourceReceiptIdentity.identity(scope).equals(id) || !binding.equals(identity.getString("bindingCommitment"))
+        String receiptId = SourceReceiptIdentity.identity(scope);
+        String binding = SourceReceiptIdentity.binding(receiptId, scope.signingKeyVersion(), scope.eventTime(), scope.purpose(),
+                scope.audience(), scope.payloadCommitment(), row.getString("keyCommitment"));
+        if (!receiptId.equals(id) || !binding.equals(identity.getString("bindingCommitment"))
                 || !binding.equals(row.getString("bindingCommitment")) || !Objects.equals(identity.get("expiresAt"), row.get("expiresAt"))
                 || !Objects.equals(identity.get("admittedAt"), row.get("admittedAt"))
                 || verifiedAt.toEpochMilli() > admitted.toEpochMilli() || admitted.isAfter(clock.instant())) {
@@ -1316,7 +1426,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         if (policy.receiptPolicyDenial(scope, row.getString("keyCommitment"), row.getString("policyVersion"), verifiedAt) != null) {
             return Receipt.absent(REVOKED);
         }
-        return new Receipt(VERIFIED, id, scope, row.getString("keyCommitment"), row.getString("policyVersion"), expiry);
+        return new Receipt(VERIFIED, id, scope, row.getString("keyCommitment"), row.getString("policyVersion"), expiry, binding);
     }
 
     private boolean validLink(Document link, String eventId, Instant createdAt, String commitment) {
@@ -1370,7 +1480,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
     private static SourceLineage absent(SourceLineage.State state) { return SourceLineage.unavailable(state); }
     private static IllegalStateException invalid(String code) { return new IllegalStateException("SOURCE_LINEAGE_" + code); }
     private record Receipt(SourceLineage.State state, String id, SourceScope scope, String keyCommitment,
-                           String policyVersion, Instant expiresAt) {
-        static Receipt absent(SourceLineage.State state) { return new Receipt(state, null, null, null, null, null); }
+                           String policyVersion, Instant expiresAt, String bindingCommitment) {
+        static Receipt absent(SourceLineage.State state) { return new Receipt(state, null, null, null, null, null, null); }
     }
 }
