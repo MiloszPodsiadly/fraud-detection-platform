@@ -28,6 +28,19 @@ v2 still does not cover:
 - fraud alert creation from governance advisories
 - automatic alert routing configuration in repo
 
+## Cross-service event correlation
+
+The current event path carries identifiers through its existing contracts and Kafka headers while keeping them out of application logs, MDC and metric labels:
+
+1. HTTP ingress accepts `X-Correlation-Id`; if it is absent, the filter creates a UUID. The response echoes the selected value, and the same value is stored as the event `correlationId`.
+2. The RAW producer preserves `correlationId`, `traceId` and `transactionId` headers. The enricher listener opens a scoped `TraceContext`, and the ENRICHED producer forwards the correlation, transaction and trace headers.
+3. The scorer listener opens the same scoped context and the SCORED producer forwards those headers. The alert listener opens a scope from the scored event and trace header; alert and decision producers carry correlation, transaction, alert and trace headers.
+4. `TraceContext` keeps values in a request/worker `ThreadLocal`, never MDC. Closing a scope restores only the prior in-process `ThreadLocal` context and always removes correlation, trace, transaction and alert identifiers from MDC, including on exceptions and nested scope closure. Other MDC fields such as service and operation remain untouched. New threads do not inherit the context; asynchronous work must explicitly re-open it from its event/header inputs.
+
+For an incident, search application logs by service, topic, bounded outcome/reason and time. When authorized, use Kafka administration tooling to inspect the `correlationId` and `traceId` headers on the relevant records and follow the same values across RAW, ENRICHED, SCORED and alert topics. Treat these header values as sensitive business/diagnostic identifiers; do not copy them into log messages, MDC, metric tags or tickets. Durable audit records continue to retain the authorized correlation field and chain evidence.
+
+The repository does not configure an OpenTelemetry exporter or distributed trace backend. There is no production trace search UI, and app logs cannot currently be searched by request or transaction identifiers. Production tracing export and broker-side operational access are **NOT CONFIGURED**; header propagation tests prove the code path only, not deployment telemetry.
+
 ## Local Runtime Stack
 
 FDP-5 now includes a local-only monitoring stack in `deployment`:

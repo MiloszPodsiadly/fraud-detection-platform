@@ -166,8 +166,6 @@ public class EngineIntelligencePendingProjectionWorker {
         ).getModifiedCount();
         if (modified == 1) {
             log.atError()
-                    .addKeyValue("sourceEventId", work.getSourceEventId())
-                    .addKeyValue("transactionId", work.getTransactionId())
                     .addKeyValue("reason", reason)
                     .log("Engine Intelligence projection requires operator resolution.");
         }

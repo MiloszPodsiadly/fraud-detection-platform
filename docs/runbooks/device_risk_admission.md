@@ -2,25 +2,27 @@
 
 ## Purpose and scope
 
-Use this runbook for the disabled Device Risk observation and diagnostic candidate. The Mongo adapter and pure policy
-are not connected to the running pipeline. This runbook does not authorize data collection or runtime activation.
+Use this runbook for the Device Risk trust path. Independently signed admission and private diagnostics are implemented
+behind package-private test-only adapters. They are exercised against real Mongo/Kafka test infrastructure but are not
+registered as production beans, endpoints, or scoring paths. This runbook does not authorize data collection or runtime
+activation.
 
 ## Current status
 
 | Status | Evidence |
 | --- | --- |
-| IMPLEMENTED | Bounded Mongo adapter foundation, diagnostic-only predicates, and synthetic replay identity controls. |
-| TESTED | Focused policy, persistence-adapter, contract, and deterministic replay cases; structural fixtures do not prove issuer authenticity. |
-| DISABLED BY DESIGN | Admission defaults to `false`; enabling it fails startup. Device Risk is not registered in the scoring engine. |
-| EXTERNAL DEPENDENCY | Authenticated issuer and coverage seal, occurrence/device binding, approved key custody and retention, durable delivery and recovery. |
+| IMPLEMENTED IN TEST-ONLY PATH | Independent source, Device and coverage signature verification; epoch-aware Mongo v2 stage/seal/commit; exact initial SCORED binding; private read-only diagnostic. |
+| TESTED | Ed25519 test signers, authenticated Mongo replica sets and Kafka Testcontainers cover selected lifecycle, recovery, revocation, authorization, privacy and contract boundaries. These do not prove production issuer authenticity or population completeness. |
+| DISABLED BY DESIGN | `fraud.device-risk.admission.enabled=false` and `fraud.scoring.engines.device.enabled=false`; both services fail startup if their respective flag is enabled without authorization. Device remains absent from the active registry. |
+| EXTERNAL DEPENDENCY | Production issuer and population authority, approved key custody, legal/privacy retention, production Mongo roles and additive schema/index migration, operational ownership and external monitoring. |
 | DEPLOYMENT ATTESTATION REQUIRED | Consumer compatibility, access controls, retention, recovery ownership, and measured performance. |
 
-Binary decision: `CODE-FOUNDATION-MERGE-READY`; `DEVICE-RUNTIME-ACTIVATION-NO-GO`. No real authenticated
-institutional issuer is available in the current ingress path. A structural enum, hash, request field, local fixture,
-or self-signed seal does not change that result.
+Status: code-merge decision is pending review; Device runtime activation is **NO-GO**. No production issuer or
+population authority is configured. Test signers are disposable keys generated in memory and do not establish a
+production trust anchor. A structural enum, hash, request field, local fixture, or self-signed test assertion does not
+change that result. The current design and release gates are in [Device Verified Source Admission](../adr/device_verified_source_admission.md).
 
-Accountable role owners and the concrete evidence required for each of the five candidate signals are listed in the
-[Device Risk evidence boundaries](../architecture/device_risk_evidence_boundaries.md#activation-owners-and-evidence-required).
+The pure policy's supported and unsupported signals are described in [Device Risk signal policy](../architecture/device_risk_signal_policy.md).
 The repository contains no named approvers or recorded external approvals; keep both admission and scoring flags off.
 
 ## Symptoms and impact
@@ -30,12 +32,55 @@ The repository contains no named approvers or recorded external approvals; keep 
 - `fraud.scoring.engines.device.enabled=true` is also expected to fail startup. The candidate engine has no admitted
   evidence reader and must not affect Rules/ML decisions.
 - The running application exports no Device Risk query, lifecycle, conflict, or latency metrics. An opt-in local
-  Mongo query-plan/load measurement is recorded below; lock conflicts, transaction retry counts, and worst-case retry
-  latency remain **NOT MEASURED**.
-- `revokeDeviceFromOperationalHistory` in the un-wired adapter removes active membership and blocks replay, but
+  Stage A query-plan/load measurement is recorded below. The serial profiles observed zero transient transaction
+  retries and unknown commit acknowledgements; contention, lock-conflict behavior, worst-case retry latency and runtime
+  telemetry remain **NOT MEASURED**.
+- `revokeDeviceFromOperationalHistory` in the test-only adapter removes active membership and blocks replay, but
   intentionally retains bounded receipts. It is operational revocation, not legal or complete erasure.
 
-## Opt-in local Mongo measurement
+## Historical and current Mongo measurements
+
+The table below is a historical local baseline from 2026-10-28 against the earlier implementation. It is retained as
+historical evidence only; it is not a performance result for the current epoch-aware v2 schema. Current v2 Stage A
+measurements at 100 and 500 history members are recorded separately below. The 1,000-member Stage A profile, the
+10,000/25,000 high-density limits, saturation, contention, and production capacity/SLO are **NOT MEASURED**.
+
+### Current Stage A local profiles
+
+The opt-in profile uses real signed admission fixtures and an authenticated single-member Mongo replica set in
+Testcontainers. Both completed runs were recorded on 2026-11-13 using Windows 11, OpenJDK 21.0.10, Docker Desktop
+29.5.2 (15,619 MB reported), Testcontainers 2.0.5 and MongoDB 7.0. On the 100-member run, Stage A `stage` p50/p95
+was 30.059/39.310 ms, `seal` took 46.948 ms (one
+sample), and `commit` p50/p95/p99 was 73.806/105.651/118.013 ms. It recorded 1,000 Device reads / 20,100 Device
+documents and 2,196 source reads / 21,600 source documents. On the completed 500-member run, `stage` p50/p95 was
+26.416/35.294 ms, warm `seal` p50/p95 was 30.988/53.746 ms, and warm `commit` p50/p95/p99 was
+135.234/216.839/286.730 ms (maximum 523.980 ms). It recorded 5,000 Device reads / 182,896 Device documents and
+10,996 source reads / 508,000 source documents. Both runs had zero quarantine/fail-closed outcomes, transient
+transaction retries and unknown commit acknowledgements.
+
+The four real Stage A query shapes are the observation device/customer `$or` union, anchors, occurrences, and committed
+candidates. At 500, each used the expected device/customer window indexes, returned and examined 500 documents, and
+examined 1,000 keys; there was no in-memory `SORT` or `COLLSCAN`. Stage A sorts customer-matched observation rows in
+Java after the indexed union query. The profile checks local query behavior and fixture latency only; it does not prove
+contention behavior or a production SLO. Revalidating the retained history for each new event makes total work grow
+with the sum of prior window sizes for a repeated device/customer stream. Further safe reduction needs a separately
+reviewed authenticated incremental-history design with explicit source-revocation and deletion semantics. Do not
+change the current history caps based on these two profiles. Stage B has separate local 100/500/1,000-member results
+in [private diagnostics](../architecture/device_private_diagnostics.md).
+
+Run either completed profile from the repository root in PowerShell:
+
+```powershell
+mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dsurefire.failIfNoSpecifiedTests=false" `
+  "-Dfraud.device-risk.performance=true" "-Dfraud.device-risk.stage-a.max-members=100" `
+  -pl feature-enricher-service -am "-Dtest=MongoDeviceObservationStageABenchmarkTest" test
+```
+
+Use `-Dfraud.device-risk.stage-a.max-members=500` for the 500-member run. The 1,000-member run was stopped after its
+500-member checkpoint and is **NOT MEASURED**; do not treat that partial run as a completed result. No 10,000/25,000
+profile or production capacity/SLO measurement is available.
+
+### Historical opt-in local baseline
 
 The reproducible Testcontainers measurement is opt-in and uses a disposable single-member Mongo replica set with
 `mongo:7.0`. It seeds 10,000 device-window rows, 25,000 customer-window rows (with overlap), and 2,000 distinct
@@ -61,9 +106,9 @@ Testcontainers 2.0.5, and the Mongo 7.0 single-member replica set:
 
 Seed insertion took 677 ms; the one transaction committing at both query caps took 233 ms. Mongo's `serverStatus`
 resident-memory samples were 166 MB before seeding and 230 MB after the run; these are two point samples, not peak
-container or JVM memory. The measurement did not induce contention. Lock conflicts and transaction retry counts are
-not instrumented, and a worst-case retry duration was not measured. These local timings validate index selection and
-exercise the configured row bounds; they are not a production throughput or latency SLO.
+container or JVM memory. The measurement did not induce contention. These historical timings validate the earlier
+implementation's index selection and exercise its configured row bounds; they are not a production throughput or
+latency SLO.
 
 Separate focused Testcontainers tests cover parallel staging and duplicate seals, two-worker commits, commit versus
 operational revocation, capacity quarantine, source gaps, expiry/cold windows, key rotation, and replay after
@@ -84,9 +129,9 @@ and its metrics remain unwired in production.
 
 `DEVICE_STORE_SCHEMA_INCOMPATIBLE` is fail-closed. It is never a request for the application to migrate, drop an
 index, rewrite data, or recount a counter. Only after stopping every user of a dedicated local/dev/test database may
-an approved operator reset these Device Risk-only collections: `device_observation_candidates`,
-`device_observations`, `device_occurrences`, `device_source_coverage`, `device_scope_fences`,
-`device_operational_revocation_tombstones`, and historical `device_erasure_tombstones`. Do not use this procedure for
+an approved operator reset these seven Device Risk-only collections: `device_observation_candidates`,
+`device_observations`, `device_occurrences`, `device_history_member_anchors`, `device_source_coverage`,
+`device_scope_fences`, and `device_operational_revocation_tombstones`. Do not use this procedure for
 shared, production, retained, alert, audit, governance, or model data; escalate those cases to the data owner.
 
 ## Forbidden actions

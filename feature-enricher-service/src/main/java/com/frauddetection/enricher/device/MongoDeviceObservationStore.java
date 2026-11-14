@@ -1,6 +1,7 @@
 package com.frauddetection.enricher.device;
 
 import com.frauddetection.common.events.device.DeviceRiskEvidence;
+import com.frauddetection.common.events.source.SourceScoredOccurrence;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.CountryFact;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.HistoryFact;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.NetworkFact;
@@ -26,10 +27,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -57,8 +61,9 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private static final int MAX_COMMIT_ACK_ATTEMPTS = 3;
     private static final int MAX_SEAL_BATCH = 1_000;
     private static final int MAX_PENDING_CANDIDATES = 10_000;
-    private static final int MAX_DEVICE_ROWS = 10_000;
-    private static final int MAX_CUSTOMER_ROWS = 25_000;
+    static final int MAX_DEVICE_ROWS = 10_000;
+    static final int MAX_CUSTOMER_ROWS = 25_000;
+    static final int MAX_HISTORY_MEMBERSHIP_ROWS = MAX_DEVICE_ROWS + MAX_CUSTOMER_ROWS;
     private static final TransactionOptions TRANSACTION_OPTIONS = TransactionOptions.builder()
             .readConcern(ReadConcern.SNAPSHOT).writeConcern(WriteConcern.MAJORITY).build();
     private final MongoClient client;
@@ -66,15 +71,56 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     private final MongoCollection<Document> candidates;
     private final MongoCollection<Document> observations;
     private final MongoCollection<Document> occurrences;
+    private final MongoCollection<Document> historyMemberAnchors;
     private final MongoCollection<Document> coverage;
     private final MongoCollection<Document> fences;
     private final MongoCollection<Document> revocationTombstones;
     private final Clock clock;
-    private final JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
+    private final DeviceEpoch epoch;
+    private final HistoryAuthority authority;
+    private final DevicePseudonyms integrityKey;
+    private static final JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
 
-    MongoDeviceObservationStore(MongoClient client, String databaseName, Clock clock) {
+    DeviceEpoch epoch() { return epoch; }
+
+    void bindScored(Observation expected, SourceScoredOccurrence scored) {
+        String id = eventId(expected.institutionToken(), expected.sourceCode(), expected.sourceEventKey());
+        try {
+            transaction(session -> {
+                Document row = occurrences.find(session, eq("_id", id)).first();
+                if (row == null) { throw terminal("OCCURRENCE_MISSING"); }
+                existingResult(session, candidates.find(session, eq("_id", id)).first(), row);
+                if (!expected.provenance().document().equals(row.get("provenance", Document.class))) { throw terminal("IDENTITY_CONFLICT"); }
+                Document binding = DeviceScoredBinding.expected(row, scored);
+                if (row.containsKey("scoredBinding")) {
+                    if (!binding.equals(row.get("scoredBinding", Document.class))) { throw terminal("SCORED_BINDING_CONFLICT"); }
+                    return null;
+                }
+                long changed = occurrences.updateOne(session, and(eq("_id", id), com.mongodb.client.model.Filters.exists("scoredBinding", false),
+                                eq("evidenceCommitment", row.getString("evidenceCommitment")), eq("provenanceCommitment", row.getString("provenanceCommitment"))),
+                        set("scoredBinding", binding)).getModifiedCount();
+                if (changed != 1) { throw retryable("SCORED_BINDING_RACE"); }
+                return null;
+            });
+        } catch (MongoException unresolved) {
+            Document durable = safeRead(occurrences, id);
+            if (durable != null && DeviceScoredBinding.matches(durable, scored)
+                    && expected.provenance().document().equals(durable.get("provenance", Document.class))) { existing(id); return; }
+            throw unavailable("SCORED_BINDING", unresolved);
+        }
+    }
+
+    MongoDeviceObservationStore(MongoClient client, String databaseName, Clock clock, DeviceEpoch epoch, HistoryAuthority authority) {
+        this(client, databaseName, clock, epoch, authority, null);
+    }
+
+    MongoDeviceObservationStore(MongoClient client, String databaseName, Clock clock, DeviceEpoch epoch, HistoryAuthority authority,
+                                DevicePseudonyms integrityKey) {
         this.client = java.util.Objects.requireNonNull(client, "client");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
+        this.epoch = java.util.Objects.requireNonNull(epoch, "epoch");
+        this.authority = java.util.Objects.requireNonNull(authority, "authority");
+        this.integrityKey = integrityKey;
         if (databaseName == null || !databaseName.matches("[a-z][a-z0-9_]{0,63}")) {
             throw new IllegalArgumentException("DEVICE_STORE_DATABASE_NAME");
         }
@@ -82,6 +128,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         candidates = database.getCollection("device_observation_candidates");
         observations = database.getCollection("device_observations");
         occurrences = database.getCollection("device_occurrences");
+        historyMemberAnchors = database.getCollection("device_history_member_anchors");
         coverage = database.getCollection("device_source_coverage");
         fences = database.getCollection("device_scope_fences");
         revocationTombstones = database.getCollection("device_operational_revocation_tombstones");
@@ -124,7 +171,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             }
             StageOutcome outcome = transaction(session -> {
                 String scope = scopeId(input.institutionToken(), input.sourceCode());
+                fenceDevice(session, input.institutionToken(), input.sourceCode(), input.keyVersion(), input.deviceToken());
                 Document progress = coverage.find(session, eq("_id", scope)).first();
+                if (progress != null && !epoch.matches(progress)) { throw terminal("IDENTITY_CONFLICT"); }
+                if (progress != null) { requireCoverageIntegrity(progress); }
+                if (progress != null && (!input.provenance().populationCommitment().equals(progress.getString("populationCommitment"))
+                        || input.provenance().sequenceOrigin() != progress.getLong("sequenceOrigin"))) { throw terminal("SCOPE_POLICY_CONFLICT"); }
                 if (progress != null && progress.getDate("watermark") != null
                         && !input.eventTime().isAfter(progress.getDate("watermark").toInstant())) {
                     invalidateSource(session, scope);
@@ -137,8 +189,20 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                     invalidateSource(session, scope);
                     return StageOutcome.rejected(StageRejection.PENDING_CAPACITY);
                 }
-                coverage.updateOne(session, eq("_id", scope),
-                        combine(inc("revision", 1L), inc("pendingCount", 1), setOnInsert("sealedSequence", 0L)),
+                Bson initializeCoverage = combine(epoch.onInsert(input.institutionToken(), input.sourceCode()), inc("revision", 1L), inc("pendingCount", 1),
+                        setOnInsert("sealedSequence", input.provenance().sequenceOrigin() - 1), setOnInsert("sequenceOrigin", input.provenance().sequenceOrigin()),
+                        setOnInsert("populationCommitment", input.provenance().populationCommitment()), setOnInsert("coverageGeneration", 0L),
+                        setOnInsert("coverageCommitment", "0".repeat(64)));
+                if (integrityKey != null) {
+                    Document initialCoverage = epoch.document(scope, input.institutionToken(), input.sourceCode())
+                            .append("sealedSequence", input.provenance().sequenceOrigin() - 1)
+                            .append("sequenceOrigin", input.provenance().sequenceOrigin())
+                            .append("populationCommitment", input.provenance().populationCommitment())
+                            .append("coverageGeneration", 0L).append("coverageCommitment", "0".repeat(64));
+                    initializeCoverage = combine(initializeCoverage, setOnInsert("coverageIntegrityCommitment",
+                            DeviceRecordIntegrity.coverage(integrityKey, initialCoverage)));
+                }
+                coverage.updateOne(session, eq("_id", scope), initializeCoverage,
                         new com.mongodb.client.model.UpdateOptions().upsert(true));
                 candidates.insertOne(session, candidate(input, clock.instant()));
                 return StageOutcome.created();
@@ -156,10 +220,10 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 return duplicateOrConflict(existing, input);
             }
             try {
-                Document conflictingTransaction = candidates.find(and(eq("institution", input.institutionToken()),
-                        eq("source", input.sourceCode()), eq("transaction", input.transactionKey()))).first();
-                Document conflictingSequence = candidates.find(and(eq("institution", input.institutionToken()),
-                        eq("source", input.sourceCode()), eq("sequence", input.sourceSequence()))).first();
+                Document conflictingTransaction = candidates.find(and(epoch.filter(input.institutionToken(), input.sourceCode()),
+                        eq("transaction", input.transactionKey()))).first();
+                Document conflictingSequence = candidates.find(and(epoch.filter(input.institutionToken(), input.sourceCode()),
+                        eq("sequence", input.sourceSequence()))).first();
                 if (conflictingTransaction != null || conflictingSequence != null) {
                     throw terminal("IDENTITY_CONFLICT");
                 }
@@ -176,6 +240,9 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (seal.watermark().isAfter(clock.instant().plus(MAX_FUTURE_EVENT_SKEW))) {
             throw terminal("FUTURE_WATERMARK");
         }
+        if (!seal.watermark().equals(seal.proof().authority().proofTime())
+                || !authority.coverageCurrent(seal.proof().authority(), seal.institutionToken(), seal.sourceCode(), seal.proof().populationCommitment(),
+                seal.keyVersion(), seal.coverageStart())) { throw terminal("COVERAGE_AUTHORITY_REVOKED"); }
         try {
             transaction(session -> {
                 String id = scopeId(seal.institutionToken(), seal.sourceCode());
@@ -183,11 +250,16 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 if (progress == null) {
                     throw terminal("NO_STAGED_SOURCE");
                 }
+                if (!epoch.matches(progress)) { throw terminal("IDENTITY_CONFLICT"); }
+                requireCoverageIntegrity(progress);
                 long previous = progress.getLong("sealedSequence");
+                if (!seal.proof().populationCommitment().equals(progress.getString("populationCommitment"))
+                        || seal.proof().sequenceOrigin() != progress.getLong("sequenceOrigin")) { throw terminal("SCOPE_POLICY_CONFLICT"); }
                 if (seal.throughSequence() == previous
                         && seal.watermark().equals(dateInstant(progress, "watermark"))
                         && seal.keyVersion() == progress.getInteger("keyVersion")
-                        && seal.coverageStart().equals(dateInstant(progress, "coverageStart"))) {
+                        && seal.coverageStart().equals(dateInstant(progress, "coverageStart"))
+                        && seal.proof().assertionCommitment().equals(progress.getString("sealAssertionCommitment"))) {
                     return null;
                 }
                 if (seal.throughSequence() <= previous || seal.throughSequence() - previous > MAX_SEAL_BATCH
@@ -195,12 +267,18 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                         && seal.watermark().isBefore(dateInstant(progress, "watermark"))) {
                     throw terminal("SEAL_REGRESSION");
                 }
-                List<Document> batch = candidates.find(session, and(eq("institution", seal.institutionToken()),
-                                eq("source", seal.sourceCode()), gt("sequence", previous),
+                if (seal.proof().generation() != progress.getLong("coverageGeneration") + 1
+                        || !seal.proof().previousCommitment().equals(progress.getString("coverageCommitment"))
+                        || seal.proof().fromSequence() != previous + 1) { throw terminal("SEAL_CHAIN_CONFLICT"); }
+                List<Document> batch = candidates.find(session, and(epoch.filter(seal.institutionToken(), seal.sourceCode()), gt("sequence", previous),
                                 lte("sequence", seal.throughSequence())))
                         .sort(com.mongodb.client.model.Sorts.ascending("sequence")).into(new ArrayList<>());
                 if (batch.size() != seal.throughSequence() - previous) {
                     throw terminal("SOURCE_SEQUENCE_GAP");
+                }
+                if (integrityKey != null) { batch.forEach(this::requireCandidateIntegrity); }
+                if (!seal.proof().coverageCommitment().equals(DeviceCoverageCommitment.compute(epoch, seal, batch))) {
+                    throw terminal("SEAL_MANIFEST_CONFLICT");
                 }
                 long expected = previous + 1;
                 for (Document candidate : batch) {
@@ -210,10 +288,15 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                         throw terminal("SOURCE_SEQUENCE_OR_TIME_CONFLICT");
                     }
                 }
-                if (candidates.find(session, and(eq("institution", seal.institutionToken()),
-                        eq("source", seal.sourceCode()), gt("sequence", seal.throughSequence()),
+                if (candidates.find(session, and(epoch.filter(seal.institutionToken(), seal.sourceCode()), gt("sequence", seal.throughSequence()),
                         lte("eventTime", Date.from(seal.watermark())))).first() != null) {
                     throw terminal("SEAL_OMITS_EARLIER_EVENT");
+                }
+                if (integrityKey != null) {
+                    List<Document> anchors = batch.stream()
+                            .map(candidate -> DeviceHistoryMemberAnchor.fromSealedCandidate(integrityKey, epoch, candidate, seal.proof()))
+                            .toList();
+                    historyMemberAnchors.insertMany(session, anchors);
                 }
                 Instant oldStart = dateInstant(progress, "coverageStart");
                 Instant effectiveStart = oldStart == null || seal.coverageStart().isAfter(oldStart)
@@ -224,11 +307,24 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 if (continuity == null || effectiveStart.isAfter(continuity)) {
                     continuity = effectiveStart;
                 }
+                Bson sealUpdate = combine(set("sealedSequence", seal.throughSequence()), set("watermark", Date.from(seal.watermark())),
+                        set("coverageStart", Date.from(effectiveStart)), set("continuousSince", Date.from(continuity)),
+                        set("keyVersion", seal.keyVersion()), set("coverageGeneration", seal.proof().generation()),
+                        set("coverageCommitment", seal.proof().coverageCommitment()), set("sealAssertionCommitment", seal.proof().assertionCommitment()),
+                        set("coverageAuthority", seal.proof().authority().document()), inc("revision", 1L));
+                if (integrityKey != null) {
+                    Document sealedState = new Document(progress)
+                            .append("sealedSequence", seal.throughSequence()).append("watermark", Date.from(seal.watermark()))
+                            .append("coverageStart", Date.from(effectiveStart)).append("continuousSince", Date.from(continuity))
+                            .append("keyVersion", seal.keyVersion()).append("coverageGeneration", seal.proof().generation())
+                            .append("coverageCommitment", seal.proof().coverageCommitment())
+                            .append("sealAssertionCommitment", seal.proof().assertionCommitment())
+                            .append("coverageAuthority", seal.proof().authority().document());
+                    sealUpdate = combine(sealUpdate, set("coverageIntegrityCommitment", DeviceRecordIntegrity.coverage(integrityKey, sealedState)));
+                }
                 long changed = coverage.updateOne(session,
                         and(eq("_id", id), eq("revision", progress.getLong("revision"))),
-                        combine(set("sealedSequence", seal.throughSequence()), set("watermark", Date.from(seal.watermark())),
-                                set("coverageStart", Date.from(effectiveStart)), set("continuousSince", Date.from(continuity)),
-                                set("keyVersion", seal.keyVersion()), inc("revision", 1L))).getModifiedCount();
+                        sealUpdate).getModifiedCount();
                 if (changed != 1) {
                     throw retryable("SEAL_RACE");
                 }
@@ -236,7 +332,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             });
         } catch (MongoException exception) {
             Document durable = safeRead(coverage, scopeId(seal.institutionToken(), seal.sourceCode()));
-            if (matchesDurableSeal(durable, seal)) {
+            if (matchesDurableSeal(durable, seal) && (integrityKey == null || DeviceRecordIntegrity.coverageMatches(integrityKey, durable))) {
                 return;
             }
             throw unavailable("SEAL", exception);
@@ -252,27 +348,24 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         try {
             Document candidate = candidates.find(eq("_id", id)).first();
             if (candidate == null) {
-                Document persisted = occurrences.find(eq("_id", id)).first();
-                if (persisted != null && !occurrenceExpired(persisted, clock.instant())) {
-                    return existing(id);
-                }
                 throw terminal("CANDIDATE_MISSING");
             }
-            if (terminalCandidateExpired(candidate, clock.instant())) {
-                throw terminal("CANDIDATE_EXPIRED");
-            }
-            if (hasActiveOperationalRevocation(revocationId(candidate), clock.instant())) {
-                throw terminal("DEVICE_OPERATIONALLY_REVOKED");
-            }
             if ("COMMITTED".equals(candidate.getString("status"))) {
-                return existing(id);
+                return existing(id, candidate);
             }
             if ("QUARANTINED".equals(candidate.getString("status"))) {
+                requireCandidateStateIntegrity(candidate);
+                if (terminalCandidateExpired(candidate, clock.instant())) {
+                    throw terminal("CANDIDATE_EXPIRED");
+                }
+                if (hasActiveOperationalRevocation(revocationId(candidate), clock.instant())) {
+                    throw terminal("DEVICE_OPERATIONALLY_REVOKED");
+                }
                 return quarantined();
             }
+            // Staged candidates are fully re-read and verified in the transaction. Avoid doing
+            // the same MAC and revocation lookup once before opening that transaction.
             return transaction(session -> commitInside(session, id));
-        } catch (CapacityExceeded exception) {
-            return quarantineCapacity(id);
         } catch (MongoException exception) {
             Document persisted = safeRead(occurrences, id);
             if (persisted != null) {
@@ -332,11 +425,13 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (candidate == null) {
             throw terminal("CANDIDATE_MISSING");
         }
+        requireCandidateIntegrity(candidate);
+        requireCandidateStateIntegrity(candidate);
         if (terminalCandidateExpired(candidate, clock.instant())) {
             throw terminal("CANDIDATE_EXPIRED");
         }
         if ("COMMITTED".equals(candidate.getString("status"))) {
-            return existing(session, id);
+            return existing(session, id, candidate);
         }
         if ("QUARANTINED".equals(candidate.getString("status"))) {
             return quarantined();
@@ -344,18 +439,21 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         if (!"STAGED".equals(candidate.getString("status"))) {
             throw terminal("CANDIDATE_STATE");
         }
+        if (!authority.current(Provenance.from(candidate), candidate.getInteger("keyVersion"))) { throw terminal("AUTHORITY_REVOKED"); }
         if (hasActiveOperationalRevocation(session, revocationId(candidate), clock.instant())) {
             throw terminal("DEVICE_OPERATIONALLY_REVOKED");
         }
         Document progress = coverage.find(session, eq("_id", scopeId(candidate))).first();
+        if (progress != null && !epoch.matches(progress)) { throw terminal("IDENTITY_CONFLICT"); }
+        if (progress != null) { requireCoverageIntegrity(progress); }
         Instant time = candidate.getDate("eventTime").toInstant();
         if (progress == null || progress.getDate("watermark") == null
                 || progress.getLong("sealedSequence") < candidate.getLong("sequence")
                 || dateInstant(progress, "watermark").isBefore(time)) {
             return new CommitResult(CommitStatus.WAITING_FOR_SEAL, null);
         }
-        Bson scope = and(eq("institution", candidate.getString("institution")),
-                eq("source", candidate.getString("source")));
+        requireCoverageAuthority(progress);
+        Bson scope = epoch.filter(candidate.getString("institution"), candidate.getString("source"));
         Bson earlierTimeOrSequence = or(lt("eventTime", Date.from(time)),
                 and(eq("eventTime", Date.from(time)), lt("sequence", candidate.getLong("sequence"))));
         Bson earlier = and(scope, eq("status", "STAGED"), earlierTimeOrSequence,
@@ -369,9 +467,9 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         String customer = candidate.getString("customer");
         String device = candidate.getString("device");
         int version = candidate.getInteger("keyVersion");
-        for (String fenceId : List.of("customer:" + institution + ':' + source + ':' + customer,
-                "device:" + institution + ':' + source + ':' + version + ':' + device)) {
-            fences.updateOne(session, eq("_id", fenceId), inc("revision", 1L),
+        for (String fenceId : List.of("customer:" + scopeId(candidate) + ':' + customer,
+                "device:" + scopeId(candidate) + ':' + version + ':' + device)) {
+            fences.updateOne(session, eq("_id", fenceId), combine(epoch.onInsert(institution, source), inc("revision", 1L)),
                     new com.mongodb.client.model.UpdateOptions().upsert(true));
         }
         Instant windowStart = time.minus(WINDOW);
@@ -379,21 +477,31 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 && version == progress.getInteger("keyVersion")
                 && !dateInstant(progress, "coverageStart").isAfter(windowStart)
                 && !dateInstant(progress, "continuousSince").isAfter(windowStart)
-                && !clock.instant().isAfter(time.plus(LATE_AND_REPAIR));
+                && clock.instant().isBefore(time.plus(LATE_AND_REPAIR));
         HistoryFact prior;
         HistoryFact other;
         HistoryFact switches;
+        DeviceHistoryMembershipCommitment.Value historyMembership = null;
         if (complete) {
             Bson base = and(scope, eq("keyVersion", version), gte("eventTime", Date.from(windowStart)),
                     lt("eventTime", Date.from(time)), gt("expireAt", Date.from(clock.instant())));
-            List<Document> deviceRows = observations.find(session, and(base, eq("device", device)))
-                    .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
-                    .limit(MAX_DEVICE_ROWS + 1).into(new ArrayList<>());
-            List<Document> customerRows = observations.find(session, and(base, eq("customer", customer)))
-                    .sort(com.mongodb.client.model.Sorts.ascending("eventTime", "sourceEvent"))
-                    .limit(MAX_CUSTOMER_ROWS + 1).into(new ArrayList<>());
+            List<Document> membershipRows = observations.find(session,
+                            DeviceHistoryQueries.observationMembership(base, customer, device))
+                    .projection(DeviceHistoryQueries.observationMembershipProjection())
+                    .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
+            List<Document> deviceRows = new ArrayList<>();
+            List<Document> customerRows = new ArrayList<>();
+            for (Document row : membershipRows) {
+                if (device.equals(row.getString("device"))) { deviceRows.add(row); }
+                if (customer.equals(row.getString("customer"))) { customerRows.add(row); }
+            }
+            // Only customer history needs chronological order for transition counting; let the OR query use both
+            // selective indexes without forcing MongoDB to sort the combined result.
+            customerRows.sort(Comparator.comparing((Document row) -> row.getDate("eventTime"))
+                    .thenComparing(row -> row.getString("sourceEvent")));
             if (deviceRows.size() > MAX_DEVICE_ROWS || customerRows.size() > MAX_CUSTOMER_ROWS) {
-                throw new CapacityExceeded();
+                transitionOutOfPending(session, candidate, "QUARANTINED", true);
+                return quarantined();
             }
             Set<String> otherCustomers = new HashSet<>();
             int priorCount = 0;
@@ -405,7 +513,16 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 }
             }
             if (otherCustomers.size() > DeviceRiskEvidence.MAX_OTHER_CUSTOMERS) {
-                throw new CapacityExceeded();
+                transitionOutOfPending(session, candidate, "QUARANTINED", true);
+                return quarantined();
+            }
+            boolean sealedMembershipComplete = integrityKey == null || sealedMembershipMatches(session, membershipRows,
+                    institution, source, customer, device, version, windowStart, time);
+            if (integrityKey != null) {
+                if (sealedMembershipComplete) {
+                    historyMembership = DeviceHistoryMembershipCommitment.compute(integrityKey, epoch, institution, source,
+                            customer, device, version, windowStart, time, membershipRows);
+                }
             }
             int transitions = 0;
             String previousDevice = null;
@@ -440,6 +557,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             switches = ambiguousSwitchOrder
                     ? new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null)
                     : new HistoryFact(State.AVAILABLE, Reason.NONE, transitions);
+            if (!sealedMembershipComplete || !currentMemberships(membershipRows)) {
+                prior = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
+                other = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
+                switches = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
+                historyMembership = null;
+            }
         } else {
             prior = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
             other = new HistoryFact(State.UNAVAILABLE, Reason.INCOMPLETE_HISTORY, null);
@@ -453,19 +576,43 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 new CountryFact(State.UNAVAILABLE, Reason.PROVIDER_MISSING, null, null, null, null),
                 new NetworkFact(State.UNAVAILABLE, Reason.PROVIDER_MISSING, null, null, null, null));
         Date expiry = Date.from(clock.instant().plus(RECEIPT_RETENTION));
-        observations.insertOne(session, new Document("_id", id).append("institution", institution)
+        Document observation = epoch.document(id, institution, source)
                 .append("source", source).append("sourceEvent", candidate.getString("sourceEvent"))
                 .append("customer", customer).append("device", device).append("keyVersion", version)
-                .append("eventTime", Date.from(time)).append("expireAt", Date.from(time.plus(WINDOW).plus(LATE_AND_REPAIR))));
-        occurrences.insertOne(session, new Document("_id", id).append("institution", institution)
+                .append("eventTime", Date.from(time)).append("provenance", candidate.get("provenance", Document.class))
+                .append("provenanceCommitment", candidate.getString("provenanceCommitment"))
+                .append("expireAt", Date.from(time.plus(DeviceHistoryMemberAnchor.RETENTION)));
+        if (integrityKey != null) {
+            observation.put("membershipIntegrityCommitment", DeviceRecordIntegrity.membership(integrityKey, observation));
+        }
+        observations.insertOne(session, observation);
+        Document occurrence = epoch.document(id, institution, source)
                 .append("source", source).append("transaction", candidate.getString("transaction"))
                 .append("sourceEvent", candidate.getString("sourceEvent"))
                 .append("sequence", candidate.getLong("sequence"))
+                .append("sourceObservedAt", candidate.getDate("sourceObservedAt"))
                 .append("customer", customer).append("device", device).append("keyVersion", version)
                 .append("eventTime", Date.from(time))
                 .append("payloadCommitment", candidate.getString("payloadCommitment"))
+                .append("provenance", candidate.get("provenance", Document.class)).append("provenanceCommitment", candidate.getString("provenanceCommitment"))
+                .append("coverageCommitment", progress.getString("coverageCommitment"))
+                .append("coverageAuthority", progress.get("coverageAuthority", Document.class)).append("coverageStart", progress.getDate("coverageStart"))
+                .append("populationCommitment", progress.getString("populationCommitment"))
                 .append("evidenceJson", mapper.writeValueAsString(evidence))
-                .append("evidenceCommitment", commitment(evidence)).append("expireAt", expiry));
+                .append("evidenceCommitment", commitment(evidence)).append("expireAt", expiry);
+        if (historyMembership != null) {
+            occurrence.append("historyMembershipCount", historyMembership.size())
+                    .append("historyMembershipCommitment", historyMembership.commitment());
+        }
+        if (integrityKey != null) {
+            occurrence.append("candidateIntegrityCommitment", candidate.getString("candidateIntegrityCommitment"))
+                    .append("membershipIntegrityCommitment", DeviceRecordIntegrity.membership(integrityKey, occurrence));
+        }
+        occurrence.append("stageACommitment", DeviceSnapshotVersion.commitment(occurrence));
+        if (integrityKey != null) {
+            occurrence.append("snapshotIntegrityCommitment", DeviceRecordIntegrity.snapshot(integrityKey, occurrence));
+        }
+        occurrences.insertOne(session, occurrence);
         transitionOutOfPending(session, candidate, "COMMITTED", false);
         return new CommitResult(CommitStatus.COMMITTED, evidence);
     }
@@ -481,30 +628,50 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         }
         String id = scopeId(institutionToken, sourceCode) + ':' + keyVersion + ':' + deviceToken;
         String sourceScope = scopeId(institutionToken, sourceCode);
-        Bson scopedDevice = and(eq("institution", institutionToken), eq("source", sourceCode),
+        Bson scopedDevice = and(epoch.filter(institutionToken, sourceCode),
                 eq("keyVersion", keyVersion), eq("device", deviceToken));
         try {
             transaction(session -> {
+                fenceDevice(session, institutionToken, sourceCode, keyVersion, deviceToken);
                 revocationTombstones.updateOne(session, eq("_id", id),
-                        set("expireAt", Date.from(clock.instant().plus(REVOCATION_TOMBSTONE_RETENTION))),
+                        combine(epoch.onInsert(institutionToken, sourceCode),
+                                set("expireAt", Date.from(clock.instant().plus(REVOCATION_TOMBSTONE_RETENTION)))),
                         new com.mongodb.client.model.UpdateOptions().upsert(true));
 
                 Bson stagedDevice = and(scopedDevice, eq("status", "STAGED"));
+                List<Document> stagedCandidates = candidates.find(session, stagedDevice)
+                        .limit(MAX_PENDING_CANDIDATES + 1).into(new ArrayList<>());
+                if (stagedCandidates.size() > MAX_PENDING_CANDIDATES) {
+                    throw terminal("PENDING_CANDIDATE_CAPACITY");
+                }
+                Date terminalExpiry = Date.from(clock.instant().plus(RECEIPT_RETENTION));
+                for (Document candidate : stagedCandidates) {
+                    requireCandidateIntegrity(candidate);
+                    requireCandidateStateIntegrity(candidate);
+                    long changed = candidates.updateOne(session, and(eq("_id", candidate.getString("_id")), eq("status", "STAGED")),
+                            candidateTransitionUpdate(candidate, "QUARANTINED", "OPERATIONAL_REVOCATION_REQUESTED", terminalExpiry)).getModifiedCount();
+                    if (changed != 1) { throw retryable("OPERATIONAL_REVOCATION_CANDIDATE_RACE"); }
+                }
                 long stagedBefore = candidates.countDocuments(session, stagedDevice);
-                long quarantined = candidates.updateMany(session, stagedDevice,
-                        combine(set("status", "QUARANTINED"), set("terminalReason", "OPERATIONAL_REVOCATION_REQUESTED"),
-                                set("terminalExpireAt", Date.from(clock.instant().plus(RECEIPT_RETENTION))))).getModifiedCount();
-                if (quarantined != stagedBefore) {
+                if (stagedBefore != 0) {
                     throw retryable("OPERATIONAL_REVOCATION_CANDIDATE_RACE");
                 }
                 observations.deleteMany(session, scopedDevice);
+                historyMemberAnchors.deleteMany(session, scopedDevice);
                 int remainingPending = Math.toIntExact(candidates.countDocuments(session,
-                        and(eq("institution", institutionToken), eq("source", sourceCode), eq("status", "STAGED"))));
-                var progress = coverage.updateOne(session, eq("_id", sourceScope),
-                        combine(set("invalidated", true), set("pendingCount", remainingPending), inc("revision", 1L),
-                                setOnInsert("sealedSequence", 0L)),
-                        new com.mongodb.client.model.UpdateOptions().upsert(true));
-                if (progress.getModifiedCount() != 1 && progress.getUpsertedId() == null) {
+                        and(epoch.filter(institutionToken, sourceCode), eq("status", "STAGED"))));
+                Document progressBefore = coverage.find(session, eq("_id", sourceScope)).first();
+                if (progressBefore == null) { return null; }
+                requireCoverageIntegrity(progressBefore);
+                Document invalidated = new Document(progressBefore).append("invalidated", true).append("pendingCount", remainingPending);
+                Bson revokeUpdate = combine(set("invalidated", true), set("pendingCount", remainingPending), inc("revision", 1L));
+                if (integrityKey != null) {
+                    revokeUpdate = combine(revokeUpdate,
+                            set("coverageIntegrityCommitment", DeviceRecordIntegrity.coverage(integrityKey, invalidated)));
+                }
+                var progress = coverage.updateOne(session, and(eq("_id", sourceScope), eq("revision", progressBefore.getLong("revision"))),
+                        revokeUpdate, new com.mongodb.client.model.UpdateOptions().upsert(false));
+                if (progress.getModifiedCount() != 1) {
                     throw terminal("SOURCE_COVERAGE_MISSING");
                 }
                 return null;
@@ -515,7 +682,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     }
 
     private Document candidate(Observation input, Instant stagedAt) {
-        return new Document("_id", eventId(input.institutionToken(), input.sourceCode(), input.sourceEventKey()))
+        Document candidate = epoch.document(eventId(input.institutionToken(), input.sourceCode(), input.sourceEventKey()), input.institutionToken(), input.sourceCode())
                 .append("institution", input.institutionToken()).append("source", input.sourceCode())
                 .append("sourceEvent", input.sourceEventKey()).append("transaction", input.transactionKey())
                 .append("customer", input.customerToken()).append("device", input.deviceToken())
@@ -523,14 +690,25 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 .append("eventTime", Date.from(input.eventTime()))
                 .append("sourceObservedAt", Date.from(input.sourceObservedAt()))
                 .append("payloadCommitment", input.payloadCommitment()).append("status", "STAGED")
+                .append("provenance", input.provenance().document()).append("provenanceCommitment", input.provenance().commitment())
                 .append("stagedAt", Date.from(stagedAt));
+        if (integrityKey != null) {
+            candidate.put("candidateIntegrityCommitment", DeviceRecordIntegrity.candidate(integrityKey, candidate));
+            candidate.put("candidateStateIntegrityCommitment", DeviceRecordIntegrity.candidateState(integrityKey, candidate));
+        }
+        return candidate;
     }
 
     private StageResult duplicateOrConflict(Document existing, Observation input) {
+        if (!epoch.matches(existing)) { throw terminal("IDENTITY_CONFLICT"); }
+        requireCandidateIntegrity(existing);
+        requireCandidateStateIntegrity(existing);
         if ("QUARANTINED".equals(existing.getString("status"))) {
             throw terminal("CANDIDATE_QUARANTINED");
         }
         if (!existing.getString("payloadCommitment").equals(input.payloadCommitment())
+                || !input.provenance().document().equals(existing.get("provenance", Document.class))
+                || !input.provenance().commitment().equals(existing.getString("provenanceCommitment"))
                 || !existing.getString("transaction").equals(input.transactionKey())
                 || !existing.getString("customer").equals(input.customerToken())
                 || !existing.getString("device").equals(input.deviceToken())
@@ -544,11 +722,15 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     }
 
     private StageResult duplicateOccurrenceOrConflict(Document existing, Observation input) {
+        if (!epoch.matches(existing)) { throw terminal("IDENTITY_CONFLICT"); }
+        requireCandidateIntegrity(existing);
+        requireSnapshotIntegrity(existing);
+        if (!input.provenance().document().equals(existing.get("provenance", Document.class))
+                || !input.provenance().commitment().equals(existing.getString("provenanceCommitment"))) { throw terminal("IDENTITY_CONFLICT"); }
         DeviceRiskEvidence evidence = decode(existing);
         if (!Objects.equals(existing.getString("institution"), input.institutionToken())
                 || !Objects.equals(existing.getString("source"), input.sourceCode())
-                || existing.containsKey("sourceEvent")
-                    && !Objects.equals(existing.getString("sourceEvent"), input.sourceEventKey())
+                || !Objects.equals(existing.getString("sourceEvent"), input.sourceEventKey())
                 || !Objects.equals(existing.getString("transaction"), input.transactionKey())
                 || !Objects.equals(existing.getString("payloadCommitment"), input.payloadCommitment())
                 || existing.containsKey("sequence")
@@ -605,6 +787,14 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         return existingResult(null, candidate, persisted);
     }
 
+    private CommitResult existing(String id, Document candidate) {
+        Document persisted = occurrences.find(eq("_id", id)).first();
+        if (persisted == null) {
+            throw terminal("OCCURRENCE_MISSING");
+        }
+        return existingResult(null, candidate, persisted);
+    }
+
     private CommitResult existing(ClientSession session, String id) {
         Document persisted = occurrences.find(session, eq("_id", id)).first();
         if (persisted == null) {
@@ -614,20 +804,36 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         return existingResult(session, candidate, persisted);
     }
 
+    private CommitResult existing(ClientSession session, String id, Document candidate) {
+        Document persisted = occurrences.find(session, eq("_id", id)).first();
+        if (persisted == null) {
+            throw terminal("OCCURRENCE_MISSING");
+        }
+        return existingResult(session, candidate, persisted);
+    }
+
     private CommitResult existingResult(ClientSession session, Document candidate, Document persisted) {
+        if (candidate == null) { throw terminal("CANDIDATE_MISSING"); }
+        if (!epoch.matches(persisted) || !epoch.matches(candidate)) { throw terminal("OCCURRENCE_IDENTITY_CONFLICT"); }
+        requireCandidateIntegrity(persisted);
+        requireSnapshotIntegrity(persisted);
+        requireCandidateIntegrity(candidate);
+        requireCandidateStateIntegrity(candidate);
+        DeviceSnapshotVersion.require(persisted);
+        if (!authority.current(Provenance.from(persisted), persisted.getInteger("keyVersion"))) { throw terminal("AUTHORITY_REVOKED"); }
+        requireCoverageAuthority(persisted);
         Instant now = clock.instant();
         if (occurrenceExpired(persisted, now)) {
             throw terminal("OCCURRENCE_EXPIRED");
         }
-        if (candidate != null && terminalCandidateExpired(candidate, now)) {
+        if (terminalCandidateExpired(candidate, now)) {
             throw terminal("CANDIDATE_EXPIRED");
         }
         DeviceRiskEvidence evidence = decode(persisted);
         if (!Objects.equals(persisted.getString("institution"), evidence.institutionToken())
                 || !Objects.equals(persisted.getString("source"), evidence.source().authorityCode())
                 || !Objects.equals(persisted.getString("transaction"), evidence.occurrenceKey())
-                || persisted.containsKey("sourceEvent")
-                    && !Objects.equals(persisted.getString("sourceEvent"), evidence.source().sourceEventKey())
+                || !Objects.equals(persisted.getString("sourceEvent"), evidence.source().sourceEventKey())
                 || persisted.containsKey("customer")
                     && !Objects.equals(persisted.getString("customer"), evidence.customerToken())
                 || persisted.containsKey("device")
@@ -643,7 +849,9 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                         + evidence.keyVersion() + ':' + evidence.deviceToken(), now)) {
             throw terminal("DEVICE_OPERATIONALLY_REVOKED");
         }
-        if (candidate != null && (!"COMMITTED".equals(candidate.getString("status"))
+        if (!"COMMITTED".equals(candidate.getString("status"))
+                || !Objects.equals(candidate.get("provenance"), persisted.get("provenance"))
+                || !Objects.equals(candidate.getString("provenanceCommitment"), persisted.getString("provenanceCommitment"))
                 || !Objects.equals(candidate.getString("institution"), persisted.getString("institution"))
                 || !Objects.equals(candidate.getString("source"), persisted.getString("source"))
                 || !Objects.equals(candidate.getString("transaction"), persisted.getString("transaction"))
@@ -655,63 +863,168 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 || !Objects.equals(dateInstant(candidate, "eventTime"), evidence.eventTime())
                 || !Objects.equals(dateInstant(candidate, "sourceObservedAt"), evidence.source().observedAt())
                 || persisted.containsKey("sequence")
-                    && !Objects.equals(candidate.getLong("sequence"), persisted.getLong("sequence")))) {
+                    && !Objects.equals(candidate.getLong("sequence"), persisted.getLong("sequence"))) {
             throw terminal("OCCURRENCE_IDENTITY_CONFLICT");
         }
         return new CommitResult(CommitStatus.EXISTING, evidence);
     }
 
-    private CommitResult quarantineCapacity(String id) {
-        try {
-            return transaction(session -> {
-                Document candidate = candidates.find(session, eq("_id", id)).first();
-                if (candidate == null) {
-                    throw terminal("CANDIDATE_MISSING");
-                }
-                if ("COMMITTED".equals(candidate.getString("status"))) {
-                    return existing(session, id);
-                }
-                if ("QUARANTINED".equals(candidate.getString("status"))) {
-                    return quarantined();
-                }
-                if (!"STAGED".equals(candidate.getString("status"))) {
-                    throw terminal("CANDIDATE_STATE");
-                }
-                transitionOutOfPending(session, candidate, "QUARANTINED", true);
-                return quarantined();
-            });
-        } catch (MongoException exception) {
-            Document durable = safeRead(candidates, id);
-            if (durable != null && "QUARANTINED".equals(durable.getString("status"))) {
-                return quarantined();
-            }
-            if (durable != null && "COMMITTED".equals(durable.getString("status"))) {
-                return existing(id);
-            }
-            throw unavailable("CAPACITY_QUARANTINE", exception);
+    private void fenceDevice(ClientSession session, String institution, String source, int keyVersion, String device) {
+        fences.updateOne(session, eq("_id", "device:" + scopeId(institution, source) + ':' + keyVersion + ':' + device),
+                combine(epoch.onInsert(institution, source), inc("revision", 1L)), new com.mongodb.client.model.UpdateOptions().upsert(true));
+    }
+
+    private void requireCoverageAuthority(Document row) {
+        requireCoverageIntegrity(row);
+        if (!authority.coverageCurrent(CoverageAuthority.from(row), row.getString("institution"), row.getString("source"),
+                row.getString("populationCommitment"), row.getInteger("keyVersion"), row.getDate("coverageStart").toInstant())) {
+            throw terminal("COVERAGE_AUTHORITY_REVOKED");
         }
+    }
+
+    private boolean sealedMembershipMatches(ClientSession session, List<Document> observationRows,
+                                           String institution, String source, String customer, String device,
+                                           int version, Instant windowStart, Instant asOf) {
+        Instant now = clock.instant();
+        // Membership is compared by _id and the commitment hashes a TreeMap; Mongo result order is not part of this proof.
+        List<Document> anchors = historyMemberAnchors.find(session, DeviceHistoryQueries.retainedMembership(epoch,
+                        institution, source, version, windowStart, asOf, customer, device, now))
+                .projection(DeviceHistoryQueries.historyMemberAnchorProjection())
+                .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
+        List<Document> historicalOccurrences = occurrences.find(session, DeviceHistoryQueries.retainedMembership(epoch,
+                        institution, source, version, windowStart, asOf, customer, device, now))
+                .projection(DeviceHistoryQueries.occurrenceMembershipProjection())
+                .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
+        List<Document> historicalCandidates = candidates.find(session, DeviceHistoryQueries.committedStageAMembership(epoch,
+                        institution, source, version, windowStart, asOf, customer, device, now))
+                .projection(DeviceHistoryQueries.candidateMembershipProjection())
+                .limit(MAX_HISTORY_MEMBERSHIP_ROWS + 1).into(new ArrayList<>());
+        if (anchors.size() > MAX_HISTORY_MEMBERSHIP_ROWS || historicalOccurrences.size() > MAX_HISTORY_MEMBERSHIP_ROWS
+                || historicalCandidates.size() > MAX_HISTORY_MEMBERSHIP_ROWS) { return false; }
+
+        Map<String, Document> expectedById = uniqueHistoryMembers(observationRows);
+        Map<String, Document> anchorsById = uniqueHistoryMembers(anchors);
+        Map<String, Document> occurrencesById = uniqueHistoryMembers(historicalOccurrences);
+        Map<String, Document> candidatesById = uniqueHistoryMembers(historicalCandidates);
+        if (expectedById == null || anchorsById == null || occurrencesById == null || candidatesById == null
+                || expectedById.size() != anchorsById.size() || expectedById.size() != occurrencesById.size()
+                || expectedById.size() != candidatesById.size()) { return false; }
+
+        for (Map.Entry<String, Document> entry : expectedById.entrySet()) {
+            String id = entry.getKey();
+            Document observation = entry.getValue();
+            Document anchor = anchorsById.get(id);
+            Document occurrence = occurrencesById.get(id);
+            Document historicalCandidate = candidatesById.get(id);
+            if (anchor == null || occurrence == null || historicalCandidate == null
+                    || !epoch.matches(observation) || !epoch.matches(occurrence) || !epoch.matches(historicalCandidate)
+                    || !"COMMITTED".equals(historicalCandidate.getString("status"))
+                    || !DeviceHistoryMemberAnchor.matchesCopies(integrityKey, epoch, anchor, observation, occurrence, historicalCandidate)
+                    || !DeviceRecordIntegrity.membershipMatches(integrityKey, observation)
+                    || !DeviceRecordIntegrity.membershipMatches(integrityKey, occurrence)
+                    || !DeviceRecordIntegrity.candidateMatches(integrityKey, occurrence)
+                    || !DeviceRecordIntegrity.snapshotMatches(integrityKey, occurrence)
+                    || !DeviceRecordIntegrity.candidateMatches(integrityKey, historicalCandidate)
+                    || !DeviceRecordIntegrity.candidateStateMatches(integrityKey, historicalCandidate)) { return false; }
+            DeviceSnapshotVersion.require(occurrence);
+            DeviceObservationStore.CoverageAuthority historicalCoverage = DeviceObservationStore.CoverageAuthority.from(occurrence);
+            if (!authority.coverageCurrent(historicalCoverage, institution, source, occurrence.getString("populationCommitment"),
+                    occurrence.getInteger("keyVersion"), occurrence.getDate("coverageStart").toInstant())) { return false; }
+        }
+        return true;
+    }
+
+    private static Map<String, Document> uniqueHistoryMembers(List<Document> rows) {
+        Map<String, Document> result = new java.util.HashMap<>();
+        for (Document row : rows) {
+            String id = row.getString("_id");
+            if (id == null) { return null; }
+            Document previous = result.putIfAbsent(id, row);
+            if (previous != null && (!Objects.equals(previous.getString("sourceEvent"), row.getString("sourceEvent"))
+                    || !Objects.equals(previous.getString("customer"), row.getString("customer"))
+                    || !Objects.equals(previous.getString("device"), row.getString("device"))
+                    || !Objects.equals(previous.getDate("eventTime"), row.getDate("eventTime"))
+                    || !Objects.equals(previous.getString("provenanceCommitment"), row.getString("provenanceCommitment")))) {
+                return null;
+            }
+        }
+        return result;
+    }
+
+    private void requireCandidateIntegrity(Document row) {
+        if (integrityKey != null && !DeviceRecordIntegrity.candidateMatches(integrityKey, row)) {
+            throw terminal("CANDIDATE_INTEGRITY_INVALID");
+        }
+    }
+
+    private void requireCandidateStateIntegrity(Document row) {
+        if (integrityKey != null && !DeviceRecordIntegrity.candidateStateMatches(integrityKey, row)) {
+            throw terminal("CANDIDATE_STATE_INTEGRITY_INVALID");
+        }
+    }
+
+    private void requireSnapshotIntegrity(Document row) {
+        if (integrityKey != null && !DeviceRecordIntegrity.snapshotMatches(integrityKey, row)) {
+            throw terminal("SNAPSHOT_INTEGRITY_INVALID");
+        }
+    }
+
+    private void requireCoverageIntegrity(Document row) {
+        if (integrityKey != null && row != null && row.containsKey("coverageGeneration")
+                && !DeviceRecordIntegrity.coverageMatches(integrityKey, row)) {
+            throw terminal("COVERAGE_INTEGRITY_INVALID");
+        }
+    }
+
+    private boolean currentMemberships(List<Document> rows) {
+        Map<Integer, List<Provenance>> byVersion = new HashMap<>();
+        for (Document row : rows) {
+            if (integrityKey != null && !DeviceRecordIntegrity.membershipMatches(integrityKey, row)) { return false; }
+            byVersion.computeIfAbsent(row.getInteger("keyVersion"), ignored -> new ArrayList<>())
+                    .add(Provenance.from(row));
+        }
+        return byVersion.entrySet().stream().allMatch(entry -> authority.currentHistory(entry.getValue(), entry.getKey()));
     }
 
     private void transitionOutOfPending(ClientSession session, Document candidate, String nextState,
                                         boolean invalidateSource) {
+        requireCandidateIntegrity(candidate);
+        requireCandidateStateIntegrity(candidate);
         Bson candidateFilter = and(eq("_id", candidate.getString("_id")), eq("status", "STAGED"));
-        Bson candidateUpdate = nextState.equals("QUARANTINED")
-                ? combine(set("status", nextState), set("terminalReason", "CAPACITY_EXCEEDED"),
-                    set("terminalExpireAt", Date.from(clock.instant().plus(RECEIPT_RETENTION))))
-                : combine(set("status", nextState),
-                    set("terminalExpireAt", Date.from(clock.instant().plus(RECEIPT_RETENTION))));
+        Bson candidateUpdate = candidateTransitionUpdate(candidate, nextState,
+                nextState.equals("QUARANTINED") ? "CAPACITY_EXCEEDED" : null,
+                Date.from(clock.instant().plus(RECEIPT_RETENTION)));
         if (candidates.updateOne(session, candidateFilter, candidateUpdate).getModifiedCount() != 1) {
             throw retryable("CANDIDATE_STATE_RACE");
         }
 
-        Bson coverageFilter = and(eq("_id", scopeId(candidate)), gt("pendingCount", 0));
+        String scope = scopeId(candidate);
+        Bson coverageFilter = and(eq("_id", scope), gt("pendingCount", 0));
         Bson coverageUpdate = invalidateSource
-                ? combine(set("invalidated", true), inc("pendingCount", -1),
-                        inc("revision", 1L))
+                ? combine(set("invalidated", true), inc("pendingCount", -1), inc("revision", 1L))
                 : combine(inc("pendingCount", -1), inc("revision", 1L));
+        if (invalidateSource && integrityKey != null) {
+            Document progress = coverage.find(session, eq("_id", scope)).first();
+            if (progress == null) { throw terminal("SOURCE_COVERAGE_MISSING"); }
+            requireCoverageIntegrity(progress);
+            Document invalidated = new Document(progress).append("invalidated", true);
+            coverageUpdate = combine(coverageUpdate,
+                    set("coverageIntegrityCommitment", DeviceRecordIntegrity.coverage(integrityKey, invalidated)));
+        }
         if (coverage.updateOne(session, coverageFilter, coverageUpdate).getModifiedCount() != 1) {
             throw terminal("PENDING_COUNT_INVARIANT");
         }
+    }
+
+    private Bson candidateTransitionUpdate(Document candidate, String nextState, String terminalReason, Date terminalExpiry) {
+        Document next = new Document(candidate).append("status", nextState).append("terminalExpireAt", terminalExpiry);
+        if (terminalReason != null) { next.put("terminalReason", terminalReason); }
+        Bson update = combine(set("status", nextState), set("terminalExpireAt", terminalExpiry));
+        if (terminalReason != null) { update = combine(update, set("terminalReason", terminalReason)); }
+        if (integrityKey != null) {
+            update = combine(update, set("candidateStateIntegrityCommitment", DeviceRecordIntegrity.candidateState(integrityKey, next)));
+        }
+        return update;
     }
 
     private static CommitResult quarantined() {
@@ -720,6 +1033,9 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
 
     private static boolean matchesDurableSeal(Document progress, CoverageSeal seal) {
         return progress != null
+                && seal.proof().coverageCommitment().equals(progress.getString("coverageCommitment"))
+                && seal.proof().assertionCommitment().equals(progress.getString("sealAssertionCommitment"))
+                && seal.proof().generation() == progress.getLong("coverageGeneration")
                 && progress.getLong("sealedSequence") == seal.throughSequence()
                 && Objects.equals(dateInstant(progress, "watermark"), seal.watermark())
                 && Objects.equals(progress.getInteger("keyVersion"), seal.keyVersion())
@@ -728,14 +1044,21 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     }
 
     private void invalidateSource(ClientSession session, String scope) {
-        long changed = coverage.updateOne(session, eq("_id", scope),
-                combine(set("invalidated", true), inc("revision", 1L))).getModifiedCount();
+        Document progress = coverage.find(session, eq("_id", scope)).first();
+        if (progress == null) { throw terminal("SOURCE_COVERAGE_MISSING"); }
+        requireCoverageIntegrity(progress);
+        Bson update = combine(set("invalidated", true), inc("revision", 1L));
+        if (integrityKey != null) {
+            Document invalidated = new Document(progress).append("invalidated", true);
+            update = combine(update, set("coverageIntegrityCommitment", DeviceRecordIntegrity.coverage(integrityKey, invalidated)));
+        }
+        long changed = coverage.updateOne(session, and(eq("_id", scope), eq("revision", progress.getLong("revision"))), update).getModifiedCount();
         if (changed != 1) {
             throw terminal("SOURCE_COVERAGE_MISSING");
         }
     }
 
-    private DeviceRiskEvidence decode(Document persisted) {
+    static DeviceRiskEvidence decode(Document persisted) {
         try {
             DeviceRiskEvidence evidence = mapper.readValue(persisted.getString("evidenceJson"), DeviceRiskEvidence.class);
             if (!commitment(evidence).equals(persisted.getString("evidenceCommitment"))) {
@@ -747,7 +1070,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         }
     }
 
-    private static String commitment(DeviceRiskEvidence evidence) {
+    static String commitment(DeviceRiskEvidence evidence) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(evidence.canonicalBytes()));
         } catch (NoSuchAlgorithmException exception) {
@@ -819,23 +1142,24 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         }
     }
 
-    private static String eventId(String institution, String source, String event) {
-        return scopeId(institution, source) + ':' + event;
+    private String eventId(String institution, String source, String event) {
+        return epoch.eventId(institution, source, event);
     }
 
-    private static String scopeId(Document candidate) {
+    private String scopeId(Document candidate) {
+        if (!epoch.matches(candidate)) { throw terminal("IDENTITY_CONFLICT"); }
         return scopeId(candidate.getString("institution"), candidate.getString("source"));
     }
 
-    private static String scopeId(String institution, String source) {
-        return institution + ':' + source;
+    private String scopeId(String institution, String source) {
+        return epoch.scopeId(institution, source);
     }
 
-    private static String revocationId(Observation input) {
+    private String revocationId(Observation input) {
         return scopeId(input.institutionToken(), input.sourceCode()) + ':' + input.keyVersion() + ':' + input.deviceToken();
     }
 
-    private static String revocationId(Document candidate) {
+    private String revocationId(Document candidate) {
         return scopeId(candidate) + ':' + candidate.getInteger("keyVersion") + ':' + candidate.getString("device");
     }
 
@@ -856,8 +1180,6 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         }
     }
 
-    private static final class CapacityExceeded extends RuntimeException {
-    }
 
     private enum StageRejection { NONE, POST_SEAL, PENDING_CAPACITY }
 

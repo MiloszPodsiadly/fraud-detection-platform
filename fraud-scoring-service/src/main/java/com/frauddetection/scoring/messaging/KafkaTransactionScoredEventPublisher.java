@@ -39,8 +39,6 @@ public class KafkaTransactionScoredEventPublisher implements TransactionScoredEv
             addTraceHeaderIfPresent(record, TraceContext.currentTraceId());
             kafkaTemplate.send(record).get();
             log.atInfo()
-                    .addKeyValue("transactionId", event.transactionId())
-                    .addKeyValue("correlationId", event.correlationId())
                     .addKeyValue("topic", topic)
                     .log("Published scored transaction event.");
         } catch (Exception exception) {

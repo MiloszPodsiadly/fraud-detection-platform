@@ -65,7 +65,7 @@ class MongoDeviceObservationStoreIntegrationTest {
     void setUp() {
         databaseName = "device_risk_" + UUID.randomUUID().toString().replace("-", "");
         client = MongoClients.create(MONGO.getReplicaSetUrl(databaseName));
-        store = new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC));
+        store = new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS);
     }
 
     @AfterEach
@@ -103,7 +103,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         assertThat(store.stage(a)).isEqualTo(StageResult.DUPLICATE);
         Observation changed = new Observation(a.institutionToken(), a.sourceCode(), a.sourceEventKey(),
                 a.transactionKey(), a.customerToken(), a.deviceToken(), a.keyVersion(), a.sourceSequence(),
-                a.eventTime(), a.sourceObservedAt(), token('f'), a.sourceQuality());
+                a.eventTime(), a.sourceObservedAt(), token('f'), a.sourceQuality(), a.provenance());
         assertThatThrownBy(() -> store.stage(changed)).hasMessage("DEVICE_STORE_IDENTITY_CONFLICT");
         Observation sameTransaction = observation(INSTITUTION, CUSTOMER, DEVICE, '3', '2', 2, 1, A_TIME);
         assertThatThrownBy(() -> store.stage(sameTransaction)).hasMessage("DEVICE_STORE_IDENTITY_CONFLICT");
@@ -157,7 +157,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         }
 
         Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first();
         assertThat(progress.getInteger("pendingCount")).isEqualTo(2);
         assertThat(progress.getLong("sealedSequence")).isEqualTo(2);
         assertThat(store.commit(INSTITUTION, SOURCE, second.sourceEventKey()).status())
@@ -198,7 +198,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         Observation late = observation(INSTITUTION, CUSTOMER, DEVICE, '5', '6', 4, 1, B_TIME.minusSeconds(1));
         assertThatThrownBy(() -> store.stage(late)).hasMessage("DEVICE_STORE_POST_SEAL_EVENT");
         assertThat(client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first().getBoolean("invalidated")).isTrue();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first().getBoolean("invalidated")).isTrue();
         Observation future = observation(INSTITUTION, CUSTOMER, DEVICE, '7', '8', 5, 1, NOW.plusSeconds(180));
         assertThatThrownBy(() -> store.stage(future)).hasMessage("DEVICE_STORE_FUTURE_EVENT");
         assertThatThrownBy(() -> store.seal(seal(INSTITUTION, 3, NOW.plusSeconds(121), 1)))
@@ -303,6 +303,7 @@ class MongoDeviceObservationStoreIntegrationTest {
                     .append("eventTime", Date.from(B_TIME))
                     .append("expireAt", Date.from(A_TIME.plus(Duration.ofDays(30)))));
         }
+        rows.forEach(DeviceStoreFixtures::scopeHistoryRow);
         client.getDatabase(databaseName).getCollection("device_observations").insertMany(rows);
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
@@ -310,17 +311,24 @@ class MongoDeviceObservationStoreIntegrationTest {
                     () -> store.commit(INSTITUTION, SOURCE, next.sourceEventKey()),
                     () -> store.commit(INSTITUTION, SOURCE, next.sourceEventKey()));
             List<Future<DeviceObservationStore.CommitResult>> results = executor.invokeAll(work);
-            assertThat(results.get(0).get().status()).isEqualTo(CommitStatus.QUARANTINED);
-            assertThat(results.get(1).get().status()).isEqualTo(CommitStatus.QUARANTINED);
+            for (Future<DeviceObservationStore.CommitResult> result : results) {
+                try { assertThat(result.get().status()).isEqualTo(CommitStatus.QUARANTINED); }
+                catch (java.util.concurrent.ExecutionException unresolved) {
+                    assertThat(unresolved.getCause()).isInstanceOf(IllegalStateException.class).hasMessage("DEVICE_STORE_UNAVAILABLE_COMMIT");
+                    assertThat(unresolved.getCause().getCause()).isInstanceOf(com.mongodb.MongoException.class);
+                    assertThat(((com.mongodb.MongoException) unresolved.getCause().getCause())
+                            .hasErrorLabel(com.mongodb.MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)).isTrue();
+                }
+            }
         }
 
         assertThat(store.commit(INSTITUTION, SOURCE, next.sourceEventKey()).status())
                 .isEqualTo(CommitStatus.QUARANTINED);
 
         Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first();
         Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + next.sourceEventKey())).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, next.sourceEventKey()))).first();
         assertThat(progress.getInteger("pendingCount")).isZero();
         assertThat(candidate.getString("status")).isEqualTo("QUARANTINED");
     }
@@ -331,7 +339,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         store.stage(pending);
 
         Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, pending.sourceEventKey()))).first();
 
         assertThat(candidate.getDate("expireAt")).isNull();
         assertThat(candidate.getDate("stagedAt")).isEqualTo(Date.from(NOW));
@@ -347,7 +355,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         store.stage(pending);
         store.stage(otherScopePending);
         MongoDeviceObservationStore restarted = new MongoDeviceObservationStore(client, databaseName,
-                Clock.fixed(NOW.plus(Duration.ofHours(2)), ZoneOffset.UTC));
+                Clock.fixed(NOW.plus(Duration.ofHours(2)), ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS);
 
         DeviceObservationStore.PendingMetrics metrics = restarted.pendingMetrics();
         assertThat(metrics.stagedCandidates()).isEqualTo(2);
@@ -387,8 +395,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         long seedMillis = (System.nanoTime() - seedStartedAt) / 1_000_000;
 
         var baseFilter = Filters.and(
-                eq("institution", INSTITUTION),
-                eq("source", SOURCE),
+                DeviceStoreFixtures.EPOCH.filter(INSTITUTION, SOURCE),
                 eq("keyVersion", 1),
                 Filters.gte("eventTime", Date.from(A_TIME.minus(Duration.ofDays(30)))),
                 Filters.lt("eventTime", Date.from(A_TIME)),
@@ -466,12 +473,12 @@ class MongoDeviceObservationStoreIntegrationTest {
         CoverageSeal seal = seal(INSTITUTION, 1, B_TIME, 1);
         store.seal(seal);
         Document before = client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first();
 
         store.seal(seal);
 
         Document after = client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first();
         assertThat(after.getInteger("pendingCount")).isEqualTo(1);
         assertThat(after.getLong("revision")).isEqualTo(before.getLong("revision"));
     }
@@ -481,11 +488,12 @@ class MongoDeviceObservationStoreIntegrationTest {
         Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
         store.stage(pending);
         var candidates = client.getDatabase(databaseName).getCollection("device_observation_candidates");
-        String id = INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey();
-        candidates.updateOne(eq("_id", id), com.mongodb.client.model.Updates.unset("stagedAt"));
+        String id = DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, pending.sourceEventKey());
+        candidates.updateOne(eq("_id", id), com.mongodb.client.model.Updates.unset("stagedAt"),
+                new com.mongodb.client.model.UpdateOptions().bypassDocumentValidation(true)); // Deliberate privileged corruption.
 
         assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName,
-                Clock.fixed(NOW, ZoneOffset.UTC)))
+                Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS))
                 .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
         assertThat(candidates.find(eq("_id", id)).first())
                 .containsEntry("status", "STAGED")
@@ -496,7 +504,7 @@ class MongoDeviceObservationStoreIntegrationTest {
     void coldOrExpiredWindowIsUnavailableRatherThanNew() {
         Observation cold = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
         store.stage(cold);
-        store.seal(new CoverageSeal(INSTITUTION, SOURCE, 1, B_TIME.minus(Duration.ofDays(1)), B_TIME, 1));
+        store.seal(DeviceStoreFixtures.seal(client, databaseName, INSTITUTION, SOURCE, 1, B_TIME.minus(Duration.ofDays(1)), B_TIME, 1));
         DeviceRiskEvidence coldEvidence = store.commit(INSTITUTION, SOURCE, cold.sourceEventKey()).evidence();
         assertThat(coldEvidence.priorDevice().state()).isEqualTo(DeviceRiskEvidence.State.UNAVAILABLE);
         assertThat(coldEvidence.priorDevice().count()).isNull();
@@ -505,7 +513,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         store.stage(old);
         store.seal(seal(OTHER_INSTITUTION, 1, B_TIME, 1));
         MongoDeviceObservationStore delayed = new MongoDeviceObservationStore(client, databaseName,
-                Clock.fixed(B_TIME.plus(Duration.ofDays(2)), ZoneOffset.UTC));
+                Clock.fixed(B_TIME.plus(Duration.ofDays(2)), ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS);
         DeviceRiskEvidence expired = delayed.commit(OTHER_INSTITUTION, SOURCE, old.sourceEventKey()).evidence();
         assertThat(expired.priorDevice().state()).isEqualTo(DeviceRiskEvidence.State.UNAVAILABLE);
     }
@@ -549,9 +557,9 @@ class MongoDeviceObservationStoreIntegrationTest {
         store.revokeDeviceFromOperationalHistory(INSTITUTION, SOURCE, 1, DEVICE);
 
         Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first();
         Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, pending.sourceEventKey()))).first();
         assertThat(candidate.getString("status")).isEqualTo("QUARANTINED");
         assertThat(candidate.getString("terminalReason")).isEqualTo("OPERATIONAL_REVOCATION_REQUESTED");
         assertThat(candidate.getDate("terminalExpireAt")).isEqualTo(Date.from(NOW.plus(Duration.ofDays(45))));
@@ -570,7 +578,7 @@ class MongoDeviceObservationStoreIntegrationTest {
 
         Clock afterRetention = Clock.offset(Clock.fixed(NOW, ZoneOffset.UTC),
                 Duration.ofDays(45).plus(Duration.ofMinutes(3)));
-        MongoDeviceObservationStore restarted = new MongoDeviceObservationStore(client, databaseName, afterRetention);
+        MongoDeviceObservationStore restarted = new MongoDeviceObservationStore(client, databaseName, afterRetention, DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS);
 
         assertThatThrownBy(() -> restarted.stage(nearFuture))
                 .hasMessage("DEVICE_STORE_REPLAY_HORIZON_EXCEEDED");
@@ -617,9 +625,9 @@ class MongoDeviceObservationStoreIntegrationTest {
         }
 
         Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first();
         Document candidate = client.getDatabase(databaseName).getCollection("device_observation_candidates")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, pending.sourceEventKey()))).first();
         assertThat(count("device_observations")).isZero();
         assertThat(count("device_operational_revocation_tombstones")).isEqualTo(1);
         assertThat(candidate.getString("status")).isIn("COMMITTED", "QUARANTINED");
@@ -634,11 +642,15 @@ class MongoDeviceObservationStoreIntegrationTest {
                 "_id_", "candidate_source_event_unique", "candidate_transaction_unique", "candidate_sequence_unique",
                 "candidate_customer_event_status_sequence", "candidate_status_staged_at",
                 "candidate_status_event_source_event",
-                "candidate_device_status", "candidate_terminal_expiry_ttl");
+                "candidate_device_status", "candidate_device_window", "candidate_customer_window",
+                "candidate_terminal_expiry_ttl");
         assertThat(indexNames("device_observations")).containsExactlyInAnyOrder(
                 "_id_", "observation_device_window", "observation_customer_window", "observation_expiry_ttl");
         assertThat(indexNames("device_occurrences")).containsExactlyInAnyOrder(
-                "_id_", "occurrence_transaction_unique", "occurrence_device", "occurrence_expiry_ttl");
+                "_id_", "occurrence_transaction_unique", "occurrence_device", "occurrence_device_window",
+                "occurrence_customer_window", "occurrence_expiry_ttl");
+        assertThat(indexNames("device_history_member_anchors")).containsExactlyInAnyOrder(
+                "_id_", "history_member_device_window", "history_member_customer_window", "history_member_expiry_ttl");
         assertThat(indexNames("device_operational_revocation_tombstones")).containsExactlyInAnyOrder(
                 "_id_", "tombstone_expiry_ttl");
 
@@ -651,9 +663,9 @@ class MongoDeviceObservationStoreIntegrationTest {
         Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
         store.stage(pending);
         Document progress = client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first();
         assertThat(progress).doesNotContainKey("pendingCounterVersion");
-        new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC));
+        new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS);
     }
 
     @Test
@@ -662,17 +674,18 @@ class MongoDeviceObservationStoreIntegrationTest {
         collection.createIndex(com.mongodb.client.model.Indexes.ascending("expireAt"),
                 new IndexOptions().expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS));
         Observation pending = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
-        collection.insertOne(new Document("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey())
+        collection.insertOne(new Document("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, pending.sourceEventKey()))
                 .append("institution", INSTITUTION).append("source", SOURCE)
                 .append("sourceEvent", pending.sourceEventKey()).append("transaction", pending.transactionKey())
                 .append("customer", CUSTOMER).append("device", DEVICE).append("keyVersion", 1)
                 .append("sequence", 1L).append("eventTime", Date.from(B_TIME)).append("status", "STAGED")
-                .append("expireAt", Date.from(NOW.plus(Duration.ofDays(45)))));
+                .append("expireAt", Date.from(NOW.plus(Duration.ofDays(45)))),
+                new com.mongodb.client.model.InsertOneOptions().bypassDocumentValidation(true)); // Deliberate legacy data.
 
-        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC)))
+        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS))
                 .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
 
-        Document retained = collection.find(eq("_id", INSTITUTION + ':' + SOURCE + ':' + pending.sourceEventKey()))
+        Document retained = collection.find(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, pending.sourceEventKey())))
                 .first();
         assertThat(retained.getDate("expireAt")).isEqualTo(Date.from(NOW.plus(Duration.ofDays(45))));
         assertThat(retained.getDate("terminalExpireAt")).isNull();
@@ -688,7 +701,7 @@ class MongoDeviceObservationStoreIntegrationTest {
                         .partialFilterExpression(eq("status", "COMMITTED")));
 
         assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName,
-                Clock.fixed(NOW, ZoneOffset.UTC)))
+                Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS))
                 .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
         assertThat(candidates.listIndexes().into(new ArrayList<>()).stream()
                 .filter(index -> "candidate_transaction_unique".equals(index.getString("name")))
@@ -709,7 +722,7 @@ class MongoDeviceObservationStoreIntegrationTest {
                 new IndexOptions().name("candidate_customer_event_status_sequence"));
 
         assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName,
-                Clock.fixed(NOW, ZoneOffset.UTC)))
+                Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS))
                 .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
         assertThat(index("device_observation_candidates", "candidate_customer_event_status_sequence")
                 .get("key", Document.class))
@@ -724,13 +737,14 @@ class MongoDeviceObservationStoreIntegrationTest {
     @Test
     void startupRejectsLegacyCounterVersionMarkerWithoutMutatingData() {
         var progress = client.getDatabase(databaseName).getCollection("device_source_coverage");
-        progress.insertOne(new Document("_id", INSTITUTION + ':' + SOURCE)
-                .append("pendingCount", 0).append("revision", 0L).append("pendingCounterVersion", 1));
+        progress.insertOne(new Document("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))
+                .append("pendingCount", 0).append("revision", 0L).append("pendingCounterVersion", 1),
+                new com.mongodb.client.model.InsertOneOptions().bypassDocumentValidation(true)); // Deliberate legacy data.
 
-        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC)))
+        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS))
                 .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
 
-        assertThat(progress.find(eq("_id", INSTITUTION + ':' + SOURCE)).first())
+        assertThat(progress.find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first())
                 .containsEntry("pendingCounterVersion", 1)
                 .containsEntry("pendingCount", 0);
     }
@@ -738,28 +752,30 @@ class MongoDeviceObservationStoreIntegrationTest {
     @Test
     void startupRejectsPreRenameErasureTombstoneCollectionWithoutIgnoringItsRevocation() {
         var oldTombstones = client.getDatabase(databaseName).getCollection("device_erasure_tombstones");
-        oldTombstones.insertOne(new Document("_id", INSTITUTION + ':' + SOURCE + ":1:" + DEVICE)
+        oldTombstones.insertOne(new Document("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE) + ":1:" + DEVICE)
                 .append("expireAt", Date.from(NOW.plus(Duration.ofDays(45)))));
 
-        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC)))
+        assertThatThrownBy(() -> new MongoDeviceObservationStore(client, databaseName, Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS))
                 .hasMessage("DEVICE_STORE_SCHEMA_INCOMPATIBLE");
 
         assertThat(oldTombstones.countDocuments()).isEqualTo(1);
     }
 
     @Test
-    void exactReplayUsesBoundEvidenceWhenLegacyOccurrenceLacksSourceEventColumn() {
+    void schemaV2RejectsMissingOccurrenceIdentityInsteadOfGrandfatheringLegacyData() {
         Observation input = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, A_TIME);
         store.stage(input);
         store.seal(seal(INSTITUTION, 1, A_TIME, 1));
         store.commit(INSTITUTION, SOURCE, input.sourceEventKey());
         client.getDatabase(databaseName).getCollection("device_observation_candidates")
-                .deleteOne(eq("_id", INSTITUTION + ':' + SOURCE + ':' + input.sourceEventKey()));
-        client.getDatabase(databaseName).getCollection("device_occurrences")
-                .updateOne(eq("_id", INSTITUTION + ':' + SOURCE + ':' + input.sourceEventKey()),
-                        com.mongodb.client.model.Updates.unset("sourceEvent"));
-
-        assertThat(store.stage(input)).isEqualTo(StageResult.DUPLICATE);
+                .deleteOne(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, input.sourceEventKey())));
+        var occurrences = client.getDatabase(databaseName).getCollection("device_occurrences");
+        var id = eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, input.sourceEventKey()));
+        assertThatThrownBy(() -> occurrences.updateOne(id, com.mongodb.client.model.Updates.unset("sourceEvent")))
+                .isInstanceOf(com.mongodb.MongoWriteException.class);
+        occurrences.updateOne(id, com.mongodb.client.model.Updates.unset("sourceEvent"),
+                new com.mongodb.client.model.UpdateOptions().bypassDocumentValidation(true));
+        assertThatThrownBy(() -> store.stage(input)).hasMessage("DEVICE_STORE_IDENTITY_CONFLICT");
     }
 
     @Test
@@ -775,11 +791,12 @@ class MongoDeviceObservationStoreIntegrationTest {
                     .append("customer", distinctCustomer).append("device", DEVICE).append("keyVersion", 1)
                     .append("eventTime", Date.from(B_TIME)).append("expireAt", Date.from(A_TIME.plus(Duration.ofDays(30)))));
         }
+        rows.forEach(DeviceStoreFixtures::scopeHistoryRow);
         client.getDatabase(databaseName).getCollection("device_observations").insertMany(rows);
         assertThat(store.commit(INSTITUTION, SOURCE, next.sourceEventKey()).status()).isEqualTo(CommitStatus.QUARANTINED);
         assertThat(count("device_occurrences")).isZero();
         assertThat(client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first().getBoolean("invalidated")).isTrue();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first().getBoolean("invalidated")).isTrue();
     }
 
     @Test
@@ -787,14 +804,14 @@ class MongoDeviceObservationStoreIntegrationTest {
         Observation first = observation(INSTITUTION, CUSTOMER, DEVICE, '1', '2', 1, 1, B_TIME);
         store.stage(first);
         client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .updateOne(eq("_id", INSTITUTION + ':' + SOURCE),
+                .updateOne(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE)),
                         com.mongodb.client.model.Updates.set("pendingCount", 10_000));
         Observation next = observation(INSTITUTION, CUSTOMER, DEVICE, '3', '4', 2, 1, A_TIME);
         assertThatThrownBy(() -> store.stage(next)).hasMessage("DEVICE_STORE_PENDING_CAPACITY_EXCEEDED");
         assertThat(count("device_observation_candidates")).isEqualTo(1);
         assertThat(count("device_observations")).isZero();
         assertThat(client.getDatabase(databaseName).getCollection("device_source_coverage")
-                .find(eq("_id", INSTITUTION + ':' + SOURCE)).first().getBoolean("invalidated")).isTrue();
+                .find(eq("_id", DeviceStoreFixtures.EPOCH.scopeId(INSTITUTION, SOURCE))).first().getBoolean("invalidated")).isTrue();
     }
 
     @Test
@@ -802,7 +819,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         try (MongoClient unreachable = MongoClients.create(
                 "mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=250&connectTimeoutMS=100")) {
             assertThatThrownBy(() -> new MongoDeviceObservationStore(unreachable,
-                    "device_unavailable", Clock.fixed(NOW, ZoneOffset.UTC)))
+                    "device_unavailable", Clock.fixed(NOW, ZoneOffset.UTC), DeviceStoreFixtures.EPOCH, DeviceStoreFixtures.TRUST_STRUCTURAL_TEST_INPUTS))
                     .hasMessage("DEVICE_STORE_UNAVAILABLE_INDEXES");
         }
     }
@@ -813,7 +830,7 @@ class MongoDeviceObservationStoreIntegrationTest {
                 '1', '2', 1, 1, B_TIME.plusNanos(1)))
                 .hasMessage("DEVICE_STORE_TIME_PRECISION");
         assertThatThrownBy(() -> new CoverageSeal(INSTITUTION, SOURCE, 1,
-                B_TIME.minus(Duration.ofDays(31)), B_TIME.plusNanos(1), 1))
+                B_TIME.minus(Duration.ofDays(31)), B_TIME.plusNanos(1), 1, DeviceStoreFixtures.emptyProof()))
                 .hasMessage("DEVICE_STORE_TIME_PRECISION");
     }
 
@@ -824,7 +841,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         store.seal(seal(INSTITUTION, 1, B_TIME, 1));
         store.commit(INSTITUTION, SOURCE, first.sourceEventKey());
         client.getDatabase(databaseName).getCollection("device_occurrences")
-                .updateOne(eq("_id", INSTITUTION + ':' + SOURCE + ':' + first.sourceEventKey()),
+                .updateOne(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, first.sourceEventKey())),
                         com.mongodb.client.model.Updates.set("evidenceCommitment", token('f')));
         assertThatThrownBy(() -> store.commit(INSTITUTION, SOURCE, first.sourceEventKey()))
                 .hasMessage("DEVICE_STORE_CORRUPT_SNAPSHOT");
@@ -837,11 +854,11 @@ class MongoDeviceObservationStoreIntegrationTest {
         store.seal(seal(INSTITUTION, 1, B_TIME, 1));
         store.commit(INSTITUTION, SOURCE, input.sourceEventKey());
         client.getDatabase(databaseName).getCollection("device_occurrences")
-                .updateOne(eq("_id", INSTITUTION + ':' + SOURCE + ':' + input.sourceEventKey()),
+                .updateOne(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, input.sourceEventKey())),
                         com.mongodb.client.model.Updates.set("device", token('f')));
 
         assertThatThrownBy(() -> store.commit(INSTITUTION, SOURCE, input.sourceEventKey()))
-                .hasMessage("DEVICE_STORE_OCCURRENCE_IDENTITY_CONFLICT");
+                .hasMessage("DEVICE_STORE_CORRUPT_SNAPSHOT");
     }
 
     @Test
@@ -851,7 +868,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         store.seal(seal(INSTITUTION, 1, B_TIME, 1));
         store.commit(INSTITUTION, SOURCE, input.sourceEventKey());
         client.getDatabase(databaseName).getCollection("device_observation_candidates")
-                .updateOne(eq("_id", INSTITUTION + ':' + SOURCE + ':' + input.sourceEventKey()),
+                .updateOne(eq("_id", DeviceStoreFixtures.EPOCH.eventId(INSTITUTION, SOURCE, input.sourceEventKey())),
                         com.mongodb.client.model.Updates.set("sourceObservedAt", Date.from(B_TIME.plusMillis(1))));
 
         assertThatThrownBy(() -> store.commit(INSTITUTION, SOURCE, input.sourceEventKey()))
@@ -877,7 +894,7 @@ class MongoDeviceObservationStoreIntegrationTest {
 
     private static Document performanceObservation(String id, long sourceEventNumber, String customer,
                                                    String device, Instant eventTime) {
-        return new Document("_id", id)
+        Document row = new Document("_id", id)
                 .append("institution", INSTITUTION)
                 .append("source", SOURCE)
                 .append("sourceEvent", tokenFor(sourceEventNumber))
@@ -886,6 +903,8 @@ class MongoDeviceObservationStoreIntegrationTest {
                 .append("keyVersion", 1)
                 .append("eventTime", Date.from(eventTime))
                 .append("expireAt", Date.from(A_TIME.plus(Duration.ofDays(31))));
+        DeviceStoreFixtures.scopeHistoryRow(row);
+        return row;
     }
 
     private static String indexNameInPlan(Object node) {
@@ -938,11 +957,12 @@ class MongoDeviceObservationStoreIntegrationTest {
             char eventKey, char transactionKey, long sequence, int keyVersion, Instant eventTime) {
         return new Observation(institution, SOURCE, token(eventKey), token(transactionKey), customer, device,
                 keyVersion, sequence, eventTime, eventTime, token('9'),
-                DeviceRiskEvidence.SourceQuality.AUTHENTICATED_INSTITUTION);
+                DeviceRiskEvidence.SourceQuality.AUTHENTICATED_INSTITUTION,
+                DeviceStoreFixtures.provenance(token(eventKey), token(transactionKey), token('9'), eventTime));
     }
 
-    private static CoverageSeal seal(String institution, long sequence, Instant watermark, int keyVersion) {
-        return new CoverageSeal(institution, SOURCE, sequence, B_TIME.minus(Duration.ofDays(31)), watermark, keyVersion);
+    private CoverageSeal seal(String institution, long sequence, Instant watermark, int keyVersion) {
+        return DeviceStoreFixtures.seal(client, databaseName, institution, SOURCE, sequence, B_TIME.minus(Duration.ofDays(31)), watermark, keyVersion);
     }
 
     private static String token(char digit) {

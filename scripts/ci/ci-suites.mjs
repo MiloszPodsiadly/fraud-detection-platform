@@ -10,7 +10,6 @@ export const ciSuites = {
       "FraudCaseRemovedRouteRuntimeTest",
       "FraudCaseRemovedApiSurfaceTest",
       "FraudCaseCurrentApiSurfaceTest",
-      "FraudCaseCleanupDocumentationTest",
       "FraudCaseSecurityIntegrationTest",
       "AlertSecurityConfigTest",
       "AlertSecurityConfigJwtEnabledTest",
@@ -39,7 +38,6 @@ export const ciSuites = {
       "FraudCaseWorkQueueDocsNoOverclaimTest",
       "FraudCaseWorkQueueDeepPaginationTest",
       "FraudCaseWorkQueueIndexReadinessTest",
-      "FraudCaseCompoundIndexReadinessDocsTest",
       "FraudCaseWorkQueueOpenApiContractTest",
       "FraudCaseWorkQueueFailedReadAuditTest",
       "FraudCaseWorkQueueFilterLengthTest",
@@ -58,7 +56,6 @@ export const ciSuites = {
       "FraudCaseWorkQueueCursorPageCombinationTest",
       "FraudCaseWorkQueueCursorSecretProfileTest",
       "FraudCaseWorkQueueCursorObservabilityTest",
-      "FraudCaseWorkQueueCursorDocsContractTest",
       "FraudCaseWorkQueueSortFieldCoverageTest",
       "FraudCaseWorkQueueCursorSizeChangeTest",
       "SensitiveReadAuditServiceTest"
@@ -197,7 +194,6 @@ export const ciSuites = {
       "com.frauddetection.alert.security.config.BffCsrfBoundaryRegressionTest",
       "com.frauddetection.alert.security.config.BearerVsSessionCsrfRegressionTest",
       "com.frauddetection.alert.security.config.BffSessionSecurityIntegrationTest",
-      "com.frauddetection.alert.security.config.SecurityRouteRegistryDocumentationTest",
       "com.frauddetection.alert.security.config.SecurityRouteOwnershipRegistryTest",
       "com.frauddetection.alert.security.config.SingleSecurityFilterChainGuardTest",
       "com.frauddetection.alert.observability.AlertServiceMetricsTest"
@@ -216,7 +212,6 @@ export const ciSuites = {
           "alert-service/src/test/java/com/frauddetection/alert/security/config/BffCsrfBoundaryRegressionTest.java",
           "alert-service/src/test/java/com/frauddetection/alert/security/config/BearerVsSessionCsrfRegressionTest.java",
           "alert-service/src/test/java/com/frauddetection/alert/security/config/BffSessionSecurityIntegrationTest.java",
-          "alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityRouteRegistryDocumentationTest.java",
           "alert-service/src/test/java/com/frauddetection/alert/security/config/SecurityRouteOwnershipRegistryTest.java",
           "alert-service/src/test/java/com/frauddetection/alert/security/config/SingleSecurityFilterChainGuardTest.java"
         ]

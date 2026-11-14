@@ -235,8 +235,6 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
     private void logModelMonitoring(FraudScoringRequest request, Map<String, Object> diagnostics) {
         Map<String, Object> monitoring = (Map<String, Object>) diagnostics.get("modelMonitoring");
         log.atInfo()
-                .addKeyValue("transactionId", request.event().transactionId())
-                .addKeyValue("correlationId", request.event().correlationId())
                 .addKeyValue("mode", monitoring.get("mode"))
                 .addKeyValue("modelName", monitoring.get("modelName"))
                 .addKeyValue("modelVersion", monitoring.get("modelVersion"))

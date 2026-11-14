@@ -56,11 +56,7 @@ public class TransactionIngestService implements TransactionIngestUseCase {
     public IngestTransactionResponse ingest(IngestTransactionRequest request) {
         String correlationId = correlationIdProvider.currentOrGenerate();
 
-        log.atInfo()
-                .addKeyValue("transactionId", request.transactionId())
-                .addKeyValue("customerId", request.customerId())
-                .addKeyValue("correlationId", correlationId)
-                .log("Accepted transaction ingest request.");
+        log.info("Accepted transaction ingest request.");
 
         TransactionRawEvent event = transactionRequestMapper.toEvent(request, correlationId);
         if (originProofs == null) { transactionRawEventProducer.publish(event); }

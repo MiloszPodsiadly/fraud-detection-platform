@@ -118,7 +118,25 @@ public final class SourceSignatureVerifier {
     /** Policy check only, never a replacement for cryptographic verification or authenticated receipt ownership. */
     public Denied receiptPolicyDenial(SourceScope scope, String keyCommitment, String policyVersion, Instant verifiedAt) {
         if (scope == null || verifiedAt == null) { return Denied.MALFORMED_PROOF; }
-        Anchor anchor = anchors.get(new KeyReference(scope.issuer(), scope.sourceEpoch(), scope.signingKeyVersion()));
+        return receiptPolicyDenial(scope.issuer(), scope.institution(), scope.source(), scope.sourceEpoch(),
+                scope.signingKeyVersion(), scope.eventTime(), scope.purpose(), scope.audience(), keyCommitment,
+                policyVersion, verifiedAt);
+    }
+
+    /** Rechecks policy fields from a trusted parser of an already authenticated durable record; this does not authenticate the record. */
+    public Denied receiptPolicyDenialForPersistedScope(String issuer, String institution, String source, String sourceEpoch,
+                                                       String signingKeyVersion, Instant eventTime, String purpose, String audience,
+                                                       String keyCommitment, String policyVersion, Instant verifiedAt) {
+        if (issuer == null || institution == null || source == null || sourceEpoch == null || signingKeyVersion == null
+                || eventTime == null || purpose == null || audience == null || verifiedAt == null) { return Denied.MALFORMED_PROOF; }
+        return receiptPolicyDenial(issuer, institution, source, sourceEpoch, signingKeyVersion, eventTime, purpose, audience,
+                keyCommitment, policyVersion, verifiedAt);
+    }
+
+    private Denied receiptPolicyDenial(String issuer, String institution, String source, String sourceEpoch,
+                                       String signingKeyVersion, Instant eventTime, String purpose, String audience,
+                                       String keyCommitment, String policyVersion, Instant verifiedAt) {
+        Anchor anchor = anchors.get(new KeyReference(issuer, sourceEpoch, signingKeyVersion));
         if (anchor == null) { return Denied.UNKNOWN_TRUST_ANCHOR; }
         var policy = anchor.policy;
         if (policy.revoked()) { return Denied.TRUST_ANCHOR_REVOKED; }
@@ -129,10 +147,10 @@ public final class SourceSignatureVerifier {
         if (verifiedAt.isBefore(policy.notBefore()) || !verifiedAt.isBefore(policy.notAfter())
                 || verifiedAt.isAfter(now.plusSeconds(300))) { return Denied.EPOCH_INACTIVE; }
         if (now.isBefore(policy.notBefore()) || !now.isBefore(policy.notAfter())
-                || scope.eventTime().isBefore(policy.notBefore()) || !scope.eventTime().isBefore(policy.notAfter())
-                || scope.eventTime().isAfter(now.plusSeconds(300))) { return Denied.EPOCH_INACTIVE; }
-        if (!policy.institution().equals(scope.institution()) || !policy.source().equals(scope.source())
-                || !policy.purpose().equals(scope.purpose()) || !policy.audience().equals(scope.audience())) {
+                || eventTime.isBefore(policy.notBefore()) || !eventTime.isBefore(policy.notAfter())
+                || eventTime.isAfter(now.plusSeconds(300))) { return Denied.EPOCH_INACTIVE; }
+        if (!policy.institution().equals(institution) || !policy.source().equals(source)
+                || !policy.purpose().equals(purpose) || !policy.audience().equals(audience)) {
             return Denied.SOURCE_SCOPE_NOT_AUTHORIZED;
         }
         return null;
