@@ -45,11 +45,11 @@ final class MerchantObservationDocumentCodec {
     }
 
     static String inputCommitment(Observation observation) {
-        return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-observation/v2",
+        return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-observation/v3",
                 observation.scope().issuer(), observation.scope().institution(), observation.scope().source(),
                 observation.scope().epoch(), observation.scope().identityVersion(), observation.sourceEvent(), observation.transaction(),
                 observation.occurrence(), observation.merchant(), observation.sequence(), observation.eventTime(), observation.sourceObservedAt(),
-                observation.payloadCommitment());
+                observation.payloadCommitment(), observation.evidenceCommitment());
     }
 
     static Document scopeDocument(Scope scope) {
@@ -64,7 +64,18 @@ final class MerchantObservationDocumentCodec {
                 .append("occurrence", observation.occurrence()).append("merchant", observation.merchant())
                 .append("sequence", observation.sequence()).append("eventTime", java.util.Date.from(observation.eventTime()))
                 .append("sourceObservedAt", java.util.Date.from(observation.sourceObservedAt()))
-                .append("payloadCommitment", observation.payloadCommitment()).append("inputCommitment", inputCommitment(observation));
+                .append("payloadCommitment", observation.payloadCommitment()).append("evidenceCommitment", observation.evidenceCommitment())
+                .append("inputCommitment", inputCommitment(observation));
+    }
+
+    static Document manifestDocument(Observation observation, MerchantAssertionAnchor anchor) {
+        if (observation.evidenceCommitment() == null ? anchor != null
+                : anchor == null || anchor.role() != MerchantAssertionVerifier.Role.OBSERVATION
+                || !observation.evidenceCommitment().equals(anchor.commitment())) {
+            throw failure("EVIDENCE_ANCHOR_MISMATCH");
+        }
+        return observationDocument(observation).append("observationAnchor", anchor == null ? null : anchor.toDocument())
+                .append("scoredBinding", null);
     }
 
     static Document membershipDocument(Observation observation, MembershipCheckpoint previous) {
@@ -261,7 +272,7 @@ final class MerchantObservationDocumentCodec {
         try {
             Observation observation = new Observation(decodeScope(row), row.getString("sourceEvent"), row.getString("transaction"),
                     row.getString("occurrence"), row.getString("merchant"), row.getLong("sequence"), row.getDate("eventTime").toInstant(),
-                    row.getDate("sourceObservedAt").toInstant(), row.getString("payloadCommitment"));
+                    row.getDate("sourceObservedAt").toInstant(), row.getString("payloadCommitment"), row.getString("evidenceCommitment"));
             if (!eventId(observation).equals(row.getString("_id")) || !scopeId(observation.scope()).equals(row.getString("scope"))
                     || !inputCommitment(observation).equals(row.getString("inputCommitment"))) {
                 throw failure("CORRUPT_OBSERVATION");

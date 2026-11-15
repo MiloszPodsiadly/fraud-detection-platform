@@ -18,13 +18,14 @@ import static com.mongodb.client.model.Filters.eq;
 
 /** Fresh bootstrap only. Existing collections must match; nothing is migrated, dropped, or repaired. */
 final class MongoMerchantObservationSchema {
-    static final int SCHEMA_VERSION = 1;
+    static final int SCHEMA_VERSION = 3;
     static final String CANDIDATES = "merchant_observation_candidates";
     static final String HISTORY = "merchant_observations";
     static final String MANIFEST = "merchant_observation_manifest";
     static final String COVERAGE = "merchant_source_coverage";
     static final String MEMBERSHIP = "merchant_observation_membership";
     static final String MEMBERSHIP_TIPS = "merchant_observation_membership_tips";
+    static final List<String> COLLECTIONS = List.of(CANDIDATES, HISTORY, MANIFEST, COVERAGE, MEMBERSHIP, MEMBERSHIP_TIPS);
     static final String CANDIDATE_WINDOW = "merchant_candidate_window";
     static final String HISTORY_WINDOW = "merchant_history_window";
     static final String MANIFEST_WINDOW = "merchant_manifest_window";
@@ -124,9 +125,9 @@ final class MongoMerchantObservationSchema {
                     .append("compactedThroughSequence", type("long").append("minimum", 0))
                     .append("retainedFrom", type("date"))
                     .append("invalidated", type("bool")).append("coverageStart", type("date")).append("watermark", type("date"))
-                    .append("policyCommitment", token());
+                    .append("policyCommitment", token()).append("coverageAnchor", nullableAnchor(MerchantAssertionVerifier.Role.COVERAGE));
             required.addAll(List.of("revision", "accepted", "pending", "quarantined", "membershipTipCount", "sealedSequence", "compactedThroughSequence",
-                    "retainedFrom", "invalidated", "policyCommitment"));
+                    "retainedFrom", "invalidated", "policyCommitment", "coverageAnchor"));
         } else if (MEMBERSHIP.equals(name)) {
             properties.append("scope", type("string").append("maxLength", 265)).append("sourceEvent", token())
                     .append("merchant", token()).append("sequence", type("long").append("minimum", 1))
@@ -161,13 +162,21 @@ final class MongoMerchantObservationSchema {
             properties.append("scope", type("string").append("maxLength", 265)).append("sourceEvent", token()).append("transaction", token())
                     .append("occurrence", token()).append("merchant", token()).append("sequence", type("long").append("minimum", 1))
                     .append("eventTime", type("date")).append("sourceObservedAt", type("date"))
-                    .append("payloadCommitment", token()).append("inputCommitment", token());
+                    .append("payloadCommitment", token())
+                    .append("evidenceCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"))
+                    .append("inputCommitment", token());
             required.addAll(List.of("scope", "sourceEvent", "transaction", "occurrence", "merchant", "sequence", "eventTime",
-                    "sourceObservedAt", "payloadCommitment", "inputCommitment"));
+                    "sourceObservedAt", "payloadCommitment", "evidenceCommitment", "inputCommitment"));
+            if (MANIFEST.equals(name)) {
+                properties.append("observationAnchor", nullableAnchor(MerchantAssertionVerifier.Role.OBSERVATION));
+                properties.append("scoredBinding", nullableScoredBinding());
+                required.addAll(List.of("observationAnchor", "scoredBinding"));
+            }
             if (HISTORY.equals(name)) {
                 properties.append("expireAt", type("date"));
                 required.add("expireAt");
             } else if (CANDIDATES.equals(name)) {
+                properties.append("historyCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"));
                 properties.append("status", type("string").append("enum", List.of("STAGED", "COMMITTED", "QUARANTINED")))
                         .append("stagedAt", type("date")).append("receiptExpireAt", type("date"))
                         .append("windowStart", type("date")).append("asOf", type("date"))
@@ -175,7 +184,7 @@ final class MongoMerchantObservationSchema {
                         .append("priorCount", new Document("bsonType", List.of("int", "null")))
                         .append("reason", type("string").append("enum", java.util.Arrays.stream(MerchantObservationStore.Reason.values()).map(Enum::name).toList()))
                         .append("snapshotCommitment", token()).append("terminalReason", type("string").append("maxLength", 64));
-                required.addAll(List.of("status", "stagedAt"));
+                required.addAll(List.of("status", "stagedAt", "historyCommitment"));
             }
         }
         return new Document("$jsonSchema", new Document("bsonType", "object").append("required", required)
@@ -184,6 +193,32 @@ final class MongoMerchantObservationSchema {
 
     private static Document type(String type) { return new Document("bsonType", type); }
     private static Document token() { return type("string").append("pattern", "^[0-9a-f]{64}$"); }
+
+    private static Document nullableAnchor(MerchantAssertionVerifier.Role role) {
+        return new Document("bsonType", List.of("object", "null"))
+                .append("required", List.of("version", "role", "commitment", "assertion", "proof"))
+                .append("additionalProperties", false)
+                .append("properties", new Document("version", type("int").append("enum", List.of(1)))
+                        .append("role", type("string").append("enum", List.of(role.name())))
+                        .append("commitment", token())
+                        .append("assertion", type("string").append("maxLength", 10_924))
+                        .append("proof", type("string").append("maxLength", 5_464)));
+    }
+
+    private static Document nullableScoredBinding() {
+        Document fields = new Document("version", type("int").append("enum", List.of(1)))
+                .append("eventId", type("string").append("pattern", "^[A-Za-z0-9._:-]{1,128}$"))
+                .append("createdAt", type("string").append("maxLength", 64))
+                .append("fingerprint", token()).append("runId", type("string").append("enum", List.of("initial")))
+                .append("sourceScopeCommitment", token()).append("coverageCommitment", token()).append("receiptId", token())
+                .append("rawCommitment", token()).append("enrichedCommitment", token())
+                .append("identityVersion", type("int").append("minimum", 1).append("maximum", 65_535))
+                .append("merchantCommitment", token()).append("inputCommitment", token())
+                .append("snapshotCommitment", token()).append("historyCommitment", token()).append("commitment", token());
+        return new Document("bsonType", List.of("object", "null"))
+                .append("required", new ArrayList<>(fields.keySet())).append("additionalProperties", false)
+                .append("properties", fields);
+    }
 
     private static void createIndexes(MongoDatabase database, String name, List<IndexSpec> specs) {
         for (IndexSpec spec : specs) {

@@ -1,5 +1,7 @@
 package com.frauddetection.enricher.merchant;
 
+import com.frauddetection.common.events.source.SourceScoredOccurrence;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -10,6 +12,7 @@ interface MerchantObservationStore {
     StageResult stage(Observation observation);
     void seal(CoverageSeal seal);
     CommitResult commit(Observation observation);
+    void bindScored(Observation observation, SourceScoredOccurrence scored);
     Snapshot readSnapshot(Observation observation);
     PendingCounts pending(Scope scope);
 
@@ -18,6 +21,14 @@ interface MerchantObservationStore {
         void requireObservation(Observation observation);
         void requireCoverage(CoverageSeal seal);
         void requireRead(Scope scope);
+        /** Returns exact proof bytes only for the currently authorized admission call. */
+        default MerchantAssertionAnchor observationAnchor(Observation observation) { return null; }
+        /** Returns exact proof bytes only for the currently authorized coverage call. */
+        default MerchantAssertionAnchor coverageAnchor(CoverageSeal seal) { return null; }
+        /** Rechecks a persisted member during sealing, before its sequence can enter the signed prefix. */
+        default void requirePersistedObservation(Observation observation, MerchantAssertionAnchor anchor) {
+            requireObservation(observation);
+        }
         /** Requires independently verified read completeness and exact binding, not a claimed count or seal alone. */
         default void requireHistoryRead(HistoryRead read) {
             throw new SecurityException("MERCHANT_PROFILE_READ_NOT_ADMITTED");
@@ -44,7 +55,13 @@ interface MerchantObservationStore {
 
     record Observation(Scope scope, String sourceEvent, String transaction, String occurrence,
                        String merchant, long sequence, Instant eventTime, Instant sourceObservedAt,
-                       String payloadCommitment) {
+                       String payloadCommitment, String evidenceCommitment) {
+        public Observation(Scope scope, String sourceEvent, String transaction, String occurrence,
+                           String merchant, long sequence, Instant eventTime, Instant sourceObservedAt,
+                           String payloadCommitment) {
+            this(scope, sourceEvent, transaction, occurrence, merchant, sequence, eventTime, sourceObservedAt,
+                    payloadCommitment, null);
+        }
         public Observation {
             require(scope != null, "SCOPE");
             reference(sourceEvent);
@@ -52,6 +69,7 @@ interface MerchantObservationStore {
             reference(occurrence);
             reference(merchant);
             reference(payloadCommitment);
+            if (evidenceCommitment != null) { reference(evidenceCommitment); }
             require(sequence >= 1, "SEQUENCE");
             time(eventTime);
             time(sourceObservedAt);
@@ -60,9 +78,14 @@ interface MerchantObservationStore {
     }
 
     /** This shape is not a signed seal. The verifier must independently authorize the exact scope and coverage assertion. */
-    record CoverageSeal(Scope scope, long throughSequence, Instant coverageStart, Instant watermark) {
+    record CoverageSeal(Scope scope, long throughSequence, Instant coverageStart, Instant watermark,
+                        String evidenceCommitment) {
+        public CoverageSeal(Scope scope, long throughSequence, Instant coverageStart, Instant watermark) {
+            this(scope, throughSequence, coverageStart, watermark, null);
+        }
         public CoverageSeal {
             require(scope != null, "SCOPE");
+            if (evidenceCommitment != null) { reference(evidenceCommitment); }
             require(throughSequence >= 1, "SEQUENCE");
             time(coverageStart);
             time(watermark);
@@ -73,7 +96,13 @@ interface MerchantObservationStore {
 
     /** Bounded read description only. expectedRows covers unique prior rows in [from, asOf), not admission or completeness proof. */
     record HistoryRead(Observation current, CoverageSeal coverage, Instant from, Instant asOf, Instant evaluatedAt,
-                       Instant retainedFrom, int expectedRows, List<Observation> observations, boolean sourceInvalidated) {
+                       Instant retainedFrom, int expectedRows, List<Observation> observations, boolean sourceInvalidated,
+                       List<MerchantAssertionAnchor> observationAnchors, MerchantAssertionAnchor coverageAnchor) {
+        public HistoryRead(Observation current, CoverageSeal coverage, Instant from, Instant asOf, Instant evaluatedAt,
+                           Instant retainedFrom, int expectedRows, List<Observation> observations, boolean sourceInvalidated) {
+            this(current, coverage, from, asOf, evaluatedAt, retainedFrom, expectedRows, observations,
+                    sourceInvalidated, java.util.Collections.nCopies(observations == null ? 0 : observations.size(), null), null);
+        }
         public HistoryRead {
             require(current != null, "HISTORY_CURRENT");
             time(from);
@@ -85,6 +114,8 @@ interface MerchantObservationStore {
             require(expectedRows >= 0 && expectedRows <= 25_000, "HISTORY_CAPACITY");
             require(observations != null && observations.size() <= 25_000, "HISTORY_CAPACITY");
             observations = List.copyOf(observations);
+            require(observationAnchors != null && observationAnchors.size() == observations.size(), "HISTORY_EVIDENCE");
+            observationAnchors = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(observationAnchors));
         }
         @Override public String toString() { return "MerchantHistoryRead[redacted]"; }
     }
@@ -101,6 +132,18 @@ interface MerchantObservationStore {
                     : reason != Reason.NONE && priorCount == null, "SNAPSHOT_STATE");
         }
         @Override public String toString() { return "MerchantSnapshot[redacted]"; }
+    }
+
+    enum DiagnosticState { READY, PENDING, UNAVAILABLE }
+
+    /** Private read result; it deliberately carries no proof bytes or caller identity. */
+    record DiagnosticSnapshot(DiagnosticState state, Snapshot snapshot, boolean exactScoredBindingPresent) {
+        public DiagnosticSnapshot {
+            require(state != null, "DIAGNOSTIC_STATE");
+            require(state == DiagnosticState.READY ? snapshot != null : snapshot == null && !exactScoredBindingPresent,
+                    "DIAGNOSTIC_STATE");
+        }
+        @Override public String toString() { return "MerchantDiagnosticSnapshot[redacted]"; }
     }
 
     record CommitResult(CommitStatus status, Snapshot snapshot) {

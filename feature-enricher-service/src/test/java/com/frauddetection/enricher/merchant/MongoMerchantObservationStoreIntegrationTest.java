@@ -2727,6 +2727,11 @@ class MongoMerchantObservationStoreIntegrationTest {
         @Override public void requireObservation(Observation row) { require(observations.contains(row)); }
         @Override public void requireCoverage(CoverageSeal seal) { require(seals.contains(seal)); }
         @Override public void requireRead(Scope scope) { require(scopes.contains(scope)); }
+        @Override public void requireHistoryRead(HistoryRead read) {
+            require(observations.contains(read.current()) && read.observations().stream().allMatch(observations::contains)
+                    && read.observationAnchors().stream().allMatch(java.util.Objects::isNull)
+                    && read.coverageAnchor() == null);
+        }
         private void require(boolean allowed) { if (!allowed) { throw new SecurityException("TEST_ONLY_ADMISSION_DENIED"); } }
     }
     private static final class MutableClock extends Clock {

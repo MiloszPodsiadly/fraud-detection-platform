@@ -82,6 +82,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     @Override
     public StageResult stage(Observation observation) {
         authorize(() -> admission.requireObservation(Objects.requireNonNull(observation)));
+        MerchantAssertionAnchor observationAnchor = authorizedObservationAnchor(observation);
         Instant now = now();
         if (observation.eventTime().isAfter(now.plus(limits.clockSkew()))
                 || observation.sourceObservedAt().isAfter(now.plus(limits.clockSkew()))) {
@@ -90,7 +91,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         if (!observation.eventTime().isAfter(now.minus(limits.replayHorizon()))) {
             rejectTemporallyInvalidObservation(observation, now, "REPLAY_EXPIRED");
         }
-        try { return stageAuthorized(observation, now); }
+        try { return stageAuthorized(observation, now, observationAnchor); }
         catch (IllegalStateException exception) {
             if ("MERCHANT_STORE_IDENTITY_CONFLICT".equals(exception.getMessage())) {
                 try {
@@ -274,7 +275,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         } catch (RuntimeException unavailable) { return false; }
     }
 
-    private StageResult stageAuthorized(Observation observation, Instant now) {
+    private StageResult stageAuthorized(Observation observation, Instant now, MerchantAssertionAnchor observationAnchor) {
         try {
             StageDecision decision = transaction(session -> {
                 Document source = source(session, observation.scope());
@@ -344,13 +345,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     return new StageDecision(null, late ? Capacity.LATE_EVIDENCE : Capacity.STORAGE);
                 }
                 Document candidate = observationDocument(observation).append("status", late ? "QUARANTINED" : "STAGED")
-                        .append("stagedAt", Date.from(now));
+                        .append("stagedAt", Date.from(now)).append("historyCommitment", null);
                 if (late) {
                     candidate.append("receiptExpireAt", Date.from(receiptExpiration(now, observation)))
                             .append("terminalReason", "POST_SEAL_EVENT");
                 }
                 candidates.insertOne(session, candidate);
-                manifest.insertOne(session, observationDocument(observation));
+                manifest.insertOne(session, manifestDocument(observation, observationAnchor));
                 coverage.updateOne(session, eq("_id", source.getString("_id")), late
                         ? combine(inc("revision", 1L), inc("accepted", 1), inc("quarantined", 1), set("invalidated", true))
                         : combine(inc("revision", 1L), inc("accepted", 1), inc("pending", 1)));
@@ -371,6 +372,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     @Override
     public void seal(CoverageSeal seal) {
         authorize(() -> admission.requireCoverage(Objects.requireNonNull(seal)));
+        MerchantAssertionAnchor coverageAnchor = authorizedCoverageAnchor(seal);
         if (seal.watermark().isAfter(now().plus(limits.clockSkew()))) { throw failure("FUTURE_WATERMARK"); }
         AtomicReference<SealFence> sourceFence = new AtomicReference<>();
         try {
@@ -397,8 +399,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                         .limit(limits.maxSealBatch() + 1).into(new ArrayList<>());
                 if (batch.size() != delta || !matchesManifestBatch(batch, receipts)) { throw failure("SOURCE_SEQUENCE_GAP"); }
                 long expected = previous;
-                for (Document row : batch) {
+                for (int index = 0; index < batch.size(); index++) {
+                    Document row = batch.get(index);
                     Observation observation = decodeObservation(row);
+                    MerchantAssertionAnchor persistedAnchor = observationAnchor(receipts.get(index));
+                    authorize(() -> admission.requirePersistedObservation(observation, persistedAnchor));
                     if (observation.sequence() != ++expected || observation.eventTime().isAfter(seal.watermark())
                             || "QUARANTINED".equals(row.getString("status"))) { throw failure("SOURCE_SEQUENCE_GAP"); }
                 }
@@ -408,6 +413,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 if (coverage.updateOne(session, and(eq("_id", source.getString("_id")), eq("revision", source.getLong("revision"))),
                         combine(set("sealedSequence", seal.throughSequence()), set("coverageStart", Date.from(seal.coverageStart())),
                                 set("watermark", Date.from(seal.watermark())), set("retainedFrom", Date.from(retainedFrom)),
+                                set("coverageAnchor", coverageAnchor == null ? null : coverageAnchor.toDocument()),
                                 inc("membershipTipCount", newMembershipTips), inc("revision", 1L))).getModifiedCount() != 1) {
                     throw race();
                 }
@@ -498,6 +504,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                             ? new CommitResult(CommitStatus.EXISTING, unavailable(observation, Reason.HISTORY_MISSING))
                             : new CommitResult(CommitStatus.QUARANTINED, null);
                 }
+                MerchantAssertionAnchor persistedCurrentAnchor = observationAnchor(receipt);
+                authorize(() -> admission.requirePersistedObservation(observation, persistedCurrentAnchor));
                 CommitResult terminal = terminalResult(session, candidate, observation, source);
                 if (terminal != null) { return terminal; }
                 if (invalidated(source)) {
@@ -517,7 +525,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     return new CommitResult(CommitStatus.WAITING_FOR_PREDECESSOR, null);
                 }
                 Snapshot snapshot;
-                MerchantObservationWindowPolicy.Result preflight = deriveWindow(observation, source, List.of(), now());
+                String historyCommitment = null;
+                MerchantObservationWindowPolicy.Result preflight = deriveWindow(observation, source, List.of(), List.of(), now());
                 if (preflight.reason() != com.frauddetection.common.events.merchant.MerchantProfile.Reason.NONE
                         || preflight.windows().getFirst().status() == com.frauddetection.common.events.merchant.MerchantProfile.Status.UNAVAILABLE) {
                     snapshot = snapshotFromDerived(observation, preflight);
@@ -543,8 +552,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                             source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"))) {
                         return quarantine(session, candidate, observation.scope(), Reason.HISTORY_MISSING);
                     }
-                    MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, now());
+                    MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, receipts, now());
                     snapshot = snapshotFromDerived(observation, derived);
+                    if (snapshot.availability() == Availability.COMPLETE_WINDOW) {
+                        historyCommitment = historyWindowCommitment(observation, start, rows, receipts, members);
+                    }
                 }
                 history.insertOne(session, observationDocument(observation)
                         .append("expireAt", Date.from(later(now(), observation.eventTime()).plus(limits.historyRetention()))));
@@ -552,7 +564,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                         combine(set("status", "COMMITTED"), set("receiptExpireAt", Date.from(receiptExpiration(now(), observation))),
                                 set("windowStart", Date.from(snapshot.windowStart())), set("asOf", Date.from(snapshot.asOf())),
                                 set("availability", snapshot.availability().name()), set("priorCount", snapshot.priorCount()),
-                                set("reason", snapshot.reason().name()), set("snapshotCommitment", snapshotCommitment(observation, snapshot))))
+                                set("reason", snapshot.reason().name()), set("historyCommitment", historyCommitment),
+                                set("snapshotCommitment", snapshotCommitment(observation, snapshot, historyCommitment))))
                         .getModifiedCount() != 1) { throw race(); }
                 transitionSource(session, observation.scope(), false);
                 return new CommitResult(CommitStatus.COMMITTED, snapshot);
@@ -575,6 +588,107 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     }
 
     @Override
+    public void bindScored(Observation observation, com.frauddetection.common.events.source.SourceScoredOccurrence scored) {
+        authorize(() -> admission.requireObservation(Objects.requireNonNull(observation)));
+        authorize(() -> admission.requireRead(observation.scope()));
+        if (scored == null) { throw failure("SCORED_BINDING_NOT_ADMITTED"); }
+        String id = eventId(observation);
+        try {
+            transaction(session -> {
+                Document candidate = candidates.find(session, eq("_id", id)).first();
+                Document receipt = manifest.find(session, eq("_id", id)).first();
+                Document binding = scoredBindingEvidence(session, observation, scored, candidate, receipt).binding();
+                Document persisted = receipt.get("scoredBinding", Document.class);
+                if (persisted != null) {
+                    if (!binding.equals(persisted)) { throw failure("SCORED_BINDING_CONFLICT"); }
+                    return null;
+                }
+                if (manifest.updateOne(session, and(eq("_id", id), eq("inputCommitment", inputCommitment(observation)),
+                                eq("evidenceCommitment", observation.evidenceCommitment()), eq("scoredBinding", null)),
+                        set("scoredBinding", binding)).getModifiedCount() == 1) {
+                    return null;
+                }
+                Document after = manifest.find(session, eq("_id", id)).first();
+                if (binding.equals(after == null ? null : after.get("scoredBinding", Document.class))) { return null; }
+                throw failure("SCORED_BINDING_RACE");
+            });
+        } catch (MongoException unresolved) {
+            if (reconcilesScoredBinding(observation, scored)) { return; }
+            throw failure("SCORED_BINDING_UNRESOLVED");
+        }
+    }
+
+    private ScoredBindingEvidence scoredBindingEvidence(ClientSession session, Observation observation,
+                                                        com.frauddetection.common.events.source.SourceScoredOccurrence scored,
+                                                        Document candidate, Document receipt) {
+        Document source = source(session, observation.scope());
+        requireSource(source, observation.scope());
+        requireBinding(candidate, observation);
+        requireReceiptFresh(candidate);
+        if (!"COMMITTED".equals(candidate.getString("status"))) { throw failure("STAGE_A_NOT_COMMITTED"); }
+        if (!matchesManifest(candidate, receipt)) { throw failure("HISTORY_MISSING"); }
+        MerchantAssertionAnchor anchor = observationAnchor(receipt);
+        authorize(() -> admission.requirePersistedObservation(observation, anchor));
+        Snapshot snapshot = decodeSnapshot(candidate, observation);
+        if (snapshot.availability() != Availability.COMPLETE_WINDOW) { throw failure("STAGE_A_NOT_COMPLETE"); }
+        Snapshot current = currentSnapshot(session, snapshot, source, observation, candidate.getString("historyCommitment"), now());
+        if (!snapshot.equals(current)) { throw failure("STAGE_A_CHANGED"); }
+        MerchantAssertionAnchor coverageProof = coverageAnchor(source);
+        if (coverageProof == null) { throw failure("EVIDENCE_ANCHOR_MISMATCH"); }
+        return new ScoredBindingEvidence(MerchantScoredBinding.expected(candidate, observation, anchor, coverageProof, scored), current);
+    }
+
+    private boolean reconcilesScoredBinding(Observation observation,
+                                            com.frauddetection.common.events.source.SourceScoredOccurrence scored) {
+        try (ClientSession session = client.startSession()) {
+            session.startTransaction(TRANSACTION);
+            try {
+                String id = eventId(observation);
+                Document candidate = candidates.find(session, eq("_id", id)).first();
+                Document receipt = manifest.find(session, eq("_id", id)).first();
+                Document expected = scoredBindingEvidence(session, observation, scored, candidate, receipt).binding();
+                return expected.equals(receipt.get("scoredBinding", Document.class));
+            } catch (RuntimeException unresolved) {
+                return false;
+            } finally { abort(session); }
+        } catch (RuntimeException unavailable) { return false; }
+    }
+
+    DiagnosticSnapshot readDiagnostic(Observation observation,
+                                      com.frauddetection.common.events.source.SourceScoredOccurrence scored) {
+        authorize(() -> admission.requireObservation(Objects.requireNonNull(observation)));
+        authorize(() -> admission.requireRead(observation.scope()));
+        if (scored == null) { return new DiagnosticSnapshot(DiagnosticState.PENDING, null, false); }
+        try (ClientSession session = client.startSession()) {
+            session.startTransaction(TRANSACTION);
+            try {
+                String id = eventId(observation);
+                Document candidate = candidates.find(session, eq("_id", id)).first();
+                Document receipt = manifest.find(session, eq("_id", id)).first();
+                if (candidate == null || receipt == null || !observation.equals(decodeObservation(candidate))
+                        || !matchesManifest(candidate, receipt)) {
+                    return new DiagnosticSnapshot(DiagnosticState.UNAVAILABLE, null, false);
+                }
+                MerchantAssertionAnchor anchor = observationAnchor(receipt);
+                authorize(() -> admission.requirePersistedObservation(observation, anchor));
+                if ("STAGED".equals(candidate.getString("status"))) {
+                    return new DiagnosticSnapshot(DiagnosticState.PENDING, null, false);
+                }
+                if (!"COMMITTED".equals(candidate.getString("status"))) {
+                    return new DiagnosticSnapshot(DiagnosticState.UNAVAILABLE, null, false);
+                }
+                ScoredBindingEvidence evidence = scoredBindingEvidence(session, observation, scored, candidate, receipt);
+                Document persisted = receipt.get("scoredBinding", Document.class);
+                if (persisted == null) {
+                    return new DiagnosticSnapshot(DiagnosticState.READY, evidence.snapshot(), false);
+                }
+                if (!evidence.binding().equals(persisted)) { throw failure("SCORED_BINDING_CONFLICT"); }
+                return new DiagnosticSnapshot(DiagnosticState.READY, evidence.snapshot(), true);
+            } finally { abort(session); }
+        } catch (MongoException unavailable) { throw failure("DIAGNOSTIC_READ_UNAVAILABLE"); }
+    }
+
+    @Override
     public Snapshot readSnapshot(Observation observation) {
         authorize(() -> admission.requireObservation(Objects.requireNonNull(observation)));
         authorize(() -> admission.requireRead(observation.scope()));
@@ -589,10 +703,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 if (!"COMMITTED".equals(row.getString("status"))) { throw failure("SNAPSHOT_MISSING"); }
                 if (invalidated(source)) { return unavailable(observation, Reason.HISTORY_MISSING); }
                 Snapshot stored = decodeSnapshot(row, observation);
-                if (!matchesManifest(row, manifest.find(session, eq("_id", eventId(observation))).first())) {
+                Document receipt = manifest.find(session, eq("_id", eventId(observation))).first();
+                if (!matchesManifest(row, receipt)) {
                     return unavailable(observation, Reason.HISTORY_MISSING);
                 }
-                return currentSnapshot(session, stored, source, observation, now());
+                MerchantAssertionAnchor persistedCurrentAnchor = observationAnchor(receipt);
+                authorize(() -> admission.requirePersistedObservation(observation, persistedCurrentAnchor));
+                return currentSnapshot(session, stored, source, observation, row.getString("historyCommitment"), now());
             } finally { abort(session); } // A read-only snapshot needs no commit acknowledgment or write retry.
         } catch (MongoException exception) { throw failure("READ_UNAVAILABLE"); }
     }
@@ -604,6 +721,24 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         if (row == null) { return new PendingCounts(0, 0); }
         requireSource(row, scope);
         return new PendingCounts(row.getInteger("pending"), row.getInteger("quarantined"));
+    }
+
+    MerchantAssertionAnchor storedCoverageAnchor(Scope scope) {
+        Document row = safeRead(coverage, scopeId(scope));
+        if (row == null) { return null; }
+        requireSource(row, scope);
+        return coverageAnchor(row);
+    }
+
+    StoredCoverage storedCoverage(Scope scope) {
+        Document row = safeRead(coverage, scopeId(scope));
+        if (row == null) { return null; }
+        requireSource(row, scope);
+        MerchantAssertionAnchor anchor = coverageAnchor(row);
+        CoverageSeal seal = row.getDate("watermark") == null ? null
+                : new CoverageSeal(scope, row.getLong("sealedSequence"), instant(row, "coverageStart"),
+                instant(row, "watermark"), anchor == null ? null : anchor.commitment());
+        return new StoredCoverage(seal, anchor);
     }
 
     private CommitResult quarantine(ClientSession session, Document candidate, Scope scope, Reason reason) {
@@ -777,10 +912,15 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     }
 
     private boolean matchesManifest(Document candidate, Document receipt) {
-        return candidate != null && receipt != null
-                && Objects.equals(candidate.getString("_id"), receipt.getString("_id"))
-                && Objects.equals(candidate.getString("inputCommitment"), receipt.getString("inputCommitment"))
-                && decodeObservation(candidate).equals(decodeObservation(receipt));
+        if (candidate == null || receipt == null
+                || !Objects.equals(candidate.getString("_id"), receipt.getString("_id"))
+                || !Objects.equals(candidate.getString("inputCommitment"), receipt.getString("inputCommitment"))
+                || !Objects.equals(candidate.getString("evidenceCommitment"), receipt.getString("evidenceCommitment"))
+                || !decodeObservation(candidate).equals(decodeObservation(receipt))) { return false; }
+        try {
+            MerchantAssertionAnchor anchor = observationAnchor(receipt);
+            return Objects.equals(candidate.getString("evidenceCommitment"), anchor == null ? null : anchor.commitment());
+        } catch (RuntimeException corrupt) { return false; }
     }
 
     private boolean matchesManifestBatch(List<Document> batch, List<Document> receipts) {
@@ -894,7 +1034,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         return switch (row.getString("status")) {
             case "COMMITTED" -> new CommitResult(CommitStatus.EXISTING,
                     session == null ? readSnapshot(observation)
-                            : currentSnapshot(session, decodeSnapshot(row, observation), source, observation, now()));
+                            : currentSnapshot(session, decodeSnapshot(row, observation), source, observation,
+                            row.getString("historyCommitment"), now()));
             case "QUARANTINED" -> new CommitResult(CommitStatus.QUARANTINED, null);
             case "STAGED" -> null;
             default -> throw failure("CANDIDATE_STATE");
@@ -902,8 +1043,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     }
 
     /** Revoke usability without rewriting the immutable receipt when coverage or retained history is no longer sufficient. */
-    private Snapshot currentSnapshot(ClientSession session, Snapshot stored, Document source, Observation observation, Instant evaluatedAt) {
-        MerchantObservationWindowPolicy.Result preflight = deriveWindow(observation, source, List.of(), evaluatedAt);
+    private Snapshot currentSnapshot(ClientSession session, Snapshot stored, Document source, Observation observation,
+                                     String expectedHistoryCommitment, Instant evaluatedAt) {
+        MerchantObservationWindowPolicy.Result preflight = deriveWindow(observation, source, List.of(), List.of(), evaluatedAt);
         if (preflight.reason() != com.frauddetection.common.events.merchant.MerchantProfile.Reason.NONE
                 || preflight.windows().getFirst().status() == com.frauddetection.common.events.merchant.MerchantProfile.Status.UNAVAILABLE) {
             return snapshotFromDerived(observation, preflight);
@@ -931,7 +1073,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     stored.windowStart(), source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"))) {
                 return unavailable(observation, Reason.HISTORY_MISSING);
             }
-            MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, evaluatedAt);
+            String currentHistoryCommitment = historyWindowCommitment(observation, stored.windowStart(), rows, receipts, members);
+            if (!Objects.equals(expectedHistoryCommitment, currentHistoryCommitment)) {
+                return unavailable(observation, Reason.HISTORY_MISSING);
+            }
+            MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source, rows, receipts, evaluatedAt);
             Snapshot current = snapshotFromDerived(observation, derived);
             if (current.availability() != Availability.COMPLETE_WINDOW) { return current; }
             if (!current.priorCount().equals(stored.priorCount())) {
@@ -942,18 +1088,23 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     }
 
     private MerchantObservationWindowPolicy.Result deriveWindow(Observation current, Document source,
-                                                                 List<Document> historyRows, Instant evaluatedAt) {
+                                                                 List<Document> historyRows, List<Document> manifestRows,
+                                                                 Instant evaluatedAt) {
         Instant start = current.eventTime().minus(limits.window());
         List<Observation> observations = historyRows.stream().map(MerchantObservationDocumentCodec::decodeObservation).toList();
+        List<MerchantAssertionAnchor> anchors = manifestRows.stream().map(MongoMerchantObservationStore::observationAnchor).toList();
+        if (anchors.size() != observations.size()) { throw failure("HISTORY_MISSING"); }
         Instant evaluationFloor = later(evaluatedAt, current.eventTime());
+        MerchantAssertionAnchor persistedCoverageAnchor = coverageAnchor(source);
         CoverageSeal seal = source.getDate("watermark") == null ? null
                 : new CoverageSeal(current.scope(), source.getLong("sealedSequence"), instant(source, "coverageStart"),
-                        instant(source, "watermark"));
+                        instant(source, "watermark"), persistedCoverageAnchor == null ? null : persistedCoverageAnchor.commitment());
         HistoryRead read = new HistoryRead(current,
                 seal,
                 start, current.eventTime(), evaluationFloor,
                 later(instant(source, "retainedFrom"), evaluatedAt.minus(limits.historyRetention())), observations.size(),
-                observations, invalidated(source));
+                observations, invalidated(source), anchors, persistedCoverageAnchor);
+        authorize(() -> admission.requireHistoryRead(read));
         return MerchantObservationWindowPolicy.derive(read,
                 List.of(new MerchantObservationWindowPolicy.Window(start, current.eventTime())), limits.maxHistoryRows());
     }
@@ -981,7 +1132,10 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     private StageResult existingStage(Document row, Observation observation) {
         requireBinding(row, observation);
         requireReceiptFresh(row);
-        if (!matchesManifest(row, safeRead(manifest, eventId(observation)))) { throw failure("HISTORY_MISSING"); }
+        Document receipt = safeRead(manifest, eventId(observation));
+        if (!matchesManifest(row, receipt)) { throw failure("HISTORY_MISSING"); }
+        MerchantAssertionAnchor persistedAnchor = observationAnchor(receipt);
+        authorize(() -> admission.requirePersistedObservation(observation, persistedAnchor));
         if ("COMMITTED".equals(row.getString("status"))) {
             Document member = safeRead(membership, eventId(observation));
             Document source = safeRead(coverage, scopeId(observation.scope()));
@@ -1023,7 +1177,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
             if (!snapshot.asOf().equals(observation.eventTime())
                     || !snapshot.windowStart().equals(observation.eventTime().minus(limits.window()))
                     || snapshot.priorCount() != null && snapshot.priorCount() > limits.maxHistoryRows()
-                    || !snapshotCommitment(observation, snapshot).equals(row.getString("snapshotCommitment"))) {
+                    || !snapshotCommitment(observation, snapshot, row.getString("historyCommitment"))
+                    .equals(row.getString("snapshotCommitment"))) {
                 throw failure("CORRUPT_SNAPSHOT");
             }
             return snapshot;
@@ -1054,6 +1209,10 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 throw failure("CORRUPT_COVERAGE");
             }
             instant(row, "retainedFrom");
+            MerchantAssertionAnchor persistedCoverage = coverageAnchor(row);
+            if (persistedCoverage != null && (row.getLong("sealedSequence") == 0 || row.getDate("watermark") == null)) {
+                throw failure("CORRUPT_COVERAGE");
+            }
             if (row.getDate("watermark") != null) {
                 new CoverageSeal(scope, row.getLong("sealedSequence"), instant(row, "coverageStart"), instant(row, "watermark"));
             }
@@ -1067,7 +1226,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         return scopeDocument(scope).append("_id", scopeId(scope)).append("revision", 0L).append("pending", 0)
                 .append("accepted", 0).append("quarantined", 0).append("membershipTipCount", 0).append("sealedSequence", 0L)
                 .append("compactedThroughSequence", 0L).append("retainedFrom", Date.from(now.minus(limits.historyRetention())))
-                .append("invalidated", false).append("policyCommitment", policyCommitment);
+                .append("invalidated", false).append("policyCommitment", policyCommitment).append("coverageAnchor", null);
     }
 
     private boolean hasIdentityConflict(ClientSession session, Observation observation) {
@@ -1108,9 +1267,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     }
 
     private static boolean matchesSeal(Document source, CoverageSeal seal) {
+        MerchantAssertionAnchor anchor;
+        try { anchor = coverageAnchor(source); }
+        catch (RuntimeException corrupt) { return false; }
         return source != null && !invalidated(source) && Objects.equals(source.get("sealedSequence"), seal.throughSequence())
                 && Objects.equals(source.getDate("watermark"), Date.from(seal.watermark()))
-                && Objects.equals(source.getDate("coverageStart"), Date.from(seal.coverageStart()));
+                && Objects.equals(source.getDate("coverageStart"), Date.from(seal.coverageStart()))
+                && Objects.equals(seal.evidenceCommitment(), anchor == null ? null : anchor.commitment());
     }
 
     private <T> T transaction(Function<ClientSession, T> body) {
@@ -1163,11 +1326,95 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         catch (RuntimeException exception) { throw failure("NOT_ADMITTED"); }
     }
 
+    private MerchantAssertionAnchor authorizedObservationAnchor(Observation observation) {
+        MerchantAssertionAnchor anchor;
+        try { anchor = admission.observationAnchor(observation); }
+        catch (RuntimeException denied) { throw failure("NOT_ADMITTED"); }
+        return requireAnchor(observation.evidenceCommitment(), anchor, MerchantAssertionVerifier.Role.OBSERVATION);
+    }
+
+    private MerchantAssertionAnchor authorizedCoverageAnchor(CoverageSeal seal) {
+        MerchantAssertionAnchor anchor;
+        try { anchor = admission.coverageAnchor(seal); }
+        catch (RuntimeException denied) { throw failure("NOT_ADMITTED"); }
+        return requireAnchor(seal.evidenceCommitment(), anchor, MerchantAssertionVerifier.Role.COVERAGE);
+    }
+
+    private static MerchantAssertionAnchor requireAnchor(String commitment, MerchantAssertionAnchor anchor,
+                                                          MerchantAssertionVerifier.Role role) {
+        if (commitment == null ? anchor != null
+                : anchor == null || anchor.role() != role || !commitment.equals(anchor.commitment())) {
+            throw failure("EVIDENCE_ANCHOR_MISMATCH");
+        }
+        return anchor;
+    }
+
+    private static MerchantAssertionAnchor observationAnchor(Document manifestRow) {
+        try {
+            Document anchor = manifestRow.get("observationAnchor", Document.class);
+            String commitment = manifestRow.getString("evidenceCommitment");
+            if (anchor == null) {
+                if (commitment != null) { throw failure("EVIDENCE_ANCHOR_MISMATCH"); }
+                return null;
+            }
+            MerchantAssertionAnchor decoded = MerchantAssertionAnchor.fromDocument(anchor, MerchantAssertionVerifier.Role.OBSERVATION);
+            if (!Objects.equals(commitment, decoded.commitment())) { throw failure("EVIDENCE_ANCHOR_MISMATCH"); }
+            return decoded;
+        } catch (RuntimeException malformed) { throw failure("EVIDENCE_ANCHOR_MISMATCH"); }
+    }
+
+    private static MerchantAssertionAnchor coverageAnchor(Document source) {
+        if (source == null) { return null; }
+        Document anchor = source.get("coverageAnchor", Document.class);
+        if (anchor == null) { return null; }
+        try { return MerchantAssertionAnchor.fromDocument(anchor, MerchantAssertionVerifier.Role.COVERAGE); }
+        catch (RuntimeException malformed) { throw failure("EVIDENCE_ANCHOR_MISMATCH"); }
+    }
+
     private static String snapshotCommitment(Observation observation, Snapshot snapshot) {
+        return snapshotCommitment(observation, snapshot, null);
+    }
+
+    private static String snapshotCommitment(Observation observation, Snapshot snapshot, String historyCommitment) {
+        if (snapshot.availability() == Availability.COMPLETE_WINDOW
+                ? !isCommitment(historyCommitment) : historyCommitment != null) {
+            throw failure("SNAPSHOT_HISTORY_COMMITMENT");
+        }
         return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-snapshot/v2",
                 inputCommitment(observation), snapshot.windowStart(), snapshot.asOf(),
-                snapshot.availability(), snapshot.priorCount(), snapshot.reason());
+                snapshot.availability(), snapshot.priorCount(), snapshot.reason(), historyCommitment);
     }
+
+    private static String historyWindowCommitment(Observation current, Instant start, List<Document> rows,
+                                                  List<Document> receipts, List<Document> members) {
+        if (rows.size() != receipts.size() || rows.size() != members.size()) { throw failure("HISTORY_MISSING"); }
+        MerchantCommitment.Accumulator digest = MerchantCommitment.accumulator("MERCHANT_STORE_DIGEST_UNAVAILABLE")
+                .append("merchant-history-window/v1", scopeId(current.scope()), current.merchant(), start,
+                        current.eventTime(), rows.size());
+        for (int index = 0; index < rows.size(); index++) {
+            Document row = rows.get(index);
+            Document receipt = receipts.get(index);
+            Document member = members.get(index);
+            Observation observation = decodeObservation(row);
+            MerchantAssertionAnchor anchor = observationAnchor(receipt);
+            MembershipCheckpoint checkpoint = decodeMembership(member);
+            if (!Objects.equals(row.getString("_id"), receipt.getString("_id"))
+                    || !Objects.equals(row.getString("_id"), member.getString("_id"))
+                    || !Objects.equals(row.getString("inputCommitment"), receipt.getString("inputCommitment"))
+                    || !Objects.equals(row.getString("inputCommitment"), member.getString("inputCommitment"))
+                    || !Objects.equals(row.getString("inputCommitment"), inputCommitment(observation))
+                    || !Objects.equals(anchor == null ? null : anchor.commitment(), observation.evidenceCommitment())
+                    || !checkpoint.inputCommitment().equals(row.getString("inputCommitment"))) {
+                throw failure("HISTORY_MISSING");
+            }
+            digest.append(row.getString("_id"), observation.sequence(), observation.eventTime(),
+                    row.getString("inputCommitment"), observation.evidenceCommitment(),
+                    anchor == null ? null : anchor.commitment(), checkpoint.commitment());
+        }
+        return digest.finish();
+    }
+
+    private static boolean isCommitment(String value) { return value != null && value.matches("[0-9a-f]{64}"); }
     private Instant now() { return Instant.ofEpochMilli(clock.millis()); }
     private Instant receiptExpiration(Instant now, Observation observation) {
         return later(now.plus(limits.receiptRetention()),
@@ -1185,16 +1432,18 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     private record SealFence(long revision, long sealedSequence, long compactedThroughSequence,
                              int membershipTipCount,
                              Instant coverageStart, Instant watermark, Instant retainedFrom,
-                             String policyCommitment) {
+                             String policyCommitment, String coverageAnchorCommitment) {
         private static SealFence from(Document source) {
+            MerchantAssertionAnchor anchor = coverageAnchor(source);
             return new SealFence(source.getLong("revision"), source.getLong("sealedSequence"),
                     source.getLong("compactedThroughSequence"),
                     source.getInteger("membershipTipCount"), nullableInstant(source, "coverageStart"),
                     nullableInstant(source, "watermark"), nullableInstant(source, "retainedFrom"),
-                    source.getString("policyCommitment"));
+                    source.getString("policyCommitment"), anchor == null ? null : anchor.commitment());
         }
 
         private boolean matches(Document source, Scope scope, boolean invalidated) {
+            MerchantAssertionAnchor anchor = coverageAnchor(source);
             return source != null && scope.equals(decodeScope(source))
                     && scopeId(scope).equals(source.getString("_id"))
                     && Objects.equals(policyCommitment, source.getString("policyCommitment"))
@@ -1205,6 +1454,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     && Objects.equals(coverageStart, nullableInstant(source, "coverageStart"))
                     && Objects.equals(watermark, nullableInstant(source, "watermark"))
                     && Objects.equals(retainedFrom, nullableInstant(source, "retainedFrom"))
+                    && Objects.equals(coverageAnchorCommitment,
+                    anchor == null ? null : anchor.commitment())
                     && Objects.equals(invalidated, source.getBoolean("invalidated"));
         }
 
@@ -1214,6 +1465,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     eq("compactedThroughSequence", compactedThroughSequence),
                     eq("membershipTipCount", membershipTipCount), eq("coverageStart", asDate(coverageStart)),
                     eq("watermark", asDate(watermark)), eq("retainedFrom", asDate(retainedFrom)),
+                    eq("coverageAnchor.commitment", coverageAnchorCommitment),
                     eq("invalidated", false));
         }
 
@@ -1229,5 +1481,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                                     Map<String, MembershipCheckpoint> retainedById) {
         @Override public String toString() { return "MerchantMembershipLineage[redacted]"; }
     }
+    private record ScoredBindingEvidence(Document binding, Snapshot snapshot) { }
     private record StageDecision(StageResult result, Capacity capacity) { }
+    record StoredCoverage(CoverageSeal seal, MerchantAssertionAnchor anchor) { }
 }
