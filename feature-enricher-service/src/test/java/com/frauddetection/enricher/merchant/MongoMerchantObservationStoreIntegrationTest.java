@@ -2427,6 +2427,9 @@ class MongoMerchantObservationStoreIntegrationTest {
         sources.updateOne(new Document(), set("pending", Integer.MAX_VALUE), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_COVERAGE").hasNoCause();
         sources.updateOne(new Document(), set("pending", 0));
+        sources.updateOne(new Document(), set("schemaVersion", 3), bypass);
+        assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_SCHEMA_VERSION").hasNoCause();
+        sources.updateOne(new Document(), set("schemaVersion", MongoMerchantObservationSchema.SCHEMA_VERSION));
         sources.updateOne(new Document(), set("schemaVersion", MongoMerchantObservationSchema.SCHEMA_VERSION + 1), bypass);
         assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_SCHEMA_VERSION").hasNoCause();
         sources.updateOne(new Document(), set("schemaVersion", MongoMerchantObservationSchema.SCHEMA_VERSION));

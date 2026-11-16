@@ -18,7 +18,7 @@ import static com.mongodb.client.model.Filters.eq;
 
 /** Fresh bootstrap only. Existing collections must match; nothing is migrated, dropped, or repaired. */
 final class MongoMerchantObservationSchema {
-    static final int SCHEMA_VERSION = 3;
+    static final int SCHEMA_VERSION = 4;
     static final String CANDIDATES = "merchant_observation_candidates";
     static final String HISTORY = "merchant_observations";
     static final String MANIFEST = "merchant_observation_manifest";
@@ -54,9 +54,12 @@ final class MongoMerchantObservationSchema {
             index("merchant_membership_sequence_unique", true, false,
                     "issuer", "institution", "source", "epoch", "identityVersion", "sequence"));
     private static final List<IndexSpec> MEMBERSHIP_TIP_INDEXES = List.of(
-            index("merchant_membership_tip_unique", true, false,
+            partialIndex("merchant_membership_tip_unique", true, "kind", MerchantObservationDocumentCodec.MEMBERSHIP_TIP_KIND,
                     "issuer", "institution", "source", "epoch", "identityVersion", "merchant"),
-            index("merchant_membership_tip_scope", false, false, "scope"));
+            partialIndex("merchant_membership_tip_scope", false, "kind", MerchantObservationDocumentCodec.MEMBERSHIP_TIP_KIND,
+                    "scope"),
+            partialIndex("merchant_coverage_generation_unique", true, "kind", MerchantObservationDocumentCodec.COVERAGE_GENERATION_KIND,
+                    "scope", "generation"));
 
     static void initialize(MongoDatabase database) {
         Set<String> expected = Set.of(CANDIDATES, HISTORY, MANIFEST, COVERAGE, MEMBERSHIP, MEMBERSHIP_TIPS);
@@ -125,9 +128,10 @@ final class MongoMerchantObservationSchema {
                     .append("compactedThroughSequence", type("long").append("minimum", 0))
                     .append("retainedFrom", type("date"))
                     .append("invalidated", type("bool")).append("coverageStart", type("date")).append("watermark", type("date"))
-                    .append("policyCommitment", token()).append("coverageAnchor", nullableAnchor(MerchantAssertionVerifier.Role.COVERAGE));
+                    .append("policyCommitment", token()).append("coverageAnchor", nullableAnchor(MerchantAssertionVerifier.Role.COVERAGE))
+                    .append("coverageFence", nullableCoverageFence());
             required.addAll(List.of("revision", "accepted", "pending", "quarantined", "membershipTipCount", "sealedSequence", "compactedThroughSequence",
-                    "retainedFrom", "invalidated", "policyCommitment", "coverageAnchor"));
+                    "retainedFrom", "invalidated", "policyCommitment", "coverageAnchor", "coverageFence"));
         } else if (MEMBERSHIP.equals(name)) {
             properties.append("scope", type("string").append("maxLength", 265)).append("sourceEvent", token())
                     .append("merchant", token()).append("sequence", type("long").append("minimum", 1))
@@ -145,7 +149,9 @@ final class MongoMerchantObservationSchema {
                     .append("additionalProperties", false)
                     .append("properties", new Document("id", token()).append("sequence", type("long").append("minimum", 1))
                             .append("eventTime", type("date")).append("commitment", token()));
-            properties.append("scope", type("string").append("maxLength", 265)).append("merchant", token())
+            Document tipProperties = new Document(properties)
+                    .append("kind", type("string").append("enum", List.of(MerchantObservationDocumentCodec.MEMBERSHIP_TIP_KIND)))
+                    .append("scope", type("string").append("maxLength", 265)).append("merchant", token())
                     .append("checkpointId", token()).append("sourceEvent", token())
                     .append("sequence", type("long").append("minimum", 1)).append("eventTime", type("date"))
                     .append("inputCommitment", token())
@@ -155,9 +161,30 @@ final class MongoMerchantObservationSchema {
                     .append("previousCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"))
                     .append("membershipCommitment", token()).append("compactedCheckpoint", compactedCheckpoint)
                     .append("compacted", type("bool"));
-            required.addAll(List.of("scope", "merchant", "checkpointId", "sourceEvent", "sequence", "eventTime",
+            List<String> tipRequired = new ArrayList<>(required);
+            tipRequired.addAll(List.of("kind", "scope", "merchant", "checkpointId", "sourceEvent", "sequence", "eventTime",
                     "inputCommitment", "previousCheckpointId", "previousSequence", "previousEventTime",
                     "previousCommitment", "membershipCommitment", "compactedCheckpoint", "compacted"));
+            Document tipSchema = new Document("bsonType", "object").append("required", tipRequired)
+                    .append("additionalProperties", false).append("properties", tipProperties);
+
+            Document generationProperties = new Document(properties)
+                    .append("kind", type("string").append("enum", List.of(MerchantObservationDocumentCodec.COVERAGE_GENERATION_KIND)))
+                    .append("scope", type("string").append("maxLength", 265))
+                    .append("generation", type("long").append("minimum", 1))
+                    .append("fromSequence", type("long").append("minimum", 1))
+                    .append("throughSequence", type("long").append("minimum", 1))
+                    .append("coverageStart", type("date")).append("watermark", type("date"))
+                    .append("previousCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"))
+                    .append("commitment", token()).append("anchor", anchorSchema(MerchantAssertionVerifier.Role.COVERAGE))
+                    .append("retentionThroughSequence", type("long").append("minimum", 1));
+            List<String> generationRequired = new ArrayList<>(required);
+            generationRequired.addAll(List.of("kind", "scope", "generation", "fromSequence", "throughSequence", "coverageStart",
+                    "watermark", "previousCommitment", "commitment", "anchor", "retentionThroughSequence"));
+            Document generationSchema = new Document("bsonType", "object").append("required", generationRequired)
+                    .append("additionalProperties", false).append("properties", generationProperties);
+            return new Document("$or", List.of(new Document("$jsonSchema", tipSchema),
+                    new Document("$jsonSchema", generationSchema)));
         } else {
             properties.append("scope", type("string").append("maxLength", 265)).append("sourceEvent", token()).append("transaction", token())
                     .append("occurrence", token()).append("merchant", token()).append("sequence", type("long").append("minimum", 1))
@@ -177,6 +204,8 @@ final class MongoMerchantObservationSchema {
                 required.add("expireAt");
             } else if (CANDIDATES.equals(name)) {
                 properties.append("historyCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"));
+                properties.append("stageCoverageGeneration", new Document("bsonType", List.of("long", "null")).append("minimum", 1))
+                        .append("stageCoverageCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"));
                 properties.append("status", type("string").append("enum", List.of("STAGED", "COMMITTED", "QUARANTINED")))
                         .append("stagedAt", type("date")).append("receiptExpireAt", type("date"))
                         .append("windowStart", type("date")).append("asOf", type("date"))
@@ -184,7 +213,7 @@ final class MongoMerchantObservationSchema {
                         .append("priorCount", new Document("bsonType", List.of("int", "null")))
                         .append("reason", type("string").append("enum", java.util.Arrays.stream(MerchantObservationStore.Reason.values()).map(Enum::name).toList()))
                         .append("snapshotCommitment", token()).append("terminalReason", type("string").append("maxLength", 64));
-                required.addAll(List.of("status", "stagedAt", "historyCommitment"));
+                required.addAll(List.of("status", "stagedAt", "historyCommitment", "stageCoverageGeneration", "stageCoverageCommitment"));
             }
         }
         return new Document("$jsonSchema", new Document("bsonType", "object").append("required", required)
@@ -205,12 +234,41 @@ final class MongoMerchantObservationSchema {
                         .append("proof", type("string").append("maxLength", 5_464)));
     }
 
+    private static Document anchorSchema(MerchantAssertionVerifier.Role role) {
+        return new Document("bsonType", "object")
+                .append("required", List.of("version", "role", "commitment", "assertion", "proof"))
+                .append("additionalProperties", false)
+                .append("properties", new Document("version", type("int").append("enum", List.of(1)))
+                        .append("role", type("string").append("enum", List.of(role.name())))
+                        .append("commitment", token())
+                        .append("assertion", type("string").append("maxLength", 10_924))
+                        .append("proof", type("string").append("maxLength", 5_464)));
+    }
+
+    private static Document nullableCoverageFence() {
+        return new Document("bsonType", List.of("object", "null"))
+                .append("required", List.of("version", "generation", "fromSequence", "throughSequence", "coverageStart",
+                        "watermark", "previousCommitment", "commitment", "anchor", "retentionThroughSequence"))
+                .append("additionalProperties", false)
+                .append("properties", new Document("version", type("int").append("enum", List.of(1)))
+                        .append("generation", type("long").append("minimum", 1))
+                        .append("fromSequence", type("long").append("minimum", 1))
+                        .append("throughSequence", type("long").append("minimum", 1))
+                        .append("coverageStart", type("date")).append("watermark", type("date"))
+                        .append("previousCommitment", new Document("bsonType", List.of("string", "null")).append("pattern", "^[0-9a-f]{64}$"))
+                        .append("commitment", token()).append("anchor", anchorSchema(MerchantAssertionVerifier.Role.COVERAGE))
+                        .append("retentionThroughSequence", type("long").append("minimum", 1)));
+    }
+
     private static Document nullableScoredBinding() {
         Document fields = new Document("version", type("int").append("enum", List.of(1)))
                 .append("eventId", type("string").append("pattern", "^[A-Za-z0-9._:-]{1,128}$"))
                 .append("createdAt", type("string").append("maxLength", 64))
                 .append("fingerprint", token()).append("runId", type("string").append("enum", List.of("initial")))
                 .append("sourceScopeCommitment", token()).append("coverageCommitment", token()).append("receiptId", token())
+                .append("coverageGeneration", type("long").append("minimum", 1))
+                .append("coverageFromSequence", type("long").append("minimum", 1))
+                .append("coverageThroughSequence", type("long").append("minimum", 1))
                 .append("rawCommitment", token()).append("enrichedCommitment", token())
                 .append("identityVersion", type("int").append("minimum", 1).append("maximum", 65_535))
                 .append("merchantCommitment", token()).append("inputCommitment", token())
@@ -225,6 +283,7 @@ final class MongoMerchantObservationSchema {
             IndexOptions options = new IndexOptions().name(spec.name());
             if (spec.unique()) { options.unique(true); }
             if (spec.ttl()) { options.expireAfter(0L, java.util.concurrent.TimeUnit.SECONDS); }
+            if (spec.partialFilter() != null) { options.partialFilterExpression(spec.partialFilter()); }
             database.getCollection(name).createIndex(spec.keys(), options);
         }
     }
@@ -250,7 +309,8 @@ final class MongoMerchantObservationSchema {
             Document collation = found.get("collation", Document.class);
             if (keys == null || !new ArrayList<>(spec.keys().entrySet()).equals(new ArrayList<>(keys.entrySet()))
                     || spec.unique() != Boolean.TRUE.equals(found.get("unique"))
-                    || found.containsKey("partialFilterExpression") || Boolean.TRUE.equals(found.get("sparse"))
+                    || !java.util.Objects.equals(spec.partialFilter(), found.get("partialFilterExpression"))
+                    || Boolean.TRUE.equals(found.get("sparse"))
                     || Boolean.TRUE.equals(found.get("hidden")) || collation != null && !"simple".equals(collation.getString("locale"))
                     || spec.ttl() && (!(found.get("expireAfterSeconds") instanceof Number n) || n.longValue() != 0)
                     || !spec.ttl() && found.containsKey("expireAfterSeconds")) {
@@ -260,11 +320,20 @@ final class MongoMerchantObservationSchema {
     }
 
     private static IndexSpec index(String name, boolean unique, boolean ttl, String... fields) {
-        Document keys = new Document();
-        for (String field : fields) { keys.append(field, 1); }
-        return new IndexSpec(name, keys, unique, ttl);
+        return index(name, unique, ttl, null, fields);
     }
 
-    private record IndexSpec(String name, Document keys, boolean unique, boolean ttl) { }
+    private static IndexSpec partialIndex(String name, boolean unique, String filterField, String filterValue,
+                                          String... fields) {
+        return index(name, unique, false, new Document(filterField, filterValue), fields);
+    }
+
+    private static IndexSpec index(String name, boolean unique, boolean ttl, Document partialFilter, String... fields) {
+        Document keys = new Document();
+        for (String field : fields) { keys.append(field, 1); }
+        return new IndexSpec(name, keys, unique, ttl, partialFilter);
+    }
+
+    private record IndexSpec(String name, Document keys, boolean unique, boolean ttl, Document partialFilter) { }
     private static IllegalStateException incompatible() { return new IllegalStateException("MERCHANT_STORE_SCHEMA_INCOMPATIBLE"); }
 }

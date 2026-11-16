@@ -17,6 +17,8 @@ import com.frauddetection.ingest.source.DeviceTestSourceReceipts;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -55,6 +57,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -79,6 +82,8 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     private final KeyPair sourceKey = key();
     private final KeyPair observationKey = key();
     private final KeyPair coverageKey = key();
+    private final KeyPair rotatedCoverageKey = key();
+    private final KeyPair thirdCoverageKey = key();
     private final byte[] pseudonymKey = randomKey();
     private final MerchantPseudonyms pseudonyms = new MerchantPseudonyms(pseudonymKey, 1, 1);
     private final MerchantAssertionTrustPolicy.SourceIdentity identity =
@@ -186,13 +191,16 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     @Test
     void alteredPersistedHistoricalAssertionCannotProduceACompleteWindowAfterRestart() {
         VerifiedMerchantAdmission admission = adapter();
-        SourceEvent first = sourceEvent(1, "merchant-a", 120);
-        SourceEvent current = sourceEvent(2, "merchant-a", 60);
+        SourceEvent first = sourceEvent(1, "merchant-a", 180);
+        SourceEvent second = sourceEvent(2, "merchant-a", 120);
+        SourceEvent current = sourceEvent(3, "merchant-a", 60);
         stage(admission, first, 1);
-        var currentTicket = stage(admission, current, 2);
-        Signed coverage = coverage(2, current.raw.createdAt());
+        stage(admission, second, 2);
+        var currentTicket = stage(admission, current, 3);
+        Signed coverage = coverage(3, current.raw.createdAt());
         admission.seal(currentTicket, coverage.proof, coverage.payload);
         admission.commit(stage(admission, first, 1));
+        admission.commit(stage(admission, second, 2));
 
         String firstId = MerchantObservationDocumentCodec.eventId(pseudonyms.scope(sourceScope(first)),
                 pseudonyms.sourceEvent("institution-a", "BANK", first.raw.eventId()));
@@ -201,7 +209,7 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
                 .updateOne(eq("_id", firstId), set("observationAnchor.assertion", "AA=="));
 
         VerifiedMerchantAdmission restarted = adapter();
-        var replay = stage(restarted, current, 2);
+        var replay = stage(restarted, current, 3);
         assertThatThrownBy(() -> restarted.commit(replay)).hasMessage("MERCHANT_STORE_NOT_ADMITTED");
         assertThat(ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.HISTORY)
                 .find(eq("_id", firstId)).first()).isNotNull();
@@ -298,6 +306,191 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     }
 
     @Test
+    void privateReadKeepsTheInitialScoredBindingAfterCoverageAdvancesToAnIndependentKey() {
+        List<MerchantAssertionTrustPolicy.Grant> rotatedGrants = rotatedCoverageGrants(false);
+        VerifiedMerchantAdmission admission = adapter(rotatedGrants);
+        SourceEvent first = sourceEvent(1, "merchant-a", 60);
+        Staged firstStaged = stageWithEvidence(admission, first, 1);
+        MerchantAssertionTrustPolicy.Grant firstCoverageGrant = rotatedGrants.get(1);
+        Signed c1 = signedCoverage(1, 1, 1, null, first.raw.createdAt(), firstCoverageGrant, coverageKey);
+        admission.seal(firstStaged.ticket, c1.proof, c1.payload);
+        CommitResult firstSnapshot = admission.commit(firstStaged.ticket);
+        PersistedScore published = publish(first, MongoSourceOccurrenceStore.INITIAL_RUN, "score-c1-1");
+        admission.bindScored(firstStaged.ticket, occurrenceReader, published.reference);
+
+        SourceEvent second = sourceEvent(2, "merchant-b", 30);
+        VerifiedMerchantAdmission.Ticket secondTicket = stage(admission, second, 2);
+        MerchantAssertionVerifier.VerifiedCoverage c1Evidence = verifiedCoverage(c1, first, rotatedGrants, null, null);
+        String c1Commitment = c1Evidence.assertionCommitment();
+        Signed c2 = signedCoverage(2, 2, 2, c1Commitment, second.raw.createdAt(), rotatedGrants.get(2), rotatedCoverageKey);
+        admission.seal(secondTicket, c2.proof, c2.payload);
+
+        SourceEvent third = sourceEvent(3, "merchant-c", 10);
+        VerifiedMerchantAdmission.Ticket thirdTicket = stage(admission, third, 3);
+        MerchantAssertionVerifier.VerifiedCoverage c2Evidence = verifiedCoverage(c2, second, rotatedGrants, c1, first);
+        Signed c3 = signedCoverage(3, 3, 3, c2Evidence.assertionCommitment(), third.raw.createdAt(),
+                rotatedGrants.get(3), thirdCoverageKey);
+        admission.seal(thirdTicket, c3.proof, c3.payload);
+
+        PrivateMerchantDiagnosticReader.ReadGrant grant = readGrant(first, "merchant-a");
+        PrivateMerchantDiagnosticReader reader = reader(grant, new AtomicBoolean(true), () -> { }, System::nanoTime,
+                CLOCK, rotatedGrants);
+        assertThat(firstSnapshot.snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(reader.evaluate(request(first, firstStaged, published.reference)).outcome())
+                .isEqualTo(PrivateMerchantDiagnosticReader.Outcome.EVALUATED);
+
+        VerifiedMerchantAdmission restarted = adapter(rotatedGrants);
+        VerifiedMerchantAdmission.Ticket replay = stage(restarted, first, 1);
+        assertThat(replay.status()).isEqualTo(StageResult.EXISTING);
+        assertThat(restarted.commit(replay).snapshot()).isEqualTo(firstSnapshot.snapshot());
+        restarted.bindScored(replay, occurrenceReader, published.reference);
+        PrivateMerchantDiagnosticReader restartedReader = reader(grant, new AtomicBoolean(true), () -> { },
+                System::nanoTime, CLOCK, rotatedGrants);
+        assertThat(restartedReader.evaluate(request(first, firstStaged, published.reference)).outcome())
+                .isEqualTo(PrivateMerchantDiagnosticReader.Outcome.EVALUATED);
+    }
+
+    @Test
+    void verifiedCoveragePrefixCompactsIntoAFenceAndAcceptsTheNextGeneration() {
+        Limits compactLimits = new Limits(Duration.ofSeconds(5), Duration.ofSeconds(30), Duration.ofSeconds(31),
+                Duration.ofSeconds(30), Duration.ofSeconds(1), 100, 100, 100, 1_000);
+        MutableClock clock = new MutableClock(NOW);
+        VerifiedMerchantAdmission admission = adapter(grants, clock, compactLimits);
+        SourceEvent first = sourceEvent(1, "merchant-a", 2);
+        Staged firstStaged = stageWithEvidence(admission, first, 1);
+        MerchantAssertionTrustPolicy.Grant coverageGrant = grants.get(1);
+        Signed c1 = signedCoverage(1, 1, 1, null, first.raw.createdAt(), coverageGrant, coverageKey);
+        admission.seal(firstStaged.ticket, c1.proof, c1.payload);
+        admission.commit(firstStaged.ticket);
+
+        SourceEvent second = sourceEvent(2, "merchant-b", 1);
+        Staged secondStaged = stageWithEvidence(admission, second, 2);
+        String c1Commitment = verifiedCoverageCommitment(c1, first, grants);
+        Signed c2 = signedCoverage(2, 2, 2, c1Commitment, second.raw.createdAt(), coverageGrant, coverageKey);
+        admission.seal(secondStaged.ticket, c2.proof, c2.payload);
+        admission.commit(secondStaged.ticket);
+        String c2Commitment = verifiedCoverage(c2, second, grants, c1, first).assertionCommitment();
+
+        clock.set(NOW.plusSeconds(32));
+        SourceEvent current = sourceEvent(3, "merchant-c", -10);
+        Staged currentStaged = stageWithEvidence(admission, current, 3);
+
+        String scopeId = MerchantObservationDocumentCodec.scopeId(pseudonyms.scope(sourceScope(current)));
+        Document source = ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.COVERAGE)
+                .find(eq("_id", scopeId)).first();
+        assertThat(source.getLong("compactedThroughSequence")).isEqualTo(2L);
+        assertThat(source.get("coverageFence", Document.class).getLong("generation")).isEqualTo(2L);
+        assertThat(ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)
+                .countDocuments(new Document("kind", MerchantObservationDocumentCodec.COVERAGE_GENERATION_KIND))).isZero();
+
+        Signed c3 = signedCoverage(3, 3, 3, c2Commitment, current.raw.createdAt(), coverageGrant, coverageKey);
+        admission.seal(currentStaged.ticket, c3.proof, c3.payload);
+        Snapshot snapshot = admission.commit(currentStaged.ticket).snapshot();
+        assertThat(snapshot.availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(snapshot.priorCount()).isZero();
+        assertThat(ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)
+                .countDocuments(new Document("kind", MerchantObservationDocumentCodec.COVERAGE_GENERATION_KIND))).isOne();
+    }
+
+    @Test
+    void revokingTheFirstCoverageSignerMakesItsHistoricalDiagnosticUnavailable() {
+        List<MerchantAssertionTrustPolicy.Grant> activeGrants = rotatedCoverageGrants(false);
+        VerifiedMerchantAdmission admission = adapter(activeGrants);
+        SourceEvent first = sourceEvent(1, "merchant-a", 60);
+        Staged firstStaged = stageWithEvidence(admission, first, 1);
+        Signed c1 = signedCoverage(1, 1, 1, null, first.raw.createdAt(), activeGrants.get(1), coverageKey);
+        admission.seal(firstStaged.ticket, c1.proof, c1.payload);
+        admission.commit(firstStaged.ticket);
+        PersistedScore published = publish(first, MongoSourceOccurrenceStore.INITIAL_RUN, "score-revoked-c1-1");
+        admission.bindScored(firstStaged.ticket, occurrenceReader, published.reference);
+
+        SourceEvent second = sourceEvent(2, "merchant-b", 30);
+        VerifiedMerchantAdmission.Ticket secondTicket = stage(admission, second, 2);
+        String c1Commitment = verifiedCoverageCommitment(c1, first, activeGrants);
+        Signed c2 = signedCoverage(2, 2, 2, c1Commitment, second.raw.createdAt(), activeGrants.get(2), rotatedCoverageKey);
+        admission.seal(secondTicket, c2.proof, c2.payload);
+
+        List<MerchantAssertionTrustPolicy.Grant> revokedFirstGrant = rotatedCoverageGrants(true);
+        PrivateMerchantDiagnosticReader.ReadGrant grant = readGrant(first, "merchant-a");
+        PrivateMerchantDiagnosticReader reader = reader(grant, new AtomicBoolean(true), () -> { }, System::nanoTime,
+                CLOCK, revokedFirstGrant);
+        assertThat(reader.evaluate(request(first, firstStaged, published.reference)).outcome())
+                .isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+    }
+
+    @Test
+    void missingHistoricalCoverageGenerationMakesTheBoundDiagnosticUnavailableAfterRestart() {
+        List<MerchantAssertionTrustPolicy.Grant> activeGrants = rotatedCoverageGrants(false);
+        VerifiedMerchantAdmission admission = adapter(activeGrants);
+        SourceEvent first = sourceEvent(1, "merchant-a", 60);
+        Staged firstStaged = stageWithEvidence(admission, first, 1);
+        Signed c1 = signedCoverage(1, 1, 1, null, first.raw.createdAt(), activeGrants.get(1), coverageKey);
+        admission.seal(firstStaged.ticket, c1.proof, c1.payload);
+        admission.commit(firstStaged.ticket);
+        PersistedScore published = publish(first, MongoSourceOccurrenceStore.INITIAL_RUN, "score-missing-c1-1");
+        admission.bindScored(firstStaged.ticket, occurrenceReader, published.reference);
+
+        SourceEvent second = sourceEvent(2, "merchant-b", 30);
+        VerifiedMerchantAdmission.Ticket secondTicket = stage(admission, second, 2);
+        String c1Commitment = verifiedCoverageCommitment(c1, first, activeGrants);
+        Signed c2 = signedCoverage(2, 2, 2, c1Commitment, second.raw.createdAt(), activeGrants.get(2), rotatedCoverageKey);
+        admission.seal(secondTicket, c2.proof, c2.payload);
+
+        String firstGenerationId = MerchantObservationDocumentCodec.coverageGenerationId(
+                pseudonyms.scope(first.origin.scope()), 1);
+        long deleted = ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS)
+                .deleteOne(eq("_id", firstGenerationId)).getDeletedCount();
+        assertThat(deleted).isOne();
+
+        PrivateMerchantDiagnosticReader reader = reader(readGrant(first, "merchant-a"), new AtomicBoolean(true),
+                () -> { }, System::nanoTime, CLOCK, activeGrants);
+        assertThat(reader.evaluate(request(first, firstStaged, published.reference)).outcome())
+                .isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+    }
+
+    @Test
+    void historicalSourceLineageReadsStayAtFourQueriesPerThousandBindings() {
+        SourceEvent event = sourceEvent(1, "merchant-a", 60);
+        MongoSourceLineage.EnrichedBinding binding = new MongoSourceLineage.EnrichedBinding(
+                SourceReceiptIdentity.identity(event.origin.scope()), SourceEventCommitment.raw(event.raw),
+                SourceEventCommitment.enriched(event.enriched));
+        AtomicInteger sourceFinds = new AtomicInteger();
+        AtomicInteger totalReads = new AtomicInteger();
+        CommandListener listener = new CommandListener() {
+            @Override public void commandStarted(CommandStartedEvent command) {
+                if (!"find".equals(command.getCommandName())) { return; }
+                String collection = command.getCommand().getString("find").getValue();
+                if (List.of("source_lineage_enriched", "source_lineage_raw", "source_admission_receipts",
+                        "source_admission_identities").contains(collection)) {
+                    sourceFinds.incrementAndGet();
+                    totalReads.incrementAndGet();
+                }
+            }
+        };
+        MongoClient measuredClient = MONGO.occurrenceReader(database, listener);
+        List<Integer> batches = new ArrayList<>();
+        MongoSourceLineage measuredSource = new MongoSourceLineage(measuredClient, database, "merchant_source_reader",
+                MongoSourceLineage.Stage.SCORER, originVerifier, CLOCK);
+
+        for (int count : List.of(1, 100, 1_000, 1_001)) {
+            batches.clear();
+            sourceFinds.set(0);
+            List<SourceLineage> results = VerifiedMerchantAdmission.resolveSourceBindings(bindings -> {
+                        batches.add(bindings.size());
+                        return measuredSource.enrichedBindings(bindings);
+                    },
+                    java.util.Collections.nCopies(count, binding));
+            int expectedBatches = (count + MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH - 1)
+                    / MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH;
+            assertThat(batches).hasSize(expectedBatches);
+            assertThat(batches).allMatch(size -> size > 0 && size <= MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH);
+            assertThat(results).hasSize(count).allMatch(lineage -> lineage.state() == SourceLineage.State.VERIFIED);
+            assertThat(sourceFinds.get()).isEqualTo(expectedBatches * 4);
+        }
+        assertThat(totalReads.get()).isEqualTo(4 * (1 + 1 + 1 + 2));
+    }
+
+    @Test
     void stageBRejectsRescoresWrongReferencesAndBindingsConflictsWithoutOverwritingTheInitialFact() throws Exception {
         VerifiedMerchantAdmission admission = adapter();
         SourceEvent current = sourceEvent(1, "merchant-a", 60);
@@ -363,10 +556,11 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
 
         assertThat(result.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.EVALUATED);
         assertThat(result.claim()).isEqualTo(PrivateMerchantDiagnosticReader.Claim.FIRST_OBSERVED_IN_COMPLETE_RECENT_WINDOW);
+        assertThat(result.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.NONE);
         assertThat(result.toString()).doesNotContain("merchant-a", "institution-a", "transaction-1", "score-private-1");
         assertThat(fixture.request.toString()).doesNotContain("merchant-a", "institution-a", "transaction-1", "score-private-1");
         assertThat(PrivateMerchantDiagnosticReader.Result.class.getRecordComponents())
-                .extracting(java.lang.reflect.RecordComponent::getName).containsExactly("outcome", "claim");
+                .extracting(java.lang.reflect.RecordComponent::getName).containsExactly("outcome", "claim", "reason");
     }
 
     @Test
@@ -380,6 +574,7 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
                 .deleteOne(eq("_id", priorId));
         PrivateMerchantDiagnosticReader.Result afterLoss = fixture.reader.evaluate(fixture.request);
         assertThat(afterLoss.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(afterLoss.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.HISTORY_UNAVAILABLE);
         assertThat(afterLoss.claim()).isNull();
     }
 
@@ -389,15 +584,19 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         AtomicBoolean active = new AtomicBoolean(true);
         PrivateMerchantDiagnosticReader revokedDuringRead = reader(fixture.grant, active,
                 () -> active.set(false), System::nanoTime);
-        assertThat(revokedDuringRead.evaluate(fixture.request).outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.DENIED);
+        PrivateMerchantDiagnosticReader.Result denied = revokedDuringRead.evaluate(fixture.request);
+        assertThat(denied.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.DENIED);
+        assertThat(denied.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.READ_NOT_AUTHORIZED);
 
         AtomicBoolean coverageActive = new AtomicBoolean(true);
         String scopeId = MerchantObservationDocumentCodec.scopeId(pseudonyms.scope(sourceScope(fixture.current)));
         PrivateMerchantDiagnosticReader revokedCoverageDuringRead = reader(fixture.grant, coverageActive, () ->
                 ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.COVERAGE)
-                        .updateOne(eq("_id", scopeId), set("coverageAnchor.proof", "AA==")), System::nanoTime);
-        assertThat(revokedCoverageDuringRead.evaluate(fixture.request).outcome())
-                .isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+                        .updateOne(eq("_id", scopeId), set("coverageAnchor.proof", "AA=="),
+                                new com.mongodb.client.model.UpdateOptions().bypassDocumentValidation(true)), System::nanoTime);
+        PrivateMerchantDiagnosticReader.Result coverageTampered = revokedCoverageDuringRead.evaluate(fixture.request);
+        assertThat(coverageTampered.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(coverageTampered.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.HISTORY_UNAVAILABLE);
 
     }
 
@@ -409,8 +608,9 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
                 ownerClient.getDatabase(database).getCollection("source_admission_receipts")
                         .deleteOne(eq("_id", receiptId)), System::nanoTime);
 
-        assertThat(lostReceiptDuringRead.evaluate(fixture.request).outcome())
-                .isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        PrivateMerchantDiagnosticReader.Result unavailable = lostReceiptDuringRead.evaluate(fixture.request);
+        assertThat(unavailable.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(unavailable.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.SOURCE_AUTHORITY_UNAVAILABLE);
     }
 
     @Test
@@ -422,6 +622,7 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         PrivateMerchantDiagnosticReader.Result result = failedRead.evaluate(fixture.request);
 
         assertThat(result.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.INTERNAL_UNAVAILABLE);
         assertThat(result.claim()).isNull();
         assertThat(result.toString()).doesNotContain("merchant-a", "transaction-1", "score-private-1");
     }
@@ -455,6 +656,7 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
             PrivateMerchantDiagnosticReader.Result negative = privateReader.evaluate(
                     request(current, staged, wrongFingerprint));
             assertThat(negative.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.PENDING);
+            assertThat(negative.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.INITIAL_SCORED_PENDING);
             assertThat(negative.claim()).isNull();
         } finally {
             if (KAFKA.isRunning()) { KAFKA.stop(); }
@@ -467,8 +669,9 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         MutableClock clock = new MutableClock(NOW);
         PrivateMerchantDiagnosticReader expiresDuringRead = reader(fixture.grant, new AtomicBoolean(true),
                 () -> clock.set(NOW.plus(Duration.ofDays(1)).plusSeconds(1)), System::nanoTime, clock);
-        assertThat(expiresDuringRead.evaluate(fixture.request).outcome())
-                .isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        PrivateMerchantDiagnosticReader.Result expired = expiresDuringRead.evaluate(fixture.request);
+        assertThat(expired.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(expired.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.SOURCE_AUTHORITY_UNAVAILABLE);
     }
 
     @Test
@@ -476,14 +679,18 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         DiagnosticFixture fixture = diagnosticFixture(false);
         ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.MANIFEST)
                 .updateOne(eq("_id", manifest(fixture.current).getString("_id")), set("scoredBinding", null));
-        assertThat(fixture.reader.evaluate(fixture.request).outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.PENDING);
+        PrivateMerchantDiagnosticReader.Result bindingPending = fixture.reader.evaluate(fixture.request);
+        assertThat(bindingPending.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.PENDING);
+        assertThat(bindingPending.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.STAGE_A_BINDING_PENDING);
         fixture.admission.bindScored(fixture.ticket, occurrenceReader, fixture.reference);
 
         PrivateMerchantDiagnosticReader.ReadGrant wrongMerchant = new PrivateMerchantDiagnosticReader.ReadGrant(
                 fixture.grant.principal(), PrivateMerchantDiagnosticReader.PURPOSE, PrivateMerchantDiagnosticReader.AUDIENCE,
                 fixture.grant.scope(), pseudonyms.merchant("institution-a", "merchant-other"), LIMITS.maxHistoryRows());
-        assertThat(reader(wrongMerchant, new AtomicBoolean(true), () -> { }, System::nanoTime)
-                .evaluate(fixture.request).outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.DENIED);
+        PrivateMerchantDiagnosticReader.Result wrongMerchantResult = reader(wrongMerchant, new AtomicBoolean(true), () -> { }, System::nanoTime)
+                .evaluate(fixture.request);
+        assertThat(wrongMerchantResult.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.DENIED);
+        assertThat(wrongMerchantResult.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.READ_NOT_AUTHORIZED);
 
         Scope scope = fixture.grant.scope();
         PrivateMerchantDiagnosticReader.ReadGrant wrongEpoch = new PrivateMerchantDiagnosticReader.ReadGrant(
@@ -501,7 +708,9 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         AtomicLong elapsed = new AtomicLong();
         PrivateMerchantDiagnosticReader timedOut = reader(fixture.grant, new AtomicBoolean(true), () -> { },
                 () -> elapsed.getAndAdd(TimeUnit.SECONDS.toNanos(6)));
-        assertThat(timedOut.evaluate(fixture.request).outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        PrivateMerchantDiagnosticReader.Result timeout = timedOut.evaluate(fixture.request);
+        assertThat(timeout.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.UNAVAILABLE);
+        assertThat(timeout.reason()).isEqualTo(PrivateMerchantDiagnosticReader.Reason.DEADLINE_EXCEEDED);
         assertThatThrownBy(() -> new PrivateMerchantDiagnosticReader(ownerClient, database, fixture.grant,
                 ignored -> true, diagnosticSource, occurrenceReader, origins, grants, pseudonyms, CLOCK, LIMITS))
                 .isInstanceOf(SecurityException.class).hasMessage("MERCHANT_PRIVATE_READ_NOT_AUTHORIZED");
@@ -532,6 +741,75 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
 
     private VerifiedMerchantAdmission adapter() {
         return new VerifiedMerchantAdmission(ownerClient, database, CLOCK, LIMITS, enricher, origins, grants, pseudonyms);
+    }
+
+    private VerifiedMerchantAdmission adapter(List<MerchantAssertionTrustPolicy.Grant> merchantGrants) {
+        return new VerifiedMerchantAdmission(ownerClient, database, CLOCK, LIMITS, enricher, origins,
+                merchantGrants, pseudonyms);
+    }
+
+    private VerifiedMerchantAdmission adapter(List<MerchantAssertionTrustPolicy.Grant> merchantGrants,
+                                               Clock clock, Limits limits) {
+        return new VerifiedMerchantAdmission(ownerClient, database, clock, limits, enricher, origins,
+                merchantGrants, pseudonyms);
+    }
+
+    private List<MerchantAssertionTrustPolicy.Grant> rotatedCoverageGrants(boolean revokeFirst) {
+        MerchantAssertionTrustPolicy.Grant observation = grants.getFirst();
+        MerchantAssertionTrustPolicy.Grant first = coverageGrant(coverageKey, "merchant-coverage-issuer",
+                "coverage-v1", coverageGrantId, revokeFirst);
+        MerchantAssertionTrustPolicy.Grant second = coverageGrant(rotatedCoverageKey, "merchant-coverage-issuer-2",
+                "coverage-v2", "merchant-coverage-grant-v2", false);
+        MerchantAssertionTrustPolicy.Grant third = coverageGrant(thirdCoverageKey, "merchant-coverage-issuer-3",
+                "coverage-v3", "merchant-coverage-grant-v3", false);
+        return List.of(observation, first, second, third);
+    }
+
+    private MerchantAssertionTrustPolicy.Grant coverageGrant(KeyPair pair, String issuer, String version,
+                                                              String grantId, boolean revoked) {
+        return new MerchantAssertionTrustPolicy.Grant(MerchantAssertionVerifier.Role.COVERAGE, grantId, 1,
+                trusted(issuer, version, MerchantAssertionVerifier.COVERAGE_PURPOSE,
+                        MerchantAssertionTrustPolicy.AUDIENCE, pair, "merchant-policy-v1", revoked),
+                identity, population, null);
+    }
+
+    private String verifiedCoverageCommitment(Signed signed, SourceEvent source,
+                                               List<MerchantAssertionTrustPolicy.Grant> merchantGrants) {
+        return verifiedCoverage(signed, source, merchantGrants, null, null).assertionCommitment();
+    }
+
+    private MerchantAssertionVerifier.VerifiedCoverage verifiedCoverage(Signed signed, SourceEvent source,
+                                                                          List<MerchantAssertionTrustPolicy.Grant> merchantGrants,
+                                                                          Signed previousSigned, SourceEvent previousSource) {
+        MerchantAssertionVerifier verifier = new MerchantAssertionVerifier(origins, merchantGrants, CLOCK);
+        MerchantAssertionVerifier.VerifiedCoverage previous = null;
+        if (previousSigned != null) {
+            MerchantAssertionVerifier.Result previousResult = verifier.verifyCoverage(previousSigned.proof,
+                    previousSigned.payload, previousSource.origin, null);
+            if (!(previousResult instanceof MerchantAssertionVerifier.VerifiedCoverage verifiedPrevious)) {
+                throw new IllegalStateException("TEST_COVERAGE_SIGNATURE_INVALID");
+            }
+            previous = verifiedPrevious;
+        }
+        MerchantAssertionVerifier.Result result = verifier.verifyCoverage(signed.proof, signed.payload, source.origin, previous);
+        if (!(result instanceof MerchantAssertionVerifier.VerifiedCoverage verified)) {
+            throw new IllegalStateException("TEST_COVERAGE_SIGNATURE_INVALID");
+        }
+        return verified;
+    }
+
+    private Signed signedCoverage(long generation, long fromSequence, long throughSequence, String previousCommitment,
+                                  Instant watermark, MerchantAssertionTrustPolicy.Grant grant, KeyPair signer) {
+        String coverageId = "coverage-generation-" + generation;
+        MerchantCoverageAssertion assertion = new MerchantCoverageAssertion(1, identity.issuer(), identity.institution(),
+                identity.source(), identity.sourceEpoch(), grant.merchantGrantId(), grant.merchantGrantVersion(),
+                grant.key().policyVersion(), identity.identityVersion(), coverageId, population.feedId(), population.id(),
+                population.definitionVersion(), population.definitionCommitment(), population.inclusionRulesCommitment(),
+                population.exclusionRulesCommitment(), 1, fromSequence, throughSequence, NOW.minus(Duration.ofDays(1)),
+                watermark, generation, previousCommitment);
+        byte[] payload = MerchantAssertionCodec.encodeCoverage(assertion);
+        byte[] proof = signed(grant.key(), signer, payload, coverageId, watermark);
+        return new Signed(proof, payload);
     }
 
     private VerifiedMerchantAdmission.Ticket stage(VerifiedMerchantAdmission admission, SourceEvent event, long sequence) {
@@ -566,8 +844,15 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     private PrivateMerchantDiagnosticReader reader(PrivateMerchantDiagnosticReader.ReadGrant grant,
                                                     AtomicBoolean active, Runnable afterSnapshotRead,
                                                     java.util.function.LongSupplier nanoTime, Clock clock) {
+        return reader(grant, active, afterSnapshotRead, nanoTime, clock, grants);
+    }
+
+    private PrivateMerchantDiagnosticReader reader(PrivateMerchantDiagnosticReader.ReadGrant grant,
+                                                    AtomicBoolean active, Runnable afterSnapshotRead,
+                                                    java.util.function.LongSupplier nanoTime, Clock clock,
+                                                    List<MerchantAssertionTrustPolicy.Grant> merchantGrants) {
         return new PrivateMerchantDiagnosticReader(merchantReaderClient, database, grant, ignored -> active.get(),
-                diagnosticSource, occurrenceReader, origins, grants, pseudonyms, clock, LIMITS,
+                diagnosticSource, occurrenceReader, origins, merchantGrants, pseudonyms, clock, LIMITS,
                 afterSnapshotRead, nanoTime);
     }
 
@@ -705,9 +990,15 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
 
     private static SourceVerificationProperties.TrustedKey trusted(String issuer, String version, String purpose,
                                                                     String audience, KeyPair pair, String policyVersion) {
+        return trusted(issuer, version, purpose, audience, pair, policyVersion, false);
+    }
+
+    private static SourceVerificationProperties.TrustedKey trusted(String issuer, String version, String purpose,
+                                                                    String audience, KeyPair pair, String policyVersion,
+                                                                    boolean revoked) {
         return new SourceVerificationProperties.TrustedKey(issuer, "institution-a", "BANK", "epoch-a", version,
                 "Ed25519", Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()),
-                NOW.minus(Duration.ofDays(60)), NOW.plus(Duration.ofDays(1)), false, purpose, audience, policyVersion);
+                NOW.minus(Duration.ofDays(60)), NOW.plus(Duration.ofDays(1)), revoked, purpose, audience, policyVersion);
     }
 
     private static byte[] signed(SourceVerificationProperties.TrustedKey key, KeyPair pair, byte[] payload,
@@ -833,6 +1124,10 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
             return connect("merchant_source_reader", "ephemeral-source-read-only", database);
         }
 
+        MongoClient occurrenceReader(String database, CommandListener listener) {
+            return connect("merchant_source_reader", "ephemeral-source-read-only", database, listener);
+        }
+
         MongoClient merchantReader(MongoClient owner, String database) {
             List<Document> privileges = new ArrayList<>();
             privileges.add(privilege(database, "", List.of("listCollections")));
@@ -847,10 +1142,16 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         }
 
         private MongoClient connect(String user, String password, String authDatabase) {
+            return connect(user, password, authDatabase, null);
+        }
+
+        private MongoClient connect(String user, String password, String authDatabase, CommandListener listener) {
             String address = server.getHost() + ":" + server.getMappedPort(27017);
             String uri = "mongodb://" + user + ":" + password + "@" + address + "/?directConnection=true&authSource=" + authDatabase;
-            MongoClient client = MongoClients.create(MongoClientSettings.builder().applyConnectionString(
-                    new com.mongodb.ConnectionString(uri)).timeout(5_000, java.util.concurrent.TimeUnit.MILLISECONDS).build());
+            MongoClientSettings.Builder settings = MongoClientSettings.builder().applyConnectionString(
+                    new com.mongodb.ConnectionString(uri)).timeout(5_000, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (listener != null) { settings.addCommandListener(listener); }
+            MongoClient client = MongoClients.create(settings.build());
             clients.add(client);
             return client;
         }

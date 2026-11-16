@@ -4,6 +4,7 @@ import com.frauddetection.common.events.source.SourceScoredOccurrence;
 import com.frauddetection.common.events.source.SourceScope;
 import com.frauddetection.common.events.source.MongoSourceOccurrenceStore;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Availability;
+import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageGeneration;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Observation;
 import org.bson.Document;
 
@@ -14,14 +15,19 @@ final class MerchantScoredBinding {
     private MerchantScoredBinding() { }
 
     static Document expected(Document candidate, Observation observation, MerchantAssertionAnchor anchor,
-                             MerchantAssertionAnchor coverageAnchor, SourceScoredOccurrence scored) {
-        if (candidate == null || observation == null || anchor == null || coverageAnchor == null || scored == null
+                             CoverageGeneration coverageGeneration, SourceScoredOccurrence scored) {
+        MerchantAssertionAnchor coverageAnchor = coverageGeneration == null ? null : coverageGeneration.anchor();
+        if (candidate == null || observation == null || anchor == null || coverageGeneration == null
+                || coverageAnchor == null || scored == null
                 || anchor.role() != MerchantAssertionVerifier.Role.OBSERVATION
                 || coverageAnchor.role() != MerchantAssertionVerifier.Role.COVERAGE
+                || !coverageGeneration.covers(observation.sequence())
                 || !Objects.equals(candidate.getString("_id"), MerchantObservationDocumentCodec.eventId(observation))
                 || !"COMMITTED".equals(candidate.getString("status"))
                 || !Availability.COMPLETE_WINDOW.name().equals(candidate.getString("availability"))
                 || !Objects.equals(candidate.getString("evidenceCommitment"), anchor.commitment())
+                || !Objects.equals(candidate.getLong("stageCoverageGeneration"), coverageGeneration.generation())
+                || !Objects.equals(candidate.getString("stageCoverageCommitment"), coverageGeneration.commitment())
                 || !commitment(candidate.getString("snapshotCommitment"))
                 || !commitment(candidate.getString("historyCommitment"))) {
             throw invalid();
@@ -57,8 +63,10 @@ final class MerchantScoredBinding {
         String inputCommitment = MerchantObservationDocumentCodec.inputCommitment(observation);
         String snapshotCommitment = candidate.getString("snapshotCommitment");
         String historyCommitment = candidate.getString("historyCommitment");
-        String commitment = MerchantCommitment.sha256("MERCHANT_SCORED_BINDING_UNAVAILABLE", "merchant-scored-binding/v1",
-                candidate.getString("_id"), inputCommitment, sourceScopeCommitment, coverageAnchor.commitment(),
+        String commitment = MerchantCommitment.sha256("MERCHANT_SCORED_BINDING_UNAVAILABLE", "merchant-scored-binding/v2",
+                candidate.getString("_id"), inputCommitment, sourceScopeCommitment,
+                coverageGeneration.generation(), coverageGeneration.fromSequence(), coverageGeneration.throughSequence(),
+                coverageAnchor.commitment(),
                 scored.receiptId(), claim.rawCommitment(),
                 claim.enrichedCommitment(), observation.scope().identityVersion(), merchantCommitment, snapshotCommitment,
                 historyCommitment, scored.scoredEventId(), scored.scoredCreatedAt(), scored.scoredFingerprint(), scored.runId());
@@ -66,6 +74,9 @@ final class MerchantScoredBinding {
                 .append("createdAt", scored.scoredCreatedAt().toString()).append("fingerprint", scored.scoredFingerprint())
                 .append("runId", scored.runId()).append("sourceScopeCommitment", sourceScopeCommitment)
                 .append("coverageCommitment", coverageAnchor.commitment())
+                .append("coverageGeneration", coverageGeneration.generation())
+                .append("coverageFromSequence", coverageGeneration.fromSequence())
+                .append("coverageThroughSequence", coverageGeneration.throughSequence())
                 .append("receiptId", scored.receiptId()).append("rawCommitment", claim.rawCommitment())
                 .append("enrichedCommitment", claim.enrichedCommitment())
                 .append("identityVersion", observation.scope().identityVersion()).append("merchantCommitment", merchantCommitment)
@@ -74,10 +85,10 @@ final class MerchantScoredBinding {
     }
 
     static boolean matches(Document manifest, Document candidate, Observation observation,
-                           MerchantAssertionAnchor anchor, MerchantAssertionAnchor coverageAnchor,
+                           MerchantAssertionAnchor anchor, CoverageGeneration coverageGeneration,
                            SourceScoredOccurrence scored) {
         if (manifest == null) { return false; }
-        try { return expected(candidate, observation, anchor, coverageAnchor, scored).equals(manifest.get("scoredBinding", Document.class)); }
+        try { return expected(candidate, observation, anchor, coverageGeneration, scored).equals(manifest.get("scoredBinding", Document.class)); }
         catch (RuntimeException invalid) { return false; }
     }
 

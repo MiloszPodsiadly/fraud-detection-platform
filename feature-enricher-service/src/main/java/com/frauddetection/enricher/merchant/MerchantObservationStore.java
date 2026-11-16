@@ -9,6 +9,8 @@ import java.util.regex.Pattern;
 
 /** Disconnected storage seam. Records describe inputs; only an independent admission verifier may authorize them. */
 interface MerchantObservationStore {
+    int MAX_ACTIVE_COVERAGE_GENERATIONS = 1_000;
+
     StageResult stage(Observation observation);
     void seal(CoverageSeal seal);
     CommitResult commit(Observation observation);
@@ -33,6 +35,10 @@ interface MerchantObservationStore {
         default void requireHistoryRead(HistoryRead read) {
             throw new SecurityException("MERCHANT_PROFILE_READ_NOT_ADMITTED");
         }
+        /** Revalidates a persisted fence and every active signed generation before append or prefix compaction. */
+        default void requireCoverageChain(Scope scope, CoverageGeneration coverageFence,
+                                          List<CoverageGeneration> activeGenerations,
+                                          CoverageGeneration latestGeneration) { }
     }
 
     /** Source-level quarantine rejects new work without accumulating more candidate rows. */
@@ -94,14 +100,46 @@ interface MerchantObservationStore {
         @Override public String toString() { return "MerchantCoverageSeal[redacted]"; }
     }
 
+    /** Exact signed coverage cohort retained until a verified prefix-compaction fence supersedes it. */
+    record CoverageGeneration(Scope scope, long generation, long fromSequence, long throughSequence,
+                              Instant coverageStart, Instant watermark, String previousCommitment,
+                              String commitment, MerchantAssertionAnchor anchor) {
+        public CoverageGeneration {
+            require(scope != null && anchor != null && anchor.role() == MerchantAssertionVerifier.Role.COVERAGE,
+                    "COVERAGE_GENERATION_EVIDENCE");
+            require(generation >= 1 && fromSequence >= 1 && throughSequence >= fromSequence,
+                    "COVERAGE_GENERATION_RANGE");
+            time(coverageStart);
+            time(watermark);
+            require(coverageStart.isBefore(watermark), "COVERAGE_GENERATION_WINDOW");
+            reference(commitment);
+            require(commitment.equals(anchor.commitment()), "COVERAGE_GENERATION_COMMITMENT");
+            if (generation == 1) {
+                require(fromSequence == 1 && previousCommitment == null, "COVERAGE_GENERATION_ORIGIN");
+            } else {
+                reference(previousCommitment);
+            }
+        }
+        boolean covers(long sequence) { return sequence >= fromSequence && sequence <= throughSequence; }
+        @Override public String toString() { return "MerchantCoverageGeneration[redacted]"; }
+    }
+
     /** Bounded read description only. expectedRows covers unique prior rows in [from, asOf), not admission or completeness proof. */
     record HistoryRead(Observation current, CoverageSeal coverage, Instant from, Instant asOf, Instant evaluatedAt,
                        Instant retainedFrom, int expectedRows, List<Observation> observations, boolean sourceInvalidated,
-                       List<MerchantAssertionAnchor> observationAnchors, MerchantAssertionAnchor coverageAnchor) {
+                       List<MerchantAssertionAnchor> observationAnchors, MerchantAssertionAnchor coverageAnchor,
+                       CoverageGeneration coverageFence, List<CoverageGeneration> coverageGenerations) {
+        public HistoryRead(Observation current, CoverageSeal coverage, Instant from, Instant asOf, Instant evaluatedAt,
+                           Instant retainedFrom, int expectedRows, List<Observation> observations, boolean sourceInvalidated,
+                           List<MerchantAssertionAnchor> observationAnchors, MerchantAssertionAnchor coverageAnchor) {
+            this(current, coverage, from, asOf, evaluatedAt, retainedFrom, expectedRows, observations, sourceInvalidated,
+                    observationAnchors, coverageAnchor, null, List.of());
+        }
         public HistoryRead(Observation current, CoverageSeal coverage, Instant from, Instant asOf, Instant evaluatedAt,
                            Instant retainedFrom, int expectedRows, List<Observation> observations, boolean sourceInvalidated) {
             this(current, coverage, from, asOf, evaluatedAt, retainedFrom, expectedRows, observations,
-                    sourceInvalidated, java.util.Collections.nCopies(observations == null ? 0 : observations.size(), null), null);
+                    sourceInvalidated, java.util.Collections.nCopies(observations == null ? 0 : observations.size(), null),
+                    null, null, List.of());
         }
         public HistoryRead {
             require(current != null, "HISTORY_CURRENT");
@@ -116,6 +154,12 @@ interface MerchantObservationStore {
             observations = List.copyOf(observations);
             require(observationAnchors != null && observationAnchors.size() == observations.size(), "HISTORY_EVIDENCE");
             observationAnchors = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(observationAnchors));
+            require(coverageGenerations != null && coverageGenerations.size() <= MAX_ACTIVE_COVERAGE_GENERATIONS,
+                    "COVERAGE_GENERATION_CAPACITY");
+            coverageGenerations = List.copyOf(coverageGenerations);
+            if (coverageFence != null) { require(coverageFence.scope().equals(current.scope()), "COVERAGE_FENCE_SCOPE"); }
+            require(coverageGenerations.stream().allMatch(generation -> generation.scope().equals(current.scope())),
+                    "COVERAGE_GENERATION_SCOPE");
         }
         @Override public String toString() { return "MerchantHistoryRead[redacted]"; }
     }

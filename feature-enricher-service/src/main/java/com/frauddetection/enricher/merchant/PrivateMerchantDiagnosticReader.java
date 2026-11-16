@@ -81,70 +81,82 @@ final class PrivateMerchantDiagnosticReader {
     }
 
     Result evaluate(Request request) {
-        if (request == null || !currentlyAuthorized()) { return Result.of(Outcome.DENIED); }
+        if (request == null || !currentlyAuthorized()) { return Result.of(Outcome.DENIED, Reason.READ_NOT_AUTHORIZED); }
         long started = nanoTime.getAsLong();
         VerifiedMerchantAdmission.Ticket ticket;
         try {
             ticket = admission.authorizeRead(request.sourceProof(), request.sourcePayload(), request.observationProof(),
                     request.observationAssertion(), request.raw(), request.enriched());
         } catch (SecurityException denied) {
-            return Result.of(Outcome.DENIED);
+            return Result.of(Outcome.DENIED, Reason.READ_NOT_AUTHORIZED);
         } catch (RuntimeException unavailable) {
-            return Result.of(Outcome.UNAVAILABLE);
+            return Result.of(Outcome.UNAVAILABLE, Reason.SOURCE_AUTHORITY_UNAVAILABLE);
         }
         if (!admission.matchesReadGrant(ticket, grant.scope(), grant.merchantPseudonym())) {
-            return Result.of(Outcome.DENIED);
+            return Result.of(Outcome.DENIED, Reason.READ_NOT_AUTHORIZED);
         }
-        if (!withinBudget(started)) { return Result.of(Outcome.UNAVAILABLE); }
+        if (!withinBudget(started)) { return Result.of(Outcome.UNAVAILABLE, Reason.DEADLINE_EXCEEDED); }
 
         SourceScoredOccurrence occurrence;
         try { occurrence = admission.resolveScored(ticket, scored, request.reference()); }
-        catch (SecurityException denied) { return Result.of(Outcome.DENIED); }
-        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE); }
-        if (occurrence == null) { return Result.of(Outcome.PENDING); }
-        if (!withinBudget(started)) { return Result.of(Outcome.UNAVAILABLE); }
+        catch (SecurityException denied) { return Result.of(Outcome.DENIED, Reason.READ_NOT_AUTHORIZED); }
+        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE, Reason.SOURCE_AUTHORITY_UNAVAILABLE); }
+        if (occurrence == null) { return Result.of(Outcome.PENDING, Reason.INITIAL_SCORED_PENDING); }
+        if (!withinBudget(started)) { return Result.of(Outcome.UNAVAILABLE, Reason.DEADLINE_EXCEEDED); }
 
         DiagnosticSnapshot first;
         try { first = admission.readDiagnostic(ticket, occurrence); }
-        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE); }
-        if (first.state() == DiagnosticState.PENDING) { return Result.of(Outcome.PENDING); }
+        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE, Reason.HISTORY_UNAVAILABLE); }
+        if (first.state() == DiagnosticState.PENDING) { return Result.of(Outcome.PENDING, Reason.STAGE_A_BINDING_PENDING); }
         if (first.state() == DiagnosticState.READY && !first.exactScoredBindingPresent()) {
-            return Result.of(Outcome.PENDING);
+            return Result.of(Outcome.PENDING, Reason.STAGE_A_BINDING_PENDING);
         }
-        if (!ready(first)) { return Result.of(Outcome.UNAVAILABLE); }
+        if (!ready(first)) { return Result.of(Outcome.UNAVAILABLE, Reason.HISTORY_UNAVAILABLE); }
 
         try { afterSnapshotRead.run(); }
-        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE); }
-        if (!withinBudget(started)) { return Result.of(Outcome.UNAVAILABLE); }
-        if (!currentlyAuthorized()) { return Result.of(Outcome.DENIED); }
+        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE, Reason.INTERNAL_UNAVAILABLE); }
+        if (!withinBudget(started)) { return Result.of(Outcome.UNAVAILABLE, Reason.DEADLINE_EXCEEDED); }
+        if (!currentlyAuthorized()) { return Result.of(Outcome.DENIED, Reason.READ_NOT_AUTHORIZED); }
 
-        try {
-            admission.recheck(ticket);
-            SourceScoredOccurrence current = admission.resolveScored(ticket, scored, request.reference());
-            if (!sameOccurrence(occurrence, current)) { return Result.of(Outcome.UNAVAILABLE); }
-            DiagnosticSnapshot finalRead = admission.readDiagnostic(ticket, current);
-            if (!ready(finalRead) || !finalRead.exactScoredBindingPresent()
-                    || !first.snapshot().equals(finalRead.snapshot())) { return Result.of(Outcome.UNAVAILABLE); }
-            admission.recheck(ticket);
-            SourceScoredOccurrence last = admission.resolveScored(ticket, scored, request.reference());
-            if (!currentlyAuthorized()) { return Result.of(Outcome.DENIED); }
-            if (!sameOccurrence(current, last) || !withinBudget(started)) {
-                return Result.of(Outcome.UNAVAILABLE);
-            }
-            return evaluated(finalRead.snapshot());
-        } catch (RuntimeException unavailable) {
-            return Result.of(Outcome.UNAVAILABLE);
+        try { admission.recheck(ticket); }
+        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE, Reason.SOURCE_AUTHORITY_UNAVAILABLE); }
+
+        SourceScoredOccurrence current;
+        try { current = admission.resolveScored(ticket, scored, request.reference()); }
+        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE, Reason.SOURCE_AUTHORITY_UNAVAILABLE); }
+        if (!sameOccurrence(occurrence, current)) {
+            return Result.of(Outcome.UNAVAILABLE, Reason.SOURCE_AUTHORITY_UNAVAILABLE);
         }
+
+        DiagnosticSnapshot finalRead;
+        try { finalRead = admission.readDiagnostic(ticket, current); }
+        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE, Reason.HISTORY_UNAVAILABLE); }
+        if (!ready(finalRead) || !finalRead.exactScoredBindingPresent()
+                || !first.snapshot().equals(finalRead.snapshot())) {
+            return Result.of(Outcome.UNAVAILABLE, Reason.HISTORY_UNAVAILABLE);
+        }
+
+        try { admission.recheck(ticket); }
+        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE, Reason.SOURCE_AUTHORITY_UNAVAILABLE); }
+        SourceScoredOccurrence last;
+        try { last = admission.resolveScored(ticket, scored, request.reference()); }
+        catch (RuntimeException unavailable) { return Result.of(Outcome.UNAVAILABLE, Reason.SOURCE_AUTHORITY_UNAVAILABLE); }
+        if (!currentlyAuthorized()) { return Result.of(Outcome.DENIED, Reason.READ_NOT_AUTHORIZED); }
+        if (!sameOccurrence(current, last)) {
+            return Result.of(Outcome.UNAVAILABLE, Reason.SOURCE_AUTHORITY_UNAVAILABLE);
+        }
+        if (!withinBudget(started)) { return Result.of(Outcome.UNAVAILABLE, Reason.DEADLINE_EXCEEDED); }
+        return evaluated(finalRead.snapshot());
     }
 
     private Result evaluated(Snapshot snapshot) {
         if (snapshot.availability() != Availability.COMPLETE_WINDOW || snapshot.priorCount() == null) {
-            return Result.of(Outcome.UNAVAILABLE);
+            return Result.of(Outcome.UNAVAILABLE, Reason.HISTORY_UNAVAILABLE);
         }
         Claim claim = snapshot.priorCount() == 0
                 ? Claim.FIRST_OBSERVED_IN_COMPLETE_RECENT_WINDOW
                 : Claim.PREVIOUSLY_OBSERVED_IN_COMPLETE_RECENT_WINDOW;
-        return new Result(Outcome.EVALUATED, claim);
+        return new Result(Outcome.EVALUATED, claim, Reason.NONE);
     }
 
     private static boolean ready(DiagnosticSnapshot value) {
@@ -209,6 +221,17 @@ final class PrivateMerchantDiagnosticReader {
 
     enum Claim { FIRST_OBSERVED_IN_COMPLETE_RECENT_WINDOW, PREVIOUSLY_OBSERVED_IN_COMPLETE_RECENT_WINDOW }
 
+    enum Reason {
+        NONE,
+        READ_NOT_AUTHORIZED,
+        INITIAL_SCORED_PENDING,
+        STAGE_A_BINDING_PENDING,
+        HISTORY_UNAVAILABLE,
+        SOURCE_AUTHORITY_UNAVAILABLE,
+        DEADLINE_EXCEEDED,
+        INTERNAL_UNAVAILABLE
+    }
+
     @JsonIgnoreType
     record ReadGrant(String principal, String purpose, String audience, Scope scope,
                      String merchantPseudonym, int maxHistoryRows) {
@@ -259,12 +282,21 @@ final class PrivateMerchantDiagnosticReader {
     }
 
     @JsonIgnoreType
-    record Result(Outcome outcome, Claim claim) {
+    record Result(Outcome outcome, Claim claim, Reason reason) {
         Result {
             Objects.requireNonNull(outcome);
-            if ((outcome == Outcome.EVALUATED) != (claim != null)) { throw new IllegalArgumentException("MERCHANT_PRIVATE_RESULT_STATE"); }
+            Objects.requireNonNull(reason);
+            boolean valid = switch (outcome) {
+                case EVALUATED -> claim != null && reason == Reason.NONE;
+                case DENIED -> claim == null && reason == Reason.READ_NOT_AUTHORIZED;
+                case PENDING -> claim == null && (reason == Reason.INITIAL_SCORED_PENDING
+                        || reason == Reason.STAGE_A_BINDING_PENDING);
+                case UNAVAILABLE -> claim == null && (reason == Reason.HISTORY_UNAVAILABLE || reason == Reason.SOURCE_AUTHORITY_UNAVAILABLE
+                        || reason == Reason.DEADLINE_EXCEEDED || reason == Reason.INTERNAL_UNAVAILABLE);
+            };
+            if (!valid) { throw new IllegalArgumentException("MERCHANT_PRIVATE_RESULT_STATE"); }
         }
-        static Result of(Outcome outcome) { return new Result(outcome, null); }
+        static Result of(Outcome outcome, Reason reason) { return new Result(outcome, null, reason); }
         @Override public String toString() { return "MerchantPrivateDiagnostic[redacted]"; }
     }
 }

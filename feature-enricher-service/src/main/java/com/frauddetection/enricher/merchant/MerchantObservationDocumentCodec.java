@@ -1,6 +1,7 @@
 package com.frauddetection.enricher.merchant;
 
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Observation;
+import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageGeneration;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Scope;
 import org.bson.Document;
 
@@ -11,6 +12,8 @@ import java.util.regex.Pattern;
 
 /** Versioned Mongo document mapping and identity validation, kept separate from transaction coordination. */
 final class MerchantObservationDocumentCodec {
+    static final String MEMBERSHIP_TIP_KIND = "MEMBERSHIP_TIP";
+    static final String COVERAGE_GENERATION_KIND = "COVERAGE_GENERATION";
     record MembershipCheckpoint(Scope scope, String id, String sourceEvent, String merchant, long sequence,
                                 Instant eventTime, String inputCommitment, String previousId,
                                 Long previousSequence, Instant previousEventTime, String previousCommitment,
@@ -42,6 +45,11 @@ final class MerchantObservationDocumentCodec {
     static String membershipTipId(Scope scope, String merchant) {
         return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-membership-tip/v1",
                 scope.issuer(), scope.institution(), scope.source(), scope.epoch(), scope.identityVersion(), merchant);
+    }
+
+    static String coverageGenerationId(Scope scope, long generation) {
+        return MerchantCommitment.sha256("MERCHANT_STORE_DIGEST_UNAVAILABLE", "merchant-coverage-generation-id/v1",
+                scope.issuer(), scope.institution(), scope.source(), scope.epoch(), scope.identityVersion(), generation);
     }
 
     static String inputCommitment(Observation observation) {
@@ -148,6 +156,7 @@ final class MerchantObservationDocumentCodec {
             throw failure("MEMBERSHIP_TIP_MISMATCH");
         }
         return scopeDocument(checkpoint.scope()).append("_id", membershipTipId(checkpoint.scope(), checkpoint.merchant()))
+                .append("kind", MEMBERSHIP_TIP_KIND)
                 .append("scope", scopeId(checkpoint.scope())).append("merchant", checkpoint.merchant())
                 .append("checkpointId", checkpoint.id()).append("sourceEvent", checkpoint.sourceEvent())
                 .append("sequence", checkpoint.sequence()).append("eventTime", Date.from(checkpoint.eventTime()))
@@ -168,7 +177,8 @@ final class MerchantObservationDocumentCodec {
         try {
             Scope scope = decodeScope(row);
             String merchant = row.getString("merchant");
-            if (!reference(merchant) || !membershipTipId(scope, merchant).equals(row.getString("_id"))
+            if (!MEMBERSHIP_TIP_KIND.equals(row.getString("kind"))
+                    || !reference(merchant) || !membershipTipId(scope, merchant).equals(row.getString("_id"))
                     || !scopeId(scope).equals(row.getString("scope"))) {
                 throw failure("CORRUPT_MEMBERSHIP_TIP");
             }
@@ -211,6 +221,87 @@ final class MerchantObservationDocumentCodec {
         } catch (RuntimeException exception) {
             throw failure("CORRUPT_MEMBERSHIP_TIP");
         }
+    }
+
+    static Document coverageGenerationDocument(CoverageGeneration generation) {
+        return scopeDocument(generation.scope()).append("_id", coverageGenerationId(generation.scope(), generation.generation()))
+                .append("kind", COVERAGE_GENERATION_KIND).append("scope", scopeId(generation.scope()))
+                .append("generation", generation.generation()).append("fromSequence", generation.fromSequence())
+                .append("throughSequence", generation.throughSequence())
+                .append("coverageStart", Date.from(generation.coverageStart())).append("watermark", Date.from(generation.watermark()))
+                .append("previousCommitment", generation.previousCommitment()).append("commitment", generation.commitment())
+                .append("anchor", generation.anchor().toDocument())
+                .append("retentionThroughSequence", generation.throughSequence());
+    }
+
+    static CoverageGeneration decodeCoverageGeneration(Document row, Scope expectedScope) {
+        try {
+            Scope scope = decodeScope(row);
+            if (!COVERAGE_GENERATION_KIND.equals(row.getString("kind")) || !scope.equals(expectedScope)
+                    || !scopeId(scope).equals(row.getString("scope"))
+                    || !coverageGenerationId(scope, row.getLong("generation")).equals(row.getString("_id"))) {
+                throw failure("CORRUPT_COVERAGE_GENERATION");
+            }
+            MerchantAssertionAnchor anchor = MerchantAssertionAnchor.fromDocument(
+                    row.get("anchor", Document.class), MerchantAssertionVerifier.Role.COVERAGE);
+            CoverageGeneration generation = coverageGenerationFromAnchor(scope, anchor);
+            if (row.getLong("generation") != generation.generation()
+                    || row.getLong("fromSequence") != generation.fromSequence()
+                    || row.getLong("throughSequence") != generation.throughSequence()
+                    || !row.getDate("coverageStart").toInstant().equals(generation.coverageStart())
+                    || !row.getDate("watermark").toInstant().equals(generation.watermark())
+                    || !java.util.Objects.equals(row.getString("previousCommitment"), generation.previousCommitment())
+                    || !generation.commitment().equals(row.getString("commitment"))
+                    || row.getLong("retentionThroughSequence") != generation.throughSequence()) {
+                throw failure("CORRUPT_COVERAGE_GENERATION");
+            }
+            return generation;
+        } catch (RuntimeException invalid) { throw failure("CORRUPT_COVERAGE_GENERATION"); }
+    }
+
+    static CoverageGeneration coverageGenerationFromAnchor(Scope scope, MerchantAssertionAnchor anchor) {
+        try {
+            if (anchor == null || anchor.role() != MerchantAssertionVerifier.Role.COVERAGE) {
+                throw failure("CORRUPT_COVERAGE_GENERATION");
+            }
+            MerchantCoverageAssertion claim = MerchantAssertionCodec.parseCoverage(anchor.assertionBytes());
+            // The persisted store scope uses keyed public tokens; signed claims retain source identifiers.
+            if (scope.identityVersion() != claim.identityVersion()) {
+                throw failure("CORRUPT_COVERAGE_GENERATION");
+            }
+            return new CoverageGeneration(scope, claim.generation(), claim.fromSequence(), claim.throughSequence(),
+                    claim.coverageStart(), claim.watermark(), claim.previousCoverageCommitment(), anchor.commitment(), anchor);
+        } catch (RuntimeException invalid) { throw failure("CORRUPT_COVERAGE_GENERATION"); }
+    }
+
+    static Document coverageFenceDocument(CoverageGeneration generation) {
+        return new Document("version", 1).append("generation", generation.generation())
+                .append("fromSequence", generation.fromSequence()).append("throughSequence", generation.throughSequence())
+                .append("coverageStart", Date.from(generation.coverageStart())).append("watermark", Date.from(generation.watermark()))
+                .append("previousCommitment", generation.previousCommitment()).append("commitment", generation.commitment())
+                .append("anchor", generation.anchor().toDocument()).append("retentionThroughSequence", generation.throughSequence());
+    }
+
+    static CoverageGeneration decodeCoverageFence(Document row, Scope scope) {
+        try {
+            if (row == null || !Integer.valueOf(1).equals(row.get("version"))) {
+                throw failure("CORRUPT_COVERAGE_FENCE");
+            }
+            MerchantAssertionAnchor anchor = MerchantAssertionAnchor.fromDocument(
+                    row.get("anchor", Document.class), MerchantAssertionVerifier.Role.COVERAGE);
+            CoverageGeneration generation = coverageGenerationFromAnchor(scope, anchor);
+            if (row.getLong("generation") != generation.generation()
+                    || row.getLong("fromSequence") != generation.fromSequence()
+                    || row.getLong("throughSequence") != generation.throughSequence()
+                    || !row.getDate("coverageStart").toInstant().equals(generation.coverageStart())
+                    || !row.getDate("watermark").toInstant().equals(generation.watermark())
+                    || !java.util.Objects.equals(row.getString("previousCommitment"), generation.previousCommitment())
+                    || !generation.commitment().equals(row.getString("commitment"))
+                    || row.getLong("retentionThroughSequence") != generation.throughSequence()) {
+                throw failure("CORRUPT_COVERAGE_FENCE");
+            }
+            return generation;
+        } catch (RuntimeException invalid) { throw failure("CORRUPT_COVERAGE_FENCE"); }
     }
 
     static boolean membershipMatchesObservation(Document row, Observation observation) {

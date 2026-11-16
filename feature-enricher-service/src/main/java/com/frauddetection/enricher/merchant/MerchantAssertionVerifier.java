@@ -36,9 +36,19 @@ final class MerchantAssertionVerifier {
                               Clock clock) {
         this.clock = Objects.requireNonNull(clock, "MERCHANT_ASSERTION_CLOCK_REQUIRED");
         this.trustPolicy = new MerchantAssertionTrustPolicy(grants);
+        requireMerchantKeysDistinctFromTransactionKeys(Objects.requireNonNull(sourcePolicy));
         this.originVerifier = new SourceSignatureVerifier(Objects.requireNonNull(sourcePolicy), clock);
         this.assertionVerifier = new SourceSignatureVerifier(
                 new SourceVerificationProperties(trustPolicy.keys()), clock);
+    }
+
+    private void requireMerchantKeysDistinctFromTransactionKeys(SourceVerificationProperties sourcePolicy) {
+        List<String> transactionKeys = sourcePolicy.keys().stream()
+                .filter(key -> "TRANSACTION_SOURCE_ATTESTATION".equals(key.purpose()))
+                .map(MerchantAssertionTrustPolicy::keyCommitment).toList();
+        boolean reusedKey = trustPolicy.keys().stream().map(MerchantAssertionTrustPolicy::keyCommitment)
+                .anyMatch(transactionKeys::contains);
+        if (reusedKey) { throw new IllegalArgumentException("MERCHANT_ASSERTION_POLICY_INVALID"); }
     }
 
     Result verifyObservation(byte[] proof, byte[] originalAssertion, ExpectedSourceBinding expected) {
@@ -226,6 +236,13 @@ final class MerchantAssertionVerifier {
                 || Duration.between(claim.coverageStart(), claim.watermark()).compareTo(MAX_COVERAGE_WINDOW) > 0
                 || claim.watermark().isAfter(clock.instant().plus(FUTURE_SKEW))) { return null; }
         return new VerifiedCoverage(verifierIdentity, claim, signature, origin, grant, payload, proof, commitment);
+    }
+
+    VerifiedCoverage verifyStoredCoverage(MerchantAssertionAnchor anchor, SourceSignatureVerifier.Verified origin,
+                                         CoverageSeal stored, VerifiedCoverage previous) {
+        VerifiedCoverage verified = verifyStoredCoverage(anchor, origin, stored);
+        if (verified == null || !validCoverageChain(verified.assertion(), previous)) { return null; }
+        return verified;
     }
 
     /** Rechecks current source and Merchant key policy before a capability can be reused. */

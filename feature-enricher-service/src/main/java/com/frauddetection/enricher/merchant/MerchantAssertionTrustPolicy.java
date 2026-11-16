@@ -29,7 +29,7 @@ final class MerchantAssertionTrustPolicy {
         if (copy.isEmpty() || copy.size() > MAX_GRANTS) { throw invalidPolicy(); }
         Map<KeyId, Grant> byKey = new HashMap<>();
         Map<KeyId, String> commitments = new HashMap<>();
-        Map<String, MerchantAssertionVerifier.Role> commitmentRoles = new HashMap<>();
+        Set<String> distinctGrantKeyCommitments = new HashSet<>();
         Map<SourceIdentity, Population> populations = new HashMap<>();
         Map<SourceIdentity, Set<MerchantAssertionVerifier.Role>> rolesByScope = new HashMap<>();
         Set<String> grantIds = new HashSet<>();
@@ -37,10 +37,9 @@ final class MerchantAssertionTrustPolicy {
             Objects.requireNonNull(grant, "MERCHANT_GRANT_REQUIRED");
             KeyId id = KeyId.from(grant);
             String commitment = keyCommitment(grant.key());
-            if (byKey.putIfAbsent(id, grant) != null || !grantIds.add(grant.merchantGrantId())) { throw invalidPolicy(); }
+            if (byKey.putIfAbsent(id, grant) != null || !grantIds.add(grant.merchantGrantId())
+                    || !distinctGrantKeyCommitments.add(commitment)) { throw invalidPolicy(); }
             commitments.put(id, commitment);
-            MerchantAssertionVerifier.Role previousRole = commitmentRoles.putIfAbsent(commitment, grant.role());
-            if (previousRole != null && previousRole != grant.role()) { throw invalidPolicy(); }
             Population previousPopulation = populations.putIfAbsent(grant.sourceIdentity(), grant.population());
             if (previousPopulation != null && !previousPopulation.equals(grant.population())) { throw invalidPolicy(); }
             rolesByScope.computeIfAbsent(grant.sourceIdentity(), ignored -> new HashSet<>()).add(grant.role());

@@ -121,6 +121,48 @@ class MerchantAssertionVerifierTest {
     }
 
     @Test
+    void transactionSourceSigningKeyCannotBeReusedForMerchantGrant() {
+        Fixture fixture = new Fixture();
+        SourceVerificationProperties.TrustedKey reusedSourceMaterial = fixture.key("merchant-observer", "observation-v1",
+                OBSERVATION_PURPOSE, AUDIENCE, fixture.sourcePair, NOW.minusSeconds(86_400), NOW.plusSeconds(86_400), false);
+        Grant collidingObservation = new Grant(Role.OBSERVATION, OBSERVATION_GRANT_ID, 1,
+                reusedSourceMaterial, fixture.sourceIdentity, fixture.population,
+                new MerchantMapping(1, MAPPING_COMMITMENT));
+
+        assertThatThrownBy(() -> fixture.verifier(List.of(collidingObservation, fixture.coverageGrant)))
+                .hasMessage("MERCHANT_ASSERTION_POLICY_INVALID");
+    }
+
+    @Test
+    void transactionSourceSigningKeyCannotBeReusedForMerchantCoverageGrant() {
+        Fixture fixture = new Fixture();
+        SourceVerificationProperties.TrustedKey reusedSourceMaterial = fixture.key("merchant-coverage-issuer",
+                "coverage-v1", COVERAGE_PURPOSE, AUDIENCE, fixture.sourcePair,
+                NOW.minusSeconds(86_400), NOW.plusSeconds(86_400), false);
+        Grant collidingCoverage = new Grant(Role.COVERAGE, COVERAGE_GRANT_ID, 1,
+                reusedSourceMaterial, fixture.sourceIdentity, fixture.population, null);
+
+        assertThatThrownBy(() -> fixture.verifier(List.of(fixture.observationGrant, collidingCoverage)))
+                .hasMessage("MERCHANT_ASSERTION_POLICY_INVALID");
+    }
+
+    @Test
+    void merchantKeyMaterialCannotBeReusedAcrossDifferentSourceScopesWithinOneRole() {
+        Fixture fixture = new Fixture();
+        SourceIdentity otherScope = new SourceIdentity("other-source-issuer", INSTITUTION, SOURCE, EPOCH, 1);
+        SourceVerificationProperties.TrustedKey reusedObservationMaterial = fixture.key("merchant-observer-2",
+                "observation-v2", OBSERVATION_PURPOSE, AUDIENCE, fixture.observationPair,
+                NOW.minusSeconds(86_400), NOW.plusSeconds(86_400), false);
+        Grant secondObservationGrant = new Grant(Role.OBSERVATION, "merchant-observation-grant-v2", 1,
+                reusedObservationMaterial, otherScope, fixture.population,
+                new MerchantMapping(1, MAPPING_COMMITMENT));
+
+        assertThatThrownBy(() -> fixture.verifier(List.of(fixture.observationGrant, secondObservationGrant,
+                fixture.coverageGrant)))
+                .hasMessage("MERCHANT_ASSERTION_POLICY_INVALID");
+    }
+
+    @Test
     void revokedExpiredAndReplacedMerchantKeysFailClosed() {
         Fixture fixture = new Fixture();
         byte[] observation = MerchantAssertionCodec.encodeObservation(fixture.observation());

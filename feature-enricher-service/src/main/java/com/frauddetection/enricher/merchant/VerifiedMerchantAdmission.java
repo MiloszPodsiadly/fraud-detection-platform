@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreType;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.source.MongoSourceLineage;
+import com.frauddetection.common.events.source.MongoSourceLineage.EnrichedBinding;
 import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.common.events.source.SourceReceiptIdentity;
 import com.frauddetection.common.events.source.SourceScope;
@@ -14,14 +15,18 @@ import com.frauddetection.common.events.source.SourceVerificationProperties;
 import com.mongodb.client.MongoClient;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.CommitResult;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageSeal;
+import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageGeneration;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.DiagnosticSnapshot;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Limits;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Observation;
+import com.frauddetection.enricher.merchant.MerchantObservationStore.Scope;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
-import java.util.Arrays;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /** Private Stage A vertical. Deliberately package-private and not registered as a Spring component. */
@@ -253,6 +258,26 @@ final class VerifiedMerchantAdmission {
 
     private static SecurityException denied() { return new SecurityException("MERCHANT_VERIFIED_ADMISSION_DENIED"); }
 
+    static List<SourceLineage> resolveSourceBindings(MongoSourceLineage source, List<EnrichedBinding> bindings) {
+        if (source == null) { throw denied(); }
+        return resolveSourceBindings(source::enrichedBindings, bindings);
+    }
+
+    static List<SourceLineage> resolveSourceBindings(Function<List<EnrichedBinding>, List<SourceLineage>> lookup,
+                                                     List<EnrichedBinding> bindings) {
+        if (lookup == null || bindings == null) { throw denied(); }
+        if (bindings.isEmpty()) { return List.of(); }
+        List<SourceLineage> resolved = new ArrayList<>(bindings.size());
+        for (int start = 0; start < bindings.size(); start += MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH) {
+            List<EnrichedBinding> batch = bindings.subList(start,
+                    Math.min(start + MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH, bindings.size()));
+            List<SourceLineage> lineages = lookup.apply(batch);
+            if (lineages == null || lineages.size() != batch.size()) { throw denied(); }
+            resolved.addAll(lineages);
+        }
+        return List.copyOf(resolved);
+    }
+
     private final class Admission implements MerchantObservationStore.AdmissionVerifier {
         @Override public void requireObservation(Observation observation) {
             AuthorityContext context = active.get();
@@ -291,22 +316,130 @@ final class VerifiedMerchantAdmission {
             if (!verifier.verifyStoredObservation(anchor, lineage, observation, pseudonyms)) { throw denied(); }
         }
 
+        @Override public void requireCoverageChain(Scope scope, CoverageGeneration coverageFence,
+                                                   List<CoverageGeneration> activeGenerations,
+                                                   CoverageGeneration latestGeneration) {
+            AuthorityContext context = active.get();
+            if (context == null || context.observation == null || !context.input.scope().equals(scope)
+                    || verifier.currentDenial(context.observation) != null) { throw denied(); }
+            verifyCoverageChain(context, scope, coverageFence, activeGenerations, latestGeneration,
+                    latestGeneration != null);
+        }
+
         @Override public void requireHistoryRead(MerchantObservationStore.HistoryRead read) {
             AuthorityContext context = active.get();
             if (context == null || context.observation == null
                     || !context.input.equals(read.current()) || verifier.currentDenial(context.observation) != null) { throw denied(); }
             requireCurrent(new Ticket(VerifiedMerchantAdmission.this, context.origin, context.raw, context.enriched,
                     context.observation, context.input, MerchantObservationStore.StageResult.EXISTING));
-            MerchantAssertionAnchor coverageProof = read.coverageAnchor();
-            MerchantAssertionVerifier.VerifiedCoverage durableCoverage = verifier.verifyStoredCoverage(
-                    coverageProof, context.origin, read.coverage());
-            if (durableCoverage == null || verifier.currentDenial(durableCoverage) != null
-                    || read.coverage().throughSequence() < read.current().sequence()
+            CoverageGeneration fence = read.coverageFence();
+            CoverageGeneration latest = null;
+            try { latest = MerchantObservationDocumentCodec.coverageGenerationFromAnchor(
+                    read.current().scope(), read.coverageAnchor()); }
+            catch (RuntimeException invalid) { throw denied(); }
+            MerchantAssertionVerifier.VerifiedCoverage verifiedLatest = verifyCoverageChain(context, read.current().scope(),
+                    fence, read.coverageGenerations(), latest, true);
+            if (read.coverage() == null || read.coverageAnchor() == null
+                    || verifier.currentDenial(verifiedLatest) != null
+                    || !verifiedLatest.assertionCommitment().equals(read.coverageAnchor().commitment())
+                    || !read.coverage().evidenceCommitment().equals(read.coverageAnchor().commitment())
+                    || read.coverage().throughSequence() != verifiedLatest.assertion().throughSequence()
+                    || !read.coverage().coverageStart().equals(verifiedLatest.assertion().coverageStart())
+                    || !read.coverage().watermark().equals(verifiedLatest.assertion().watermark())
+                    || !covers(read.current().sequence(), fence, read.coverageGenerations())
                     || read.coverage().watermark().isBefore(read.current().eventTime())) { throw denied(); }
             if (read.observations().size() != read.observationAnchors().size()) { throw denied(); }
-            for (int index = 0; index < read.observations().size(); index++) {
-                requirePersistedObservation(read.observations().get(index), read.observationAnchors().get(index));
+            for (int start = 0; start < read.observations().size(); start += MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH) {
+                int end = Math.min(start + MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH, read.observations().size());
+                List<MerchantObservationStore.Observation> observations = read.observations().subList(start, end);
+                List<MerchantAssertionAnchor> anchors = read.observationAnchors().subList(start, end);
+                List<EnrichedBinding> bindings = anchors.stream().map(this::sourceBinding).toList();
+                List<SourceLineage> lineages = resolveSourceBindings(source, bindings);
+                if (lineages.size() != observations.size()) { throw denied(); }
+                for (int index = 0; index < observations.size(); index++) {
+                    MerchantObservationStore.Observation observation = observations.get(index);
+                    SourceLineage lineage = lineages.get(index);
+                    if (!covers(observation.sequence(), fence, read.coverageGenerations())
+                            || lineage == null || lineage.state() != SourceLineage.State.VERIFIED
+                            || !verifier.verifyStoredObservation(anchors.get(index), lineage, observation, pseudonyms)) {
+                        throw denied();
+                    }
+                }
             }
+        }
+
+        private EnrichedBinding sourceBinding(MerchantAssertionAnchor anchor) {
+            if (anchor == null || anchor.role() != MerchantAssertionVerifier.Role.OBSERVATION) { throw denied(); }
+            try {
+                MerchantObservationAssertion claim = MerchantAssertionCodec.parseObservation(anchor.assertionBytes());
+                return new EnrichedBinding(claim.receiptId(), claim.rawCommitment(), claim.enrichedCommitment());
+            } catch (RuntimeException malformed) { throw denied(); }
+        }
+
+
+        private CoverageSeal coverageSeal(CoverageGeneration generation) {
+            return new CoverageSeal(generation.scope(), generation.throughSequence(), generation.coverageStart(),
+                    generation.watermark(), generation.commitment());
+        }
+
+        private MerchantAssertionVerifier.VerifiedCoverage verifyCoverageChain(AuthorityContext context, Scope scope,
+                                                                                CoverageGeneration fence,
+                                                                                List<CoverageGeneration> activeGenerations,
+                                                                                CoverageGeneration latest,
+                                                                                boolean requireLatest) {
+            if (activeGenerations == null || activeGenerations.size() > MerchantObservationStore.MAX_ACTIVE_COVERAGE_GENERATIONS
+                    || !pseudonyms.scope(context.origin.scope()).equals(scope)
+                    || fence != null && !fence.scope().equals(scope)
+                    || latest != null && !latest.scope().equals(scope)) { throw denied(); }
+            MerchantAssertionVerifier.VerifiedCoverage previous = null;
+            long expectedGeneration = 1;
+            long expectedFromSequence = 1;
+            String previousCommitment = null;
+            if (fence != null) {
+                // Prefix compaction advances only after verifying the complete chain; the retained fence is that chain's checkpoint.
+                previous = verifier.verifyStoredCoverage(fence.anchor(), context.origin, coverageSeal(fence));
+                if (previous == null || verifier.currentDenial(previous) != null || !sameCoverage(previous.assertion(), fence)) {
+                    throw denied();
+                }
+                if (fence.generation() == Long.MAX_VALUE || fence.throughSequence() == Long.MAX_VALUE) { throw denied(); }
+                expectedGeneration = fence.generation() + 1;
+                expectedFromSequence = fence.throughSequence() + 1;
+                previousCommitment = fence.commitment();
+            }
+            for (CoverageGeneration generation : activeGenerations) {
+                if (!generation.scope().equals(scope) || generation.generation() != expectedGeneration
+                        || generation.fromSequence() != expectedFromSequence
+                        || !Objects.equals(generation.previousCommitment(), previousCommitment)) { throw denied(); }
+                MerchantAssertionVerifier.VerifiedCoverage verified = verifier.verifyStoredCoverage(
+                        generation.anchor(), context.origin, coverageSeal(generation), previous);
+                if (verified == null || verifier.currentDenial(verified) != null
+                        || !sameCoverage(verified.assertion(), generation)) { throw denied(); }
+                previous = verified;
+                previousCommitment = generation.commitment();
+                if (generation.generation() == Long.MAX_VALUE || generation.throughSequence() == Long.MAX_VALUE) { throw denied(); }
+                expectedGeneration = generation.generation() + 1;
+                expectedFromSequence = generation.throughSequence() + 1;
+            }
+            if (latest == null) {
+                if (requireLatest || previous != null || fence != null || !activeGenerations.isEmpty()) { throw denied(); }
+                return null;
+            }
+            if (previous == null || !previous.assertionCommitment().equals(latest.commitment())
+                    || !MerchantAssertionAnchor.coverage(previous).equals(latest.anchor())
+                    || !sameCoverage(previous.assertion(), latest)) { throw denied(); }
+            return previous;
+        }
+
+        private boolean sameCoverage(MerchantCoverageAssertion claim, CoverageGeneration generation) {
+            return claim.generation() == generation.generation() && claim.fromSequence() == generation.fromSequence()
+                    && claim.throughSequence() == generation.throughSequence()
+                    && claim.coverageStart().equals(generation.coverageStart())
+                    && claim.watermark().equals(generation.watermark())
+                    && Objects.equals(claim.previousCoverageCommitment(), generation.previousCommitment());
+        }
+
+        private boolean covers(long sequence, CoverageGeneration fence, List<CoverageGeneration> generations) {
+            return fence != null && fence.covers(sequence) || generations.stream().anyMatch(generation -> generation.covers(sequence));
         }
     }
 
