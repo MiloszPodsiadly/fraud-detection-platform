@@ -51,6 +51,40 @@ class MerchantProfileProjectorTest {
     }
 
     @Test
+    void historicalWindowsUseTheCoverageGenerationsThatAdmittedTheirObservations() {
+        Observation current = observation(100, 50, TIME);
+        HistoryRead input = chainedRead(current, List.of(
+                observation(1, 10, TIME.minusSeconds(5_400)),
+                observation(2, 20, TIME.minusSeconds(1_800))), TIME.minusSeconds(1_800));
+
+        MerchantProfile profile = projectChained(input);
+
+        assertThat(profile.recent().status()).isEqualTo(Status.AVAILABLE);
+        assertThat(profile.baseline().status()).isEqualTo(Status.AVAILABLE);
+        assertThat(profile.provenance().coverageStart()).isEqualTo(TIME.minusSeconds(10_800));
+        assertThat(profile.provenance().coverageStart()).isBeforeOrEqualTo(profile.recent().start());
+        assertThat(profile.provenance().coverageStart()).isBeforeOrEqualTo(profile.baseline().start());
+        assertThat(profile.provenance().throughSequence()).isEqualTo(300);
+        assertThat(profile.canonicalBytes()).isEqualTo(projectChained(input).canonicalBytes());
+    }
+
+    @Test
+    void laterGenerationUsedOnlyByRecentWindowCannotOverstateBaselineCoverage() {
+        Observation current = observation(100, 50, TIME);
+        HistoryRead input = chainedRead(current, List.of(
+                observation(1, 10, TIME.minusSeconds(5_400)),
+                observation(2, 250, TIME.minusSeconds(1_800))), TIME.minusSeconds(5_400));
+
+        MerchantProfile profile = projectChained(input);
+
+        assertThat(profile.recent().status()).isEqualTo(Status.AVAILABLE);
+        assertThat(profile.baseline().status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(profile.baseline().reason()).isEqualTo(Reason.MISSING_COVERAGE);
+        assertThat(profile.provenance().coverageStart()).isEqualTo(TIME.minusSeconds(5_400));
+        assertThat(profile.provenance().coverageStart()).isBeforeOrEqualTo(profile.recent().start());
+    }
+
+    @Test
     void validShapeAndCoverageCannotGrantAuthority() {
         HistoryRead input = read(List.of(), 0);
         unavailable(new MerchantProfileProjector(WINDOWS, null).project(input), Reason.NOT_ADMITTED);
@@ -322,6 +356,9 @@ class MerchantProfileProjectorTest {
     private static MerchantProfile project(HistoryRead read) {
         return new MerchantProfileProjector(WINDOWS, new TestOnlyAdmittedReads(Set.of(read))).project(read);
     }
+    private static MerchantProfile projectChained(HistoryRead read) {
+        return new MerchantProfileProjector(WINDOWS, new TestOnlyChainedReadAdmission(read)).project(read);
+    }
     private static void unavailable(MerchantProfile profile, Reason reason) {
         assertThat(profile.recent().status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(profile.baseline().status()).isEqualTo(Status.UNAVAILABLE);
@@ -332,6 +369,26 @@ class MerchantProfileProjectorTest {
     }
     private static HistoryRead read(List<Observation> rows, int expected) {
         return admittedRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED, COVERAGE.coverageStart(), expected, rows, false);
+    }
+
+    private static HistoryRead chainedRead(Observation current, List<Observation> rows, Instant c3CoverageStart) {
+        String c1Commitment = token(9_101);
+        String c2Commitment = token(9_102);
+        String c3Commitment = token(9_103);
+        CoverageGeneration c1 = generation(1, 1, 100, TIME.minusSeconds(10_800), null, c1Commitment);
+        CoverageGeneration c2 = generation(2, 101, 200, TIME.minusSeconds(7_200), c1Commitment, c2Commitment);
+        CoverageGeneration c3 = generation(3, 201, 300, c3CoverageStart, c2Commitment, c3Commitment);
+        CoverageSeal latest = new CoverageSeal(SCOPE, 300, c3CoverageStart, TIME.plusSeconds(60), c3Commitment);
+        return new HistoryRead(current, latest, FROM, TIME, EVALUATED, TIME.minusSeconds(10_800), rows.size(), rows,
+                false, Collections.nCopies(rows.size(), null), c3.anchor(), null, List.of(c1, c2, c3));
+    }
+
+    private static CoverageGeneration generation(long generation, long from, long through, Instant coverageStart,
+                                                 String previousCommitment, String commitment) {
+        MerchantAssertionAnchor anchor = new MerchantAssertionAnchor(MerchantAssertionVerifier.Role.COVERAGE,
+                commitment, new byte[] {1}, new byte[] {1});
+        return new CoverageGeneration(SCOPE, generation, from, through, coverageStart, TIME.plusSeconds(60),
+                previousCommitment, commitment, anchor);
     }
     private static HistoryRead withCoverage(CoverageSeal coverage) {
         return admittedRead(CURRENT, coverage, FROM, TIME, EVALUATED, COVERAGE.coverageStart(), 0, List.of(), false);
@@ -373,6 +430,38 @@ class MerchantProfileProjectorTest {
         }
         public void requireHistoryRead(HistoryRead read) {
             if (!reads.contains(read)) { throw new SecurityException("TEST_ONLY_NOT_ADMITTED"); }
+        }
+    }
+
+    /** Structural chain admission for synthetic fixtures; these anchors are not cryptographically verified. */
+    private record TestOnlyChainedReadAdmission(HistoryRead expected) implements AdmissionVerifier {
+        public void requireObservation(Observation observation) {
+            if (!expected.current().equals(observation)) { throw new SecurityException("TEST_ONLY_NOT_ADMITTED"); }
+        }
+        public void requireCoverage(CoverageSeal seal) {
+            if (!expected.coverage().equals(seal)) { throw new SecurityException("TEST_ONLY_NOT_ADMITTED"); }
+        }
+        public void requireRead(Scope scope) {
+            if (!expected.current().scope().equals(scope)) { throw new SecurityException("TEST_ONLY_NOT_ADMITTED"); }
+        }
+        public void requireHistoryRead(HistoryRead read) {
+            if (!expected.equals(read) || read.coverage() == null || read.coverageAnchor() == null) {
+                throw new SecurityException("TEST_ONLY_NOT_ADMITTED");
+            }
+            var view = read.coverageView();
+            CoverageGeneration latest = view.generationForSequence(read.coverage().throughSequence());
+            if (latest == null || latest.throughSequence() != read.coverage().throughSequence()
+                    || read.coverageFence() != null || view.activeGenerations().isEmpty()
+                    || !view.activeGenerations().getLast().equals(latest)
+                    || !latest.anchor().equals(read.coverageAnchor())
+                    || !latest.commitment().equals(read.coverage().evidenceCommitment())
+                    || !latest.coverageStart().equals(read.coverage().coverageStart())
+                    || !latest.watermark().equals(read.coverage().watermark())
+                    || view.generationForSequence(read.current().sequence()) == null
+                    || read.observations().stream().anyMatch(row -> !row.scope().equals(read.current().scope())
+                    || view.generationForSequence(row.sequence()) == null)) {
+                throw new SecurityException("TEST_ONLY_NOT_ADMITTED");
+            }
         }
     }
 }
