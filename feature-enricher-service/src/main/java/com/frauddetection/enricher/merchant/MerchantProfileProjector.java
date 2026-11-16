@@ -9,11 +9,13 @@ import com.frauddetection.common.events.merchant.MerchantProfileFacts;
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.OccurrenceClaim;
 import com.frauddetection.common.events.merchant.MerchantRiskEvidenceClaim.ScopeClaim;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.AdmissionVerifier;
+import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageGeneration;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.HistoryRead;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Observation;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -67,21 +69,97 @@ final class MerchantProfileProjector {
                 new MerchantObservationWindowPolicy.Window(baselineStart, recentStart)), windows.maxRows());
         if (result.reason() != Reason.NONE) { return unavailable(read, result.reason()); }
         // The canonical policy orders equal-time rows by sequence and event reference before commitment.
-        Provenance provenance = provenance(read, historyCommitment(result.prior()));
-        return profile(read, provenance, result.windows().get(0), result.windows().get(1));
+        CoverageProjection coverage = coverageForAvailableWindows(read, result.prior(), result.windows());
+        Provenance provenance = provenance(read, coverage.coverageStart(), historyCommitment(result.prior()));
+        return profile(read, provenance, coverage.windows().get(0), coverage.windows().get(1));
     }
 
     private MerchantProfile unavailable(HistoryRead read, Reason reason) {
         Instant recentStart = read.current().eventTime().minus(windows.recent());
-        return profile(read, provenance(read, null),
+        Provenance provenance = new Provenance(read.evaluatedAt(), read.retainedFrom(), null, null, null, null);
+        return profile(read, provenance,
                 new WindowCount(recentStart, read.current().eventTime(), Status.UNAVAILABLE, null, reason),
                 new WindowCount(recentStart.minus(windows.baseline()), recentStart, Status.UNAVAILABLE, null, reason));
     }
 
-    private Provenance provenance(HistoryRead read, String commitment) {
+    private Provenance provenance(HistoryRead read, Instant coverageStart, String commitment) {
         boolean sameScope = read.coverage() != null && read.coverage().scope().equals(read.current().scope());
-        return new Provenance(read.evaluatedAt(), read.retainedFrom(), sameScope ? read.coverage().coverageStart() : null,
-                sameScope ? read.coverage().watermark() : null, sameScope ? read.coverage().throughSequence() : null, commitment);
+        boolean usable = sameScope && coverageStart != null;
+        return new Provenance(read.evaluatedAt(), read.retainedFrom(), usable ? coverageStart : null,
+                usable ? read.coverage().watermark() : null, usable ? read.coverage().throughSequence() : null, commitment);
+    }
+
+    /**
+     * Provenance has one historical lower bound, while each window can use a different generation.
+     * Keep only windows supported by the most restrictive lower bound that can be stated for all of them.
+     */
+    private static CoverageProjection coverageForAvailableWindows(HistoryRead read, List<Observation> prior,
+                                                                   List<WindowCount> sourceWindows) {
+        List<WindowCount> result = new ArrayList<>(sourceWindows);
+        var view = read.coverageView();
+        CoverageGeneration currentGeneration = view.generationForSequence(read.current().sequence());
+        if (currentGeneration == null) {
+            markAvailableUnavailable(result);
+            return new CoverageProjection(null, result);
+        }
+
+        while (true) {
+            List<Instant> windowLowerBounds = new ArrayList<>(result.size());
+            boolean changed = false;
+            for (int index = 0; index < result.size(); index++) {
+                WindowCount window = result.get(index);
+                if (window.status() != Status.AVAILABLE) {
+                    windowLowerBounds.add(null);
+                    continue;
+                }
+                Instant lowerBound = currentGeneration.coverageStart();
+                boolean missingGeneration = false;
+                for (Observation observation : prior) {
+                    if (!inWindow(observation, window)) { continue; }
+                    CoverageGeneration generation = view.generationForSequence(observation.sequence());
+                    if (generation == null) {
+                        result.set(index, unavailable(window));
+                        missingGeneration = true;
+                        break;
+                    }
+                    if (generation.coverageStart().isAfter(lowerBound)) { lowerBound = generation.coverageStart(); }
+                }
+                windowLowerBounds.add(missingGeneration ? null : lowerBound);
+                changed |= missingGeneration;
+            }
+            if (changed) { continue; }
+
+            Instant mostRestrictive = currentGeneration.coverageStart();
+            for (Instant lowerBound : windowLowerBounds) {
+                if (lowerBound != null && lowerBound.isAfter(mostRestrictive)) { mostRestrictive = lowerBound; }
+            }
+            for (int index = 0; index < result.size(); index++) {
+                WindowCount window = result.get(index);
+                if (window.status() == Status.AVAILABLE && mostRestrictive.isAfter(window.start())) {
+                    result.set(index, unavailable(window));
+                    changed = true;
+                }
+            }
+            if (!changed) { return new CoverageProjection(mostRestrictive, result); }
+        }
+    }
+
+    private static void markAvailableUnavailable(List<WindowCount> windows) {
+        for (int index = 0; index < windows.size(); index++) {
+            if (windows.get(index).status() == Status.AVAILABLE) { windows.set(index, unavailable(windows.get(index))); }
+        }
+    }
+
+    private static WindowCount unavailable(WindowCount window) {
+        return new WindowCount(window.start(), window.end(), Status.UNAVAILABLE, null, Reason.MISSING_COVERAGE);
+    }
+
+    private static boolean inWindow(Observation observation, WindowCount window) {
+        return !observation.eventTime().isBefore(window.start()) && observation.eventTime().isBefore(window.end());
+    }
+
+    private record CoverageProjection(Instant coverageStart, List<WindowCount> windows) {
+        private CoverageProjection { windows = List.copyOf(windows); }
     }
 
     private MerchantProfile profile(HistoryRead read, Provenance provenance, WindowCount recent, WindowCount baseline) {
