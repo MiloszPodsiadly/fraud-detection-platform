@@ -2404,6 +2404,41 @@ class MongoMerchantObservationStoreIntegrationTest {
     }
 
     @Test
+    void historicalAdmissionDenialIsUnavailableForReadButHardRejectsCommittedReplay() {
+        Observation first = approved(SCOPE, 1, 1, BASE);
+        Observation current = approved(SCOPE, 2, 2, BASE.plusSeconds(60));
+        store.stage(first);
+        store.stage(current);
+        seal(SCOPE, 2, BASE.minusSeconds(7_200), current.eventTime());
+        assertThat(store.commit(first).snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+        assertThat(store.commit(current).snapshot().priorCount()).isEqualTo(1);
+
+        String currentId = MerchantObservationDocumentCodec.eventId(current);
+        Document candidateBefore = database.getCollection(MongoMerchantObservationSchema.CANDIDATES)
+                .find(eq("_id", currentId)).first();
+        Document manifestBefore = database.getCollection(MongoMerchantObservationSchema.MANIFEST)
+                .find(eq("_id", currentId)).first();
+        Document sourceBefore = source(SCOPE);
+        long historyCountBefore = count(MongoMerchantObservationSchema.HISTORY);
+        long membershipCountBefore = count(MongoMerchantObservationSchema.MEMBERSHIP);
+
+        verifier.observations.remove(first);
+        Snapshot read = store.readSnapshot(current);
+        assertThat(read.availability()).isEqualTo(Availability.UNAVAILABLE);
+        assertThat(read.reason()).isEqualTo(Reason.INCOMPLETE_COVERAGE);
+        assertThat(read.priorCount()).isNull();
+        assertThatThrownBy(() -> store.commit(current)).hasMessage("MERCHANT_STORE_NOT_ADMITTED").hasNoCause();
+
+        assertThat(database.getCollection(MongoMerchantObservationSchema.CANDIDATES).find(eq("_id", currentId)).first())
+                .isEqualTo(candidateBefore);
+        assertThat(database.getCollection(MongoMerchantObservationSchema.MANIFEST).find(eq("_id", currentId)).first())
+                .isEqualTo(manifestBefore);
+        assertThat(source(SCOPE)).isEqualTo(sourceBefore);
+        assertThat(count(MongoMerchantObservationSchema.HISTORY)).isEqualTo(historyCountBefore);
+        assertThat(count(MongoMerchantObservationSchema.MEMBERSHIP)).isEqualTo(membershipCountBefore);
+    }
+
+    @Test
     void corruptCoverageShapeUnknownDocumentVersionAndMalformedReceiptCannotBecomeEvidence() {
         Observation first = approved(SCOPE, 1, 1, BASE);
         store.stage(first);

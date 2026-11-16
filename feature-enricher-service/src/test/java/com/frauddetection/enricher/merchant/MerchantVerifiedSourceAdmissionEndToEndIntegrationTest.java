@@ -210,9 +210,41 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.MANIFEST)
                 .updateOne(eq("_id", firstId), set("observationAnchor.assertion", "AA=="));
 
+        var ledger = ownerClient.getDatabase(database);
+        String currentId = MerchantObservationDocumentCodec.eventId(pseudonyms.scope(sourceScope(current)),
+                pseudonyms.sourceEvent("institution-a", "BANK", current.raw.eventId()));
+        String scopeId = MerchantObservationDocumentCodec.scopeId(pseudonyms.scope(sourceScope(current)));
+        Document candidateBefore = ledger.getCollection(MongoMerchantObservationSchema.CANDIDATES)
+                .find(eq("_id", currentId)).first();
+        Document manifestBefore = ledger.getCollection(MongoMerchantObservationSchema.MANIFEST)
+                .find(eq("_id", currentId)).first();
+        Document sourceBefore = ledger.getCollection(MongoMerchantObservationSchema.COVERAGE)
+                .find(eq("_id", scopeId)).first();
+        Document membershipBefore = ledger.getCollection(MongoMerchantObservationSchema.MEMBERSHIP)
+                .find(eq("_id", currentId)).first();
+        long historyCountBefore = ledger.getCollection(MongoMerchantObservationSchema.HISTORY).countDocuments();
+        long membershipCountBefore = ledger.getCollection(MongoMerchantObservationSchema.MEMBERSHIP).countDocuments();
+        assertThat(candidateBefore).isNotNull().containsEntry("status", "STAGED");
+        assertThat(manifestBefore).isNotNull();
+        assertThat(manifestBefore.get("scoredBinding")).isNull();
+        assertThat(sourceBefore).isNotNull();
+
         VerifiedMerchantAdmission restarted = adapter();
         var replay = stage(restarted, current, 3);
         assertThatThrownBy(() -> restarted.commit(replay)).hasMessage("MERCHANT_STORE_NOT_ADMITTED");
+        assertThat(ledger.getCollection(MongoMerchantObservationSchema.CANDIDATES).find(eq("_id", currentId)).first())
+                .isEqualTo(candidateBefore);
+        assertThat(ledger.getCollection(MongoMerchantObservationSchema.MANIFEST).find(eq("_id", currentId)).first())
+                .isEqualTo(manifestBefore);
+        assertThat(ledger.getCollection(MongoMerchantObservationSchema.COVERAGE).find(eq("_id", scopeId)).first())
+                .isEqualTo(sourceBefore);
+        assertThat(ledger.getCollection(MongoMerchantObservationSchema.MEMBERSHIP).find(eq("_id", currentId)).first())
+                .isEqualTo(membershipBefore);
+        assertThat(ledger.getCollection(MongoMerchantObservationSchema.HISTORY).countDocuments()).isEqualTo(historyCountBefore);
+        assertThat(ledger.getCollection(MongoMerchantObservationSchema.MEMBERSHIP).countDocuments())
+                .isEqualTo(membershipCountBefore);
+        assertThat(ledger.getCollection(MongoMerchantObservationSchema.MANIFEST).find(eq("_id", currentId)).first()
+                .get("scoredBinding")).isNull();
         assertThat(ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.HISTORY)
                 .find(eq("_id", firstId)).first()).isNotNull();
     }

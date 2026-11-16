@@ -724,6 +724,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 if (!evidence.binding().equals(persisted)) { throw failure("SCORED_BINDING_CONFLICT"); }
                 return new DiagnosticSnapshot(DiagnosticState.READY, evidence.snapshot(), true);
             } finally { abort(session); }
+        } catch (IllegalStateException denied) {
+            if (notAdmitted(denied)) { return new DiagnosticSnapshot(DiagnosticState.UNAVAILABLE, null, false); }
+            throw denied;
         } catch (MongoException unavailable) { throw failure("DIAGNOSTIC_READ_UNAVAILABLE"); }
     }
 
@@ -750,6 +753,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 authorize(() -> admission.requirePersistedObservation(observation, persistedCurrentAnchor));
                 return currentSnapshot(session, stored, source, observation, row.getString("historyCommitment"), now());
             } finally { abort(session); } // A read-only snapshot needs no commit acknowledgment or write retry.
+        } catch (IllegalStateException denied) {
+            if (notAdmitted(denied)) { return unavailable(observation, Reason.INCOMPLETE_COVERAGE); }
+            throw denied;
         } catch (MongoException exception) { throw failure("READ_UNAVAILABLE"); }
     }
 
@@ -1266,13 +1272,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 later(instant(source, "retainedFrom"), evaluatedAt.minus(limits.historyRetention())), observations.size(),
                 observations, invalidated(source), anchors, persistedCoverageAnchor, coverageView.fence(),
                 coverageView.activeGenerations());
-        try { admission.requireHistoryRead(read); }
-        catch (SecurityException denied) {
-            return MerchantObservationWindowPolicy.notAdmitted(
-                    List.of(new MerchantObservationWindowPolicy.Window(start, current.eventTime())));
-        }
+        authorize(() -> admission.requireHistoryRead(read));
         return MerchantObservationWindowPolicy.derive(read,
                 List.of(new MerchantObservationWindowPolicy.Window(start, current.eventTime())), limits.maxHistoryRows());
+    }
+
+    private static boolean notAdmitted(IllegalStateException exception) {
+        return "MERCHANT_STORE_NOT_ADMITTED".equals(exception.getMessage());
     }
 
     private Snapshot snapshotFromDerived(Observation observation, MerchantObservationWindowPolicy.Result derived) {
