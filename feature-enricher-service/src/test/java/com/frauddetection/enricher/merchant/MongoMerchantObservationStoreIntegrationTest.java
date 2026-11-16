@@ -34,8 +34,10 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -80,7 +82,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         client = MongoClients.create(mongoUri(databaseName));
         database = client.getDatabase(databaseName);
         clock = new MutableClock(BASE.plusSeconds(1_200));
-        verifier = new TestOnlyMerchantSource();
+        verifier = new TestOnlyMerchantSource(database);
         store = new MongoMerchantObservationStore(client, databaseName, clock, LIMITS, verifier);
     }
 
@@ -174,8 +176,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         FailAfterFirstMerchantWrites fault = new FailAfterFirstMerchantWrites();
         MongoClient faultingClient = fault.wrap(client);
         var faultingStore = new MongoMerchantObservationStore(faultingClient, databaseName, clock, LIMITS, verifier);
-        CoverageSeal seal = new CoverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
         Document beforeProgress = sealProgress(SCOPE);
         long beforeRevision = source(SCOPE).getLong("revision");
         List<Document> beforeMembership = ledgerState(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE);
@@ -215,8 +216,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         fault.failInvalidationUpdateOnce();
         MongoClient uncertainClient = lostAcknowledgments(client, invalidationAcknowledgments);
         var faultingStore = new MongoMerchantObservationStore(fault.wrap(uncertainClient), databaseName, clock, LIMITS, verifier);
-        CoverageSeal failedSeal = new CoverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), secondInFailedSeal.eventTime());
-        verifier.permit(failedSeal);
+        CoverageSeal failedSeal = verifier.coverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), secondInFailedSeal.eventTime());
         Document beforeProgress = sealProgress(SCOPE);
         beforeProgress.remove("accepted");
         beforeProgress.remove("pending");
@@ -286,7 +286,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(source(SCOPE).getInteger("membershipTipCount")).isEqualTo(2);
         assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
         assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE)).isEqualTo(2);
-        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(2);
+        assertThat(countMerchantTipsForScope(SCOPE)).isEqualTo(2);
 
         CommitResult firstResult = store.commit(first);
         CommitResult secondResult = store.commit(second);
@@ -396,8 +396,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         Observation gap = approved(SCOPE, 3, 3, BASE.plusSeconds(60));
         store.stage(first);
         store.stage(gap);
-        CoverageSeal bad = new CoverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), gap.eventTime());
-        verifier.permit(bad);
+        CoverageSeal bad = verifier.coverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), gap.eventTime());
         assertThatThrownBy(() -> store.seal(bad)).hasMessage("MERCHANT_STORE_SOURCE_SEQUENCE_GAP");
         assertThat(source(SCOPE).getLong("sealedSequence")).isZero();
         seal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
@@ -448,7 +447,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(countForScope(MongoMerchantObservationSchema.MANIFEST, SCOPE)).isEqualTo(1);
         assertThat(countForScope(MongoMerchantObservationSchema.HISTORY, SCOPE)).isEqualTo(1);
         assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP, SCOPE)).isEqualTo(1);
-        assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(1);
+        assertThat(countMerchantTipsForScope(SCOPE)).isEqualTo(1);
         assertUnavailable(bounded, first);
 
         MongoMerchantObservationStore restarted = storeWithLimits(oneObservation);
@@ -475,8 +474,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(rejectedEarlierEvent.eventTime()).isAfterOrEqualTo(laterSequenceFirst.eventTime().minus(LIMITS.window()));
         assertThat(rejectedEarlierEvent.eventTime()).isBefore(laterSequenceFirst.eventTime());
 
-        CoverageSeal seal = new CoverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), laterSequenceFirst.eventTime());
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), laterSequenceFirst.eventTime());
         String sealOutcome = null;
         try { bounded.seal(seal); }
         catch (IllegalStateException exception) { sealOutcome = exception.getMessage(); }
@@ -1196,7 +1194,7 @@ class MongoMerchantObservationStoreIntegrationTest {
     void unadmittedFutureObservationPerformsNoMongoOperation() {
         Scope scope = changeScope(SCOPE, "source");
         MongoOperationCounter operations = new MongoOperationCounter(client);
-        TestOnlyMerchantSource denyingAdmission = new TestOnlyMerchantSource();
+        TestOnlyMerchantSource denyingAdmission = new TestOnlyMerchantSource(database);
         MongoMerchantObservationStore denied = new MongoMerchantObservationStore(
                 operations.client(), databaseName, clock, LIMITS, denyingAdmission);
         Instant now = clock.instant();
@@ -1290,7 +1288,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(store.commit(first).snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
 
         MongoOperationCounter operations = new MongoOperationCounter(client);
-        TestOnlyMerchantSource denyingAdmission = new TestOnlyMerchantSource();
+        TestOnlyMerchantSource denyingAdmission = new TestOnlyMerchantSource(database);
         MongoMerchantObservationStore denied = new MongoMerchantObservationStore(
                 operations.client(), databaseName, clock, LIMITS, denyingAdmission);
         operations.start();
@@ -1497,8 +1495,7 @@ class MongoMerchantObservationStoreIntegrationTest {
 
         Observation second = approved(SCOPE, 2, 2, BASE.plusSeconds(60));
         store.stage(second);
-        CoverageSeal nextSeal = new CoverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
-        verifier.permit(nextSeal);
+        CoverageSeal nextSeal = verifier.coverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
         try (var workers = Executors.newFixedThreadPool(8)) {
             var work = new java.util.ArrayList<java.util.concurrent.Callable<Object>>();
             work.add(() -> { store.seal(nextSeal); return null; });
@@ -1593,8 +1590,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         bounded.stage(first);
         bounded.stage(second);
         bounded.stage(third);
-        CoverageSeal seal = new CoverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), third.eventTime());
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), third.eventTime());
         bounded.seal(seal);
         bounded.commit(first);
         bounded.commit(second);
@@ -1846,8 +1842,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         var restartedAfterUnknownStage = new MongoMerchantObservationStore(client, databaseName, clock, LIMITS, verifier);
         assertThat(restartedAfterUnknownStage.stage(first)).isEqualTo(StageResult.EXISTING);
         assertThat(store.pending(SCOPE).pending()).isEqualTo(1);
-        CoverageSeal seal = new CoverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
         AtomicInteger sealAcks = new AtomicInteger();
         new MongoMerchantObservationStore(lostAcknowledgments(client, sealAcks), databaseName, clock, LIMITS, verifier).seal(seal);
         assertThat(sealAcks).hasValue(3);
@@ -1986,8 +1981,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         var bounded = new MongoMerchantObservationStore(client, databaseName, clock, storageBudget(1), verifier);
         Observation first = approved(SCOPE, 1, 1, BASE);
         bounded.stage(first);
-        CoverageSeal firstSeal = new CoverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
-        verifier.permit(firstSeal);
+        CoverageSeal firstSeal = verifier.coverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
         bounded.seal(firstSeal);
         bounded.commit(first);
 
@@ -2000,8 +1994,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(source(SCOPE).getLong("compactedThroughSequence")).isEqualTo(1L);
         assertThat(countForScope(MongoMerchantObservationSchema.MEMBERSHIP_TIPS, SCOPE)).isEqualTo(1L);
 
-        CoverageSeal secondSeal = new CoverageSeal(SCOPE, 2, second.eventTime().minusSeconds(7_200), second.eventTime());
-        verifier.permit(secondSeal);
+        CoverageSeal secondSeal = verifier.coverageSeal(SCOPE, 2, second.eventTime().minusSeconds(7_200), second.eventTime());
         assertThatThrownBy(() -> bounded.seal(secondSeal)).hasMessage("MERCHANT_STORE_STORAGE_CAPACITY");
         assertThat(source(SCOPE).getLong("sealedSequence")).isEqualTo(1L);
         assertThat(source(SCOPE).getBoolean("invalidated")).isFalse();
@@ -2021,7 +2014,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         database.getCollection(MongoMerchantObservationSchema.HISTORY).deleteOne(eq("sourceEvent", first.sourceEvent()));
         assertThat(store.readSnapshot(second).reason()).isEqualTo(Reason.HISTORY_MISSING);
         assertThat(store.readSnapshot(second).priorCount()).isNull();
-        CoverageSeal same = new CoverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
+        CoverageSeal same = verifier.coverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
         assertThatCode(() -> store.seal(same)).doesNotThrowAnyException();
         assertThat(store.stage(approved(SCOPE, 3, 3, BASE.plusSeconds(120)))).isEqualTo(StageResult.QUARANTINED);
         assertThat(count(MongoMerchantObservationSchema.CANDIDATES)).isEqualTo(1);
@@ -2161,8 +2154,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         store.stage(first);
         store.stage(interleaved);
         store.stage(later);
-        CoverageSeal seal = new CoverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), later.eventTime());
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(SCOPE, 3, BASE.minusSeconds(7_200), later.eventTime());
         store.seal(seal);
         store.commit(first);
         store.commit(interleaved);
@@ -2281,8 +2273,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         Observation second = distinctMerchant(2, BASE.plusSeconds(1));
         bounded.stage(first);
         bounded.stage(second);
-        CoverageSeal seal = new CoverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(SCOPE, 2, BASE.minusSeconds(7_200), second.eventTime());
         bounded.seal(seal);
         assertThat(bounded.commit(first).snapshot().priorCount()).isZero();
         assertThat(bounded.commit(second).snapshot().priorCount()).isZero();
@@ -2306,8 +2297,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         var bounded = new MongoMerchantObservationStore(client, databaseName, clock, storageBudget(1), verifier);
         Observation first = approved(SCOPE, 1, 1, BASE);
         bounded.stage(first);
-        CoverageSeal seal = new CoverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), BASE);
         bounded.seal(seal);
         bounded.commit(first);
         // Disposable test database: simulate removal while preserving the operational source fence, not legal erasure.
@@ -2519,8 +2509,7 @@ class MongoMerchantObservationStoreIntegrationTest {
         assertThat(source(futureScope).getBoolean("invalidated")).isTrue();
         Observation boundary = approved(SCOPE, 1, 1, clock.instant().plusSeconds(120));
         store.stage(boundary);
-        CoverageSeal future = new CoverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), clock.instant().plusSeconds(121));
-        verifier.permit(future);
+        CoverageSeal future = verifier.coverageSeal(SCOPE, 1, BASE.minusSeconds(7_200), clock.instant().plusSeconds(121));
         assertThatThrownBy(() -> store.seal(future)).hasMessage("MERCHANT_STORE_FUTURE_WATERMARK");
         assertThat(source(SCOPE).getLong("sealedSequence")).isZero();
         seal(SCOPE, 1, BASE.minusSeconds(7_200), boundary.eventTime());
@@ -2541,8 +2530,9 @@ class MongoMerchantObservationStoreIntegrationTest {
         sources.updateOne(eq("_id", source(SCOPE).getString("_id")), com.mongodb.client.model.Updates.combine(
                 set("sealedSequence", 0L), com.mongodb.client.model.Updates.unset("coverageStart"),
                 com.mongodb.client.model.Updates.unset("watermark")));
-        assertThat(store.readSnapshot(first).availability()).isEqualTo(Availability.UNAVAILABLE);
-        assertThat(store.commit(first).snapshot().availability()).isEqualTo(Availability.UNAVAILABLE);
+        // requireSource rejects an anchor whose durable seal projection was erased; both paths must fail closed.
+        assertThatThrownBy(() -> store.readSnapshot(first)).hasMessage("MERCHANT_STORE_CORRUPT_COVERAGE");
+        assertThatThrownBy(() -> store.commit(first)).hasMessage("MERCHANT_STORE_CORRUPT_COVERAGE");
     }
 
     @Test
@@ -2638,13 +2628,11 @@ class MongoMerchantObservationStoreIntegrationTest {
         return new Observation(scope, token(100 + id), token(200 + id), token(300 + id), MERCHANT, sequence, time, time, token(400 + id));
     }
     private void seal(Scope scope, long through, Instant start, Instant watermark) {
-        CoverageSeal seal = new CoverageSeal(scope, through, start, watermark);
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(scope, through, start, watermark);
         store.seal(seal);
     }
     private void seal(MongoMerchantObservationStore target, Scope scope, long through, Instant start, Instant watermark) {
-        CoverageSeal seal = new CoverageSeal(scope, through, start, watermark);
-        verifier.permit(seal);
+        CoverageSeal seal = verifier.coverageSeal(scope, through, start, watermark);
         target.seal(seal);
     }
     private void assertUnavailable(MerchantObservationStore target, Observation observation) {
@@ -2693,6 +2681,11 @@ class MongoMerchantObservationStoreIntegrationTest {
     private long countForScope(String collection, Scope scope) {
         return database.getCollection(collection).countDocuments(eq("scope", MerchantObservationDocumentCodec.scopeId(scope)));
     }
+    private long countMerchantTipsForScope(Scope scope) {
+        return database.getCollection(MongoMerchantObservationSchema.MEMBERSHIP_TIPS).countDocuments(and(
+                eq("scope", MerchantObservationDocumentCodec.scopeId(scope)),
+                ne("kind", MerchantObservationDocumentCodec.COVERAGE_GENERATION_KIND)));
+    }
     private void assertUniqueIndex(String collection, String name, List<String> prefix, String identity) {
         Document index = database.getCollection(collection).listIndexes().into(new java.util.ArrayList<>()).stream()
                 .filter(row -> name.equals(row.getString("name"))).findFirst().orElseThrow();
@@ -2720,22 +2713,116 @@ class MongoMerchantObservationStoreIntegrationTest {
                 + "?directConnection=true&timeoutMS=5000&serverSelectionTimeoutMS=5000&connectTimeoutMS=1000&socketTimeoutMS=5000";
     }
 
-    /** Explicit test-only assumption of external admission; not issuer authentication or a production verifier. */
+    /** Parser-valid durable coverage fixtures; these do not claim issuer authentication or production verification. */
     private static final class TestOnlyMerchantSource implements AdmissionVerifier {
+        private final MongoDatabase database;
         private final Set<Observation> observations = ConcurrentHashMap.newKeySet();
         private final Set<CoverageSeal> seals = ConcurrentHashMap.newKeySet();
         private final Set<Scope> scopes = ConcurrentHashMap.newKeySet();
+        private final Map<TestSealKey, CoverageSeal> sealByFields = new ConcurrentHashMap<>();
+        private final Map<CoverageSeal, MerchantAssertionAnchor> coverageAnchors = new ConcurrentHashMap<>();
+
+        private TestOnlyMerchantSource(MongoDatabase database) { this.database = database; }
+
         void permit(Observation row) { observations.add(row); scopes.add(row.scope()); }
-        void permit(CoverageSeal seal) { seals.add(seal); scopes.add(seal.scope()); }
+
+        synchronized CoverageSeal coverageSeal(Scope scope, long throughSequence, Instant coverageStart, Instant watermark) {
+            TestSealKey key = new TestSealKey(scope, throughSequence, coverageStart, watermark);
+            CoverageSeal existing = sealByFields.get(key);
+            if (existing != null) { return existing; }
+
+            CoverageGeneration previous = latestGeneration(scope);
+            long generation = previous == null ? 1 : previous.generation() + 1;
+            long fromSequence = previous == null ? 1 : previous.throughSequence() + 1;
+            String previousCommitment = previous == null ? null : previous.commitment();
+            MerchantCoverageAssertion claim = new MerchantCoverageAssertion(1,
+                    scope.issuer(), scope.institution(), scope.source(), scope.epoch(), token(610), 1, token(611),
+                    scope.identityVersion(), token(612 + (int) generation), token(613), token(614), 1,
+                    token(615), token(616), token(617), 1, fromSequence, throughSequence, coverageStart, watermark,
+                    generation, previousCommitment);
+            byte[] assertion = MerchantAssertionCodec.encodeCoverage(claim);
+            String commitment = MerchantCommitment.sha256("MERCHANT_STORE_TEST_COVERAGE_COMMITMENT",
+                    MerchantObservationDocumentCodec.scopeId(scope),
+                    generation, fromSequence, throughSequence, coverageStart, watermark, previousCommitment);
+            MerchantAssertionAnchor anchor = new MerchantAssertionAnchor(MerchantAssertionVerifier.Role.COVERAGE,
+                    commitment, assertion, new byte[] {1});
+            CoverageSeal seal = new CoverageSeal(scope, throughSequence, coverageStart, watermark, commitment);
+            sealByFields.put(key, seal);
+            seals.add(seal);
+            scopes.add(scope);
+            coverageAnchors.put(seal, anchor);
+            return seal;
+        }
+
         @Override public void requireObservation(Observation row) { require(observations.contains(row)); }
         @Override public void requireCoverage(CoverageSeal seal) { require(seals.contains(seal)); }
         @Override public void requireRead(Scope scope) { require(scopes.contains(scope)); }
+        @Override public MerchantAssertionAnchor coverageAnchor(CoverageSeal seal) {
+            requireCoverage(seal);
+            return coverageAnchors.get(seal);
+        }
         @Override public void requireHistoryRead(HistoryRead read) {
             require(observations.contains(read.current()) && read.observations().stream().allMatch(observations::contains)
                     && read.observationAnchors().stream().allMatch(java.util.Objects::isNull)
-                    && read.coverageAnchor() == null);
+                    && read.coverageAnchor() != null
+                    && coverageAnchors.values().stream().anyMatch(read.coverageAnchor()::equals));
+            CoverageGeneration latest = MerchantObservationDocumentCodec.coverageGenerationFromAnchor(
+                    read.current().scope(), read.coverageAnchor());
+            require(read.coverage() != null && read.coverage().scope().equals(read.current().scope())
+                    && read.coverage().evidenceCommitment().equals(latest.commitment())
+                    && read.coverage().throughSequence() == latest.throughSequence()
+                    && read.coverage().coverageStart().equals(latest.coverageStart())
+                    && read.coverage().watermark().equals(latest.watermark()));
+            requireCoverageChain(read.current().scope(), read.coverageFence(), read.coverageGenerations(), latest);
+            require(covers(read.current().sequence(), read.coverageFence(), read.coverageGenerations())
+                    && read.observations().stream().allMatch(row -> covers(row.sequence(), read.coverageFence(),
+                    read.coverageGenerations())));
         }
+        @Override public void requireCoverageChain(Scope scope, CoverageGeneration coverageFence,
+                                                  List<CoverageGeneration> activeGenerations,
+                                                  CoverageGeneration latestGeneration) {
+            require((coverageFence == null || permitted(coverageFence))
+                    && activeGenerations.stream().allMatch(this::permitted));
+            if (latestGeneration == null) {
+                require(coverageFence == null && activeGenerations.isEmpty());
+                return;
+            }
+            CoverageGeneration previous = coverageFence;
+            for (CoverageGeneration generation : activeGenerations) {
+                require(generation.scope().equals(scope)
+                        && generation.generation() == (previous == null ? 1 : previous.generation() + 1)
+                        && generation.fromSequence() == (previous == null ? 1 : previous.throughSequence() + 1)
+                        && java.util.Objects.equals(generation.previousCommitment(),
+                        previous == null ? null : previous.commitment()));
+                previous = generation;
+            }
+            require(java.util.Objects.equals(previous, latestGeneration) && permitted(latestGeneration));
+        }
+
+        private boolean permitted(CoverageGeneration generation) {
+            return coverageAnchors.values().stream().anyMatch(generation.anchor()::equals);
+        }
+
+        private static boolean covers(long sequence, CoverageGeneration fence, List<CoverageGeneration> generations) {
+            return fence != null && fence.covers(sequence) || generations.stream().anyMatch(generation -> generation.covers(sequence));
+        }
+
+        private CoverageGeneration latestGeneration(Scope scope) {
+            Document source = database.getCollection(MongoMerchantObservationSchema.COVERAGE)
+                    .find(eq("_id", MerchantObservationDocumentCodec.scopeId(scope))).first();
+            if (source == null) { return null; }
+            Document anchorDocument = source.get("coverageAnchor", Document.class);
+            if (anchorDocument != null) {
+                return MerchantObservationDocumentCodec.coverageGenerationFromAnchor(scope,
+                        MerchantAssertionAnchor.fromDocument(anchorDocument, MerchantAssertionVerifier.Role.COVERAGE));
+            }
+            Document fence = source.get("coverageFence", Document.class);
+            return fence == null ? null : MerchantObservationDocumentCodec.decodeCoverageFence(fence, scope);
+        }
+
         private void require(boolean allowed) { if (!allowed) { throw new SecurityException("TEST_ONLY_ADMISSION_DENIED"); } }
+
+        private record TestSealKey(Scope scope, long throughSequence, Instant coverageStart, Instant watermark) { }
     }
     private static final class MutableClock extends Clock {
         private volatile Instant instant;

@@ -124,6 +124,55 @@ interface MerchantObservationStore {
         @Override public String toString() { return "MerchantCoverageGeneration[redacted]"; }
     }
 
+    /** Transaction-local, already-authorized coverage index; never cache it across independent reads. */
+    record CoverageView(CoverageGeneration fence, List<CoverageGeneration> activeGenerations) {
+        public CoverageView {
+            require(activeGenerations != null && activeGenerations.size() <= MAX_ACTIVE_COVERAGE_GENERATIONS,
+                    "COVERAGE_GENERATION_CAPACITY");
+            activeGenerations = List.copyOf(activeGenerations);
+            CoverageGeneration previous = fence;
+            for (CoverageGeneration generation : activeGenerations) {
+                if (previous == null) {
+                    require(generation.generation() == 1 && generation.fromSequence() == 1
+                                    && generation.previousCommitment() == null,
+                            "COVERAGE_GENERATION_ORIGIN");
+                } else {
+                    require(generation.scope().equals(previous.scope())
+                                    && generation.generation() == previous.generation() + 1
+                                    && generation.fromSequence() == previous.throughSequence() + 1
+                                    && previous.commitment().equals(generation.previousCommitment()),
+                            "COVERAGE_GENERATION_CHAIN");
+                }
+                previous = generation;
+            }
+        }
+
+        CoverageGeneration generationForSequence(long sequence) {
+            CoverageGeneration fenceMatch = fence != null && fence.covers(sequence) ? fence : null;
+            int low = 0;
+            int high = activeGenerations.size() - 1;
+            CoverageGeneration activeMatch = null;
+            while (low <= high) {
+                int middle = (low + high) >>> 1;
+                CoverageGeneration candidate = activeGenerations.get(middle);
+                if (sequence < candidate.fromSequence()) {
+                    high = middle - 1;
+                } else if (sequence > candidate.throughSequence()) {
+                    low = middle + 1;
+                } else {
+                    activeMatch = candidate;
+                    break;
+                }
+            }
+            if (fenceMatch != null && activeMatch != null) {
+                throw new IllegalStateException("MERCHANT_STORE_COVERAGE_GENERATION_OVERLAP");
+            }
+            return activeMatch != null ? activeMatch : fenceMatch;
+        }
+
+        @Override public String toString() { return "MerchantCoverageView[redacted]"; }
+    }
+
     /** Bounded read description only. expectedRows covers unique prior rows in [from, asOf), not admission or completeness proof. */
     record HistoryRead(Observation current, CoverageSeal coverage, Instant from, Instant asOf, Instant evaluatedAt,
                        Instant retainedFrom, int expectedRows, List<Observation> observations, boolean sourceInvalidated,
@@ -161,6 +210,7 @@ interface MerchantObservationStore {
             require(coverageGenerations.stream().allMatch(generation -> generation.scope().equals(current.scope())),
                     "COVERAGE_GENERATION_SCOPE");
         }
+        CoverageView coverageView() { return new CoverageView(coverageFence, coverageGenerations); }
         @Override public String toString() { return "MerchantHistoryRead[redacted]"; }
     }
 

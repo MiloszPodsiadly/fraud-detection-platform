@@ -3,6 +3,7 @@ package com.frauddetection.enricher.merchant;
 import com.frauddetection.common.events.merchant.MerchantProfile.Reason;
 import com.frauddetection.common.events.merchant.MerchantProfile.Status;
 import com.frauddetection.common.events.merchant.MerchantProfile.WindowCount;
+import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageView;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.HistoryRead;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Observation;
 
@@ -64,6 +65,11 @@ final class MerchantObservationWindowPolicy {
                 || read.coverage().watermark().isBefore(current.eventTime())) {
             return unavailable(windows, Reason.SOURCE_GAP);
         }
+        // The caller must first authorize this exact HistoryRead. For production reads this index is
+        // the authenticated chain; the latest seal remains a watermark/sequence fence, not a historic lower bound.
+        CoverageView coverageView = read.coverageView();
+        Instant currentCoverageStart = coverageStart(coverageView, current.sequence());
+        if (currentCoverageStart == null) { return unavailable(windows, Reason.MISSING_COVERAGE); }
 
         Map<String, Observation> events = new HashMap<>();
         Map<String, String> transactions = new HashMap<>();
@@ -107,12 +113,15 @@ final class MerchantObservationWindowPolicy {
         for (Window window : windows) {
             if (read.retainedFrom().isAfter(window.start())) {
                 counts.add(new WindowCount(window.start(), window.end(), Status.UNAVAILABLE, null, Reason.RETENTION_EXPIRED));
-            } else if (read.coverage().coverageStart().isAfter(window.start())) {
+            } else if (currentCoverageStart.isAfter(window.start())
+                    || prior.stream().filter(observation -> inWindow(observation, window))
+                    .map(observation -> coverageStart(coverageView, observation.sequence()))
+                    .anyMatch(start -> start == null || start.isAfter(window.start()))) {
                 counts.add(new WindowCount(window.start(), window.end(), Status.UNAVAILABLE, null, Reason.MISSING_COVERAGE));
             } else {
                 int count = 0;
                 for (Observation observation : prior) {
-                    if (!observation.eventTime().isBefore(window.start()) && observation.eventTime().isBefore(window.end())) {
+                    if (inWindow(observation, window)) {
                         count++;
                     }
                 }
@@ -122,9 +131,22 @@ final class MerchantObservationWindowPolicy {
         return new Result(Reason.NONE, prior, counts);
     }
 
+    private static Instant coverageStart(CoverageView view, long sequence) {
+        var generation = view.generationForSequence(sequence);
+        return generation == null ? null : generation.coverageStart();
+    }
+
+    private static boolean inWindow(Observation observation, Window window) {
+        return !observation.eventTime().isBefore(window.start()) && observation.eventTime().isBefore(window.end());
+    }
+
     private static Result unavailable(List<Window> windows, Reason reason) {
         return new Result(reason, List.of(), windows.stream().map(window -> new WindowCount(window.start(), window.end(),
                 Status.UNAVAILABLE, null, reason)).toList());
+    }
+
+    static Result notAdmitted(List<Window> windows) {
+        return unavailable(windows, Reason.NOT_ADMITTED);
     }
 
     private static <K> boolean conflict(Map<K, String> values, K key, String sourceEvent) {

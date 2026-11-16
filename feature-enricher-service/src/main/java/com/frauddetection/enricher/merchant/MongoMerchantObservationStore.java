@@ -548,9 +548,10 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 }
                 Snapshot snapshot;
                 String historyCommitment = null;
-                CoverageGeneration stageCoverage = coverageGenerationForSequence(session, source, observation.scope(),
-                        observation.sequence());
-                MerchantObservationWindowPolicy.Result preflight = deriveWindow(session, observation, source, List.of(), List.of(), now());
+                CoverageView coverageView = coverageView(session, observation.scope(), source);
+                CoverageGeneration stageCoverage = coverageView.generationForSequence(observation.sequence());
+                MerchantObservationWindowPolicy.Result preflight = deriveWindow(observation, source,
+                        List.of(), List.of(), now(), coverageView);
                 if (preflight.reason() != com.frauddetection.common.events.merchant.MerchantProfile.Reason.NONE
                         || preflight.windows().getFirst().status() == com.frauddetection.common.events.merchant.MerchantProfile.Status.UNAVAILABLE) {
                     snapshot = snapshotFromDerived(observation, preflight);
@@ -576,10 +577,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                             source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"))) {
                         return quarantine(session, candidate, observation.scope(), Reason.HISTORY_MISSING);
                     }
-                    MerchantObservationWindowPolicy.Result derived = deriveWindow(session, observation, source, rows, receipts, now());
+                    MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source,
+                            rows, receipts, now(), coverageView);
                     snapshot = snapshotFromDerived(observation, derived);
                     if (snapshot.availability() == Availability.COMPLETE_WINDOW) {
-                        historyCommitment = historyWindowCommitment(session, observation, start, rows, receipts, members, source);
+                        historyCommitment = historyWindowCommitment(observation, start, rows, receipts, members, coverageView);
                     }
                 }
                 history.insertOne(session, observationDocument(observation)
@@ -659,10 +661,11 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         authorize(() -> admission.requirePersistedObservation(observation, anchor));
         Snapshot snapshot = decodeSnapshot(candidate, observation);
         if (snapshot.availability() != Availability.COMPLETE_WINDOW) { throw failure("STAGE_A_NOT_COMPLETE"); }
-        Snapshot current = currentSnapshot(session, snapshot, source, observation, candidate.getString("historyCommitment"), now());
+        CoverageView coverageView = coverageView(session, observation.scope(), source);
+        Snapshot current = currentSnapshot(session, snapshot, source, observation, candidate.getString("historyCommitment"),
+                now(), coverageView);
         if (!snapshot.equals(current)) { throw failure("STAGE_A_CHANGED"); }
-        CoverageGeneration coverageGeneration = coverageGenerationForSequence(session, source, observation.scope(),
-                observation.sequence());
+        CoverageGeneration coverageGeneration = coverageView.generationForSequence(observation.sequence());
         Long storedGeneration = candidate.get("stageCoverageGeneration", Long.class);
         String storedCommitment = candidate.getString("stageCoverageCommitment");
         if (coverageGeneration == null || storedGeneration == null
@@ -859,18 +862,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         return generations;
     }
 
-    private CoverageGeneration coverageGenerationForSequence(ClientSession session, Document source, Scope scope,
-                                                             long sequence) {
-        CoverageGeneration match = null;
-        CoverageGeneration fence = coverageFence(source, scope);
-        if (fence != null && fence.covers(sequence)) { match = fence; }
-        for (CoverageGeneration generation : coverageGenerations(session, scope, source)) {
-            if (generation.covers(sequence)) {
-                if (match != null) { throw failure("COVERAGE_GENERATION_OVERLAP"); }
-                match = generation;
-            }
-        }
-        return match;
+    private CoverageView coverageView(ClientSession session, Scope scope, Document source) {
+        return new CoverageView(coverageFence(source, scope), coverageGenerations(session, scope, source));
     }
 
     private long coverageFenceGeneration(Document source) {
@@ -1204,7 +1197,14 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
     /** Revoke usability without rewriting the immutable receipt when coverage or retained history is no longer sufficient. */
     private Snapshot currentSnapshot(ClientSession session, Snapshot stored, Document source, Observation observation,
                                      String expectedHistoryCommitment, Instant evaluatedAt) {
-        MerchantObservationWindowPolicy.Result preflight = deriveWindow(session, observation, source, List.of(), List.of(), evaluatedAt);
+        CoverageView coverageView = coverageView(session, observation.scope(), source);
+        return currentSnapshot(session, stored, source, observation, expectedHistoryCommitment, evaluatedAt, coverageView);
+    }
+
+    private Snapshot currentSnapshot(ClientSession session, Snapshot stored, Document source, Observation observation,
+                                     String expectedHistoryCommitment, Instant evaluatedAt, CoverageView coverageView) {
+        MerchantObservationWindowPolicy.Result preflight = deriveWindow(observation, source,
+                List.of(), List.of(), evaluatedAt, coverageView);
         if (preflight.reason() != com.frauddetection.common.events.merchant.MerchantProfile.Reason.NONE
                 || preflight.windows().getFirst().status() == com.frauddetection.common.events.merchant.MerchantProfile.Status.UNAVAILABLE) {
             return snapshotFromDerived(observation, preflight);
@@ -1232,12 +1232,13 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     stored.windowStart(), source.getLong("compactedThroughSequence"), source.getLong("sealedSequence"))) {
                 return unavailable(observation, Reason.HISTORY_MISSING);
             }
-            String currentHistoryCommitment = historyWindowCommitment(session, observation, stored.windowStart(),
-                    rows, receipts, members, source);
+            String currentHistoryCommitment = historyWindowCommitment(observation, stored.windowStart(),
+                    rows, receipts, members, coverageView);
             if (!Objects.equals(expectedHistoryCommitment, currentHistoryCommitment)) {
                 return unavailable(observation, Reason.HISTORY_MISSING);
             }
-            MerchantObservationWindowPolicy.Result derived = deriveWindow(session, observation, source, rows, receipts, evaluatedAt);
+            MerchantObservationWindowPolicy.Result derived = deriveWindow(observation, source,
+                    rows, receipts, evaluatedAt, coverageView);
             Snapshot current = snapshotFromDerived(observation, derived);
             if (current.availability() != Availability.COMPLETE_WINDOW) { return current; }
             if (!current.priorCount().equals(stored.priorCount())) {
@@ -1247,9 +1248,9 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         return stored;
     }
 
-    private MerchantObservationWindowPolicy.Result deriveWindow(ClientSession session, Observation current, Document source,
+    private MerchantObservationWindowPolicy.Result deriveWindow(Observation current, Document source,
                                                                  List<Document> historyRows, List<Document> manifestRows,
-                                                                 Instant evaluatedAt) {
+                                                                 Instant evaluatedAt, CoverageView coverageView) {
         Instant start = current.eventTime().minus(limits.window());
         List<Observation> observations = historyRows.stream().map(MerchantObservationDocumentCodec::decodeObservation).toList();
         List<MerchantAssertionAnchor> anchors = manifestRows.stream().map(MongoMerchantObservationStore::observationAnchor).toList();
@@ -1259,14 +1260,17 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
         CoverageSeal seal = source.getDate("watermark") == null ? null
                 : new CoverageSeal(current.scope(), source.getLong("sealedSequence"), instant(source, "coverageStart"),
                         instant(source, "watermark"), persistedCoverageAnchor == null ? null : persistedCoverageAnchor.commitment());
-        CoverageGeneration fence = coverageFence(source, current.scope());
-        List<CoverageGeneration> generations = coverageGenerations(session, current.scope(), source);
         HistoryRead read = new HistoryRead(current,
                 seal,
                 start, current.eventTime(), evaluationFloor,
                 later(instant(source, "retainedFrom"), evaluatedAt.minus(limits.historyRetention())), observations.size(),
-                observations, invalidated(source), anchors, persistedCoverageAnchor, fence, generations);
-        authorize(() -> admission.requireHistoryRead(read));
+                observations, invalidated(source), anchors, persistedCoverageAnchor, coverageView.fence(),
+                coverageView.activeGenerations());
+        try { admission.requireHistoryRead(read); }
+        catch (SecurityException denied) {
+            return MerchantObservationWindowPolicy.notAdmitted(
+                    List.of(new MerchantObservationWindowPolicy.Window(start, current.eventTime())));
+        }
         return MerchantObservationWindowPolicy.derive(read,
                 List.of(new MerchantObservationWindowPolicy.Window(start, current.eventTime())), limits.maxHistoryRows());
     }
@@ -1567,8 +1571,8 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                 stageCoverageGeneration, stageCoverageCommitment);
     }
 
-    private String historyWindowCommitment(ClientSession session, Observation current, Instant start, List<Document> rows,
-                                           List<Document> receipts, List<Document> members, Document source) {
+    private String historyWindowCommitment(Observation current, Instant start, List<Document> rows,
+                                           List<Document> receipts, List<Document> members, CoverageView coverageView) {
         if (rows.size() != receipts.size() || rows.size() != members.size()) { throw failure("HISTORY_MISSING"); }
         MerchantCommitment.Accumulator digest = MerchantCommitment.accumulator("MERCHANT_STORE_DIGEST_UNAVAILABLE")
                 .append("merchant-history-window/v2", scopeId(current.scope()), current.merchant(), start,
@@ -1589,7 +1593,7 @@ final class MongoMerchantObservationStore implements MerchantObservationStore {
                     || !checkpoint.inputCommitment().equals(row.getString("inputCommitment"))) {
                 throw failure("HISTORY_MISSING");
             }
-            CoverageGeneration generation = coverageGenerationForSequence(session, source, current.scope(), observation.sequence());
+            CoverageGeneration generation = coverageView.generationForSequence(observation.sequence());
             if (observation.evidenceCommitment() != null && generation == null) { throw failure("HISTORY_MISSING"); }
             digest.append(row.getString("_id"), observation.sequence(), observation.eventTime(),
                     row.getString("inputCommitment"), observation.evidenceCommitment(),

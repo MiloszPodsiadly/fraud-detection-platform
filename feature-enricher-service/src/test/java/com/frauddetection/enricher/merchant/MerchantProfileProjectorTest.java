@@ -5,6 +5,7 @@ import com.frauddetection.common.events.merchant.MerchantProfile.Reason;
 import com.frauddetection.common.events.merchant.MerchantProfile.Status;
 import com.frauddetection.common.events.merchant.MerchantProfileFacts;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.AdmissionVerifier;
+import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageGeneration;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.CoverageSeal;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.HistoryRead;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.Observation;
@@ -168,7 +169,7 @@ class MerchantProfileProjectorTest {
     void anIndependentlyAdmittedRotatedScopeStartsItsOwnBoundedProfileWithoutCrossKeyContinuity() {
         Scope rotated = new Scope(SCOPE.issuer(), SCOPE.institution(), SCOPE.source(), token(99), 2);
         Observation current = copyScope(CURRENT, rotated, token(999));
-        HistoryRead read = new HistoryRead(current, new CoverageSeal(rotated, 200, COVERAGE.coverageStart(), COVERAGE.watermark()),
+        HistoryRead read = admittedRead(current, new CoverageSeal(rotated, 200, COVERAGE.coverageStart(), COVERAGE.watermark()),
                 FROM, TIME, EVALUATED, COVERAGE.coverageStart(), 0, List.of(), false);
         MerchantProfile profile = project(read);
         assertThat(profile.recent().count()).isZero();
@@ -186,7 +187,7 @@ class MerchantProfileProjectorTest {
     @Test
     void invalidatedSourcesAndCoverageGapsAreUnavailable() {
         HistoryRead empty = read(List.of(), 0);
-        unavailable(project(new HistoryRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED, empty.retainedFrom(), 0, List.of(), true)), Reason.SOURCE_GAP);
+        unavailable(project(admittedRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED, empty.retainedFrom(), 0, List.of(), true)), Reason.SOURCE_GAP);
         unavailable(project(withCoverage(new CoverageSeal(SCOPE, 99, COVERAGE.coverageStart(), COVERAGE.watermark()))), Reason.SOURCE_GAP);
         unavailable(project(withCoverage(new CoverageSeal(SCOPE, 200, COVERAGE.coverageStart(), TIME.minusMillis(1)))), Reason.SOURCE_GAP);
         unavailable(project(read(List.of(observation(1, 201, TIME.minusSeconds(1))), 1)), Reason.SOURCE_GAP);
@@ -210,11 +211,11 @@ class MerchantProfileProjectorTest {
 
     @Test
     void retentionExpiryAndResetNeverMasqueradeAsAnEmptyCompleteHistory() {
-        MerchantProfile partial = project(new HistoryRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED,
+        MerchantProfile partial = project(admittedRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED,
                 TIME.minusSeconds(3600), 0, List.of(), false));
         assertThat(partial.recent().count()).isZero();
         assertThat(partial.baseline().reason()).isEqualTo(Reason.RETENTION_EXPIRED);
-        MerchantProfile expired = project(new HistoryRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED,
+        MerchantProfile expired = project(admittedRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED,
                 TIME.minusSeconds(3599), 0, List.of(), false));
         unavailable(expired, Reason.RETENTION_EXPIRED);
         unavailable(project(read(List.of(), 10)), Reason.HISTORY_MISSING);
@@ -223,9 +224,9 @@ class MerchantProfileProjectorTest {
 
     @Test
     void cutoffAndReadWindowMustMatchTheScoringOccurrenceAndPolicyExactly() {
-        unavailable(project(new HistoryRead(CURRENT, COVERAGE, FROM, TIME.plusSeconds(1), EVALUATED,
+        unavailable(project(admittedRead(CURRENT, COVERAGE, FROM, TIME.plusSeconds(1), EVALUATED,
                 COVERAGE.coverageStart(), 0, List.of(), false)), Reason.OCCURRENCE_MISMATCH);
-        unavailable(project(new HistoryRead(CURRENT, COVERAGE, FROM.minusSeconds(1), TIME, EVALUATED,
+        unavailable(project(admittedRead(CURRENT, COVERAGE, FROM.minusSeconds(1), TIME, EVALUATED,
                 COVERAGE.coverageStart(), 0, List.of(), false)), Reason.WINDOW_MISMATCH);
     }
 
@@ -237,7 +238,7 @@ class MerchantProfileProjectorTest {
         unavailable(project(read(List.of(futureObserved), 1)), Reason.INVALID_TIME);
         Observation current = new Observation(SCOPE, CURRENT.sourceEvent(), CURRENT.transaction(), CURRENT.occurrence(), MERCHANT,
                 100, TIME, EVALUATED.plusMillis(1), CURRENT.payloadCommitment());
-        unavailable(project(new HistoryRead(current, COVERAGE, FROM, TIME, EVALUATED, COVERAGE.coverageStart(),
+        unavailable(project(admittedRead(current, COVERAGE, FROM, TIME, EVALUATED, COVERAGE.coverageStart(),
                 0, List.of(), false)), Reason.INVALID_TIME);
         assertThatThrownBy(() -> new HistoryRead(CURRENT, COVERAGE, FROM, TIME, TIME.minusMillis(1),
                 COVERAGE.coverageStart(), 0, List.of(), false)).hasMessage("MERCHANT_STORE_HISTORY_EVALUATION_TIME");
@@ -276,7 +277,8 @@ class MerchantProfileProjectorTest {
         byte[] originalBytes = original.canonicalBytes();
         Observation correctedPayload = new Observation(SCOPE, CURRENT.sourceEvent(), CURRENT.transaction(), CURRENT.occurrence(), MERCHANT,
                 CURRENT.sequence(), TIME, CURRENT.sourceObservedAt(), token(999));
-        HistoryRead correction = new HistoryRead(correctedPayload, COVERAGE, FROM, TIME, EVALUATED, COVERAGE.coverageStart(), 0, List.of(), false);
+        HistoryRead correction = admittedRead(correctedPayload, COVERAGE, FROM, TIME, EVALUATED,
+                COVERAGE.coverageStart(), 0, List.of(), false);
         // There is no verified category source/version/effective-at field to project, even after a separately admitted payload correction.
         MerchantProfile corrected = project(correction);
         assertThat(corrected.category().status()).isEqualTo(MerchantProfileFacts.Status.UNSUPPORTED);
@@ -329,10 +331,24 @@ class MerchantProfileProjectorTest {
         assertThat(profile.baseline().reason()).isEqualTo(reason);
     }
     private static HistoryRead read(List<Observation> rows, int expected) {
-        return new HistoryRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED, COVERAGE.coverageStart(), expected, rows, false);
+        return admittedRead(CURRENT, COVERAGE, FROM, TIME, EVALUATED, COVERAGE.coverageStart(), expected, rows, false);
     }
     private static HistoryRead withCoverage(CoverageSeal coverage) {
-        return new HistoryRead(CURRENT, coverage, FROM, TIME, EVALUATED, COVERAGE.coverageStart(), 0, List.of(), false);
+        return admittedRead(CURRENT, coverage, FROM, TIME, EVALUATED, COVERAGE.coverageStart(), 0, List.of(), false);
+    }
+    private static HistoryRead admittedRead(Observation current, CoverageSeal coverage, Instant from, Instant asOf,
+                                            Instant evaluatedAt, Instant retainedFrom, int expected,
+                                            List<Observation> rows, boolean sourceInvalidated) {
+        List<CoverageGeneration> generations = List.of();
+        if (coverage != null && coverage.scope().equals(current.scope())) {
+            String commitment = token(8_888);
+            MerchantAssertionAnchor anchor = new MerchantAssertionAnchor(MerchantAssertionVerifier.Role.COVERAGE,
+                    commitment, new byte[] {1}, new byte[] {1});
+            generations = List.of(new CoverageGeneration(current.scope(), 1, 1, coverage.throughSequence(),
+                    coverage.coverageStart(), coverage.watermark(), null, commitment, anchor));
+        }
+        return new HistoryRead(current, coverage, from, asOf, evaluatedAt, retainedFrom, expected, rows,
+                sourceInvalidated, Collections.nCopies(rows.size(), null), null, null, generations);
     }
     private static Observation observation(int id, long sequence, Instant time) {
         return new Observation(SCOPE, token(1000 + id * 4), token(1001 + id * 4), token(1002 + id * 4), MERCHANT,

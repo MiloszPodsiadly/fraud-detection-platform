@@ -30,6 +30,7 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -51,6 +52,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -312,7 +314,8 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         SourceEvent first = sourceEvent(1, "merchant-a", 60);
         Staged firstStaged = stageWithEvidence(admission, first, 1);
         MerchantAssertionTrustPolicy.Grant firstCoverageGrant = rotatedGrants.get(1);
-        Signed c1 = signedCoverage(1, 1, 1, null, first.raw.createdAt(), firstCoverageGrant, coverageKey);
+        Signed c1 = signedCoverage(1, 1, 1, null, NOW.minus(Duration.ofHours(2)),
+                first.raw.createdAt(), firstCoverageGrant, coverageKey);
         admission.seal(firstStaged.ticket, c1.proof, c1.payload);
         CommitResult firstSnapshot = admission.commit(firstStaged.ticket);
         PersistedScore published = publish(first, MongoSourceOccurrenceStore.INITIAL_RUN, "score-c1-1");
@@ -322,14 +325,15 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         VerifiedMerchantAdmission.Ticket secondTicket = stage(admission, second, 2);
         MerchantAssertionVerifier.VerifiedCoverage c1Evidence = verifiedCoverage(c1, first, rotatedGrants, null, null);
         String c1Commitment = c1Evidence.assertionCommitment();
-        Signed c2 = signedCoverage(2, 2, 2, c1Commitment, second.raw.createdAt(), rotatedGrants.get(2), rotatedCoverageKey);
+        Signed c2 = signedCoverage(2, 2, 2, c1Commitment, NOW.minus(Duration.ofMinutes(30)),
+                second.raw.createdAt(), rotatedGrants.get(2), rotatedCoverageKey);
         admission.seal(secondTicket, c2.proof, c2.payload);
 
         SourceEvent third = sourceEvent(3, "merchant-c", 10);
         VerifiedMerchantAdmission.Ticket thirdTicket = stage(admission, third, 3);
         MerchantAssertionVerifier.VerifiedCoverage c2Evidence = verifiedCoverage(c2, second, rotatedGrants, c1, first);
-        Signed c3 = signedCoverage(3, 3, 3, c2Evidence.assertionCommitment(), third.raw.createdAt(),
-                rotatedGrants.get(3), thirdCoverageKey);
+        Signed c3 = signedCoverage(3, 3, 3, c2Evidence.assertionCommitment(), NOW.minus(Duration.ofMinutes(10)),
+                third.raw.createdAt(), rotatedGrants.get(3), thirdCoverageKey);
         admission.seal(thirdTicket, c3.proof, c3.payload);
 
         PrivateMerchantDiagnosticReader.ReadGrant grant = readGrant(first, "merchant-a");
@@ -348,6 +352,20 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
                 System::nanoTime, CLOCK, rotatedGrants);
         assertThat(restartedReader.evaluate(request(first, firstStaged, published.reference)).outcome())
                 .isEqualTo(PrivateMerchantDiagnosticReader.Outcome.EVALUATED);
+
+        admission.commit(secondTicket);
+        admission.commit(thirdTicket);
+
+        SourceEvent unsupported = sourceEvent(4, "merchant-d", 1);
+        VerifiedMerchantAdmission.Ticket unsupportedTicket = stage(restarted, unsupported, 4);
+        String scopeId = MerchantObservationDocumentCodec.scopeId(pseudonyms.scope(sourceScope(unsupported)));
+        String c3Commitment = ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.COVERAGE)
+                .find(eq("_id", scopeId)).first().get("coverageAnchor", Document.class).getString("commitment");
+        Signed c4 = signedCoverage(4, 4, 4, c3Commitment, NOW.minus(Duration.ofMinutes(5)),
+                NOW, rotatedGrants.get(3), thirdCoverageKey);
+        restarted.seal(unsupportedTicket, c4.proof, c4.payload);
+        CommitResult unsupportedWindow = restarted.commit(unsupportedTicket);
+        assertThat(unsupportedWindow.snapshot().availability()).isEqualTo(Availability.UNAVAILABLE);
     }
 
     @Test
@@ -488,6 +506,129 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
             assertThat(sourceFinds.get()).isEqualTo(expectedBatches * 4);
         }
         assertThat(totalReads.get()).isEqualTo(4 * (1 + 1 + 1 + 2));
+    }
+
+    @Test
+    void verifiedReadsHaveBoundedMerchantCoverageQueriesForOneHundredAndOneThousandDistinctRows() {
+        Limits measuredLimits = new Limits(Duration.ofHours(1), Duration.ofDays(30), Duration.ofDays(31),
+                Duration.ofDays(3), Duration.ofMinutes(2), 1_000, 2_000, 100, 5_000);
+        VerifiedMerchantAdmission admission = adapter(grants, CLOCK, measuredLimits);
+        Map<Integer, SourceEvent> targetEvents = new HashMap<>();
+        Map<Integer, Staged> targetTickets = new HashMap<>();
+        Map<Integer, PersistedScore> targetScores = new HashMap<>();
+        Map<Integer, Snapshot> targetSnapshots = new HashMap<>();
+        Map<Integer, Document> initialBindings = new HashMap<>();
+        List<int[]> batches = new ArrayList<>(List.of(new int[] {1, 2}, new int[] {3, 102}));
+        for (int first = 103; first <= 1_102; first += 100) {
+            batches.add(new int[] {first, Math.min(first + 99, 1_102)});
+        }
+
+        long generation = 0;
+        for (int[] batch : batches) {
+            generation++;
+            List<SourceEvent> events = new ArrayList<>();
+            List<Staged> tickets = new ArrayList<>();
+            for (int sequence = batch[0]; sequence <= batch[1]; sequence++) {
+                SourceEvent event = sourceEvent(sequence, "merchant-a", performanceAge(sequence), 5_000);
+                Staged staged = stageWithEvidence(admission, event, sequence);
+                assertThat(staged.ticket.status()).as("staged sequence %d", sequence).isEqualTo(StageResult.CREATED);
+                events.add(event);
+                tickets.add(staged);
+                if (List.of(2, 102, 1_102).contains(sequence)) {
+                    targetEvents.put(sequence, event);
+                    targetTickets.put(sequence, staged);
+                }
+            }
+
+            Instant coverageStart = generation == 1 ? NOW.minus(Duration.ofHours(8))
+                    : generation == 2 ? NOW.minus(Duration.ofMinutes(450)) : NOW.minus(Duration.ofMinutes(370));
+            String previousCommitment = generation == 1 ? null : latestCoverageCommitment(events.getFirst());
+            SourceEvent last = events.getLast();
+            Signed seal = signedCoverage(generation, batch[0], batch[1], previousCommitment, coverageStart,
+                    last.raw.createdAt(), grants.get(1), coverageKey);
+            admission.seal(tickets.getLast().ticket, seal.proof, seal.payload);
+
+        }
+
+        // Keep the expensive O(n^2) commit setup out of this query-count test. Every source event,
+        // observation assertion, receipt and coverage generation above is genuinely admitted and sealed;
+        // the fixture materializes older committed history in one bulk operation. The three measured
+        // target observations still use the normal commit path before being read through Mongo.
+        String scopeId = MerchantObservationDocumentCodec.scopeId(pseudonyms.scope(
+                sourceScope(targetEvents.get(1_102))));
+        var candidates = ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.CANDIDATES);
+        var history = ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.HISTORY);
+        List<Document> seededHistory = new ArrayList<>();
+        for (Document candidate : candidates.find(eq("scope", scopeId))) {
+            long sequence = candidate.getLong("sequence");
+            if (List.of(2L, 102L, 1_102L).contains(sequence)) { continue; }
+            Observation observation = MerchantObservationDocumentCodec.decodeObservation(candidate);
+            seededHistory.add(MerchantObservationDocumentCodec.observationDocument(observation)
+                    .append("expireAt", java.util.Date.from(NOW.plus(measuredLimits.historyRetention()))));
+        }
+        if (!seededHistory.isEmpty()) { history.insertMany(seededHistory); }
+        candidates.updateMany(new Document("scope", scopeId).append("status", "STAGED")
+                        .append("sequence", new Document("$nin", List.of(2L, 102L, 1_102L))),
+                new Document("$set", new Document("status", "COMMITTED")));
+        ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.COVERAGE)
+                .updateOne(eq("_id", scopeId), new Document("$set", new Document("pending", 3)));
+
+        for (int sequence : List.of(2, 102, 1_102)) {
+            CommitResult committed = admission.commit(targetTickets.get(sequence).ticket);
+            assertThat(committed.status()).as("sequence %d", sequence).isEqualTo(CommitStatus.COMMITTED);
+            int expectedPrior = sequence == 2 ? 1 : sequence == 102 ? 100 : 1_000;
+            assertThat(committed.snapshot().availability()).isEqualTo(Availability.COMPLETE_WINDOW);
+            assertThat(committed.snapshot().priorCount()).isEqualTo(expectedPrior);
+            targetSnapshots.put(sequence, committed.snapshot());
+            PersistedScore published = publish(targetEvents.get(sequence), MongoSourceOccurrenceStore.INITIAL_RUN,
+                    "merchant-query-score-" + sequence);
+            targetScores.put(sequence, published);
+            admission.bindScored(targetTickets.get(sequence).ticket, occurrenceReader, published.reference);
+            initialBindings.put(sequence, manifest(targetEvents.get(sequence)).get("scoredBinding", Document.class));
+        }
+
+        QueryCounter merchantQueries = new QueryCounter();
+        QueryCounter sourceQueries = new QueryCounter();
+        MongoClient measuredLedgerClient = MONGO.merchantReader(database, merchantQueries);
+        MongoClient measuredSourceClient = MONGO.occurrenceReader(database, sourceQueries);
+        MongoSourceLineage measuredSource = new MongoSourceLineage(measuredSourceClient, database,
+                "merchant_source_reader", MongoSourceLineage.Stage.SCORER, originVerifier, CLOCK);
+        SourceEvent grantEvent = targetEvents.get(1_102);
+        PrivateMerchantDiagnosticReader.ReadGrant grant = new PrivateMerchantDiagnosticReader.ReadGrant(
+                "merchant_diagnostic_reader", PrivateMerchantDiagnosticReader.PURPOSE,
+                PrivateMerchantDiagnosticReader.AUDIENCE, pseudonyms.scope(sourceScope(grantEvent)),
+                pseudonyms.merchant("institution-a", "merchant-a"), measuredLimits.maxHistoryRows());
+        PrivateMerchantDiagnosticReader measuredReader = new PrivateMerchantDiagnosticReader(measuredLedgerClient,
+                database, grant, ignored -> true, measuredSource, occurrenceReader, origins, grants, pseudonyms,
+                CLOCK, measuredLimits, () -> { }, System::nanoTime);
+
+        List<QueryCounts> measurements = new ArrayList<>();
+        for (int sequence : List.of(2, 102, 1_102)) {
+            merchantQueries.reset();
+            sourceQueries.reset();
+            PrivateMerchantDiagnosticReader.Result result = measuredReader.evaluate(request(targetEvents.get(sequence),
+                    targetTickets.get(sequence), targetScores.get(sequence).reference));
+            assertThat(result.outcome()).isEqualTo(PrivateMerchantDiagnosticReader.Outcome.EVALUATED);
+            assertThat(admission.commit(targetTickets.get(sequence).ticket).snapshot()).isEqualTo(targetSnapshots.get(sequence));
+            assertThat(manifest(targetEvents.get(sequence)).get("scoredBinding", Document.class))
+                    .isEqualTo(initialBindings.get(sequence));
+
+            QueryCounts measured = new QueryCounts(sequence == 2 ? 1 : sequence == 102 ? 100 : 1_000,
+                    merchantQueries.coverageGenerationFinds.get(), merchantQueries.merchantReads.get(),
+                    sourceQueries.sourceLineageReads.get(), sourceQueries.sourceLineageFinds.get(),
+                    merchantQueries.merchantGetMores.get(), sourceQueries.sourceLineageGetMores.get());
+            measurements.add(measured);
+            System.out.printf("FDP154-query-count prior=%d coverage-generation-finds=%d merchant-ledger-queries=%d "
+                            + "source-lineage-queries=%d source-lineage-finds=%d merchant-getMore=%d source-lineage-getMore=%d%n",
+                    measured.priorRows(), measured.coverageGenerationFinds(), measured.merchantLedgerQueries(),
+                    measured.sourceLineageQueries(), measured.sourceLineageFinds(), measured.merchantGetMores(),
+                    measured.sourceLineageGetMores());
+        }
+
+        assertThat(measurements).extracting(QueryCounts::coverageGenerationFinds).containsExactly(2, 2, 2);
+        assertThat(measurements.stream().map(QueryCounts::merchantLedgerQueries).distinct()).hasSize(1);
+        assertThat(measurements.stream().map(QueryCounts::sourceLineageQueries).distinct()).hasSize(1);
+        assertThat(measurements.stream().map(QueryCounts::sourceLineageFinds).distinct()).hasSize(1);
     }
 
     @Test
@@ -800,12 +941,19 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
 
     private Signed signedCoverage(long generation, long fromSequence, long throughSequence, String previousCommitment,
                                   Instant watermark, MerchantAssertionTrustPolicy.Grant grant, KeyPair signer) {
+        return signedCoverage(generation, fromSequence, throughSequence, previousCommitment,
+                NOW.minus(Duration.ofDays(1)), watermark, grant, signer);
+    }
+
+    private Signed signedCoverage(long generation, long fromSequence, long throughSequence, String previousCommitment,
+                                  Instant coverageStart, Instant watermark,
+                                  MerchantAssertionTrustPolicy.Grant grant, KeyPair signer) {
         String coverageId = "coverage-generation-" + generation;
         MerchantCoverageAssertion assertion = new MerchantCoverageAssertion(1, identity.issuer(), identity.institution(),
                 identity.source(), identity.sourceEpoch(), grant.merchantGrantId(), grant.merchantGrantVersion(),
                 grant.key().policyVersion(), identity.identityVersion(), coverageId, population.feedId(), population.id(),
                 population.definitionVersion(), population.definitionCommitment(), population.inclusionRulesCommitment(),
-                population.exclusionRulesCommitment(), 1, fromSequence, throughSequence, NOW.minus(Duration.ofDays(1)),
+                population.exclusionRulesCommitment(), 1, fromSequence, throughSequence, coverageStart,
                 watermark, generation, previousCommitment);
         byte[] payload = MerchantAssertionCodec.encodeCoverage(assertion);
         byte[] proof = signed(grant.key(), signer, payload, coverageId, watermark);
@@ -881,6 +1029,10 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     }
 
     private SourceEvent sourceEvent(int sequence, String merchantId, long secondsAgo) {
+        return sourceEvent(sequence, merchantId, secondsAgo, 1_000);
+    }
+
+    private SourceEvent sourceEvent(int sequence, String merchantId, long secondsAgo, int maximumReceipts) {
         Instant eventTime = NOW.minusSeconds(secondsAgo);
         TransactionRawEvent raw = new TransactionRawEvent("raw-event-" + sequence, "transaction-" + sequence,
                 "correlation-" + sequence, "customer-" + sequence, "account-1", "instrument-1", eventTime,
@@ -894,7 +1046,7 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         SourceSignatureVerifier.Result result = originVerifier.verify(proof, payload,
                 new SourceSignatureVerifier.Context(originKey.purpose(), originKey.audience()));
         if (!(result instanceof SourceSignatureVerifier.Verified verified)) { throw new IllegalStateException("TEST_SOURCE_SIGNATURE_INVALID"); }
-        DeviceTestSourceReceipts.admit(ownerClient, database, CLOCK, originVerifier, owner, verified, raw);
+        DeviceTestSourceReceipts.admit(ownerClient, database, CLOCK, originVerifier, owner, verified, raw, maximumReceipts);
 
         Map<String, Object> featureSnapshot = new LinkedHashMap<>();
         FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES.forEach(name -> featureSnapshot.put(name, 0.0));
@@ -903,6 +1055,24 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         SourceLineage enrichedLineage = enricher.bindEnriched(raw, enriched);
         if (enrichedLineage.state() != SourceLineage.State.VERIFIED) { throw new IllegalStateException("TEST_ENRICHED_LINEAGE_INVALID"); }
         return new SourceEvent(raw, enriched, proof, payload, verified);
+    }
+
+    private String latestCoverageCommitment(SourceEvent event) {
+        String scopeId = MerchantObservationDocumentCodec.scopeId(pseudonyms.scope(sourceScope(event)));
+        Document source = ownerClient.getDatabase(database).getCollection(MongoMerchantObservationSchema.COVERAGE)
+                .find(eq("_id", scopeId)).first();
+        return source.get("coverageAnchor", Document.class).getString("commitment");
+    }
+
+    private static long performanceAge(int sequence) {
+        if (sequence == 1) { return Duration.ofHours(6).plusMinutes(20).toSeconds(); }
+        if (sequence == 2) { return Duration.ofHours(6).plusMinutes(8).toSeconds(); }
+        if (sequence <= 101) {
+            return Duration.ofHours(6).plusMinutes(7).toSeconds()
+                    - ((sequence - 3L) * Duration.ofMinutes(56).toSeconds() / 98);
+        }
+        return Duration.ofHours(5).plusMinutes(9).toSeconds()
+                - ((sequence - 102L) * Duration.ofMinutes(59).toSeconds() / 1_000);
     }
 
     private SourceScope sourceScope(SourceEvent event) { return event.origin.scope(); }
@@ -1031,6 +1201,9 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     private record Signed(byte[] proof, byte[] payload) { }
     private record Staged(VerifiedMerchantAdmission.Ticket ticket, Signed assertion) { }
     private record PersistedScore(TransactionScoredEvent event, SourceOccurrenceAccess.Reference reference) { }
+    private record QueryCounts(int priorRows, int coverageGenerationFinds, int merchantLedgerQueries,
+                               int sourceLineageQueries, int sourceLineageFinds,
+                               int merchantGetMores, int sourceLineageGetMores) { }
     private record DiagnosticFixture(VerifiedMerchantAdmission admission, SourceEvent prior, SourceEvent current,
                                     VerifiedMerchantAdmission.Ticket ticket, Signed assertion,
                                     SourceOccurrenceAccess.Reference reference,
@@ -1045,6 +1218,71 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(java.time.ZoneId zone) { return this; }
         @Override public Instant instant() { return current.get(); }
+    }
+
+    private static final class QueryCounter implements CommandListener {
+        private static final List<String> SOURCE_COLLECTIONS = List.of("source_lineage_enriched", "source_lineage_raw",
+                "source_admission_receipts", "source_admission_identities");
+        private final AtomicInteger coverageGenerationFinds = new AtomicInteger();
+        private final AtomicInteger merchantReads = new AtomicInteger();
+        private final AtomicInteger sourceLineageReads = new AtomicInteger();
+        private final AtomicInteger sourceLineageFinds = new AtomicInteger();
+        private final AtomicInteger merchantGetMores = new AtomicInteger();
+        private final AtomicInteger sourceLineageGetMores = new AtomicInteger();
+
+        @Override public void commandStarted(CommandStartedEvent event) {
+            String name = event.getCommandName();
+            var command = event.getCommand();
+            if ("getMore".equals(name)) {
+                BsonValue collectionValue = command.get("collection");
+                if (collectionValue == null || !collectionValue.isString()) { return; }
+                String collection = collectionValue.asString().getValue();
+                if (collection.startsWith("merchant_")) { merchantGetMores.incrementAndGet(); }
+                if (SOURCE_COLLECTIONS.contains(collection)) { sourceLineageGetMores.incrementAndGet(); }
+                return;
+            }
+            if (!List.of("find", "aggregate", "count", "distinct").contains(name)) { return; }
+            BsonValue collectionValue = command.get(name);
+            if (collectionValue == null || !collectionValue.isString()) { return; }
+            String collection = collectionValue.asString().getValue();
+            if (collection.startsWith("merchant_")) { merchantReads.incrementAndGet(); }
+            if (SOURCE_COLLECTIONS.contains(collection)) {
+                sourceLineageReads.incrementAndGet();
+                if ("find".equals(name)) { sourceLineageFinds.incrementAndGet(); }
+            }
+            if ("find".equals(name) && MongoMerchantObservationSchema.MEMBERSHIP_TIPS.equals(collection)) {
+                BsonValue filterValue = command.get("filter");
+                if (containsStringEquality(filterValue, "kind",
+                        MerchantObservationDocumentCodec.COVERAGE_GENERATION_KIND)) {
+                    coverageGenerationFinds.incrementAndGet();
+                }
+            }
+        }
+
+        private static boolean containsStringEquality(BsonValue value, String field, String expected) {
+            if (value == null) { return false; }
+            if (value.isDocument()) {
+                var document = value.asDocument();
+                BsonValue direct = document.get(field);
+                if (direct != null && direct.isString() && expected.equals(direct.asString().getValue())) {
+                    return true;
+                }
+                return document.values().stream().anyMatch(child -> containsStringEquality(child, field, expected));
+            }
+            if (value.isArray()) {
+                return value.asArray().stream().anyMatch(child -> containsStringEquality(child, field, expected));
+            }
+            return false;
+        }
+
+        void reset() {
+            coverageGenerationFinds.set(0);
+            merchantReads.set(0);
+            sourceLineageReads.set(0);
+            sourceLineageFinds.set(0);
+            merchantGetMores.set(0);
+            sourceLineageGetMores.set(0);
+        }
     }
 
     private static final class TestMongo implements AutoCloseable {
@@ -1126,6 +1364,10 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
 
         MongoClient occurrenceReader(String database, CommandListener listener) {
             return connect("merchant_source_reader", "ephemeral-source-read-only", database, listener);
+        }
+
+        MongoClient merchantReader(String database, CommandListener listener) {
+            return connect("merchant_diagnostic_reader", "ephemeral-merchant-read-only", database, listener);
         }
 
         MongoClient merchantReader(MongoClient owner, String database) {
