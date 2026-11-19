@@ -79,7 +79,7 @@ Production activation remains **NO-GO** until an independent owner reviews and r
 
 ### Status correction (2026-11-19)
 
-The status text above records the repository state observed on 2026-11-14 and is historical. On the current checkout, local `master` and `origin/master` both point to `5c2db06e34406bc2ba7a6bf6d3ef369edd5450b6`, which includes the Device and Merchant merge commits #240 and #241. This checkout observation does not establish the current GitHub Actions state or replace independent production authorization; the FDP-155 local test results are recorded separately in the [Graph verification matrix](../verification/graph_fdp155_test_matrix.md).
+The status text above records the repository state observed on 2026-11-14 and is historical. On the current checkout, local `master` and `origin/master` both point to `5c2db06e34406bc2ba7a6bf6d3ef369edd5450b6`, which includes the Device and Merchant merge commits #240 and #241. This checkout observation does not establish the current GitHub Actions state or replace independent production authorization; current Graph implementation and local verification outcomes are summarized in the [Graph projection ADR](graph_evidence_projection_boundary.md).
 
 The contract, compatibility, API/UI, privacy and individual fail-start selection ran **125 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**:
 
