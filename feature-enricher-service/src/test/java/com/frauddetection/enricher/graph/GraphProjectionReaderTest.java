@@ -175,7 +175,7 @@ class GraphProjectionReaderTest {
         GraphReadOutcome result = read(reader(new FakeStore(List.of(row)), authority,
                 GraphPolicyDecision.AUTHORIZED), grant(scope), scope, row.edge().evidence().occurrence(), 10, null);
 
-        assertThat(result.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(result.state()).isEqualTo(GraphProjectionState.DENIED);
         assertThat(result.reason()).isEqualTo(GraphReadReason.AUTHORITY_REVOKED);
         assertThat(result.edges()).isEmpty();
         assertThat(checks).hasValue(2);
@@ -350,7 +350,7 @@ class GraphProjectionReaderTest {
                 token("raw:" + occurrence.occurrenceToken()), token("enriched:" + occurrence.occurrenceToken()),
                 token("assertion:" + occurrence.occurrenceToken()), token("coverage:" + occurrence.occurrenceToken()),
                 token("policy:" + occurrence.occurrenceToken()), score, token("snapshot:" + occurrence.occurrenceToken()),
-                EVENT.minusSeconds(60), EVENT, 1, EVENT, EVENT.plus(Duration.ofDays(30)));
+                EVENT.minusSeconds(60), EVENT, 1, EVENT.plus(Duration.ofDays(30)));
     }
 
     private static GraphIdentityScope scope(String epoch) {
@@ -372,14 +372,12 @@ class GraphProjectionReaderTest {
         }
     }
 
-    private static final class FakeStore implements GraphProjectionStore {
+    private static final class FakeStore implements GraphProjectionDao {
         final List<GraphStoredEdge> rows;
         final AtomicInteger reads = new AtomicInteger();
         Runnable afterFirstRead;
 
         FakeStore(List<GraphStoredEdge> rows) { this.rows = new ArrayList<>(rows); }
-        @Override public GraphAppendOutcome appendVerified(GraphEvidenceAdmission.AdmittedRelation admitted) { return null; }
-        @Override public GraphAppendOutcome markRevokedOrFence(GraphEvidenceAdmission.AdmittedRelation admitted) { return null; }
         @Override public Optional<GraphStoredEdge> findLogicalRelation(GraphEdgeFact candidate) { return Optional.empty(); }
         @Override public List<GraphStoredEdge> findNeighbors(GraphNodeRef node, int limit) { return List.of(); }
 

@@ -11,7 +11,7 @@ record GraphOccurrenceSnapshot(String ownerReference, String institution, String
                                DeviceObservationStore.Provenance provenance,
                                DeviceObservationStore.CoverageAuthority occurrenceCoverageAuthority,
                                String populationCommitment, String coverageCommitment, long coverageGeneration,
-                               Instant coverageStart, Instant coverageWatermark, Instant expiresAt,
+                               Instant coverageStart, Instant currentCoverageWatermark, Instant expiresAt,
                                String stageASnapshotCommitment, SourceOccurrenceAccess.Reference scoredReference) {
     GraphOccurrenceSnapshot {
         Objects.requireNonNull(ownerReference);
@@ -24,7 +24,7 @@ record GraphOccurrenceSnapshot(String ownerReference, String institution, String
         Objects.requireNonNull(populationCommitment);
         Objects.requireNonNull(coverageCommitment);
         Objects.requireNonNull(coverageStart);
-        Objects.requireNonNull(coverageWatermark);
+        Objects.requireNonNull(currentCoverageWatermark);
         Objects.requireNonNull(expiresAt);
         Objects.requireNonNull(stageASnapshotCommitment);
         Objects.requireNonNull(scoredReference);

@@ -11,12 +11,15 @@ import org.bson.Document;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
-/** Immutable v1 schema contract. Runtime validation is read-only; bootstrap is empty-db-only. */
+/** Immutable v2 schema contract. Runtime validation is read-only; bootstrap is empty-db-only. */
 final class GraphProjectionSchema {
-    static final int SCHEMA_VERSION = 1;
+    static final int SCHEMA_VERSION = 2;
     static final String COLLECTION = "graph_edges";
     static final String SCHEMA_OWNER = "graph_schema_owner";
     static final String WRITER = "graph_projection_writer";
@@ -64,9 +67,8 @@ final class GraphProjectionSchema {
                 || !"error".equals(options.getString("validationAction"))) {
             throw incompatible();
         }
-        if (database.getCollection(COLLECTION).find(new Document("$nor", List.of(validator()))).limit(1).first() != null) {
-            throw incompatible();
-        }
+        // Strict validation governs new writes; runtime consumers decode and revalidate each bounded row.
+        // Startup deliberately inspects metadata and indexes only, so its work cannot scale with collection size.
         verifyIndexes(database);
     }
 
@@ -87,18 +89,19 @@ final class GraphProjectionSchema {
                         .append("runId", new Document("bsonType", "string").append("enum", List.of(GraphScoredOccurrenceRef.INITIAL_RUN))));
         Document evidence = object(List.of("referenceId", "sourceReceiptReference", "rawCommitment", "enrichedCommitment",
                         "ownerAssertionReference", "coverageReference", "policyReference", "score", "stageASnapshotCommitment",
-                        "coverageFrom", "asOf", "coverageGeneration", "coverageWatermark", "expiresAt"),
+                        "coverageFrom", "asOf", "coverageGeneration", "expiresAt"),
                 new Document("referenceId", token()).append("sourceReceiptReference", token()).append("rawCommitment", token())
                         .append("enrichedCommitment", token()).append("ownerAssertionReference", token())
                         .append("coverageReference", token()).append("policyReference", token()).append("score", score)
                         .append("stageASnapshotCommitment", token()).append("coverageFrom", date()).append("asOf", date())
-                        .append("coverageGeneration", number("long", 1)).append("coverageWatermark", date()).append("expiresAt", date()));
+                        .append("coverageGeneration", number("long", 1)).append("expiresAt", date()));
         Document scope = object(List.of("sourceIssuerToken", "institutionToken", "sourceToken", "sourceEpochToken", "identityVersion"),
                 new Document("sourceIssuerToken", token()).append("institutionToken", token()).append("sourceToken", token())
                         .append("sourceEpochToken", token()).append("identityVersion", version()));
         Document projection = object(List.of("schemaVersion", "canonicalKeyVersion"),
-                new Document("schemaVersion", new Document("bsonType", "int").append("enum", List.of(1)))
-                        .append("canonicalKeyVersion", new Document("bsonType", "int").append("enum", List.of(1))));
+                new Document("schemaVersion", new Document("bsonType", "int").append("enum", List.of(SCHEMA_VERSION)))
+                        .append("canonicalKeyVersion", new Document("bsonType", "int")
+                                .append("enum", List.of(GraphProjectionVersion.SUPPORTED_CANONICAL_KEY_VERSION))));
         Document properties = new Document("_id", token())
                 .append("schemaVersion", new Document("bsonType", "int").append("enum", List.of(SCHEMA_VERSION)))
                 .append("projectionVersion", projection)
@@ -141,12 +144,70 @@ final class GraphProjectionSchema {
     }
 
     private static void requirePrincipal(MongoDatabase database, String expectedPrincipal) {
-        Document status = database.runCommand(new Document("connectionStatus", 1));
+        Document status = database.runCommand(new Document("connectionStatus", 1).append("showPrivileges", true));
+        Object ok = status.get("ok");
+        if (!(ok instanceof Number result) || result.doubleValue() != 1.0d) { throw incompatible(); }
         Document authInfo = status.get("authInfo", Document.class);
         List<Document> users = authInfo == null ? null : authInfo.getList("authenticatedUsers", Document.class);
         if (users == null || users.size() != 1 || !expectedPrincipal.equals(users.getFirst().getString("user"))
                 || !database.getName().equals(users.getFirst().getString("db"))) {
             throw incompatible();
+        }
+        List<Document> privileges = authInfo.getList("authenticatedUserPrivileges", Document.class);
+        if (privileges == null || !expectedPrivileges(database.getName(), expectedPrincipal).equals(
+                effectivePrivileges(privileges))) {
+            throw incompatible();
+        }
+    }
+
+    private static Map<PrivilegeResource, Set<String>> expectedPrivileges(String database, String principal) {
+        Map<PrivilegeResource, Set<String>> expected = new TreeMap<>();
+        if (SCHEMA_OWNER.equals(principal)) {
+            expected.put(new PrivilegeResource(database, ""), Set.of("listCollections", "createCollection"));
+            expected.put(new PrivilegeResource(database, COLLECTION), Set.of("find", "listIndexes", "createIndex"));
+        } else if (WRITER.equals(principal)) {
+            expected.put(new PrivilegeResource(database, ""), Set.of("listCollections"));
+            expected.put(new PrivilegeResource(database, COLLECTION), Set.of("find", "listIndexes", "insert", "update"));
+        } else if (READER.equals(principal)) {
+            expected.put(new PrivilegeResource(database, ""), Set.of("listCollections"));
+            expected.put(new PrivilegeResource(database, COLLECTION), Set.of("find", "listIndexes"));
+        } else {
+            throw incompatible();
+        }
+        return Map.copyOf(expected);
+    }
+
+    private static Map<PrivilegeResource, Set<String>> effectivePrivileges(List<Document> privileges) {
+        Map<PrivilegeResource, Set<String>> effective = new TreeMap<>();
+        for (Document privilege : privileges) {
+            Document resource = privilege == null ? null : privilege.get("resource", Document.class);
+            List<String> actions = privilege == null ? null : privilege.getList("actions", String.class);
+            if (resource == null || !resource.keySet().equals(Set.of("db", "collection")) || actions == null
+                    || actions.isEmpty()) {
+                throw incompatible();
+            }
+            String database = resource.getString("db");
+            String collection = resource.getString("collection");
+            if (database == null || database.isBlank() || collection == null
+                    || database.contains("*") || collection.contains("*")) {
+                throw incompatible();
+            }
+            Set<String> resourceActions = effective.computeIfAbsent(new PrivilegeResource(database, collection),
+                    ignored -> new TreeSet<>());
+            for (String action : actions) {
+                if (action == null || action.isBlank()) { throw incompatible(); }
+                resourceActions.add(action);
+            }
+        }
+        Map<PrivilegeResource, Set<String>> immutable = new TreeMap<>();
+        effective.forEach((resource, actions) -> immutable.put(resource, Set.copyOf(actions)));
+        return Map.copyOf(immutable);
+    }
+
+    private record PrivilegeResource(String database, String collection) implements Comparable<PrivilegeResource> {
+        @Override public int compareTo(PrivilegeResource other) {
+            int databaseOrder = database.compareTo(other.database);
+            return databaseOrder != 0 ? databaseOrder : collection.compareTo(other.collection);
         }
     }
 

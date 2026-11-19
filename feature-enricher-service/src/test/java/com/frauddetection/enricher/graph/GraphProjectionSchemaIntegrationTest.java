@@ -6,6 +6,9 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.event.CommandFailedEvent;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -18,6 +21,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -55,7 +59,85 @@ class GraphProjectionSchemaIntegrationTest {
     }
 
     @Test
-    void strictValidatorAcceptsV1AndRejectsUnknownRootNestedAndVersionFields() {
+    void adapterStartupUsesTheSameBoundedMetadataCommandsForEmptyAndThousandRowCollections() {
+        Context context = bootstrappedContext();
+        StartupCommandProbe commands = new StartupCommandProbe();
+        MongoClient monitoredReader = MONGO.monitoredReader(context.databaseName(), commands);
+
+        new MongoGraphProjectionStore(monitoredReader.getDatabase(context.databaseName()), GraphProjectionSchema.READER);
+        int emptyDatabaseCommands = commands.schemaCommands();
+        assertThat(commands.findCommands()).isZero();
+        assertThat(emptyDatabaseCommands).isEqualTo(4);
+
+        List<Document> rows = new ArrayList<>(1_000);
+        GraphIdentityScope rowScope = scope("startup", "bounded");
+        for (int index = 0; index < 1_000; index++) {
+            rows.add(GraphProjectionDocumentCodec.encode(stored(rowScope, "startup-event-" + index,
+                    "startup-proof-" + index)));
+        }
+        context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).insertMany(rows);
+        assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1_000);
+
+        commands.reset();
+        new MongoGraphProjectionStore(monitoredReader.getDatabase(context.databaseName()), GraphProjectionSchema.READER);
+
+        assertThat(commands.findCommands()).isZero();
+        assertThat(commands.schemaCommands()).isEqualTo(emptyDatabaseCommands).isEqualTo(4);
+    }
+
+    @Test
+    void rawGraphPersistenceTypesRemainPackagePrivateAndUnwired() {
+        for (Class<?> internalType : List.of(GraphProjectionStore.class, GraphProjectionDao.class,
+                MongoGraphProjectionStore.class, GraphProjectionReader.class, GraphStoredEdge.class)) {
+            assertThat(java.lang.reflect.Modifier.isPublic(internalType.getModifiers()))
+                    .as("%s stays unavailable outside the Graph package", internalType.getSimpleName()).isFalse();
+            assertThat(internalType.getAnnotations()).as("%s is not registered as a runtime component",
+                    internalType.getSimpleName()).isEmpty();
+            assertThat(java.util.Arrays.stream(internalType.getDeclaredMethods())
+                    .flatMap(method -> java.util.Arrays.stream(method.getAnnotations())).toList())
+                    .as("%s methods have no framework entry-point annotations", internalType.getSimpleName()).isEmpty();
+        }
+    }
+
+    @Test
+    void correctlyNamedReaderWithAdditionalWriteRoleFailsStartup() {
+        Context context = bootstrappedContext();
+        context.graphDatabase().runCommand(new Document("grantRolesToUser", GraphProjectionSchema.READER)
+                .append("roles", List.of(new Document("role", "readWrite").append("db", context.databaseName()))));
+
+        assertSchemaMismatch(() -> new MongoGraphProjectionStore(context.readerDatabase(), GraphProjectionSchema.READER));
+    }
+
+    @Test
+    void correctlyNamedWriterWithDeleteAndDdlCapabilitiesFailsStartup() {
+        Context context = bootstrappedContext();
+        context.graphDatabase().runCommand(new Document("grantRolesToUser", GraphProjectionSchema.WRITER)
+                .append("roles", List.of(new Document("role", "readWrite").append("db", context.databaseName()))));
+
+        assertSchemaMismatch(() -> new MongoGraphProjectionStore(context.writerDatabase(), GraphProjectionSchema.WRITER));
+    }
+
+    @Test
+    void correctlyNamedSchemaOwnerWithDatabaseOwnerCapabilitiesFailsVerification() {
+        Context context = bootstrappedContext();
+        context.graphDatabase().runCommand(new Document("grantRolesToUser", GraphProjectionSchema.SCHEMA_OWNER)
+                .append("roles", List.of(new Document("role", "dbOwner").append("db", context.databaseName()))));
+
+        assertSchemaMismatch(() -> GraphProjectionSchema.verify(context.schemaOwnerDatabase(), GraphProjectionSchema.SCHEMA_OWNER));
+    }
+
+    @Test
+    void readerAuthenticatedAgainstTheWrongDatabaseCannotVerify() {
+        Context context = bootstrappedContext();
+        MongoClient wrongAuthenticationDatabase = MONGO.readerWithWrongAuthenticationDatabase(context.databaseName());
+
+        assertThatThrownBy(() -> GraphProjectionSchema.verify(
+                wrongAuthenticationDatabase.getDatabase(context.databaseName()), GraphProjectionSchema.READER))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void strictValidatorAcceptsV2AndRejectsUnknownRootNestedAndVersionFields() {
         Context context = bootstrappedContext();
         MongoCollection<Document> collection = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION);
         Document valid = GraphProjectionDocumentCodec.encode(stored(scope("institution-a", "epoch-a"), "event-a", "proof-a"));
@@ -70,7 +152,7 @@ class GraphProjectionSchemaIntegrationTest {
         withUnknownEvidence.get("evidence", Document.class).append("unreviewedProof", "x");
         assertValidationRejected(collection, withUnknownEvidence);
 
-        Document unknownVersion = copy(valid).append("schemaVersion", 2);
+        Document unknownVersion = copy(valid).append("schemaVersion", GraphProjectionSchema.SCHEMA_VERSION + 1);
         assertValidationRejected(collection, unknownVersion);
         assertThat(collection.countDocuments()).isEqualTo(1);
     }
@@ -112,7 +194,7 @@ class GraphProjectionSchemaIntegrationTest {
         assertThat(indexNamesInPlan(neighbors)).contains("graph_device_neighbors");
         assertThat(indexNamesInPlan(occurrenceNeighbors)).contains("graph_occurrence_neighbors");
 
-        GraphProjectionStore store = new MongoGraphProjectionStore(context.readerDatabase(), GraphProjectionSchema.READER);
+        GraphProjectionDao store = new MongoGraphProjectionStore(context.readerDatabase(), GraphProjectionSchema.READER);
         assertThat(store.findLogicalRelation(stored.edge())).contains(stored);
         assertThat(store.findNeighbors(GraphNodeRef.device(scope, stored.edge().evidence().associatedIdentityToken(), 7), 32))
                 .containsExactlyInAnyOrder(stored, secondOccurrence);
@@ -152,7 +234,7 @@ class GraphProjectionSchemaIntegrationTest {
         GraphStoredEdge stored = stored(scope, "event-race", "proof-race");
         MongoCollection<Document> collection = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION);
         collection.insertOne(GraphProjectionDocumentCodec.encode(stored));
-        GraphProjectionStore store = new MongoGraphProjectionStore(context.readerDatabase(), GraphProjectionSchema.READER);
+        GraphProjectionDao store = new MongoGraphProjectionStore(context.readerDatabase(), GraphProjectionSchema.READER);
         java.util.concurrent.atomic.AtomicInteger ownerChecks = new java.util.concurrent.atomic.AtomicInteger();
         GraphRelationAuthority ownerAuthority = new GraphRelationAuthority() {
             @Override public GraphRelationResolution resolveForAdmission(String ownerReference) {
@@ -380,7 +462,7 @@ class GraphProjectionSchemaIntegrationTest {
         GraphEvidenceRef evidence = new GraphEvidenceRef(scope, occurrence, token("device:shared"), 7,
                 token("receipt:" + proof), token("raw:" + proof), token("enriched:" + proof), token("assertion:" + proof),
                 token("coverage:" + proof), token("policy:" + proof), score, token("snapshot:" + proof),
-                EVENT.minusSeconds(300), EVENT, 1, EVENT, EVENT.plus(Duration.ofDays(30)));
+                EVENT.minusSeconds(300), EVENT, 1, EVENT.plus(Duration.ofDays(30)));
         GraphEdgeFact edge = new GraphEdgeFact(GraphProjectionVersion.CURRENT, GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE,
                 GraphNodeRef.occurrence(occurrence), GraphNodeRef.device(scope, evidence.associatedIdentityToken(), 7), evidence);
         return new GraphStoredEdge(edge, GraphEdgeLifecycle.ACTIVE,
@@ -401,5 +483,24 @@ class GraphProjectionSchemaIntegrationTest {
         MongoDatabase schemaOwnerDatabase() { return schemaOwnerClient.getDatabase(databaseName); }
         MongoDatabase writerDatabase() { return writerClient.getDatabase(databaseName); }
         MongoDatabase readerDatabase() { return readerClient.getDatabase(databaseName); }
+    }
+
+    private static final class StartupCommandProbe implements CommandListener {
+        private final AtomicInteger schemaCommands = new AtomicInteger();
+        private final AtomicInteger findCommands = new AtomicInteger();
+
+        @Override public void commandStarted(CommandStartedEvent event) {
+            switch (event.getCommandName()) {
+                case "connectionStatus", "listCollections", "listIndexes" -> schemaCommands.incrementAndGet();
+                case "find" -> findCommands.incrementAndGet();
+                default -> { }
+            }
+        }
+
+        @Override public void commandFailed(CommandFailedEvent event) { }
+
+        int schemaCommands() { return schemaCommands.get(); }
+        int findCommands() { return findCommands.get(); }
+        void reset() { schemaCommands.set(0); findCommands.set(0); }
     }
 }

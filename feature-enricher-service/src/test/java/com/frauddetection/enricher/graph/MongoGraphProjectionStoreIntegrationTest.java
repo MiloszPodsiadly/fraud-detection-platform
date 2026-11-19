@@ -241,6 +241,148 @@ class MongoGraphProjectionStoreIntegrationTest {
     }
 
     @Test
+    void freshReconciliationDurablyFencesExplicitRevocationAtSixSecondsAndOneHour() {
+        for (long elapsedSeconds : List.of(6L, 3_600L)) {
+            Context context = bootstrappedContext();
+            MutableClock clock = new MutableClock(NOW);
+            GraphStoredEdge candidate = edge(scope("institution-a", "epoch-a"),
+                    "late-revocation-" + elapsedSeconds, "proof-late-revocation-" + elapsedSeconds);
+            AdmissionHarness harness = admission(candidate.edge().evidence(), clock);
+            MongoGraphProjectionStore store = store(context, harness.admission(), clock);
+            assertThat(store.appendVerified(harness.admitted()).state()).isEqualTo(GraphAppendState.APPENDED);
+            clock.set(NOW.plusSeconds(elapsedSeconds));
+            harness.relation.set(GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED));
+
+            GraphEvidenceRef evidence = candidate.edge().evidence();
+            GraphLifecycleReconciliationService reconciler = new GraphLifecycleReconciliationService(
+                    store, evidence.scope());
+            GraphAppendOutcome reconciled = reconciler.reconcile(evidence.occurrence(),
+                    evidence.associatedIdentityToken(), evidence.pseudonymKeyVersion(),
+                    NOW.plusSeconds(elapsedSeconds + 5));
+            Document row = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first();
+
+            assertThat(reconciled.state()).isEqualTo(GraphAppendState.FENCED);
+            assertThat(reconciled.reason()).isEqualTo(GraphReadReason.AUTHORITY_REVOKED);
+            assertThat(row.get("lifecycle", Document.class).getString("state")).isEqualTo("REVOKED");
+            assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1);
+
+            clock.set(NOW.plusSeconds(elapsedSeconds + 1));
+            harness.relation.set(GraphRelationResolution.verified(evidence, evidence.expiresAt()));
+            GraphAppendOutcome renewalReplay = reconciler.reconcile(evidence.occurrence(),
+                    evidence.associatedIdentityToken(), evidence.pseudonymKeyVersion(),
+                    NOW.plusSeconds(elapsedSeconds + 6));
+            assertThat(renewalReplay.state()).isEqualTo(GraphAppendState.FENCED);
+            assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first()
+                    .get("lifecycle", Document.class).getString("state")).isEqualTo("REVOKED");
+        }
+    }
+
+    @Test
+    void reconciliationLostCommitAcknowledgementRecoversOnlyTheExactDurableFence() {
+        Context context = bootstrappedContext();
+        MutableClock clock = new MutableClock(NOW);
+        GraphStoredEdge candidate = edge(scope("institution-a", "epoch-a"), "reconcile-lost-ack", "proof-reconcile-lost-ack");
+        AdmissionHarness harness = admission(candidate.edge().evidence(), clock);
+        MongoGraphProjectionStore appendStore = store(context, harness.admission(), clock);
+        GraphAppendOutcome appended = appendStore.appendVerified(harness.admitted());
+        assertThat(appended.state()).isEqualTo(GraphAppendState.APPENDED);
+        harness.relation.set(GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED));
+        AtomicInteger acknowledgements = new AtomicInteger();
+        GraphTransactionCommitter loseCommittedAcknowledgement = session -> {
+            if (acknowledgements.getAndIncrement() == 0) { session.commitTransaction(); }
+            throw unknownCommitResult();
+        };
+        MongoGraphProjectionStore reconcileStore = new MongoGraphProjectionStore(context.writerClient(), context.databaseName(),
+                GraphProjectionSchema.WRITER, harness.admission(), clock, loseCommittedAcknowledgement);
+        GraphLifecycleReconciliationService reconciler = new GraphLifecycleReconciliationService(
+                reconcileStore, candidate.edge().evidence().scope());
+
+        GraphAppendOutcome recovered = reconciler.reconcile(candidate.edge().evidence().occurrence(),
+                candidate.edge().evidence().associatedIdentityToken(), candidate.edge().evidence().pseudonymKeyVersion(),
+                NOW.plusSeconds(5));
+        Document row = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first();
+
+        assertThat(recovered.state()).isEqualTo(GraphAppendState.ACK_RECOVERED);
+        assertThat(recovered.reason()).isEqualTo(GraphReadReason.AUTHORITY_REVOKED);
+        assertThat(acknowledgements.get()).isEqualTo(3);
+        assertThat(row.get("_id")).isEqualTo(candidate.edge().canonicalId());
+        assertThat(row.get("lifecycle", Document.class).getString("state")).isEqualTo("REVOKED");
+        assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1);
+    }
+
+    @Test
+    void reconciliationIsBoundToServerPrincipalAndOneExactPersistedRelation() {
+        Context context = bootstrappedContext();
+        GraphStoredEdge candidate = edge(scope("institution-a", "epoch-a"), "reconcile-exact-key", "proof-exact-key");
+        AdmissionHarness harness = admission(candidate.edge().evidence());
+        MongoGraphProjectionStore store = store(context, harness.admission());
+        assertThat(store.appendVerified(harness.admitted()).state()).isEqualTo(GraphAppendState.APPENDED);
+        GraphEvidenceRef evidence = candidate.edge().evidence();
+        GraphLifecycleReconciliationService reconciler = new GraphLifecycleReconciliationService(store, evidence.scope());
+
+        GraphAppendOutcome wrongScope = new GraphLifecycleReconciliationService(store,
+                scope("other-institution", "epoch-a")).reconcile(evidence.occurrence(),
+                evidence.associatedIdentityToken(), evidence.pseudonymKeyVersion(), NOW.plusSeconds(5));
+        GraphAppendOutcome wrongPrincipal = store.reconcileLifecycle(new GraphLifecycleReconciliationRequest(
+                evidence.scope(), evidence.occurrence(), evidence.associatedIdentityToken(),
+                evidence.pseudonymKeyVersion(), "graph-test-reader", NOW.plusSeconds(5)));
+        GraphOccurrenceRef missingOccurrence = new GraphOccurrenceRef(evidence.scope(), token("missing-occurrence"),
+                evidence.occurrence().eventTime());
+        GraphAppendOutcome missingKey = reconciler.reconcile(missingOccurrence, evidence.associatedIdentityToken(),
+                evidence.pseudonymKeyVersion(), NOW.plusSeconds(5));
+        Document row = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first();
+
+        assertThat(wrongScope.state()).isEqualTo(GraphAppendState.DENIED);
+        assertThat(wrongScope.reason()).isEqualTo(GraphReadReason.SCOPE_MISMATCH);
+        assertThat(wrongPrincipal.state()).isEqualTo(GraphAppendState.DENIED);
+        assertThat(wrongPrincipal.reason()).isEqualTo(GraphReadReason.GRANT_DENIED);
+        assertThat(missingKey.state()).isEqualTo(GraphAppendState.UNAVAILABLE);
+        assertThat(missingKey.reason()).isEqualTo(GraphReadReason.REFERENCE_INVALID);
+        assertThat(row.get("_id")).isEqualTo(candidate.edge().canonicalId());
+        assertThat(row.get("lifecycle", Document.class).getString("state")).isEqualTo("ACTIVE");
+        assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentReconciliationsAndStaleReplayKeepOneTerminalRevokedRow() throws Exception {
+        Context context = bootstrappedContext();
+        GraphStoredEdge candidate = edge(scope("institution-a", "epoch-a"), "reconcile-race", "proof-reconcile-race");
+        AdmissionHarness harness = admission(candidate.edge().evidence());
+        MongoGraphProjectionStore store = store(context, harness.admission());
+        assertThat(store.appendVerified(harness.admitted()).state()).isEqualTo(GraphAppendState.APPENDED);
+        harness.relation.set(GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED));
+        GraphLifecycleReconciliationService reconciler = new GraphLifecycleReconciliationService(
+                store, candidate.edge().evidence().scope());
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<GraphAppendOutcome> first = pool.submit(() -> {
+                start.await();
+                return reconciler.reconcile(candidate.edge().evidence().occurrence(),
+                        candidate.edge().evidence().associatedIdentityToken(), 7, NOW.plusSeconds(5));
+            });
+            Future<GraphAppendOutcome> second = pool.submit(() -> {
+                start.await();
+                return reconciler.reconcile(candidate.edge().evidence().occurrence(),
+                        candidate.edge().evidence().associatedIdentityToken(), 7, NOW.plusSeconds(5));
+            });
+            start.countDown();
+            GraphAppendOutcome firstResult = first.get(10, TimeUnit.SECONDS);
+            GraphAppendOutcome secondResult = second.get(10, TimeUnit.SECONDS);
+            GraphAppendOutcome staleReplay = store.appendVerified(harness.admitted());
+            Document row = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first();
+
+            assertThat(List.of(firstResult.state(), secondResult.state()))
+                    .containsOnly(GraphAppendState.FENCED);
+            assertThat(staleReplay.state()).isEqualTo(GraphAppendState.DENIED);
+            assertThat(row.get("lifecycle", Document.class).getString("state")).isEqualTo("REVOKED");
+            assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void revocationDuringCommitIsNotTreatedAsGloballyAtomicAndCanBeFencedOnRecovery() throws Exception {
         Context context = bootstrappedContext();
         GraphStoredEdge candidate = edge(scope("institution-a", "epoch-a"), "event-a", "proof-a");
@@ -411,6 +553,10 @@ class MongoGraphProjectionStoreIntegrationTest {
             }
 
             @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                if (!"graph-test-reader".equals(principal)
+                        && !GraphLifecycleReconciliationService.SERVER_PRINCIPAL.equals(principal)) {
+                    return GraphRelationResolution.denied(GraphReadReason.GRANT_DENIED);
+                }
                 if (revalidations.incrementAndGet() == revokeAt.get()) {
                     current.set(GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED));
                 }
@@ -421,8 +567,14 @@ class MongoGraphProjectionStoreIntegrationTest {
             }
         };
         AtomicReference<GraphPolicyDecision> policy = new AtomicReference<>(GraphPolicyDecision.AUTHORIZED);
-        GraphEvidenceAdmission admission = new GraphEvidenceAdmission(authority,
-                (principal, purpose, scope, deadline, now) -> policy.get(), clock);
+        GraphEvidenceAdmission admission = new GraphEvidenceAdmission(authority, (principal, purpose, scope, deadline, now) -> {
+            boolean admissionAuthorized = "graph-test-reader".equals(principal)
+                    && GraphEvidenceAdmission.PURPOSE.equals(purpose);
+            boolean reconciliationAuthorized = GraphLifecycleReconciliationService.SERVER_PRINCIPAL.equals(principal)
+                    && GraphLifecycleReconciliationRequest.PURPOSE.equals(purpose)
+                    && evidence.scope().equals(scope);
+            return admissionAuthorized || reconciliationAuthorized ? policy.get() : GraphPolicyDecision.DENIED;
+        }, clock);
         GraphAdmissionOutcome outcome = admission.admit(new GraphAdmissionRequest(evidence.ownerAssertionReference(),
                 "graph-test-reader", clock.instant().plusSeconds(4)));
         assertThat(outcome.state()).isEqualTo(GraphAdmissionState.ADMITTED);
@@ -443,7 +595,7 @@ class MongoGraphProjectionStoreIntegrationTest {
         GraphEvidenceRef evidence = new GraphEvidenceRef(scope, occurrence, token("device:shared"), 7,
                 token("receipt:" + proof), token("raw:" + proof), token("enriched:" + proof), token("assertion:" + proof),
                 token("coverage:" + proof), token("policy:" + proof), score, token("snapshot:" + proof),
-                NOW.minusSeconds(300), NOW, 1, NOW, NOW.plus(Duration.ofDays(30)));
+                NOW.minusSeconds(300), NOW, 1, NOW.plus(Duration.ofDays(30)));
         GraphEdgeFact edge = new GraphEdgeFact(GraphProjectionVersion.CURRENT, GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE,
                 GraphNodeRef.occurrence(occurrence), GraphNodeRef.device(scope, evidence.associatedIdentityToken(), 7), evidence);
         return new GraphStoredEdge(edge, GraphEdgeLifecycle.ACTIVE, NOW.plusSeconds(5).truncatedTo(ChronoUnit.MILLIS),

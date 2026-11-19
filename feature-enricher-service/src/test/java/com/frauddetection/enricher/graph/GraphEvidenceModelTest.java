@@ -122,12 +122,12 @@ class GraphEvidenceModelTest {
                 valid.pseudonymKeyVersion(), null, valid.rawCommitment(), valid.enrichedCommitment(),
                 valid.ownerAssertionReference(), valid.coverageReference(), valid.policyReference(),
                 valid.scoredOccurrence(), valid.stageASnapshotCommitment(), valid.coverageFrom(), valid.asOf(),
-                valid.coverageGeneration(), valid.coverageWatermark(), valid.expiresAt()))
+                valid.coverageGeneration(), valid.expiresAt()))
                 .hasMessage("GRAPH_REFERENCE_INVALID");
-        assertThatThrownBy(() -> evidenceWith(valid, EVENT_TIME.plusSeconds(1), EVENT_TIME, EVENT_TIME))
+        assertThatThrownBy(() -> evidenceWith(valid, EVENT_TIME.plusSeconds(1), EVENT_TIME))
                 .hasMessage("GRAPH_EVIDENCE_TEMPORAL_SCOPE_INVALID");
         assertThatThrownBy(() -> evidenceWith(valid, EVENT_TIME.minusSeconds(1), EVENT_TIME,
-                EVENT_TIME.plusSeconds(1), EVENT_TIME))
+                EVENT_TIME))
                 .hasMessage("GRAPH_EVIDENCE_TEMPORAL_SCOPE_INVALID");
     }
 
@@ -135,13 +135,14 @@ class GraphEvidenceModelTest {
     void coverageBoundaryTieIsValidButRetentionMustExtendBeyondAsOf() {
         GraphOccurrenceRef occurrence = occurrence(scope("issuer-a", "epoch-a"), "event-1");
         GraphEvidenceRef boundary = evidenceWith(occurrence, token("device-1"), 7,
-                EVENT_TIME, EVENT_TIME, EVENT_TIME, EVENT_TIME.plus(Duration.ofDays(1)));
+                EVENT_TIME, EVENT_TIME, EVENT_TIME.plus(Duration.ofDays(1)));
 
         assertThat(boundary.asOf()).isEqualTo(occurrence.eventTime());
         assertThat(boundary.coverageFrom()).isEqualTo(boundary.asOf());
-        assertThat(boundary.coverageWatermark()).isEqualTo(boundary.asOf());
+        assertThat(Arrays.stream(GraphEvidenceRef.class.getRecordComponents()).map(java.lang.reflect.RecordComponent::getName))
+                .doesNotContain("coverageWatermark");
         assertThatThrownBy(() -> evidenceWith(occurrence, token("device-1"), 7,
-                EVENT_TIME, EVENT_TIME, EVENT_TIME, EVENT_TIME))
+                EVENT_TIME, EVENT_TIME, EVENT_TIME))
                 .hasMessage("GRAPH_EVIDENCE_TEMPORAL_SCOPE_INVALID");
     }
 
@@ -203,27 +204,25 @@ class GraphEvidenceModelTest {
 
     private static GraphEvidenceRef evidence(GraphOccurrenceRef occurrence, String device, int keyVersion) {
         return evidenceWith(occurrence, token(device), keyVersion, EVENT_TIME.minusSeconds(300),
-                EVENT_TIME, EVENT_TIME, EVENT_TIME.plus(Duration.ofDays(31)));
+                EVENT_TIME, EVENT_TIME.plus(Duration.ofDays(31)));
     }
 
     private static GraphEvidenceRef evidenceWith(GraphEvidenceRef existing, Instant from, Instant asOf,
-                                                 Instant watermark) {
+                                                 Instant expiresAt) {
         return evidenceWith(existing.occurrence(), existing.associatedIdentityToken(), existing.pseudonymKeyVersion(),
-                from, asOf, watermark, existing.expiresAt());
+                from, asOf, expiresAt);
     }
 
-    private static GraphEvidenceRef evidenceWith(GraphEvidenceRef existing, Instant from, Instant asOf,
-                                                 Instant watermark, Instant expiresAt) {
-        return evidenceWith(existing.occurrence(), existing.associatedIdentityToken(), existing.pseudonymKeyVersion(),
-                from, asOf, watermark, expiresAt);
+    private static GraphEvidenceRef evidenceWith(GraphEvidenceRef existing, Instant from, Instant asOf) {
+        return evidenceWith(existing, from, asOf, existing.expiresAt());
     }
 
     private static GraphEvidenceRef evidenceWith(GraphOccurrenceRef occurrence, String device, int keyVersion,
-                                                 Instant from, Instant asOf, Instant watermark, Instant expiresAt) {
+                                                 Instant from, Instant asOf, Instant expiresAt) {
         return new GraphEvidenceRef(occurrence.scope(), occurrence, device, keyVersion,
                 token("receipt"), token("raw"), token("enriched"), token("device-assertion"),
                 token("coverage"), token("policy"), score(GraphScoredOccurrenceRef.INITIAL_RUN),
-                token("stage-a-snapshot"), from, asOf, 1, watermark, expiresAt);
+                token("stage-a-snapshot"), from, asOf, 1, expiresAt);
     }
 
     private static GraphScoredOccurrenceRef score(String runId) {
@@ -238,7 +237,7 @@ class GraphEvidenceModelTest {
                 base.pseudonymKeyVersion(), base.sourceReceiptReference(), base.rawCommitment(), base.enrichedCommitment(),
                 base.ownerAssertionReference(), base.coverageReference(), base.policyReference(), preciseScore,
                 base.stageASnapshotCommitment(), base.coverageFrom(), base.asOf(), base.coverageGeneration(),
-                base.coverageWatermark(), base.expiresAt());
+                base.expiresAt());
     }
 
     private static GraphOccurrenceRef occurrence(GraphIdentityScope scope, String event) {

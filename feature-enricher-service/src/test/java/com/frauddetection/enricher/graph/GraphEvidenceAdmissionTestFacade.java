@@ -3,6 +3,7 @@ package com.frauddetection.enricher.graph;
 import com.frauddetection.enricher.device.DeviceGraphReadGrant;
 import com.frauddetection.enricher.device.DeviceGraphRelationGrant;
 import com.frauddetection.enricher.device.DeviceGraphRelationPort;
+import com.frauddetection.enricher.device.DeviceGraphRelationResolution;
 import com.frauddetection.enricher.device.VerifiedDeviceGraphRelation;
 
 import java.time.Clock;
@@ -30,18 +31,15 @@ public final class GraphEvidenceAdmissionTestFacade {
         Map<String, GraphIdentityScope> resolvedScopes = new ConcurrentHashMap<>();
         GraphRelationAuthority authority = new GraphRelationAuthority() {
             @Override public GraphRelationResolution resolveForAdmission(String ownerReference) {
-                return owner.admit(ownerReference, relationGrant)
-                        .map(relation -> verified(ownerReference, relation, resolvedScopes))
-                        .orElseGet(() -> GraphRelationResolution.denied(GraphReadReason.REFERENCE_INVALID));
+                return graphResolution(owner.admit(ownerReference, relationGrant), ownerReference, resolvedScopes);
             }
 
             @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
                 if (!requestingPrincipal.equals(principal)) {
                     return GraphRelationResolution.denied(GraphReadReason.GRANT_DENIED);
                 }
-                return owner.resolve(expected, relationGrant, readGrant, principal)
-                        .map(relation -> verified(expected.ownerAssertionReference(), relation, resolvedScopes))
-                        .orElseGet(() -> GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED));
+                return graphResolution(owner.resolve(expected, relationGrant, readGrant, principal),
+                        expected.ownerAssertionReference(), resolvedScopes);
             }
         };
         GraphPolicyAuthorizer policy = (principal, purpose, scope, requestDeadline, now) -> {
@@ -83,18 +81,15 @@ public final class GraphEvidenceAdmissionTestFacade {
                 if (!requestingPrincipal.equals(principal)) {
                     return GraphRelationResolution.denied(GraphReadReason.GRANT_DENIED);
                 }
-                Optional<VerifiedDeviceGraphRelation> relation = currentOwner.get()
+                DeviceGraphRelationResolution relation = currentOwner.get()
                         .resolve(expected, relationGrant, deviceReadGrant, principal);
                 if (ownerChecks.incrementAndGet() == 1 && afterFirstOwnerCheck != null) {
                     afterFirstOwnerCheck.run();
                 }
-                return relation.map(value -> GraphRelationResolution.verified(value.reference(), value.validUntil()))
-                        .orElseGet(() -> GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED));
+                return graphResolution(relation, expected.ownerAssertionReference(), new ConcurrentHashMap<>());
             }
         };
-        GraphProjectionStore store = new GraphProjectionStore() {
-            @Override public GraphAppendOutcome appendVerified(GraphEvidenceAdmission.AdmittedRelation admitted) { return null; }
-            @Override public GraphAppendOutcome markRevokedOrFence(GraphEvidenceAdmission.AdmittedRelation admitted) { return null; }
+        GraphProjectionDao store = new GraphProjectionDao() {
             @Override public Optional<GraphStoredEdge> findLogicalRelation(GraphEdgeFact candidate) { return Optional.empty(); }
             @Override public List<GraphStoredEdge> findNeighbors(GraphNodeRef node, int limit) { return List.of(); }
 
@@ -124,12 +119,22 @@ public final class GraphEvidenceAdmissionTestFacade {
                 GraphQueryLimits.DEFAULT.maxPageSize(), null);
     }
 
-    private static GraphRelationResolution verified(String reference, VerifiedDeviceGraphRelation relation,
-                                                    Map<String, GraphIdentityScope> scopes) {
-        if (!reference.equals(relation.reference().ownerAssertionReference())) {
-            return GraphRelationResolution.denied(GraphReadReason.REFERENCE_INVALID);
-        }
-        scopes.put(reference, relation.reference().scope());
-        return GraphRelationResolution.verified(relation.reference(), relation.validUntil());
+    private static GraphRelationResolution graphResolution(DeviceGraphRelationResolution result, String reference,
+                                                           Map<String, GraphIdentityScope> scopes) {
+        if (result == null) { return GraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+        return switch (result.state()) {
+            case VERIFIED -> {
+                VerifiedDeviceGraphRelation relation = result.relation().orElseThrow();
+                if (!reference.equals(relation.reference().ownerAssertionReference())) {
+                    yield GraphRelationResolution.denied(GraphReadReason.REFERENCE_INVALID);
+                }
+                scopes.put(reference, relation.reference().scope());
+                yield GraphRelationResolution.verified(relation.reference(), relation.validUntil());
+            }
+            case PENDING -> GraphRelationResolution.pending(result.reason());
+            case UNAVAILABLE -> GraphRelationResolution.unavailable(result.reason());
+            case DENIED -> GraphRelationResolution.denied(result.reason());
+            case CONFLICT -> GraphRelationResolution.conflict();
+        };
     }
 }

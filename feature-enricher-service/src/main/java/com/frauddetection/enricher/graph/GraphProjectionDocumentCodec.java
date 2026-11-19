@@ -35,7 +35,7 @@ final class GraphProjectionDocumentCodec {
                 .append("score", scored).append("stageASnapshotCommitment", evidence.stageASnapshotCommitment())
                 .append("coverageFrom", date(evidence.coverageFrom())).append("asOf", date(evidence.asOf()))
                 .append("coverageGeneration", evidence.coverageGeneration())
-                .append("coverageWatermark", date(evidence.coverageWatermark())).append("expiresAt", date(evidence.expiresAt()));
+                .append("expiresAt", date(evidence.expiresAt()));
         Document lifecycle = new Document("state", stored.lifecycle().name())
                 .append("admittedAt", date(stored.admittedAt())).append("validUntil", date(stored.validUntil()));
         return new Document("_id", edge.canonicalId()).append("schemaVersion", GraphProjectionSchema.SCHEMA_VERSION)
@@ -64,7 +64,7 @@ final class GraphProjectionDocumentCodec {
             Document proof = child(document, "evidence");
             requireKeys(proof, Set.of("referenceId", "sourceReceiptReference", "rawCommitment", "enrichedCommitment",
                     "ownerAssertionReference", "coverageReference", "policyReference", "score", "stageASnapshotCommitment",
-                    "coverageFrom", "asOf", "coverageGeneration", "coverageWatermark", "expiresAt"));
+                    "coverageFrom", "asOf", "coverageGeneration", "expiresAt"));
             Document scoreDoc = child(proof, "score");
             requireKeys(scoreDoc, Set.of("eventToken", "createdAt", "fingerprint", "runId"));
             GraphScoredOccurrenceRef score = new GraphScoredOccurrenceRef(scoreDoc.getString("eventToken"),
@@ -74,7 +74,7 @@ final class GraphProjectionDocumentCodec {
                     proof.getString("enrichedCommitment"), proof.getString("ownerAssertionReference"), proof.getString("coverageReference"),
                     proof.getString("policyReference"), score, proof.getString("stageASnapshotCommitment"),
                     instant(proof, "coverageFrom"), instant(proof, "asOf"), proof.getLong("coverageGeneration"),
-                    instant(proof, "coverageWatermark"), instant(proof, "expiresAt"));
+                    instant(proof, "expiresAt"));
             if (!evidence.canonicalReferenceId().equals(proof.getString("referenceId"))) { throw invalidDocument(); }
             GraphEdgeFact edge = new GraphEdgeFact(projectionVersion, GraphEdgeType.valueOf(document.getString("edgeType")),
                     GraphNodeRef.occurrence(occurrence), GraphNodeRef.device(scope, device.getString("token"), device.getInteger("keyVersion")), evidence);

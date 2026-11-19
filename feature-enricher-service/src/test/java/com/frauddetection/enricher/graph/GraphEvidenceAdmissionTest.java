@@ -247,7 +247,7 @@ class GraphEvidenceAdmissionTest {
         return new GraphEvidenceRef(scope, occurrence, token(device), 7, token("receipt-" + event),
                 token("raw-" + event), token("enriched-" + event), token(event), token("coverage-" + event),
                 token("policy-" + event), score, token("snapshot-" + event), EVENT.minusSeconds(300), EVENT,
-                1, EVENT, EVENT.plus(Duration.ofDays(31)));
+                1, EVENT.plus(Duration.ofDays(31)));
     }
 
     private static String token(String value) { return GraphCanonical.digest("admission-test", value); }

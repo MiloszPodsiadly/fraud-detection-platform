@@ -25,7 +25,7 @@ public record GraphEdgeFact(GraphProjectionVersion projectionVersion, GraphEdgeT
 
     /** Deterministic identity includes both scoped nodes and every owner evidence reference. */
     public String canonicalId() {
-        return GraphCanonical.digest("edge/v1", Integer.toString(projectionVersion.schemaVersion()),
+        return GraphCanonical.digest("edge/v2", Integer.toString(projectionVersion.schemaVersion()),
                 Integer.toString(projectionVersion.canonicalKeyVersion()), type.name(),
                 from.canonicalId(), to.canonicalId(), evidence.canonicalReferenceId());
     }

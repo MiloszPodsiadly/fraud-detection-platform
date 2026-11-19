@@ -156,6 +156,115 @@ final class GraphEvidenceAdmission {
         };
     }
 
+    /** Reconciliation has its own bounded authorization and never reuses an expired admission handle. */
+    GraphLifecycleFenceOutcome resolveReconciliationFence(GraphLifecycleReconciliationRequest request,
+                                                            GraphStoredEdge stored) {
+        if (request == null || stored == null) {
+            return GraphLifecycleFenceOutcome.denied(GraphReadReason.REFERENCE_INVALID);
+        }
+        GraphEdgeFact edge = stored.edge();
+        GraphEvidenceRef evidence = edge.evidence();
+        if (!request.scope().equals(evidence.scope())
+                || !request.occurrence().equals(evidence.occurrence())
+                || !request.associatedIdentityToken().equals(evidence.associatedIdentityToken())
+                || request.pseudonymKeyVersion() != evidence.pseudonymKeyVersion()) {
+            return GraphLifecycleFenceOutcome.denied(GraphReadReason.REFERENCE_INVALID);
+        }
+
+        long started = nanoTime.getAsLong();
+        Instant now = clock.instant();
+        GraphReadReason deadline = deadlineState(request.operationDeadline(), now, started);
+        if (deadline != null) { return reconciliationDeadlineOutcome(deadline); }
+        if (!evidence.expiresAt().isAfter(now)) {
+            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.RETENTION_EXPIRED);
+        }
+
+        GraphPolicyDecision before;
+        try {
+            before = policyAuthorizer.authorize(request.requestingPrincipal(),
+                    GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), now);
+        } catch (RuntimeException unavailable) {
+            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
+        }
+        if (before != GraphPolicyDecision.AUTHORIZED) { return reconciliationPolicyOutcome(before); }
+
+        deadline = deadlineState(request.operationDeadline(), clock.instant(), started);
+        if (deadline != null) { return reconciliationDeadlineOutcome(deadline); }
+        GraphRelationResolution current;
+        try {
+            current = relationAuthority.revalidate(evidence, request.requestingPrincipal());
+        } catch (RuntimeException unavailable) {
+            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
+        if (current == null) { return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+
+        GraphLifecycleFenceOutcome decision = switch (current.state()) {
+            case VERIFIED -> {
+                if (!evidence.equals(current.evidence())) {
+                    yield GraphLifecycleFenceOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+                }
+                if (!current.validUntil().isAfter(clock.instant())) {
+                    yield GraphLifecycleFenceOutcome.unavailable(GraphReadReason.RETENTION_EXPIRED);
+                }
+                yield GraphLifecycleFenceOutcome.noChange();
+            }
+            case CONFLICT -> GraphLifecycleFenceOutcome.fence(new LifecycleFence(edge, GraphEdgeLifecycle.CONFLICT));
+            case DENIED -> current.reason() == GraphReadReason.AUTHORITY_REVOKED
+                    ? GraphLifecycleFenceOutcome.fence(new LifecycleFence(edge, GraphEdgeLifecycle.REVOKED))
+                    : GraphLifecycleFenceOutcome.denied(current.reason());
+            case PENDING -> GraphLifecycleFenceOutcome.pending(current.reason());
+            case UNAVAILABLE -> GraphLifecycleFenceOutcome.unavailable(current.reason());
+        };
+
+        deadline = deadlineState(request.operationDeadline(), clock.instant(), started);
+        if (deadline != null) { return reconciliationDeadlineOutcome(deadline); }
+        GraphPolicyDecision after;
+        try {
+            after = policyAuthorizer.authorize(request.requestingPrincipal(),
+                    GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), clock.instant());
+        } catch (RuntimeException unavailable) {
+            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
+        }
+        if (after != GraphPolicyDecision.AUTHORIZED) { return reconciliationPolicyOutcome(after); }
+        deadline = deadlineState(request.operationDeadline(), clock.instant(), started);
+        return deadline == null ? decision : reconciliationDeadlineOutcome(deadline);
+    }
+
+    /** Policy and operation fencing happen before even the exact-key persistence read. */
+    GraphLifecycleFenceOutcome preflightReconciliation(GraphLifecycleReconciliationRequest request) {
+        if (request == null) { return GraphLifecycleFenceOutcome.denied(GraphReadReason.REFERENCE_INVALID); }
+        long started = nanoTime.getAsLong();
+        Instant now = clock.instant();
+        GraphReadReason deadline = deadlineState(request.operationDeadline(), now, started);
+        if (deadline != null) { return reconciliationDeadlineOutcome(deadline); }
+        GraphPolicyDecision policy;
+        try {
+            policy = policyAuthorizer.authorize(request.requestingPrincipal(),
+                    GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), now);
+        } catch (RuntimeException unavailable) {
+            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
+        }
+        if (policy != GraphPolicyDecision.AUTHORIZED) { return reconciliationPolicyOutcome(policy); }
+        deadline = deadlineState(request.operationDeadline(), clock.instant(), started);
+        return deadline == null ? GraphLifecycleFenceOutcome.noChange() : reconciliationDeadlineOutcome(deadline);
+    }
+
+    private static GraphLifecycleFenceOutcome reconciliationDeadlineOutcome(GraphReadReason reason) {
+        return reason == GraphReadReason.LIMIT_EXCEEDED
+                ? GraphLifecycleFenceOutcome.denied(reason)
+                : GraphLifecycleFenceOutcome.unavailable(reason);
+    }
+
+    private static GraphLifecycleFenceOutcome reconciliationPolicyOutcome(GraphPolicyDecision decision) {
+        if (decision == null || decision == GraphPolicyDecision.UNAVAILABLE) {
+            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
+        }
+        if (decision == GraphPolicyDecision.DENIED) {
+            return GraphLifecycleFenceOutcome.denied(GraphReadReason.GRANT_DENIED);
+        }
+        throw new IllegalArgumentException("GRAPH_RECONCILIATION_POLICY_OUTCOME_INVALID");
+    }
+
     private static boolean evidenceMatches(AdmittedRelation admitted, GraphEvidenceRef current) {
         return admitted.edge().evidence().equals(current);
     }

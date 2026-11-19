@@ -45,6 +45,9 @@ import static com.mongodb.client.model.Updates.*;
 /** Owns source receipts and their encrypted, bounded RAW publication outbox; it does not read Device/Merchant history. */
 final class MongoSourceReceiptStore implements SourceReceiptStore {
     static final int ATTEMPTS = 3;
+    private static final int TRANSIENT_TRANSACTION_ATTEMPTS = 5;
+    private static final long TRANSIENT_RETRY_BASE_DELAY_MILLIS = 20;
+    private static final long TRANSIENT_RETRY_MAX_DELAY_MILLIS = 160;
     private static final int MAX_RECOVERY_EPOCHS = MongoSourceRawPublicationSchema.MAX_RECOVERY_EPOCHS;
     private static final JsonMapper RAW_JSON = JsonMapper.builder().findAndAddModules().build();
     private static final TransactionOptions TRANSACTION = TransactionOptions.builder().readConcern(ReadConcern.SNAPSHOT)
@@ -316,7 +319,7 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
     private RawResult rawTransaction(SourceSignatureVerifier.Verified evidence, Function<ClientSession, RawResult> work) {
         if (evidence == null) { return rawResult(UNVERIFIED); }
         if (verifier.currentDenial(evidence) != null) { return rawResult(REVOKED); }
-        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+        for (int attempt = 0; attempt < TRANSIENT_TRANSACTION_ATTEMPTS; attempt++) {
             try (ClientSession session = client.startSession()) {
                 session.startTransaction(TRANSACTION);
                 try {
@@ -331,7 +334,7 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
                     if (failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) { return rawResult(UNRESOLVED); }
                     abort(session);
                     if ((failure.getCode() == 11000 || failure.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL))
-                            && attempt + 1 < ATTEMPTS) { continue; }
+                            && attempt + 1 < TRANSIENT_TRANSACTION_ATTEMPTS && awaitTransientRetry(attempt)) { continue; }
                     return rawResult(UNRESOLVED);
                 } catch (RawTransactionAbort aborted) {
                     abort(session);
@@ -343,6 +346,18 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
             } catch (RuntimeException unavailable) { return rawResult(UNRESOLVED); }
         }
         return rawResult(UNRESOLVED);
+    }
+
+    private boolean awaitTransientRetry(int failedAttempt) {
+        long delay = Math.min(TRANSIENT_RETRY_MAX_DELAY_MILLIS,
+                TRANSIENT_RETRY_BASE_DELAY_MILLIS << Math.min(failedAttempt, 3));
+        try {
+            TimeUnit.MILLISECONDS.sleep(delay);
+            return true;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private TransactionRawEvent restoreRaw(Document row, Receipt receipt) {
@@ -570,7 +585,7 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
     }
 
     private Result transaction(Function<ClientSession, Result> work, SourceSignatureVerifier.Verified authorization) {
-        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+        for (int attempt = 0; attempt < TRANSIENT_TRANSACTION_ATTEMPTS; attempt++) {
             try (ClientSession session = client.startSession()) {
                 session.startTransaction(TRANSACTION);
                 try {
@@ -585,7 +600,7 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
                     if (failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) { return result(UNRESOLVED); }
                     abort(session);
                     if ((failure.getCode() == 11000 || failure.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL))
-                            && attempt + 1 < ATTEMPTS) { continue; }
+                            && attempt + 1 < TRANSIENT_TRANSACTION_ATTEMPTS && awaitTransientRetry(attempt)) { continue; }
                     return result(UNRESOLVED);
                 } catch (RuntimeException corruptOrUnavailable) {
                     abort(session); return result(UNRESOLVED);

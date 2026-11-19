@@ -38,6 +38,20 @@ class GraphProjectionSchemaTest {
     }
 
     @Test
+    void legacyV1ProofEncodingFailsClosedWithoutBeingReinterpretedAsV2() {
+        Document legacy = GraphProjectionDocumentCodec.encode(stored(scope("issuer", "epoch"),
+                "event-one", "same-device", "2026-11-18T10:00:01.123456789Z"));
+        legacy.put("schemaVersion", 1);
+        Document version = legacy.get("projectionVersion", Document.class);
+        version.put("schemaVersion", 1);
+        version.put("canonicalKeyVersion", 1);
+        legacy.get("evidence", Document.class).append("coverageWatermark", java.util.Date.from(EVENT));
+
+        assertThatThrownBy(() -> GraphProjectionDocumentCodec.decode(legacy))
+                .isInstanceOf(IllegalStateException.class).hasMessage("GRAPH_STORE_DOCUMENT_INVALID");
+    }
+
+    @Test
     void schemaIsStrictAtRootAndEveryNestedEvidenceAndLifecycleObject() {
         Document jsonSchema = GraphProjectionSchema.validator().get("$jsonSchema", Document.class);
         assertThat(jsonSchema.getBoolean("additionalProperties")).isFalse();
@@ -59,7 +73,7 @@ class GraphProjectionSchemaTest {
         GraphEvidenceRef evidence = new GraphEvidenceRef(scope, occurrence, token(device), 7,
                 token("receipt-" + event), token("raw-" + event), token("enriched-" + event), token(event),
                 token("coverage-" + event), token("policy-" + event), scored, token("snapshot-" + event),
-                EVENT.minusSeconds(300), EVENT, 1, EVENT, EVENT.plus(Duration.ofDays(30)));
+                EVENT.minusSeconds(300), EVENT, 1, EVENT.plus(Duration.ofDays(30)));
         GraphEdgeFact edge = new GraphEdgeFact(GraphProjectionVersion.CURRENT, GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE,
                 GraphNodeRef.occurrence(occurrence), GraphNodeRef.device(scope, evidence.associatedIdentityToken(), 7), evidence);
         return new GraphStoredEdge(edge, GraphEdgeLifecycle.ACTIVE, EVENT.plusSeconds(5).truncatedTo(ChronoUnit.MILLIS),

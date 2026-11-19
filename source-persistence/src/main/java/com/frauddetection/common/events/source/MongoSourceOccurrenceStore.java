@@ -303,11 +303,27 @@ public final class MongoSourceOccurrenceStore {
     /** Returns a view bound to the owner's expected signed purpose and audience. */
     public SourceOccurrenceAccess readOnly(SourceSignatureVerifier.Context expectedContext) {
         Objects.requireNonNull(expectedContext, "SOURCE_OCCURRENCE_CONTEXT_REQUIRED");
-        return (authorization, occurrence) -> {
-            if (authorization == null || authorization.state() != SourceLineage.State.VERIFIED || occurrence == null
-                    || !expectedContext.purpose().equals(authorization.source().purpose())
-                    || !expectedContext.audience().equals(authorization.source().audience())) { return Optional.empty(); }
-            return Optional.ofNullable(lookup(occurrence, authorization).binding());
+        return new SourceOccurrenceAccess() {
+            @Override public Optional<SourceScoredOccurrence> find(SourceLineage authorization,
+                                                                   SourceOccurrenceAccess.Reference occurrence) {
+                return Optional.ofNullable(resolve(authorization, occurrence).occurrence());
+            }
+
+            @Override public Resolution resolve(SourceLineage authorization,
+                                                SourceOccurrenceAccess.Reference occurrence) {
+                if (authorization == null || authorization.state() != SourceLineage.State.VERIFIED || occurrence == null
+                        || !expectedContext.purpose().equals(authorization.source().purpose())
+                        || !expectedContext.audience().equals(authorization.source().audience())) {
+                    return Resolution.unavailable();
+                }
+                Lookup lookup = MongoSourceOccurrenceStore.this.lookup(occurrence, authorization);
+                return switch (lookup.state()) {
+                    case VERIFIED -> Resolution.verified(lookup.binding());
+                    case ORDER_PENDING -> Resolution.pending();
+                    case CONFLICT -> Resolution.conflict();
+                    case REVOKED, UNAVAILABLE, UNVERIFIED -> Resolution.unavailable();
+                };
+            }
         };
     }
 
@@ -316,14 +332,24 @@ public final class MongoSourceOccurrenceStore {
             if (authorization == null || authorization.state() != SourceLineage.State.VERIFIED) { return absent(); }
             Document row = db.getCollection(OCCURRENCES).find(and(eq("eventId", occurrence.eventId()),
                     eq("eventCreatedAt", occurrence.createdAt().toString()))).first();
-            if (row == null || !authorization.receiptId().equals(row.getString("receiptId"))
+            if (row == null) { return new Lookup(SourceLineage.State.ORDER_PENDING, null); }
+            if (!authorization.receiptId().equals(row.getString("receiptId"))
                     || !occurrence.fingerprint().equals(row.getString("fingerprint"))
-                    || !authorization.eventCommitment().equals(row.getString("enrichedCommitment"))) { return absent(); }
+                    || !authorization.eventCommitment().equals(row.getString("enrichedCommitment"))) {
+                return new Lookup(SourceLineage.State.CONFLICT, null);
+            }
             Result result = restore(row, authorization.receiptId());
+            if (result.status == Status.PENDING || result.status == Status.PUBLISHING) {
+                return new Lookup(SourceLineage.State.ORDER_PENDING, null);
+            }
+            if (result.status == Status.CONFLICT) { return new Lookup(SourceLineage.State.CONFLICT, null); }
             if (result.status != Status.PUBLISHED) { return absent(); }
             SourceLineage current = lineage.recoverEnriched(row.getString("receiptId"), row.getString("enrichedCommitment"));
-            if (current.state() != SourceLineage.State.VERIFIED || !current.source().equals(authorization.source())
-                    || !current.eventCommitment().equals(authorization.eventCommitment())) { return absent(); }
+            if (current.state() != SourceLineage.State.VERIFIED) { return new Lookup(current.state(), null); }
+            if (!current.source().equals(authorization.source())
+                    || !current.eventCommitment().equals(authorization.eventCommitment())) {
+                return new Lookup(SourceLineage.State.CONFLICT, null);
+            }
             return new Lookup(SourceLineage.State.VERIFIED, new SourceScoredOccurrence(current.source(), current.receiptId(),
                     current.eventCommitment(), occurrence.eventId(), occurrence.createdAt(), row.getString("fingerprint"), row.getString("runId")));
         } catch (RuntimeException unavailable) { return absent(); }

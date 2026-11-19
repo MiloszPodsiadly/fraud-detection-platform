@@ -17,7 +17,7 @@ import java.util.function.LongSupplier;
 
 /** Internal, read-only and deliberately unwired bounded Graph projection reader. */
 final class GraphProjectionReader {
-    private final GraphProjectionStore store;
+    private final GraphProjectionDao store;
     private final GraphRelationAuthority ownerAuthority;
     private final GraphPrivateReadGrantVerifier grantVerifier;
     private final GraphQueryLimits limits;
@@ -25,13 +25,13 @@ final class GraphProjectionReader {
     private final Clock clock;
     private final LongSupplier nanoTime;
 
-    GraphProjectionReader(GraphProjectionStore store, GraphRelationAuthority ownerAuthority,
+    GraphProjectionReader(GraphProjectionDao store, GraphRelationAuthority ownerAuthority,
                           GraphPrivateReadGrantVerifier grantVerifier, GraphQueryLimits limits,
                           GraphReadCursorCodec cursors, Clock clock) {
         this(store, ownerAuthority, grantVerifier, limits, cursors, clock, System::nanoTime);
     }
 
-    GraphProjectionReader(GraphProjectionStore store, GraphRelationAuthority ownerAuthority,
+    GraphProjectionReader(GraphProjectionDao store, GraphRelationAuthority ownerAuthority,
                           GraphPrivateReadGrantVerifier grantVerifier, GraphQueryLimits limits,
                           GraphReadCursorCodec cursors, Clock clock, LongSupplier nanoTime) {
         this.store = Objects.requireNonNull(store, "GRAPH_STORE_REQUIRED");
@@ -309,11 +309,13 @@ final class GraphProjectionReader {
     }
 
     private static GraphReadOutcome ownerOutcome(GraphRelationResolution owner) {
-        if (owner == null || owner.state() == GraphRelationResolution.State.UNAVAILABLE
-                || owner.state() == GraphRelationResolution.State.PENDING) {
-            return GraphReadOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
-        }
-        if (owner.state() == GraphRelationResolution.State.CONFLICT) { return GraphReadOutcome.conflict(); }
-        return GraphReadOutcome.unavailable(GraphReadReason.AUTHORITY_REVOKED);
+        if (owner == null) { return GraphReadOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+        return switch (owner.state()) {
+            case VERIFIED -> throw new IllegalArgumentException("GRAPH_OWNER_OUTCOME_INVALID");
+            case PENDING -> GraphReadOutcome.pending(owner.reason());
+            case UNAVAILABLE -> GraphReadOutcome.unavailable(owner.reason());
+            case DENIED -> GraphReadOutcome.denied(owner.reason());
+            case CONFLICT -> GraphReadOutcome.conflict();
+        };
     }
 }

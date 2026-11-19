@@ -25,7 +25,7 @@ import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Sorts.ascending;
 
 /** Private Mongo projection adapter. DDL is verified at startup and never repaired here. */
-final class MongoGraphProjectionStore implements GraphProjectionStore {
+final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProjectionDao {
     private static final int MAX_TRANSACTION_ATTEMPTS = 3;
     private static final int MAX_COMMIT_ACK_ATTEMPTS = 3;
     private static final TransactionOptions TRANSACTION = TransactionOptions.builder()
@@ -115,6 +115,32 @@ final class MongoGraphProjectionStore implements GraphProjectionStore {
             }
         }
         throw lastRetryable == null ? new MongoException("GRAPH_TRANSACTION_RETRY_EXHAUSTED") : lastRetryable;
+    }
+
+    @Override public GraphAppendOutcome reconcileLifecycle(GraphLifecycleReconciliationRequest request) {
+        if (!GraphProjectionSchema.WRITER.equals(authenticatedPrincipal) || client == null || admission == null) {
+            return GraphAppendOutcome.denied(GraphReadReason.NOT_SUPPORTED);
+        }
+        GraphLifecycleFenceOutcome preflight = admission.preflightReconciliation(request);
+        if (preflight.state() != GraphLifecycleFenceOutcome.State.NO_CHANGE) {
+            return reconciliationFailure(preflight);
+        }
+        for (int attempt = 0; attempt < MAX_TRANSACTION_ATTEMPTS; attempt++) {
+            try {
+                return transactLifecycleReconciliation(request);
+            } catch (MongoException failure) {
+                if (failure.getCode() == 11000 || failure.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)) {
+                    if (attempt + 1 < MAX_TRANSACTION_ATTEMPTS) { continue; }
+                }
+                return GraphAppendOutcome.unavailable(GraphReadReason.STORE_UNAVAILABLE);
+            } catch (IllegalStateException invalidStoredRow) {
+                if ("GRAPH_STORE_DOCUMENT_INVALID".equals(invalidStoredRow.getMessage())) {
+                    return GraphAppendOutcome.unavailable(GraphReadReason.STORE_UNAVAILABLE);
+                }
+                throw invalidStoredRow;
+            }
+        }
+        return GraphAppendOutcome.unavailable(GraphReadReason.STORE_UNAVAILABLE);
     }
 
     @Override public Optional<GraphStoredEdge> findLogicalRelation(GraphEdgeFact candidate) {
@@ -234,6 +260,100 @@ final class MongoGraphProjectionStore implements GraphProjectionStore {
         Optional<GraphStoredEdge> committed = findLogicalRelation(admitted.edge());
         if (mutation.matchesCommittedMutation(committed)) { return GraphAppendOutcome.recovered(committed.orElseThrow()); }
         throw unknownCommit;
+    }
+
+    private GraphAppendOutcome transactLifecycleReconciliation(GraphLifecycleReconciliationRequest request) {
+        FenceMutation mutation;
+        MongoException unknownCommit = null;
+        try (ClientSession session = client.startSession()) {
+            session.startTransaction(TRANSACTION);
+            try {
+                mutation = mutateLifecycleReconciliation(session, request);
+                if (!mutation.wrote()) {
+                    abort(session);
+                    return mutation.outcome();
+                }
+                if (!request.operationDeadline().isAfter(clock.instant())) {
+                    abort(session);
+                    return GraphAppendOutcome.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
+                }
+            } catch (RuntimeException failure) {
+                abort(session);
+                throw failure;
+            }
+            try {
+                commitWithUnknownResultRetry(session);
+            } catch (MongoException failure) {
+                if (!failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) {
+                    abort(session);
+                    throw failure;
+                }
+                unknownCommit = failure;
+            }
+        }
+        if (unknownCommit == null) { return mutation.outcome(); }
+        Optional<GraphStoredEdge> committed = findReconciliationTarget(request);
+        if (mutation.matchesCommittedMutation(committed)) { return GraphAppendOutcome.recovered(committed.orElseThrow()); }
+        return GraphAppendOutcome.unavailable(GraphReadReason.STORE_UNAVAILABLE);
+    }
+
+    private FenceMutation mutateLifecycleReconciliation(ClientSession session,
+                                                         GraphLifecycleReconciliationRequest request) {
+        MongoCollection<Document> edges = collection();
+        Document currentDocument = edges.find(session, reconciliationFilter(request)).limit(1).first();
+        if (currentDocument == null) {
+            return FenceMutation.unchanged(GraphAppendOutcome.unavailable(GraphReadReason.REFERENCE_INVALID));
+        }
+        GraphStoredEdge current = GraphProjectionDocumentCodec.decode(currentDocument);
+        if (current.lifecycle() == GraphEdgeLifecycle.CONFLICT || current.lifecycle() == GraphEdgeLifecycle.REVOKED) {
+            return FenceMutation.unchanged(GraphAppendOutcome.fenced(current));
+        }
+
+        GraphLifecycleFenceOutcome decision = admission.resolveReconciliationFence(request, current);
+        if (decision.state() != GraphLifecycleFenceOutcome.State.FENCE
+                && decision.state() != GraphLifecycleFenceOutcome.State.NO_CHANGE) {
+            return FenceMutation.unchanged(reconciliationFailure(decision));
+        }
+        if (decision.state() == GraphLifecycleFenceOutcome.State.NO_CHANGE) {
+            return FenceMutation.unchanged(GraphAppendOutcome.existing(current));
+        }
+        if (!request.operationDeadline().isAfter(clock.instant())) {
+            return FenceMutation.unchanged(GraphAppendOutcome.unavailable(GraphReadReason.DEADLINE_EXCEEDED));
+        }
+
+        GraphEdgeLifecycle target = decision.fence().lifecycle();
+        long updated = edges.updateOne(session,
+                and(eq("_id", current.edge().canonicalId()), eq("lifecycle.state", GraphEdgeLifecycle.ACTIVE.name())),
+                new Document("$set", new Document("lifecycle.state", target.name()))).getModifiedCount();
+        if (updated != 1) { throw transientWriteConflict(); }
+        GraphStoredEdge fenced = new GraphStoredEdge(current.edge(), target, current.admittedAt(), current.validUntil());
+        if (!request.operationDeadline().isAfter(clock.instant())) {
+            return FenceMutation.unchanged(GraphAppendOutcome.unavailable(GraphReadReason.DEADLINE_EXCEEDED));
+        }
+        return FenceMutation.changed(GraphAppendOutcome.fenced(fenced), fenced);
+    }
+
+    private Optional<GraphStoredEdge> findReconciliationTarget(GraphLifecycleReconciliationRequest request) {
+        Document found = collection().find(reconciliationFilter(request)).limit(1).first();
+        return found == null ? Optional.empty() : Optional.of(GraphProjectionDocumentCodec.decode(found));
+    }
+
+    private static Document reconciliationFilter(GraphLifecycleReconciliationRequest request) {
+        return scopeFilter(request.scope())
+                .append("edgeType", GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE.name())
+                .append("occurrence.token", request.occurrence().occurrenceToken())
+                .append("occurrence.eventTime", java.util.Date.from(request.occurrence().eventTime()))
+                .append("device.token", request.associatedIdentityToken())
+                .append("device.keyVersion", request.pseudonymKeyVersion());
+    }
+
+    private static GraphAppendOutcome reconciliationFailure(GraphLifecycleFenceOutcome outcome) {
+        return switch (outcome.state()) {
+            case DENIED -> GraphAppendOutcome.denied(outcome.reason());
+            case PENDING -> GraphAppendOutcome.pending(outcome.reason());
+            case UNAVAILABLE -> GraphAppendOutcome.unavailable(outcome.reason());
+            case FENCE, NO_CHANGE -> throw new IllegalArgumentException("GRAPH_RECONCILIATION_OUTCOME_INVALID");
+        };
     }
 
     private FenceMutation mutateLifecycleWithinTransaction(ClientSession session,

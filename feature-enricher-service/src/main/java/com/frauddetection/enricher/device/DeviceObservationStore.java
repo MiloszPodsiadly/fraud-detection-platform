@@ -179,12 +179,22 @@ interface DeviceObservationStore {
 
     @FunctionalInterface
     interface HistoryAuthority {
+        enum Status { CURRENT, PENDING, UNAVAILABLE, DENIED, REVOKED, CONFLICT }
+
         boolean current(Provenance provenance, int pseudonymKeyVersion);
+        default Status currentStatus(Provenance provenance, int pseudonymKeyVersion) {
+            return current(provenance, pseudonymKeyVersion) ? Status.CURRENT : Status.UNAVAILABLE;
+        }
         default boolean currentHistory(List<Provenance> provenance, int pseudonymKeyVersion) {
             return provenance.stream().allMatch(item -> current(item, pseudonymKeyVersion));
         }
         default boolean coverageCurrent(CoverageAuthority proof, String institution, String source, String populationCommitment,
                                         int pseudonymKeyVersion, Instant coverageStart) { return false; }
+        default Status coverageStatus(CoverageAuthority proof, String institution, String source,
+                                      String populationCommitment, int pseudonymKeyVersion, Instant coverageStart) {
+            return coverageCurrent(proof, institution, source, populationCommitment, pseudonymKeyVersion, coverageStart)
+                    ? Status.CURRENT : Status.UNAVAILABLE;
+        }
     }
 
     private static String token(String value) {

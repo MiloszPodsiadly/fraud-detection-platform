@@ -12,8 +12,7 @@ public record GraphEvidenceRef(GraphIdentityScope scope, GraphOccurrenceRef occu
                                String sourceReceiptReference, String rawCommitment, String enrichedCommitment,
                                String ownerAssertionReference, String coverageReference, String policyReference,
                                GraphScoredOccurrenceRef scoredOccurrence, String stageASnapshotCommitment,
-                               Instant coverageFrom, Instant asOf, long coverageGeneration,
-                               Instant coverageWatermark, Instant expiresAt) {
+                               Instant coverageFrom, Instant asOf, long coverageGeneration, Instant expiresAt) {
     public GraphEvidenceRef {
         Objects.requireNonNull(scope, "GRAPH_SCOPE_REQUIRED");
         Objects.requireNonNull(occurrence, "GRAPH_OCCURRENCE_REQUIRED");
@@ -32,17 +31,16 @@ public record GraphEvidenceRef(GraphIdentityScope scope, GraphOccurrenceRef occu
         GraphValidation.token(stageASnapshotCommitment);
         GraphValidation.millisecondInstant(coverageFrom);
         GraphValidation.millisecondInstant(asOf);
-        GraphValidation.millisecondInstant(coverageWatermark);
         GraphValidation.millisecondInstant(expiresAt);
         if (coverageGeneration < 1 || coverageFrom.isAfter(asOf)
                 || !occurrence.eventTime().equals(asOf)
-                || coverageWatermark.isBefore(asOf) || !expiresAt.isAfter(asOf)) {
+                || !expiresAt.isAfter(asOf)) {
             throw new IllegalArgumentException("GRAPH_EVIDENCE_TEMPORAL_SCOPE_INVALID");
         }
     }
 
     public String canonicalReferenceId() {
-        return GraphCanonical.digest("evidence-ref/v1",
+        return GraphCanonical.digest("evidence-ref/v2",
                 scope.sourceIssuerToken(), scope.institutionToken(), scope.sourceToken(), scope.sourceEpochToken(),
                 Integer.toString(scope.identityVersion()), occurrence.occurrenceToken(),
                 Long.toString(occurrence.eventTime().toEpochMilli()), associatedIdentityToken,
@@ -51,7 +49,7 @@ public record GraphEvidenceRef(GraphIdentityScope scope, GraphOccurrenceRef occu
                 scoredOccurrence.createdAt().toString(), scoredOccurrence.fingerprint(),
                 scoredOccurrence.runId(), stageASnapshotCommitment, Long.toString(coverageFrom.toEpochMilli()),
                 Long.toString(asOf.toEpochMilli()), Long.toString(coverageGeneration),
-                Long.toString(coverageWatermark.toEpochMilli()), Long.toString(expiresAt.toEpochMilli()));
+                Long.toString(expiresAt.toEpochMilli()));
     }
 
     @Override public String toString() { return "GraphEvidenceRef[redacted]"; }

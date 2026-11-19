@@ -377,7 +377,7 @@ class MongoGraphProjectionWorkloadTest {
                 token("assertion-" + proof), token("coverage-" + proof), token("policy-" + proof),
                 new GraphScoredOccurrenceRef(token("scored-" + proof), eventTime.plusMillis(1),
                         token("fingerprint-" + proof), GraphScoredOccurrenceRef.INITIAL_RUN),
-                token("snapshot-" + proof), eventTime.minusSeconds(300), eventTime, 1, eventTime,
+                token("snapshot-" + proof), eventTime.minusSeconds(300), eventTime, 1,
                 NOW.plus(Duration.ofDays(3)));
     }
 
@@ -387,7 +387,7 @@ class MongoGraphProjectionWorkloadTest {
                 existing.enrichedCommitment(), existing.ownerAssertionReference(), existing.coverageReference(),
                 existing.policyReference(), existing.scoredOccurrence(), existing.stageASnapshotCommitment(),
                 existing.coverageFrom(), existing.asOf(), existing.coverageGeneration(),
-                existing.coverageWatermark(), existing.expiresAt());
+                existing.expiresAt());
     }
 
     private static Document scopeFilter(GraphIdentityScope scope) {
