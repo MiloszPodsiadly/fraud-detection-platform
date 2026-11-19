@@ -1729,7 +1729,8 @@ class SourceLineagePipelineIntegrationTest {
         assertThat(ownerClient.getDatabase(db).getCollection("source_admission_receipts").countDocuments()).isEqualTo(1);
     }
 
-    @Test void concurrentIdenticalSignedRequestsCommitOneReceiptRawLinkAndPublicationIntent() throws Exception {
+    @RepeatedTest(20)
+    void concurrentIdenticalSignedRequestsCommitOneReceiptRawLinkAndPublicationIntent() throws Exception {
         byte[] signedPayload = payload();
         var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
         var evidence = verified(signedPayload, Map.of());
@@ -1751,6 +1752,137 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION)
                     .countDocuments(eq("_id", first.receipt().id()))).isEqualTo(1);
         }
+    }
+
+    @Test void transientRawRetryClosesSessionBeforeBackoffAndKeepsOneCommittedIdentity() throws Exception {
+        AtomicInteger sessionsStarted = new AtomicInteger();
+        AtomicInteger activeSessions = new AtomicInteger();
+        AtomicInteger commitCalls = new AtomicInteger();
+        AtomicInteger backoffCalls = new AtomicInteger();
+        MongoClient faultClient = trackedSessionFault(ownerClient, sessionsStarted, activeSessions,
+                (session, method, args) -> {
+                    if (method.getName().equals("commitTransaction") && commitCalls.getAndIncrement() == 0) {
+                        MongoException retryable = new MongoException(112, "TEST_ONLY_TRANSIENT_RAW_WRITE_CONFLICT");
+                        retryable.addLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+                        throw retryable;
+                    }
+                    return invoke(session, method, args);
+                });
+        var faultOwner = new MongoSourceLineage(faultClient, db, "source_owner", MongoSourceLineage.Stage.INGEST,
+                verifier, CLOCK);
+        var faultStore = new MongoSourceReceiptStore(faultClient, db, CLOCK,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, faultOwner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES,
+                attempt -> {
+                    assertThat(activeSessions).hasValue(0);
+                    backoffCalls.incrementAndGet();
+                    return true;
+                });
+        byte[] signedPayload = payload();
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var candidate = new TransactionRequestMapper().toEvent(request, "transient-retry-correlation");
+
+        var accepted = faultStore.acceptRaw(verified(signedPayload, Map.of()), candidate);
+
+        assertThat(accepted.status()).isEqualTo(SourceReceiptStore.Status.ADMITTED);
+        assertThat(sessionsStarted).hasValue(2);
+        assertThat(activeSessions).hasValue(0);
+        assertThat(commitCalls).hasValue(2);
+        assertThat(backoffCalls).hasValue(1);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_receipts").countDocuments()).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_raw").countDocuments()).isEqualTo(1);
+        assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION).countDocuments()).isEqualTo(1);
+    }
+
+    @Test void rawRetryRechecksCurrentSourcePolicyBeforeStartingAnotherTransaction() throws Exception {
+        MutableClock retryClock = new MutableClock(TestSourceIssuer.NOW);
+        var retryVerifier = new SourceSignatureVerifier(new SourceVerificationProperties(
+                List.of(TestSourceIssuer.policy(0, false))), retryClock);
+        byte[] signedPayload = payload();
+        var evidence = (SourceSignatureVerifier.Verified) retryVerifier.verify(
+                TestSourceIssuer.proof(signedPayload, Map.of(), 0), signedPayload,
+                new SourceSignatureVerifier.Context(AttestedTransactionIngestService.PURPOSE,
+                        AttestedTransactionIngestService.AUDIENCE));
+        AtomicInteger sessionsStarted = new AtomicInteger();
+        AtomicInteger activeSessions = new AtomicInteger();
+        AtomicInteger commitCalls = new AtomicInteger();
+        AtomicInteger backoffCalls = new AtomicInteger();
+        MongoClient faultClient = trackedSessionFault(ownerClient, sessionsStarted, activeSessions,
+                (session, method, args) -> {
+                    if (method.getName().equals("commitTransaction") && commitCalls.getAndIncrement() == 0) {
+                        MongoException retryable = new MongoException(112, "TEST_ONLY_TRANSIENT_RAW_WRITE_CONFLICT");
+                        retryable.addLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+                        throw retryable;
+                    }
+                    return invoke(session, method, args);
+                });
+        var faultOwner = new MongoSourceLineage(faultClient, db, "source_owner", MongoSourceLineage.Stage.INGEST,
+                retryVerifier, retryClock);
+        var faultStore = new MongoSourceReceiptStore(faultClient, db, retryClock,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), retryVerifier, faultOwner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES,
+                attempt -> {
+                    assertThat(activeSessions).hasValue(0);
+                    backoffCalls.incrementAndGet();
+                    retryClock.set(TestSourceIssuer.NOW.plusSeconds(3_601));
+                    return true;
+                });
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var candidate = new TransactionRequestMapper().toEvent(request, "revoked-retry-correlation");
+
+        var denied = faultStore.acceptRaw(evidence, candidate);
+
+        assertThat(denied.status()).isEqualTo(SourceReceiptStore.Status.REVOKED);
+        assertThat(sessionsStarted).hasValue(1);
+        assertThat(activeSessions).hasValue(0);
+        assertThat(commitCalls).hasValue(1);
+        assertThat(backoffCalls).hasValue(1);
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_receipts").countDocuments()).isZero();
+        assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_raw").countDocuments()).isZero();
+        assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION).countDocuments()).isZero();
+    }
+
+    @Test void interruptedRawBackoffPreservesInterruptAndReturnsUnresolvedWithoutRetry() throws Exception {
+        AtomicInteger sessionsStarted = new AtomicInteger();
+        AtomicInteger activeSessions = new AtomicInteger();
+        AtomicInteger commitCalls = new AtomicInteger();
+        MongoClient faultClient = trackedSessionFault(ownerClient, sessionsStarted, activeSessions,
+                (session, method, args) -> {
+                    if (method.getName().equals("commitTransaction")) {
+                        commitCalls.incrementAndGet();
+                        MongoException retryable = new MongoException(112, "TEST_ONLY_TRANSIENT_RAW_WRITE_CONFLICT");
+                        retryable.addLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+                        throw retryable;
+                    }
+                    return invoke(session, method, args);
+                });
+        var faultOwner = new MongoSourceLineage(faultClient, db, "source_owner", MongoSourceLineage.Stage.INGEST,
+                verifier, CLOCK);
+        var faultStore = new MongoSourceReceiptStore(faultClient, db, CLOCK,
+                new SourceReceiptStore.Limits(Duration.ofHours(1), Duration.ofHours(2), 100), verifier, faultOwner,
+                new SourceRawPublicationCipher("raw-key-1", Map.of("raw-key-1", RAW_KEY)), RAW_PUBLICATION_PROPERTIES,
+                attempt -> {
+                    assertThat(activeSessions).hasValue(0);
+                    Thread.currentThread().interrupt();
+                    return false;
+                });
+        byte[] signedPayload = payload();
+        var request = JSON.readValue(signedPayload, IngestTransactionRequest.class);
+        var candidate = new TransactionRequestMapper().toEvent(request, "interrupted-retry-correlation");
+        try {
+            var outcome = faultStore.acceptRaw(verified(signedPayload, Map.of()), candidate);
+
+            assertThat(outcome.status()).isEqualTo(SourceReceiptStore.Status.UNRESOLVED);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            assertThat(sessionsStarted).hasValue(1);
+            assertThat(activeSessions).hasValue(0);
+            assertThat(commitCalls).hasValue(1);
+        } finally {
+            Thread.interrupted();
+        }
+        assertThat(ownerClient.getDatabase(db).getCollection("source_admission_receipts").countDocuments()).isZero();
+        assertThat(ownerClient.getDatabase(db).getCollection("source_lineage_raw").countDocuments()).isZero();
+        assertThat(ownerClient.getDatabase(db).getCollection(MongoSourceRawPublicationSchema.COLLECTION).countDocuments()).isZero();
     }
 
     @Test void rawLineageBindingRequiresTheReceiptOwnersActiveTransaction() throws Exception {
@@ -2747,6 +2879,28 @@ class SourceLineagePipelineIntegrationTest {
                             (ignored, operation, parameters) -> fault.call(session, operation, parameters));
                 });
     }
+    private static MongoClient trackedSessionFault(MongoClient delegate, AtomicInteger sessionsStarted,
+                                                   AtomicInteger activeSessions, SessionCall fault) {
+        return (MongoClient) Proxy.newProxyInstance(MongoClient.class.getClassLoader(), new Class<?>[] {MongoClient.class},
+                (proxy, method, args) -> {
+                    Object result = invoke(delegate, method, args);
+                    if (!method.getName().equals("startSession")) { return result; }
+                    ClientSession session = (ClientSession) result;
+                    sessionsStarted.incrementAndGet();
+                    activeSessions.incrementAndGet();
+                    AtomicBoolean closed = new AtomicBoolean();
+                    return Proxy.newProxyInstance(ClientSession.class.getClassLoader(), new Class<?>[] {ClientSession.class},
+                            (ignored, operation, parameters) -> {
+                                if (operation.getName().equals("close")) {
+                                    try { return invoke(session, operation, parameters); }
+                                    finally {
+                                        if (closed.compareAndSet(false, true)) { activeSessions.decrementAndGet(); }
+                                    }
+                                }
+                                return fault.call(session, operation, parameters);
+                            });
+                });
+    }
     private static Object invoke(Object delegate, Method method, Object[] args) throws Throwable {
         try { return method.invoke(delegate, args); }
         catch (InvocationTargetException failure) { throw failure.getCause(); }
@@ -2799,6 +2953,14 @@ class SourceLineagePipelineIntegrationTest {
         return JSON.treeToValue(node, TransactionRawEvent.class);
     }
     private record Scored(TransactionScoredEvent event, ScoringContext context) { }
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> current;
+        MutableClock(Instant initial) { current = new AtomicReference<>(initial); }
+        void set(Instant instant) { current.set(instant); }
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return current.get(); }
+    }
     private static byte[] payload() {
         return """
                 {"transactionId":"transaction-1","customerId":"customer-1","accountId":"account-1","paymentInstrumentId":"card-1",

@@ -67,6 +67,16 @@ class MongoSourceReceiptStoreIntegrationTest {
 
     @AfterEach void close() { client.close(); }
 
+    @Test void interruptedRetryDelayPreservesInterruptAndStopsRetrying() {
+        Thread.currentThread().interrupt();
+        try {
+            assertThat(MongoSourceReceiptStore.awaitTransientRetry(0)).isFalse();
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     @Test void maximumLengthSignedScopeKeepsReceiptMetadataBounded() throws Exception {
         var claims = Map.<String, Object>of("issuer", "a".repeat(128), "institution", "b".repeat(128), "source", "c".repeat(128),
                 "sourceEpoch", "d".repeat(128), "signingKeyVersion", "e".repeat(128), "sourceEventId", "f".repeat(128),
