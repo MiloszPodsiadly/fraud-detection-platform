@@ -184,6 +184,17 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
         return readPrincipal(owner, database, "device_reader", privileges);
     }
 
+    MongoClient graphReader(MongoClient owner, String database, String user) {
+        List<Document> privileges = new ArrayList<>();
+        privileges.add(privilege(database, "", List.of("listCollections")));
+        for (String collection : List.of("device_observation_candidates", "device_observations",
+                "device_occurrences", "device_history_member_anchors", "device_source_coverage",
+                "device_operational_revocation_tombstones")) {
+            privileges.add(privilege(database, collection, List.of("find")));
+        }
+        return readPrincipal(owner, database, user, privileges);
+    }
+
     private MongoClient readPrincipal(MongoClient owner, String database, String user, List<Document> privileges) {
         var db = owner.getDatabase(database);
         db.runCommand(new Document("createRole", user).append("privileges", privileges).append("roles", List.of()));

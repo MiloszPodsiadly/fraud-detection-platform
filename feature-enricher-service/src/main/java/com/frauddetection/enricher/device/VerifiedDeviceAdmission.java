@@ -29,7 +29,14 @@ final class VerifiedDeviceAdmission {
         this.originAudiences = origins.keys().stream().filter(k -> DeviceAssertionVerifier.TRANSACTION_PURPOSE.equals(k.purpose()))
                 .map(SourceVerificationProperties.TrustedKey::audience).distinct().toList();
         this.verifier = new DeviceAssertionVerifier(origins, grants, clock);
-        this.store = new MongoDeviceObservationStore(client, database, clock, epoch, new DeviceObservationStore.HistoryAuthority() {
+        this.store = new MongoDeviceObservationStore(client, database, clock, epoch,
+                historyAuthority(source, epoch, verifier, pseudonyms), pseudonyms);
+    }
+
+    static DeviceObservationStore.HistoryAuthority historyAuthority(MongoSourceLineage source, DeviceEpoch epoch,
+                                                                     DeviceAssertionVerifier verifier,
+                                                                     DevicePseudonyms pseudonyms) {
+        return new DeviceObservationStore.HistoryAuthority() {
             @Override public boolean current(DeviceObservationStore.Provenance p, int version) {
                 SourceLineage lineage = source.enrichedBinding(p.receiptId(), p.rawCommitment(), p.enrichedCommitment());
                 return currentLineage(p, version, lineage);
@@ -58,7 +65,7 @@ final class VerifiedDeviceAdmission {
                                                      String populationCommitment, int version, java.time.Instant coverageStart) {
                 return verifier.currentStoredCoverage(proof, epoch, institution, sourceCode, populationCommitment, version, coverageStart, pseudonyms);
             }
-        }, pseudonyms);
+        };
     }
 
     Ticket stage(byte[] sourceProof, byte[] originalSourcePayload, byte[] deviceProof, byte[] originalAssertion,

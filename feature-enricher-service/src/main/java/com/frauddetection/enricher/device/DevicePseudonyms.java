@@ -28,6 +28,16 @@ final class DevicePseudonyms {
     String device(String institution, String device) { return token("device", institution, device); }
     String transaction(String institution, String customer, String transaction) { return token("transaction", institution, customer, transaction); }
     String event(String institution, String event) { return token("source-event", institution, event); }
+    String graphReference(String purpose, String... fields) {
+        if (!java.util.Set.of("scope-issuer", "scope-institution", "scope-source", "scope-epoch",
+                "score-event", "coverage", "policy").contains(purpose)) {
+            throw new IllegalArgumentException("DEVICE_GRAPH_REFERENCE_PURPOSE_INVALID");
+        }
+        String[] versioned = new String[fields.length + 1];
+        versioned[0] = Integer.toString(version);
+        System.arraycopy(fields, 0, versioned, 1, fields.length);
+        return token("graph-" + purpose, versioned);
+    }
     /** Domain-separated server MAC for persisted verified facts; this grants no Device authority. */
     String integrity(String recordType, String... fields) {
         if (!validRecordType(recordType)) {
