@@ -143,7 +143,8 @@ class GraphProjectionReaderTest {
         };
         GraphReadOutcome rotated = read(reader(store, rotatedOwner, GraphPolicyDecision.AUTHORIZED),
                 grant(scope), scope, row.edge().evidence().occurrence(), 10, null);
-        assertThat(rotated.state()).isEqualTo(GraphProjectionState.CONFLICT);
+        assertThat(rotated.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(rotated.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
         assertThat(rotated.edges()).isEmpty();
     }
 

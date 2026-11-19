@@ -41,12 +41,11 @@ final class GraphEvidenceAdmission {
         GraphReadReason initialDeadline = deadlineState(request.deadline(), now, started);
         if (initialDeadline != null) { return deadlineOutcome(initialDeadline); }
 
-        GraphPolicyDecision preflight = policyAuthorizer.authorize(request.requestingPrincipal(), PURPOSE,
+        GraphPolicyDecision preflight = authorize(request.requestingPrincipal(), PURPOSE,
                 null, request.deadline(), now);
         if (preflight != GraphPolicyDecision.AUTHORIZED) { return policyOutcome(preflight); }
 
-        GraphRelationResolution initial = relationAuthority.resolveForAdmission(request.ownerReference());
-        if (initial == null) { return GraphAdmissionOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+        GraphRelationResolution initial = resolveForAdmission(request.ownerReference());
         if (initial.state() != GraphRelationResolution.State.VERIFIED) { return ownerOutcome(initial); }
         GraphEvidenceRef evidence = initial.evidence();
         if (!request.ownerReference().equals(evidence.ownerAssertionReference())) {
@@ -56,19 +55,20 @@ final class GraphEvidenceAdmission {
             return GraphAdmissionOutcome.unavailable(GraphReadReason.RETENTION_EXPIRED);
         }
 
-        GraphPolicyDecision scoped = policyAuthorizer.authorize(request.requestingPrincipal(), PURPOSE,
+        GraphPolicyDecision scoped = authorize(request.requestingPrincipal(), PURPOSE,
                 evidence.scope(), request.deadline(), clock.instant());
         if (scoped != GraphPolicyDecision.AUTHORIZED) { return policyOutcome(scoped); }
         GraphEdgeFact candidate = edge(evidence);
         GraphReadReason beforeFenceDeadline = deadlineState(request.deadline(), clock.instant(), started);
         if (beforeFenceDeadline != null) { return deadlineOutcome(beforeFenceDeadline); }
 
-        GraphRelationResolution current = relationAuthority.revalidate(evidence, request.requestingPrincipal());
-        if (current == null) { return GraphAdmissionOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+        GraphRelationResolution current = revalidateOwner(evidence, request.requestingPrincipal());
         if (current.state() != GraphRelationResolution.State.VERIFIED) { return ownerOutcome(current); }
-        if (!evidence.equals(current.evidence())) { return GraphAdmissionOutcome.conflict(); }
+        if (!evidence.equals(current.evidence())) {
+            return GraphAdmissionOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
 
-        GraphPolicyDecision finalPolicy = policyAuthorizer.authorize(request.requestingPrincipal(), PURPOSE,
+        GraphPolicyDecision finalPolicy = authorize(request.requestingPrincipal(), PURPOSE,
                 evidence.scope(), request.deadline(), clock.instant());
         if (finalPolicy != GraphPolicyDecision.AUTHORIZED) { return policyOutcome(finalPolicy); }
         Instant finishedAt = clock.instant();
@@ -92,18 +92,19 @@ final class GraphEvidenceAdmission {
         if (!admitted.validUntil().isAfter(startedAt)) {
             return GraphAdmissionOutcome.unavailable(GraphReadReason.RETENTION_EXPIRED);
         }
-        GraphPolicyDecision before = policyAuthorizer.authorize(admitted.requestingPrincipal(), PURPOSE,
+        GraphPolicyDecision before = authorize(admitted.requestingPrincipal(), PURPOSE,
                 evidence.scope(), admitted.operationDeadline(), startedAt);
         if (before != GraphPolicyDecision.AUTHORIZED) { return policyOutcome(before); }
         deadline = deadlineState(admitted.operationDeadline(), clock.instant(), started);
         if (deadline != null) { return deadlineOutcome(deadline); }
-        GraphRelationResolution current = relationAuthority.revalidate(evidence, admitted.requestingPrincipal());
-        if (current == null) { return GraphAdmissionOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+        GraphRelationResolution current = revalidateOwner(evidence, admitted.requestingPrincipal());
         if (current.state() != GraphRelationResolution.State.VERIFIED) { return ownerOutcome(current); }
-        if (!evidence.equals(current.evidence())) { return GraphAdmissionOutcome.conflict(); }
+        if (!evidence.equals(current.evidence())) {
+            return GraphAdmissionOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
         deadline = deadlineState(admitted.operationDeadline(), clock.instant(), started);
         if (deadline != null) { return deadlineOutcome(deadline); }
-        GraphPolicyDecision after = policyAuthorizer.authorize(admitted.requestingPrincipal(), PURPOSE,
+        GraphPolicyDecision after = authorize(admitted.requestingPrincipal(), PURPOSE,
                 evidence.scope(), admitted.operationDeadline(), clock.instant());
         if (after != GraphPolicyDecision.AUTHORIZED) { return policyOutcome(after); }
         Instant now = clock.instant();
@@ -118,7 +119,8 @@ final class GraphEvidenceAdmission {
                 admitted.operationDeadline(), admitted.requestingPrincipal()));
     }
 
-    GraphLifecycleFenceOutcome resolveLifecycleFence(AdmittedRelation admitted) {
+    /** This fence is valid only within the original bounded admission operation. */
+    GraphLifecycleFenceOutcome resolveAdmissionWindowFence(AdmittedRelation admitted) {
         if (admitted == null) { return GraphLifecycleFenceOutcome.denied(GraphReadReason.REFERENCE_INVALID); }
         long started = nanoTime.getAsLong();
         Instant now = clock.instant();
@@ -127,8 +129,7 @@ final class GraphEvidenceAdmission {
         if (!admitted.validUntil().isAfter(now)) {
             return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.RETENTION_EXPIRED);
         }
-        GraphRelationResolution current = relationAuthority.revalidate(admitted.edge().evidence(), admitted.requestingPrincipal());
-        if (current == null) { return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+        GraphRelationResolution current = revalidateOwner(admitted.edge().evidence(), admitted.requestingPrincipal());
         now = clock.instant();
         deadline = deadlineState(admitted.operationDeadline(), now, started);
         if (deadline != null) { return GraphLifecycleFenceOutcome.unavailable(deadline); }
@@ -139,7 +140,7 @@ final class GraphEvidenceAdmission {
         if (current.state() == GraphRelationResolution.State.VERIFIED) {
             return evidenceMatches(admitted, current.evidence())
                     ? GraphLifecycleFenceOutcome.noChange()
-                    : GraphLifecycleFenceOutcome.fence(new LifecycleFence(admitted.edge(), GraphEdgeLifecycle.CONFLICT));
+                    : GraphLifecycleFenceOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
         }
         if (current.state() == GraphRelationResolution.State.CONFLICT) {
             return GraphLifecycleFenceOutcome.fence(new LifecycleFence(admitted.edge(), GraphEdgeLifecycle.CONFLICT));
@@ -179,24 +180,13 @@ final class GraphEvidenceAdmission {
             return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.RETENTION_EXPIRED);
         }
 
-        GraphPolicyDecision before;
-        try {
-            before = policyAuthorizer.authorize(request.requestingPrincipal(),
-                    GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), now);
-        } catch (RuntimeException unavailable) {
-            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
-        }
+        GraphPolicyDecision before = authorize(request.requestingPrincipal(),
+                GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), now);
         if (before != GraphPolicyDecision.AUTHORIZED) { return reconciliationPolicyOutcome(before); }
 
         deadline = deadlineState(request.operationDeadline(), clock.instant(), started);
         if (deadline != null) { return reconciliationDeadlineOutcome(deadline); }
-        GraphRelationResolution current;
-        try {
-            current = relationAuthority.revalidate(evidence, request.requestingPrincipal());
-        } catch (RuntimeException unavailable) {
-            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
-        }
-        if (current == null) { return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+        GraphRelationResolution current = revalidateOwner(evidence, request.requestingPrincipal());
 
         GraphLifecycleFenceOutcome decision = switch (current.state()) {
             case VERIFIED -> {
@@ -218,13 +208,8 @@ final class GraphEvidenceAdmission {
 
         deadline = deadlineState(request.operationDeadline(), clock.instant(), started);
         if (deadline != null) { return reconciliationDeadlineOutcome(deadline); }
-        GraphPolicyDecision after;
-        try {
-            after = policyAuthorizer.authorize(request.requestingPrincipal(),
-                    GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), clock.instant());
-        } catch (RuntimeException unavailable) {
-            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
-        }
+        GraphPolicyDecision after = authorize(request.requestingPrincipal(),
+                GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), clock.instant());
         if (after != GraphPolicyDecision.AUTHORIZED) { return reconciliationPolicyOutcome(after); }
         deadline = deadlineState(request.operationDeadline(), clock.instant(), started);
         return deadline == null ? decision : reconciliationDeadlineOutcome(deadline);
@@ -237,13 +222,8 @@ final class GraphEvidenceAdmission {
         Instant now = clock.instant();
         GraphReadReason deadline = deadlineState(request.operationDeadline(), now, started);
         if (deadline != null) { return reconciliationDeadlineOutcome(deadline); }
-        GraphPolicyDecision policy;
-        try {
-            policy = policyAuthorizer.authorize(request.requestingPrincipal(),
-                    GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), now);
-        } catch (RuntimeException unavailable) {
-            return GraphLifecycleFenceOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
-        }
+        GraphPolicyDecision policy = authorize(request.requestingPrincipal(),
+                GraphLifecycleReconciliationRequest.PURPOSE, request.scope(), request.operationDeadline(), now);
         if (policy != GraphPolicyDecision.AUTHORIZED) { return reconciliationPolicyOutcome(policy); }
         deadline = deadlineState(request.operationDeadline(), clock.instant(), started);
         return deadline == null ? GraphLifecycleFenceOutcome.noChange() : reconciliationDeadlineOutcome(deadline);
@@ -269,6 +249,39 @@ final class GraphEvidenceAdmission {
         return admitted.edge().evidence().equals(current);
     }
 
+    /** Port boundary: runtime adapter failures are infrastructure uncertainty, never authority outcomes. */
+    private GraphPolicyDecision authorize(String principal, String purpose, GraphIdentityScope scope,
+                                          Instant deadline, Instant now) {
+        try {
+            GraphPolicyDecision decision = policyAuthorizer.authorize(principal, purpose, scope, deadline, now);
+            return decision == null ? GraphPolicyDecision.UNAVAILABLE : decision;
+        } catch (RuntimeException dependencyFailure) {
+            return GraphPolicyDecision.UNAVAILABLE;
+        }
+    }
+
+    /** Port boundary: owner adapter failures are unavailable; fatal JVM errors are not caught. */
+    private GraphRelationResolution resolveForAdmission(String ownerReference) {
+        try {
+            GraphRelationResolution resolution = relationAuthority.resolveForAdmission(ownerReference);
+            return resolution == null
+                    ? GraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE) : resolution;
+        } catch (RuntimeException dependencyFailure) {
+            return GraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
+    }
+
+    /** Port boundary: owner adapter failures are unavailable; fatal JVM errors are not caught. */
+    private GraphRelationResolution revalidateOwner(GraphEvidenceRef evidence, String principal) {
+        try {
+            GraphRelationResolution resolution = relationAuthority.revalidate(evidence, principal);
+            return resolution == null
+                    ? GraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE) : resolution;
+        } catch (RuntimeException dependencyFailure) {
+            return GraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
+    }
+
     List<GraphAdmissionOutcome> admitBatch(List<GraphAdmissionRequest> requests) {
         if (requests == null || requests.size() > MAX_BATCH) {
             return List.of(GraphAdmissionOutcome.denied(GraphReadReason.LIMIT_EXCEEDED));
@@ -288,10 +301,13 @@ final class GraphEvidenceAdmission {
     }
 
     private GraphAdmissionOutcome policyOutcome(GraphPolicyDecision decision) {
+        if (decision == null || decision == GraphPolicyDecision.UNAVAILABLE) {
+            return GraphAdmissionOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
+        }
         return switch (decision) {
             case AUTHORIZED -> throw new IllegalArgumentException("GRAPH_POLICY_OUTCOME_INVALID");
             case DENIED -> GraphAdmissionOutcome.denied(GraphReadReason.GRANT_DENIED);
-            case UNAVAILABLE -> GraphAdmissionOutcome.unavailable(GraphReadReason.POLICY_UNAVAILABLE);
+            case UNAVAILABLE -> throw new IllegalArgumentException("GRAPH_POLICY_OUTCOME_INVALID");
         };
     }
 

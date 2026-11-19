@@ -382,7 +382,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                 forged.scoredOccurrence(), forged.stageASnapshotCommitment(), forged.coverageFrom(), forged.asOf(),
                 forged.coverageGeneration(), forged.expiresAt());
         assertThat(restartedReader.resolve(changedDevice, relationGrant, readGrant, "graph_reader").state())
-                .isIn(DeviceGraphRelationResolution.State.UNAVAILABLE, DeviceGraphRelationResolution.State.CONFLICT);
+                .isEqualTo(DeviceGraphRelationResolution.State.UNAVAILABLE);
         assertThat(restartedReader.resolve(admitted.reference(), null, readGrant, "graph_reader").state())
                 .isEqualTo(DeviceGraphRelationResolution.State.DENIED);
         assertThat(restartedReader.resolve(admitted.reference(), relationGrant, readGrant, "someone_else").state())
@@ -409,6 +409,18 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         var revokedResolution = revokedCoverage.resolve(admitted.reference(), relationGrant, readGrant, "graph_reader");
         assertThat(revokedResolution.state()).isEqualTo(DeviceGraphRelationResolution.State.DENIED);
         assertThat(revokedResolution.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.AUTHORITY_REVOKED);
+
+        assertThat(f.ownerClient.getDatabase(f.database).getCollection("source_scored_occurrences")
+                .updateOne(com.mongodb.client.model.Filters.eq("eventId", scored.event.eventId()),
+                        com.mongodb.client.model.Updates.set("fingerprint", "0".repeat(64))).getModifiedCount())
+                .isEqualTo(1);
+        var sourceOwnerConflict = restartedReader.resolve(graphEdges.get(0).evidence(), relationGrant,
+                readGrant, "graph_reader");
+        assertThat(sourceOwnerConflict.state()).isEqualTo(DeviceGraphRelationResolution.State.CONFLICT);
+        var conflictRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                () -> restartedReader, relationGrant, readGrant, graphEdges.get(0), "graph_reader", graphReadAt, null);
+        assertThat(conflictRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.CONFLICT);
+        assertThat(conflictRead.edges()).isEmpty();
     }
 
     @Test void historicalGraphEdgeRemainsReadableAfterASecondValidSignedCoverageSeal() throws Exception {

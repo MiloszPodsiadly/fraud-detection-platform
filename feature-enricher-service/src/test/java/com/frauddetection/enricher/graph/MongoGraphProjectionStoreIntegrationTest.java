@@ -228,7 +228,7 @@ class MongoGraphProjectionStoreIntegrationTest {
                 .find().first().get("evidence", Document.class).getString("referenceId");
         harness.relation.set(GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED));
 
-        GraphAppendOutcome fenced = store.markRevokedOrFence(harness.admitted());
+        GraphAppendOutcome fenced = store.fenceWithinAdmissionOperation(harness.admitted());
         GraphAppendOutcome staleReplay = store.appendVerified(harness.admitted());
         Document row = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first();
 
@@ -237,6 +237,80 @@ class MongoGraphProjectionStoreIntegrationTest {
         assertThat(row.get("lifecycle", Document.class).getString("state")).isEqualTo("REVOKED");
         assertThat(row.get("evidence", Document.class).getString("referenceId")).isEqualTo(immutableEvidenceReference);
         assertThat(staleReplay.state()).isEqualTo(GraphAppendState.DENIED);
+        assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1);
+    }
+
+    @Test
+    void verifiedButDifferentOwnerProofDoesNotDurablyFenceTheStoredRelation() {
+        Context context = bootstrappedContext();
+        GraphStoredEdge candidate = edge(scope("institution-a", "epoch-a"), "owner-mismatch", "original-proof");
+        GraphStoredEdge changedProof = edge(candidate.edge().from().scope(), "owner-mismatch", "changed-proof");
+        AdmissionHarness harness = admission(candidate.edge().evidence());
+        MongoGraphProjectionStore store = store(context, harness.admission());
+        assertThat(store.appendVerified(harness.admitted()).state()).isEqualTo(GraphAppendState.APPENDED);
+        harness.relation.set(GraphRelationResolution.verified(changedProof.edge().evidence(), NOW.plusSeconds(20)));
+
+        GraphAppendOutcome result = new GraphLifecycleReconciliationService(store, candidate.edge().from().scope())
+                .reconcile(candidate.edge().evidence().occurrence(),
+                        candidate.edge().evidence().associatedIdentityToken(),
+                        candidate.edge().evidence().pseudonymKeyVersion(), NOW.plusSeconds(5));
+        Document row = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first();
+
+        assertThat(result.state()).isEqualTo(GraphAppendState.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(row.get("lifecycle", Document.class).getString("state")).isEqualTo("ACTIVE");
+        assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1);
+    }
+
+    @Test
+    void ownerAdapterExceptionAtLifecycleFenceLeavesPersistedRelationActive() {
+        Context context = bootstrappedContext();
+        GraphStoredEdge candidate = edge(scope("institution-a", "epoch-a"), "owner-outage", "proof-owner-outage");
+        AdmissionHarness harness = admission(candidate.edge().evidence());
+        MongoGraphProjectionStore initialStore = store(context, harness.admission());
+        assertThat(initialStore.appendVerified(harness.admitted()).state()).isEqualTo(GraphAppendState.APPENDED);
+        GraphRelationAuthority unavailableOwner = new GraphRelationAuthority() {
+            @Override public GraphRelationResolution resolveForAdmission(String ownerReference) {
+                return GraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+            }
+            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                throw new IllegalStateException("private owner adapter failure");
+            }
+        };
+        GraphEvidenceAdmission unavailableAdmission = new GraphEvidenceAdmission(unavailableOwner,
+                (principal, purpose, scope, deadline, now) -> GraphPolicyDecision.AUTHORIZED, CLOCK);
+
+        GraphAppendOutcome outcome = store(context, unavailableAdmission)
+                .fenceWithinAdmissionOperation(harness.admitted());
+        Document row = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first();
+
+        assertThat(outcome.state()).isEqualTo(GraphAppendState.UNAVAILABLE);
+        assertThat(outcome.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(row.get("lifecycle", Document.class).getString("state")).isEqualTo("ACTIVE");
+        assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1);
+    }
+
+    @Test
+    void explicitTypedOwnerConflictFencesOnlyTheExactRelationAndReplayCannotReactivateIt() {
+        Context context = bootstrappedContext();
+        GraphStoredEdge candidate = edge(scope("institution-a", "epoch-a"), "owner-conflict", "proof-conflict");
+        AdmissionHarness harness = admission(candidate.edge().evidence());
+        MongoGraphProjectionStore store = store(context, harness.admission());
+        assertThat(store.appendVerified(harness.admitted()).state()).isEqualTo(GraphAppendState.APPENDED);
+        harness.relation.set(GraphRelationResolution.conflict());
+
+        GraphAppendOutcome conflict = new GraphLifecycleReconciliationService(store, candidate.edge().from().scope())
+                .reconcile(candidate.edge().evidence().occurrence(),
+                        candidate.edge().evidence().associatedIdentityToken(),
+                        candidate.edge().evidence().pseudonymKeyVersion(), NOW.plusSeconds(5));
+        harness.relation.set(GraphRelationResolution.verified(candidate.edge().evidence(), NOW.plusSeconds(20)));
+        GraphAppendOutcome replay = store.appendVerified(harness.admitted());
+        Document row = context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).find().first();
+
+        assertThat(conflict.state()).isEqualTo(GraphAppendState.FENCED);
+        assertThat(conflict.reason()).isEqualTo(GraphReadReason.CONFLICTING_EVIDENCE);
+        assertThat(replay.state()).isEqualTo(GraphAppendState.CONFLICT);
+        assertThat(row.get("lifecycle", Document.class).getString("state")).isEqualTo("CONFLICT");
         assertThat(context.graphDatabase().getCollection(GraphProjectionSchema.COLLECTION).countDocuments()).isEqualTo(1);
     }
 
@@ -409,7 +483,7 @@ class MongoGraphProjectionStoreIntegrationTest {
             harness.relation.set(GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED));
             releaseCommit.countDown();
             GraphAppendOutcome write = pendingCommit.get(5, TimeUnit.SECONDS);
-            GraphAppendOutcome recoveryFence = recoveryStore.markRevokedOrFence(harness.admitted());
+            GraphAppendOutcome recoveryFence = recoveryStore.fenceWithinAdmissionOperation(harness.admitted());
 
             assertThat(write.state()).isEqualTo(GraphAppendState.APPENDED);
             assertThat(recoveryFence.state()).isEqualTo(GraphAppendState.FENCED);
@@ -562,7 +636,9 @@ class MongoGraphProjectionStoreIntegrationTest {
                 }
                 GraphRelationResolution resolution = current.get();
                 if (resolution.state() == GraphRelationResolution.State.VERIFIED
-                        && !expected.equals(resolution.evidence())) { return GraphRelationResolution.conflict(); }
+                        && !expected.equals(resolution.evidence())) {
+                    return GraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+                }
                 return resolution;
             }
         };

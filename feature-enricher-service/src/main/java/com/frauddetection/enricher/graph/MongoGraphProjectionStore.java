@@ -97,7 +97,7 @@ final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProj
         throw lastRetryable == null ? new MongoException("GRAPH_TRANSACTION_RETRY_EXHAUSTED") : lastRetryable;
     }
 
-    @Override public GraphAppendOutcome markRevokedOrFence(GraphEvidenceAdmission.AdmittedRelation admitted) {
+    @Override public GraphAppendOutcome fenceWithinAdmissionOperation(GraphEvidenceAdmission.AdmittedRelation admitted) {
         if (!GraphProjectionSchema.WRITER.equals(authenticatedPrincipal) || client == null || admission == null) {
             return GraphAppendOutcome.denied(GraphReadReason.NOT_SUPPORTED);
         }
@@ -105,7 +105,7 @@ final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProj
         MongoException lastRetryable = null;
         for (int attempt = 0; attempt < MAX_TRANSACTION_ATTEMPTS; attempt++) {
             try {
-                return transactLifecycleFence(admitted);
+                return transactAdmissionWindowFence(admitted);
             } catch (MongoException failure) {
                 if (failure.getCode() == 11000 || failure.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)) {
                     lastRetryable = failure;
@@ -231,13 +231,13 @@ final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProj
         throw unknownCommit;
     }
 
-    private GraphAppendOutcome transactLifecycleFence(GraphEvidenceAdmission.AdmittedRelation admitted) {
+    private GraphAppendOutcome transactAdmissionWindowFence(GraphEvidenceAdmission.AdmittedRelation admitted) {
         FenceMutation mutation;
         MongoException unknownCommit = null;
         try (ClientSession session = client.startSession()) {
             session.startTransaction(TRANSACTION);
             try {
-                mutation = mutateLifecycleWithinTransaction(session, admitted);
+                mutation = mutateAdmissionWindowFence(session, admitted);
                 if (!mutation.wrote()) {
                     abort(session);
                     return mutation.outcome();
@@ -356,9 +356,9 @@ final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProj
         };
     }
 
-    private FenceMutation mutateLifecycleWithinTransaction(ClientSession session,
-                                                            GraphEvidenceAdmission.AdmittedRelation admitted) {
-        GraphLifecycleFenceOutcome decision = admission.resolveLifecycleFence(admitted);
+    private FenceMutation mutateAdmissionWindowFence(ClientSession session,
+                                                      GraphEvidenceAdmission.AdmittedRelation admitted) {
+        GraphLifecycleFenceOutcome decision = admission.resolveAdmissionWindowFence(admitted);
         if (decision.state() != GraphLifecycleFenceOutcome.State.FENCE
                 && decision.state() != GraphLifecycleFenceOutcome.State.NO_CHANGE) {
             GraphAppendOutcome failed = switch (decision.state()) {

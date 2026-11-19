@@ -226,13 +226,16 @@ class MongoGraphProjectionWorkloadTest {
         GraphEvidenceRef revoked = evidence.get(index);
         authority.revoke(revoked);
         GraphReadOutcome revokedRead = performRead(reader, scopes, occurrences, index);
-        assertThat(revokedRead.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(revokedRead.state()).isEqualTo(GraphProjectionState.DENIED);
         assertThat(revokedRead.reason()).isEqualTo(GraphReadReason.AUTHORITY_REVOKED);
+        assertThat(revokedRead.edges()).isEmpty();
 
         GraphEvidenceRef stale = evidence.get((index + 1) % evidence.size());
         authority.replace(stale, evidenceWithDifferentProof(stale));
         GraphReadOutcome staleRead = performRead(reader, scopes, occurrences, (index + 1) % evidence.size());
-        assertThat(staleRead.state()).isEqualTo(GraphProjectionState.CONFLICT);
+        assertThat(staleRead.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(staleRead.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(staleRead.edges()).isEmpty();
         System.out.printf(Locale.ROOT,
                 "GRAPH_WORKLOAD_NEGATIVE revoked=%s stale_owner_evidence=%s outcome_bytes_logged=false%n",
                 revokedRead.state(), staleRead.state());

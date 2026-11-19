@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
@@ -75,7 +76,7 @@ class GraphEvidenceAdmissionTest {
     }
 
     @Test
-    void changedOwnerEvidenceAtFinalFenceIsAConflict() {
+    void unexplainedVerifiedOwnerMismatchAtFinalFenceIsUnavailable() {
         GraphEvidenceRef initial = evidence("event-a", "device-a");
         GraphEvidenceRef changed = evidence("event-a", "device-b");
         FakeAuthority authority = new FakeAuthority(initial, changed);
@@ -83,9 +84,26 @@ class GraphEvidenceAdmissionTest {
 
         GraphAdmissionOutcome result = admission(authority, policy).admit(request("event-a"));
 
-        assertThat(result.state()).isEqualTo(GraphAdmissionState.CONFLICT);
-        assertThat(result.reason()).isEqualTo(GraphReadReason.CONFLICTING_EVIDENCE);
+        assertThat(result.state()).isEqualTo(GraphAdmissionState.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
         assertThat(result.relation()).isNull();
+    }
+
+    @Test
+    void unexplainedVerifiedOwnerMismatchDuringPersistenceIsUnavailable() {
+        GraphEvidenceRef initial = evidence("event-a", "device-a");
+        GraphEvidenceRef changed = evidence("event-a", "device-b");
+        FakeAuthority authority = new FakeAuthority(initial, initial, changed);
+        GraphEvidenceAdmission admission = admission(authority, new RecordingPolicy(GraphPolicyDecision.AUTHORIZED,
+                GraphPolicyDecision.AUTHORIZED, GraphPolicyDecision.AUTHORIZED, GraphPolicyDecision.AUTHORIZED));
+
+        GraphAdmissionOutcome admitted = admission.admit(request("event-a"));
+        GraphAdmissionOutcome persistence = admission.revalidateForPersistence(admitted.relation());
+
+        assertThat(admitted.state()).isEqualTo(GraphAdmissionState.ADMITTED);
+        assertThat(persistence.state()).isEqualTo(GraphAdmissionState.UNAVAILABLE);
+        assertThat(persistence.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(persistence.relation()).isNull();
     }
 
     @Test
@@ -123,6 +141,95 @@ class GraphEvidenceAdmissionTest {
         GraphAdmissionOutcome waiting = admission(pending, authorizedPolicy()).admit(request("event-a"));
         assertThat(waiting.state()).isEqualTo(GraphAdmissionState.PENDING);
         assertThat(waiting.relation()).isNull();
+    }
+
+    @Test
+    void throwingPolicyAndOwnerPortsFailClosedAtAdmissionBoundaries() {
+        GraphEvidenceRef evidence = evidence("event-a", "same-device");
+        AtomicInteger ownerCalls = new AtomicInteger();
+        GraphRelationAuthority owner = new GraphRelationAuthority() {
+            @Override public GraphRelationResolution resolveForAdmission(String ownerReference) {
+                ownerCalls.incrementAndGet();
+                if (ownerCalls.get() == 1) { throw new IllegalStateException("private owner failure"); }
+                return GraphRelationResolution.verified(evidence, NOW.plusSeconds(20));
+            }
+            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                throw new IllegalStateException("private owner failure");
+            }
+        };
+        GraphAdmissionOutcome initialPolicyFailure = new GraphEvidenceAdmission(owner,
+                (principal, purpose, scope, deadline, now) -> { throw new IllegalStateException("private policy failure"); },
+                CLOCK).admit(request("event-a"));
+        assertThat(initialPolicyFailure.state()).isEqualTo(GraphAdmissionState.UNAVAILABLE);
+        assertThat(initialPolicyFailure.reason()).isEqualTo(GraphReadReason.POLICY_UNAVAILABLE);
+        assertThat(ownerCalls).hasValue(0);
+
+        GraphAdmissionOutcome initialOwnerFailure = new GraphEvidenceAdmission(owner, authorizedPolicy(), CLOCK)
+                .admit(request("event-a"));
+        assertThat(initialOwnerFailure.state()).isEqualTo(GraphAdmissionState.UNAVAILABLE);
+        assertThat(initialOwnerFailure.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
+
+        for (int throwingPolicyCall : List.of(2, 3)) {
+            AtomicInteger policyCalls = new AtomicInteger();
+            FakeAuthority reliableOwner = new FakeAuthority(evidence, evidence);
+            GraphPolicyAuthorizer throwingPolicy = (principal, purpose, scope, deadline, now) -> {
+                if (policyCalls.incrementAndGet() == throwingPolicyCall) {
+                    throw new IllegalStateException("private policy failure");
+                }
+                return GraphPolicyDecision.AUTHORIZED;
+            };
+
+            GraphAdmissionOutcome result = new GraphEvidenceAdmission(reliableOwner, throwingPolicy, CLOCK)
+                    .admit(request("event-a"));
+
+            assertThat(result.state()).isEqualTo(GraphAdmissionState.UNAVAILABLE);
+            assertThat(result.reason()).isEqualTo(GraphReadReason.POLICY_UNAVAILABLE);
+            assertThat(result.relation()).isNull();
+        }
+
+        FakeAuthority revalidationFailure = new FakeAuthority(evidence, evidence) {
+            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                throw new IllegalStateException("private owner failure");
+            }
+        };
+        GraphAdmissionOutcome ownerRevalidationFailure = admission(revalidationFailure, authorizedPolicy())
+                .admit(request("event-a"));
+        assertThat(ownerRevalidationFailure.state()).isEqualTo(GraphAdmissionState.UNAVAILABLE);
+        assertThat(ownerRevalidationFailure.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(ownerRevalidationFailure.relation()).isNull();
+    }
+
+    @Test
+    void throwingPolicyAndOwnerPortsFailClosedDuringPersistenceRevalidation() {
+        GraphEvidenceRef evidence = evidence("event-a", "same-device");
+        AtomicInteger policyCalls = new AtomicInteger();
+        GraphPolicyAuthorizer policy = (principal, purpose, scope, deadline, now) -> {
+            if (policyCalls.incrementAndGet() == 5) { throw new IllegalStateException("private policy failure"); }
+            return GraphPolicyDecision.AUTHORIZED;
+        };
+        FakeAuthority authority = new FakeAuthority(evidence, evidence, evidence);
+        GraphEvidenceAdmission graphAdmission = new GraphEvidenceAdmission(authority, policy, CLOCK);
+        GraphAdmissionOutcome admitted = graphAdmission.admit(request("event-a"));
+        assertThat(admitted.state()).isEqualTo(GraphAdmissionState.ADMITTED);
+
+        GraphAdmissionOutcome policyFailure = graphAdmission.revalidateForPersistence(admitted.relation());
+        assertThat(policyFailure.state()).isEqualTo(GraphAdmissionState.UNAVAILABLE);
+        assertThat(policyFailure.reason()).isEqualTo(GraphReadReason.POLICY_UNAVAILABLE);
+
+        AtomicInteger revalidations = new AtomicInteger();
+        FakeAuthority ownerFailure = new FakeAuthority(evidence, evidence, evidence) {
+            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                if (revalidations.incrementAndGet() == 2) { throw new IllegalStateException("private owner failure"); }
+                return super.revalidate(expected, principal);
+            }
+        };
+        GraphEvidenceAdmission ownerAdmission = admission(ownerFailure, new RecordingPolicy(GraphPolicyDecision.AUTHORIZED,
+                GraphPolicyDecision.AUTHORIZED, GraphPolicyDecision.AUTHORIZED, GraphPolicyDecision.AUTHORIZED));
+        GraphAdmissionOutcome ownerAdmitted = ownerAdmission.admit(request("event-a"));
+        GraphAdmissionOutcome ownerResult = ownerAdmission.revalidateForPersistence(ownerAdmitted.relation());
+        assertThat(ownerResult.state()).isEqualTo(GraphAdmissionState.UNAVAILABLE);
+        assertThat(ownerResult.reason()).isEqualTo(GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(ownerResult.relation()).isNull();
     }
 
     @Test

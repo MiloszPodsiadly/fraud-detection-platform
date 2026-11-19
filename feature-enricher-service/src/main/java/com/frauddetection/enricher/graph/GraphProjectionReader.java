@@ -126,7 +126,7 @@ final class GraphProjectionReader {
                 return ownerOutcome(owner);
             }
             if (!evidence.equals(owner.evidence())) {
-                return GraphReadOutcome.conflict();
+                return GraphReadOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
             }
             Instant verifiedAt = clock.instant();
             if (!row.validUntil().isAfter(verifiedAt) || !owner.validUntil().isAfter(verifiedAt)
@@ -262,7 +262,9 @@ final class GraphProjectionReader {
         if (current == null || current.state() != GraphRelationResolution.State.VERIFIED) {
             return ownerOutcome(current);
         }
-        if (!row.edge().evidence().equals(current.evidence())) { return GraphReadOutcome.conflict(); }
+        if (!row.edge().evidence().equals(current.evidence())) {
+            return GraphReadOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
         Instant now = clock.instant();
         if (!row.validUntil().isAfter(now) || !current.validUntil().isAfter(now)
                 || !row.edge().evidence().expiresAt().isAfter(now)) {
