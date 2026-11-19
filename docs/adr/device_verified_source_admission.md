@@ -2,7 +2,7 @@
 
 Date: 2026-11-14
 
-Status: open PR #240; the branch is not synchronized with `master`. This repository record describes implementation evidence under independent review. It is not an approved institutional decision, production authorization, or merge approval.
+Historical status as of 2026-11-14: PR #240 was open and unsynchronized with `master`. See the dated status correction under Verification evidence for the current checkout observation. This repository record is not an approved institutional decision or production authorization.
 
 ## Decision and scope
 
@@ -76,6 +76,10 @@ Production activation remains **NO-GO** until an independent owner reviews and r
 - Reconcile the evidence with the canonical institutional masterplan and obtain explicit owner authorization before considering either Device flag for production.
 
 ## Verification evidence
+
+### Status correction (2026-11-19)
+
+The status text above records the repository state observed on 2026-11-14 and is historical. On the current checkout, local `master` and `origin/master` both point to `5c2db06e34406bc2ba7a6bf6d3ef369edd5450b6`, which includes the Device and Merchant merge commits #240 and #241. This checkout observation does not establish the current GitHub Actions state or replace independent production authorization; the FDP-155 local test results are recorded separately in the [Graph verification matrix](../verification/graph_fdp155_test_matrix.md).
 
 The contract, compatibility, API/UI, privacy and individual fail-start selection ran **125 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**:
 
