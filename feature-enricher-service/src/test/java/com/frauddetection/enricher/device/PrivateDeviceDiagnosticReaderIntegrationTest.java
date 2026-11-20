@@ -410,17 +410,48 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         assertThat(revokedResolution.state()).isEqualTo(DeviceGraphRelationResolution.State.DENIED);
         assertThat(revokedResolution.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.AUTHORITY_REVOKED);
 
-        assertThat(f.ownerClient.getDatabase(f.database).getCollection("source_scored_occurrences")
-                .updateOne(com.mongodb.client.model.Filters.eq("eventId", scored.event.eventId()),
-                        com.mongodb.client.model.Updates.set("fingerprint", "0".repeat(64))).getModifiedCount())
-                .isEqualTo(1);
-        var sourceOwnerConflict = restartedReader.resolve(graphEdges.get(0).evidence(), relationGrant,
-                readGrant, "graph_reader");
-        assertThat(sourceOwnerConflict.state()).isEqualTo(DeviceGraphRelationResolution.State.CONFLICT);
-        var conflictRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
-                () -> restartedReader, relationGrant, readGrant, graphEdges.get(0), "graph_reader", graphReadAt, null);
-        assertThat(conflictRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.CONFLICT);
-        assertThat(conflictRead.edges()).isEmpty();
+        var scoredOccurrences = f.ownerClient.getDatabase(f.database).getCollection("source_scored_occurrences");
+        assertThat(scoredOccurrences.updateOne(com.mongodb.client.model.Filters.eq("eventId", scored.event.eventId()),
+                com.mongodb.client.model.Updates.set("fingerprint", "0".repeat(64))).getModifiedCount()).isEqualTo(1);
+        List<MongoClient> mismatchRestartClients = new ArrayList<>();
+        try {
+            MongoClient mismatchSourceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO
+                    .occurrenceReader(f.ownerClient, f.database, "graph_source_mismatch_restart", List.of());
+            MongoClient mismatchDeviceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO
+                    .graphReader(f.ownerClient, f.database, "device_graph_mismatch_restart");
+            mismatchRestartClients.add(mismatchSourceClient);
+            mismatchRestartClients.add(mismatchDeviceClient);
+            var mismatchOccurrences = com.frauddetection.common.events.source.MongoSourceOccurrenceStore.readOnly(
+                    mismatchSourceClient, f.database, "graph_source_mismatch_restart", f.originVerifier,
+                    VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher,
+                    new com.frauddetection.common.events.source.SourceSignatureVerifier.Context(
+                            DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
+            var mismatchSource = new com.frauddetection.common.events.source.MongoSourceLineage(mismatchSourceClient,
+                    f.database, "graph_source_mismatch_restart",
+                    com.frauddetection.common.events.source.MongoSourceLineage.Stage.SCORER, f.originVerifier,
+                    VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+            var afterMismatchRestart = DeviceGraphRelationAuthority.testOnly(mismatchDeviceClient, f.database,
+                    "device_graph_mismatch_restart", f.A.epoch(), mismatchSource, f.origins, f.grants,
+                    mismatchOccurrences, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+            assertThat(afterMismatchRestart.resolve(graphEdges.get(0).evidence(), relationGrant, readGrant, "graph_reader").state())
+                    .isEqualTo(DeviceGraphRelationResolution.State.UNAVAILABLE);
+            var unavailableRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                    () -> afterMismatchRestart, relationGrant, readGrant, graphEdges.get(0), "graph_reader", graphReadAt, null);
+            assertThat(unavailableRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.UNAVAILABLE);
+            assertThat(unavailableRead.edges()).isEmpty();
+
+            assertThat(scoredOccurrences.updateOne(com.mongodb.client.model.Filters.eq("eventId", scored.event.eventId()),
+                    com.mongodb.client.model.Updates.set("fingerprint", scored.reference.fingerprint())).getModifiedCount())
+                    .isEqualTo(1);
+            assertThat(afterMismatchRestart.resolve(graphEdges.get(0).evidence(), relationGrant, readGrant, "graph_reader").state())
+                    .isEqualTo(DeviceGraphRelationResolution.State.VERIFIED);
+            var recoveredRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                    () -> afterMismatchRestart, relationGrant, readGrant, graphEdges.get(0), "graph_reader", graphReadAt, null);
+            assertThat(recoveredRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.VERIFIED_BOUNDED);
+            assertThat(recoveredRead.edges()).containsExactly(graphEdges.get(0));
+        } finally {
+            mismatchRestartClients.forEach(MongoClient::close);
+        }
     }
 
     @Test void historicalGraphEdgeRemainsReadableAfterASecondValidSignedCoverageSeal() throws Exception {
@@ -601,6 +632,52 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         assertThat(result.lifecycleAfterFirstReconciliation()).isEqualTo("ACTIVE");
         assertThat(result.recoveryState()).isEqualTo("EXISTING");
         assertThat(result.lifecycle()).isEqualTo("ACTIVE");
+        assertThat(result.persistedRows()).isEqualTo(1);
+    }
+
+    @Test void conflictingValidSignedSourceBindingFencesOneGraphRelationAfterOwnerRestart() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("signed_source_conflict", "graph-device-signed-source-conflict");
+        AtomicReference<DeviceGraphRelationPort> currentOwner = new AtomicReference<>(fixture.owner());
+        List<MongoClient> restartedOwnerClients = new ArrayList<>();
+        String reconciliationPrincipal = "graph_lifecycle_reconciler";
+        DeviceGraphReadGrant reconciliationReadGrant = DeviceGraphReadGrant.testOnly(reconciliationPrincipal,
+                new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
+                "transaction-ingest", 1, VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade.LifecycleResult result;
+        try {
+            result = com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade
+                    .appendThenReconcileAfterOwnerChange(currentOwner::get, fixture.relationGrant(), fixture.readGrant(),
+                            reconciliationReadGrant, fixture.edge().evidence().ownerAssertionReference(),
+                            fixture.principal(), VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(1), () -> {
+                                var conflictingProof = conflictingSignedProof(fixture.event());
+                                var ownerStatus = com.frauddetection.ingest.source.DeviceTestSourceReceipts
+                                        .admitConflictingSignedProof(f.ownerClient, f.database,
+                                                VerifiedDeviceAdmissionIntegrationTest.CLOCK, f.originVerifier,
+                                                conflictingProof, f.sourceReceiptCapacity);
+                                assertThat(ownerStatus).isEqualTo("CONFLICT");
+                                currentOwner.set(restartedGraphOwner("device_graph_signed_source_conflict_restart",
+                                        restartedOwnerClients));
+                                assertThat(currentOwner.get().resolve(fixture.edge().evidence(), fixture.relationGrant(),
+                                        reconciliationReadGrant, reconciliationPrincipal).state())
+                                        .isEqualTo(DeviceGraphRelationResolution.State.CONFLICT);
+                            },
+                            () -> currentOwner.set(restartedGraphOwner("device_graph_signed_conflict_recovery",
+                                    restartedOwnerClients)));
+        } finally {
+            restartedOwnerClients.forEach(MongoClient::close);
+        }
+
+        assertThat(result.appendState()).isEqualTo("APPENDED");
+        assertThat(result.reconciliationState()).isEqualTo("FENCED");
+        assertThat(result.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.CONFLICTING_EVIDENCE);
+        assertThat(result.lifecycleAfterFirstReconciliation()).isEqualTo("CONFLICT");
+        assertThat(result.recoveryState()).isEqualTo("FENCED");
+        assertThat(result.recoveryReason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.CONFLICTING_EVIDENCE);
+        assertThat(result.lifecycle()).isEqualTo("CONFLICT");
+        assertThat(result.replayAdmissionState()).isEqualTo("CONFLICT");
+        assertThat(result.edgesAfterFence()).isZero();
+        assertThat(result.immutableEvidencePreserved()).isTrue();
         assertThat(result.persistedRows()).isEqualTo(1);
     }
 
@@ -1460,14 +1537,24 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                 readGrant, List.of(ownerReference), "graph_reader", VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
                 VerifiedDeviceAdmissionIntegrationTest.CLOCK).getFirst();
         return new GraphReaderFixture(owner, ownerClient, relationGrant, readGrant, edge, "graph_reader",
-                VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5));
+                VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5), event);
     }
 
     private DeviceGraphRelationAuthority restartedGraphOwner(String principal, List<MongoClient> ownedClients) {
-        MongoClient ownerClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database, principal);
-        ownedClients.add(ownerClient);
-        return DeviceGraphRelationAuthority.testOnly(ownerClient, f.database, principal, f.A.epoch(), privateSource,
-                f.origins, f.grants, occurrenceReader, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        String sourcePrincipal = "graph_source_" + principal;
+        MongoClient sourceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceReader(f.ownerClient,
+                f.database, sourcePrincipal, List.of());
+        MongoClient deviceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient,
+                f.database, principal);
+        ownedClients.add(sourceClient);
+        ownedClients.add(deviceClient);
+        var restartedOccurrences = MongoSourceOccurrenceStore.readOnly(sourceClient, f.database, sourcePrincipal,
+                f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher,
+                new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
+        var restartedSource = new MongoSourceLineage(sourceClient, f.database, sourcePrincipal,
+                MongoSourceLineage.Stage.SCORER, f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        return DeviceGraphRelationAuthority.testOnly(deviceClient, f.database, principal, f.A.epoch(), restartedSource,
+                f.origins, f.grants, restartedOccurrences, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
     }
 
     private PrivateDeviceDiagnosticReader.ReadGrant readGrant(String customerToken) {
@@ -1494,6 +1581,26 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         }).toList();
     }
 
+    private SourceSignatureVerifier.Verified conflictingSignedProof(VerifiedDeviceAdmissionIntegrationTest.Event event) {
+        try {
+            var changed = (tools.jackson.databind.node.ObjectNode) VerifiedDeviceAdmissionIntegrationTest.JSON
+                    .readTree(event.sourcePayload());
+            changed.put("transactionId", event.raw().transactionId() + "-conflicting-signed-payload");
+            byte[] payload = VerifiedDeviceAdmissionIntegrationTest.JSON.writeValueAsBytes(changed);
+            SourceScope original = event.origin().scope();
+            SourceScope conflicting = new SourceScope(original.issuer(), original.institution(), original.source(),
+                    original.sourceEpoch(), original.signingKeyVersion(), original.sourceEventId(), original.eventTime(),
+                    original.purpose(), original.audience(), SourceSignedInput.payloadCommitment(payload));
+            byte[] proof = VerifiedDeviceAdmissionIntegrationTest.sign(conflicting, payload, f.originKey);
+            var verified = f.originVerifier.verify(proof, payload,
+                    new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
+            assertThat(verified).isInstanceOf(SourceSignatureVerifier.Verified.class);
+            return (SourceSignatureVerifier.Verified) verified;
+        } catch (Exception failure) {
+            throw new IllegalStateException("TEST_SOURCE_CONFLICT_PROOF_FAILED", failure);
+        }
+    }
+
     private SourceOccurrenceCipher sourceCipher() {
         byte[] key = VerifiedDeviceAdmissionIntegrationTest.randomKey();
         return new SourceOccurrenceCipher("test-key", Map.of("test-key", Base64.getEncoder().encodeToString(key)));
@@ -1505,7 +1612,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                                       DeviceGraphRelationGrant relationGrant,
                                       DeviceGraphReadGrant readGrant,
                                       com.frauddetection.enricher.graph.GraphEdgeFact edge, String principal,
-                                      Instant readAt) { }
+                                      Instant readAt, VerifiedDeviceAdmissionIntegrationTest.Event event) { }
     private record BenchmarkSample(long elapsedNanos, PrivateDeviceDiagnosticReader.Outcome outcome) { }
     private record QueryPlan(List<String> indexes, long documentsExamined, long keysExamined, long documentsReturned,
                              boolean inMemorySort, boolean collectionScan) { }

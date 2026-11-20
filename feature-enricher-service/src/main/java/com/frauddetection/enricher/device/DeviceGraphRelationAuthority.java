@@ -100,7 +100,9 @@ final class DeviceGraphRelationAuthority implements DeviceGraphRelationPort {
             DeviceGraphRelationResolution initialScoreOutcome = scoreOutcome(initialScoreResult);
             if (initialScoreOutcome != null) { return initialScoreOutcome; }
             SourceScoredOccurrence initialScore = initialScoreResult.occurrence();
-            if (!exactScore(initialScore, initialSource, before)) { return DeviceGraphRelationResolution.conflict(); }
+            if (!exactScore(initialScore, initialSource, before)) {
+                return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+            }
             if (expired(started)) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
 
             MongoDeviceObservationStore.GraphOccurrenceRead currentRead = store.graphOccurrence(ownerReference, initialScore);
@@ -119,7 +121,7 @@ final class DeviceGraphRelationAuthority implements DeviceGraphRelationPort {
             if (finalScoreOutcome != null) { return finalScoreOutcome; }
             SourceScoredOccurrence finalScore = finalScoreResult.occurrence();
             if (!exactScore(finalScore, finalSource, current) || !sameScore(initialScore, finalScore)) {
-                return DeviceGraphRelationResolution.conflict();
+                return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
             }
             if (expired(started)) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
 

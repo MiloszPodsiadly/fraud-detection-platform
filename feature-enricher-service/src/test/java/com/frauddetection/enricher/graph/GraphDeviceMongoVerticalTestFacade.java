@@ -176,6 +176,7 @@ public final class GraphDeviceMongoVerticalTestFacade {
             MongoClient schemaOwner = mongo.schemaOwner(root, databaseName);
             GraphProjectionSchema.bootstrapEmptyDatabase(schemaOwner.getDatabase(databaseName));
             MongoClient writerClient = mongo.writer(root, databaseName);
+            MongoClient readerClient = mongo.reader(root, databaseName);
             AtomicReference<GraphIdentityScope> ownerScope = new AtomicReference<>();
             GraphRelationAuthority relationAuthority = authority(currentDeviceOwner, relationGrant, admissionReadGrant,
                     requestingPrincipal, ownerScope);
@@ -244,12 +245,33 @@ public final class GraphDeviceMongoVerticalTestFacade {
             GraphAppendOutcome recovered = recoveryReconciler.reconcile(evidence.occurrence(),
                     evidence.associatedIdentityToken(), evidence.pseudonymKeyVersion(), recoveryTime.plusSeconds(5));
             recoveryWriterClient.close();
+
+            GraphEvidenceAdmission replayAdmission = new GraphEvidenceAdmission(
+                    authority(currentDeviceOwner, relationGrant, admissionReadGrant, requestingPrincipal, ownerScope),
+                    graphPolicy, recoveryClock);
+            GraphAdmissionOutcome replay = replayAdmission.admit(new GraphAdmissionRequest(ownerOccurrenceReference,
+                    requestingPrincipal, recoveryTime.plusSeconds(5)));
+            MongoGraphProjectionStore restartedReaderStore = new MongoGraphProjectionStore(
+                    readerClient.getDatabase(databaseName), GraphProjectionSchema.READER);
+            GraphPrivateReadGrant graphGrant = GraphPrivateReadGrant.testOnly(requestingPrincipal,
+                    evidence.scope(), 1, evidence.expiresAt());
+            GraphProjectionReader restartedReader = new GraphProjectionReader(restartedReaderStore,
+                    authority(currentDeviceOwner, relationGrant, admissionReadGrant, requestingPrincipal, ownerScope),
+                    (grant, principal, scope, now) -> grant.matches(principal, scope, now)
+                            ? GraphPolicyDecision.AUTHORIZED : GraphPolicyDecision.DENIED,
+                    GraphQueryLimits.DEFAULT, new GraphReadCursorCodec(new byte[32]),
+                    Clock.fixed(recoveryTime.plusSeconds(1), ZoneOffset.UTC));
+            GraphReadOutcome readAfterFence = restartedReader.readAuthorizedOccurrenceNeighbors(requestingPrincipal,
+                    graphGrant, evidence.scope(), evidence.occurrence(), evidence.occurrence().eventTime().minus(Duration.ofHours(1)),
+                    evidence.occurrence().eventTime().plusMillis(1), GraphQueryLimits.DEFAULT.maxPageSize(), null);
             Document row = root.getDatabase(databaseName).getCollection(GraphProjectionSchema.COLLECTION).find().first();
             GraphStoredEdge stored = row == null ? null : GraphProjectionDocumentCodec.decode(row);
             return new LifecycleResult(appended.state().name(), reconciled.state().name(), reconciled.reason(),
                     lifecycleAfterFirst, recovered.state().name(), recovered.reason(),
                     stored == null ? null : stored.lifecycle().name(),
-                    root.getDatabase(databaseName).getCollection(GraphProjectionSchema.COLLECTION).countDocuments());
+                    root.getDatabase(databaseName).getCollection(GraphProjectionSchema.COLLECTION).countDocuments(),
+                    replay.state().name(), readAfterFence.state().name(), readAfterFence.edges().size(),
+                    stored != null && evidence.equals(stored.edge().evidence()));
         } finally {
             mongo.close();
         }
@@ -304,6 +326,7 @@ public final class GraphDeviceMongoVerticalTestFacade {
 
     public record LifecycleResult(String appendState, String reconciliationState, GraphReadReason reason,
                                   String lifecycleAfterFirstReconciliation, String recoveryState,
-                                  GraphReadReason recoveryReason,
-                                  String lifecycle, long persistedRows) { }
+                                  GraphReadReason recoveryReason, String lifecycle, long persistedRows,
+                                  String replayAdmissionState, String readStateAfterFence, int edgesAfterFence,
+                                  boolean immutableEvidencePreserved) { }
 }

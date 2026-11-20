@@ -336,23 +336,30 @@ public final class MongoSourceOccurrenceStore {
             if (!authorization.receiptId().equals(row.getString("receiptId"))
                     || !occurrence.fingerprint().equals(row.getString("fingerprint"))
                     || !authorization.eventCommitment().equals(row.getString("enrichedCommitment"))) {
-                return new Lookup(SourceLineage.State.CONFLICT, null);
+                return mismatchOutcome(authorization);
             }
             Result result = restore(row, authorization.receiptId());
             if (result.status == Status.PENDING || result.status == Status.PUBLISHING) {
                 return new Lookup(SourceLineage.State.ORDER_PENDING, null);
             }
-            if (result.status == Status.CONFLICT) { return new Lookup(SourceLineage.State.CONFLICT, null); }
+            if (result.status == Status.CONFLICT) { return mismatchOutcome(authorization); }
             if (result.status != Status.PUBLISHED) { return absent(); }
             SourceLineage current = lineage.recoverEnriched(row.getString("receiptId"), row.getString("enrichedCommitment"));
             if (current.state() != SourceLineage.State.VERIFIED) { return new Lookup(current.state(), null); }
             if (!current.source().equals(authorization.source())
                     || !current.eventCommitment().equals(authorization.eventCommitment())) {
-                return new Lookup(SourceLineage.State.CONFLICT, null);
+                return absent();
             }
             return new Lookup(SourceLineage.State.VERIFIED, new SourceScoredOccurrence(current.source(), current.receiptId(),
                     current.eventCommitment(), occurrence.eventId(), occurrence.createdAt(), row.getString("fingerprint"), row.getString("runId")));
         } catch (RuntimeException unavailable) { return absent(); }
+    }
+
+    /** Only a current signed Source lineage contradiction is terminal; outbox drift is ambiguous. */
+    private Lookup mismatchOutcome(SourceLineage authorization) {
+        SourceLineage current = lineage.recoverEnriched(authorization.receiptId(), authorization.eventCommitment());
+        return current.state() == SourceLineage.State.CONFLICT ? new Lookup(SourceLineage.State.CONFLICT, null)
+                : current.state() == SourceLineage.State.VERIFIED ? absent() : new Lookup(current.state(), null);
     }
 
     public List<String> pending(int limit) {
