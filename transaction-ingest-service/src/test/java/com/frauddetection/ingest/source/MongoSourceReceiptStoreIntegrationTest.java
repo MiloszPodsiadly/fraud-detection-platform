@@ -12,10 +12,15 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
+import com.mongodb.event.CommandFailedEvent;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
+import com.mongodb.event.CommandSucceededEvent;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -30,13 +35,18 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.frauddetection.ingest.source.MongoSourceReceiptSchema.*;
 import static com.frauddetection.ingest.source.SourceReceiptStore.Status.*;
@@ -250,6 +260,83 @@ class MongoSourceReceiptStoreIntegrationTest {
         assertCounts(1, 1);
     }
 
+    @Test
+    @EnabledIfSystemProperty(named = "fdp.source.retry.benchmark", matches = "true")
+    void sourceReceiptRetryBenchmarkReportsOneHundredSamplesPerCase() throws Exception {
+        AtomicLong mongoCommands = new AtomicLong();
+        try (MongoClient benchmarkClient = benchmarkClient(mongoCommands)) {
+            var benchmarkLimits = new SourceReceiptStore.Limits(Duration.ofMinutes(5), Duration.ofMinutes(10), 1_000);
+            long[] baseline = new long[100];
+            MongoSourceReceiptStore baselineStore = new MongoSourceReceiptStore(benchmarkClient,
+                    databaseName + "_fx16_baseline", clock, benchmarkLimits, verifier);
+            for (int i = 0; i < 10; i++) {
+                assertThat(baselineStore.admit(benchmarkEvidence("baseline", i)).status()).isEqualTo(ADMITTED);
+            }
+            long commandStart = mongoCommands.get();
+            long totalStart = System.nanoTime();
+            for (int i = 0; i < baseline.length; i++) {
+                var evidence = benchmarkEvidence("baseline", 10 + i);
+                long started = System.nanoTime();
+                assertThat(baselineStore.admit(evidence).status()).isEqualTo(ADMITTED);
+                baseline[i] = System.nanoTime() - started;
+            }
+            printRetryBenchmark("baseline", baseline, System.nanoTime() - totalStart,
+                    mongoCommands.get() - commandStart, 0, 0);
+
+            long[] contention = new long[200];
+            MongoSourceReceiptStore contentionStore = new MongoSourceReceiptStore(benchmarkClient,
+                    databaseName + "_fx16_contention", clock, benchmarkLimits, verifier);
+            for (int i = 0; i < 10; i++) {
+                assertThat(contentionStore.admit(benchmarkEvidence("contention-warmup", i)).status()).isEqualTo(ADMITTED);
+            }
+            commandStart = mongoCommands.get();
+            totalStart = System.nanoTime();
+            try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+                for (int i = 0; i < 100; i++) {
+                    ContendedSample sample = contend(contentionStore, benchmarkEvidence("contention", i), pool);
+                    assertThat(sample.first().status()).isIn(ADMITTED, EXISTING);
+                    assertThat(sample.second().status()).isIn(ADMITTED, EXISTING);
+                    contention[2 * i] = sample.firstNanos();
+                    contention[2 * i + 1] = sample.secondNanos();
+                }
+            }
+            printRetryBenchmark("controlled_contention", contention, System.nanoTime() - totalStart,
+                    mongoCommands.get() - commandStart, 0, 0);
+
+            AtomicBoolean failNextCommit = new AtomicBoolean();
+            AtomicInteger injectedFailures = new AtomicInteger();
+            MongoClient transientFault = commitFault(benchmarkClient, (session, method, args) -> {
+                if (method.getName().equals("commitTransaction") && failNextCommit.compareAndSet(true, false)) {
+                    injectedFailures.incrementAndGet();
+                    MongoException retryable = new MongoException(112, "TEST_ONLY_TRANSIENT_RETRY_BENCHMARK");
+                    retryable.addLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+                    throw retryable;
+                }
+                return invoke(session, method, args);
+            });
+            MongoSourceReceiptStore transientStore = new MongoSourceReceiptStore(transientFault,
+                    databaseName + "_fx16_transient", clock, benchmarkLimits, verifier);
+            for (int i = 0; i < 10; i++) {
+                failNextCommit.set(true);
+                assertThat(transientStore.admit(benchmarkEvidence("transient-warmup", i)).status()).isEqualTo(ADMITTED);
+            }
+            long[] transientFailure = new long[100];
+            int failuresBeforeMeasurement = injectedFailures.get();
+            commandStart = mongoCommands.get();
+            totalStart = System.nanoTime();
+            for (int i = 0; i < transientFailure.length; i++) {
+                failNextCommit.set(true);
+                var evidence = benchmarkEvidence("transient", i);
+                long started = System.nanoTime();
+                assertThat(transientStore.admit(evidence).status()).isEqualTo(ADMITTED);
+                transientFailure[i] = System.nanoTime() - started;
+            }
+            printRetryBenchmark("transient_failure", transientFailure, System.nanoTime() - totalStart,
+                    mongoCommands.get() - commandStart, injectedFailures.get() - failuresBeforeMeasurement,
+                    (injectedFailures.get() - failuresBeforeMeasurement) * 20L);
+        }
+    }
+
     @Test void receiptSurvivesClientAndStoreRestart() throws Exception {
         var evidence = verified(PAYLOAD, Map.of(), 0);
         String id = store.admit(evidence).receipt().id();
@@ -438,6 +525,56 @@ class MongoSourceReceiptStoreIntegrationTest {
         return MongoClients.create(MongoClientSettings.builder().applyConnectionString(new ConnectionString(MONGO.getReplicaSetUrl()))
                 .timeout(5, TimeUnit.SECONDS).build());
     }
+    private static MongoClient benchmarkClient(AtomicLong commandCount) {
+        return MongoClients.create(MongoClientSettings.builder().applyConnectionString(new ConnectionString(MONGO.getReplicaSetUrl()))
+                .timeout(5, TimeUnit.SECONDS).addCommandListener(new CommandListener() {
+                    @Override public void commandStarted(CommandStartedEvent event) { commandCount.incrementAndGet(); }
+                    @Override public void commandSucceeded(CommandSucceededEvent event) { }
+                    @Override public void commandFailed(CommandFailedEvent event) { }
+                }).build());
+    }
+    private SourceSignatureVerifier.Verified benchmarkEvidence(String scenario, int sample) throws Exception {
+        return verified(PAYLOAD, Map.of("sourceEventId", "fx16-" + scenario + "-" + sample), 0);
+    }
+    private static ContendedSample contend(MongoSourceReceiptStore store, SourceSignatureVerifier.Verified evidence,
+                                           ExecutorService pool) throws Exception {
+        var barrier = new CyclicBarrier(2);
+        AtomicLong firstNanos = new AtomicLong();
+        AtomicLong secondNanos = new AtomicLong();
+        var first = pool.submit(() -> {
+            barrier.await(10, TimeUnit.SECONDS);
+            long started = System.nanoTime();
+            SourceReceiptStore.Result result = store.admit(evidence);
+            firstNanos.set(System.nanoTime() - started);
+            return result;
+        });
+        var second = pool.submit(() -> {
+            barrier.await(10, TimeUnit.SECONDS);
+            long started = System.nanoTime();
+            SourceReceiptStore.Result result = store.admit(evidence);
+            secondNanos.set(System.nanoTime() - started);
+            return result;
+        });
+        return new ContendedSample(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS),
+                firstNanos.get(), secondNanos.get());
+    }
+    private static void printRetryBenchmark(String scenario, long[] samples, long elapsedNanos,
+                                            long mongoCommands, int retries, long configuredBackoffMillis) {
+        System.out.printf(Locale.ROOT,
+                "SOURCE_RETRY_BENCHMARK case=%s samples=%d warmup=10 p50_ms=%.3f p95_ms=%.3f p99_ms=%.3f "
+                        + "total_elapsed_ms=%.3f retries=%d configured_backoff_ms=%d mongo_commands=%d commands_per_attempt=%.2f%n",
+                scenario, samples.length, percentileMillis(samples, 0.50), percentileMillis(samples, 0.95),
+                percentileMillis(samples, 0.99), elapsedNanos / 1_000_000.0, retries, configuredBackoffMillis,
+                mongoCommands, (double) mongoCommands / samples.length);
+    }
+    private static double percentileMillis(long[] samples, double percentile) {
+        long[] sorted = samples.clone();
+        Arrays.sort(sorted);
+        int index = Math.max(0, (int) Math.ceil(percentile * sorted.length) - 1);
+        return sorted[index] / 1_000_000.0;
+    }
+    private record ContendedSample(SourceReceiptStore.Result first, SourceReceiptStore.Result second,
+                                   long firstNanos, long secondNanos) { }
     private static MongoException unknownCommit() {
         MongoException failure = new MongoException(91, "TEST_ONLY_LOST_COMMIT_ACK");
         failure.addLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL); return failure;
