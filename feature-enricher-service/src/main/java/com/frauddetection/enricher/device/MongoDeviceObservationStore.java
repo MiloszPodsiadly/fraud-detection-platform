@@ -2,6 +2,8 @@ package com.frauddetection.enricher.device;
 
 import com.frauddetection.common.events.device.DeviceRiskEvidence;
 import com.frauddetection.common.events.source.SourceScoredOccurrence;
+import com.frauddetection.common.events.source.SourceOccurrenceAccess;
+import com.frauddetection.common.events.source.MongoSourceOccurrenceStore;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.CountryFact;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.HistoryFact;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.NetworkFact;
@@ -9,6 +11,7 @@ import com.frauddetection.common.events.device.DeviceRiskEvidence.Reason;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.Source;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.SourceQuality;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.State;
+import com.frauddetection.enricher.graph.GraphReadReason;
 import com.mongodb.MongoException;
 import com.mongodb.ReadConcern;
 import com.mongodb.TransactionOptions;
@@ -111,11 +114,25 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     }
 
     MongoDeviceObservationStore(MongoClient client, String databaseName, Clock clock, DeviceEpoch epoch, HistoryAuthority authority) {
-        this(client, databaseName, clock, epoch, authority, null);
+        this(client, databaseName, clock, epoch, authority, null, false, null);
     }
 
     MongoDeviceObservationStore(MongoClient client, String databaseName, Clock clock, DeviceEpoch epoch, HistoryAuthority authority,
                                 DevicePseudonyms integrityKey) {
+        this(client, databaseName, clock, epoch, authority, integrityKey, false, null);
+    }
+
+    /** Creates a schema-inert reader only after validating the named principal's exact read privileges. */
+    static MongoDeviceObservationStore readOnly(MongoClient client, String databaseName, Clock clock, DeviceEpoch epoch,
+                                                HistoryAuthority authority, DevicePseudonyms integrityKey,
+                                                String expectedReaderPrincipal) {
+        return new MongoDeviceObservationStore(client, databaseName, clock, epoch, authority, integrityKey,
+                true, expectedReaderPrincipal);
+    }
+
+    private MongoDeviceObservationStore(MongoClient client, String databaseName, Clock clock, DeviceEpoch epoch,
+                                        HistoryAuthority authority, DevicePseudonyms integrityKey, boolean readOnly,
+                                        String expectedReaderPrincipal) {
         this.client = java.util.Objects.requireNonNull(client, "client");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
         this.epoch = java.util.Objects.requireNonNull(epoch, "epoch");
@@ -132,10 +149,190 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         coverage = database.getCollection("device_source_coverage");
         fences = database.getCollection("device_scope_fences");
         revocationTombstones = database.getCollection("device_operational_revocation_tombstones");
+        if (!readOnly) {
+            try {
+                new MongoDeviceObservationSchema(database).ensureIndexes();
+            } catch (MongoException exception) {
+                throw unavailable("INDEXES", exception);
+            }
+        } else {
+            requireReadOnlyPrincipal(expectedReaderPrincipal);
+        }
+    }
+
+    private void requireReadOnlyPrincipal(String expectedPrincipal) {
         try {
-            new MongoDeviceObservationSchema(database).ensureIndexes();
-        } catch (MongoException exception) {
-            throw unavailable("INDEXES", exception);
+            DeviceAssertions.reference(expectedPrincipal);
+            Document auth = database.runCommand(new Document("connectionStatus", 1).append("showPrivileges", true))
+                    .get("authInfo", Document.class);
+            List<Document> users = auth == null ? null : auth.getList("authenticatedUsers", Document.class);
+            List<Document> privileges = auth == null ? null : auth.getList("authenticatedUserPrivileges", Document.class);
+            if (users == null || users.size() != 1 || !expectedPrincipal.equals(users.getFirst().getString("user"))
+                    || privileges == null) { throw new IllegalArgumentException("DEVICE_GRAPH_READ_ONLY_PRINCIPAL_REQUIRED"); }
+            Set<String> readable = new java.util.HashSet<>();
+            Set<String> expectedCollections = Set.of("device_observation_candidates", "device_observations",
+                    "device_occurrences", "device_history_member_anchors", "device_source_coverage",
+                    "device_operational_revocation_tombstones");
+            for (Document privilege : privileges) {
+                Document resource = privilege.get("resource", Document.class);
+                List<String> actions = privilege.getList("actions", String.class);
+                if (resource == null || !database.getName().equals(resource.getString("db")) || actions == null
+                        || !Set.of("find", "listCollections").containsAll(actions)) {
+                    throw new IllegalArgumentException("DEVICE_GRAPH_READ_ONLY_PRINCIPAL_REQUIRED");
+                }
+                String collection = resource.getString("collection");
+                if (collection == null || collection.isEmpty()
+                        && !actions.stream().allMatch("listCollections"::equals)
+                        || !collection.isEmpty() && !expectedCollections.contains(collection)) {
+                    throw new IllegalArgumentException("DEVICE_GRAPH_READ_ONLY_PRINCIPAL_REQUIRED");
+                }
+                if (actions.contains("find")) { readable.add(collection); }
+            }
+            if (!readable.equals(expectedCollections)) {
+                throw new IllegalArgumentException("DEVICE_GRAPH_READ_ONLY_PRINCIPAL_REQUIRED");
+            }
+        } catch (RuntimeException invalid) {
+            throw new IllegalArgumentException("DEVICE_GRAPH_READ_ONLY_PRINCIPAL_REQUIRED");
+        }
+    }
+
+    /**
+     * Re-resolves one previously admitted occurrence using owner state only. This returns typed
+     * references; BSON stays inside this owner package and no proof bytes are reconstructed.
+     */
+    GraphOccurrenceRead graphOccurrence(String ownerReference, SourceScoredOccurrence score) {
+        if (integrityKey == null || ownerReference == null || !DeviceObservationStore.TOKEN.matcher(ownerReference).matches()) {
+            return GraphOccurrenceRead.denied(GraphReadReason.REFERENCE_INVALID);
+        }
+        try {
+            return transaction(session -> {
+                Instant now = clock.instant();
+                Document row = occurrences.find(session, eq("_id", ownerReference)).first();
+                Document candidate = candidates.find(session, eq("_id", ownerReference)).first();
+                Document observation = observations.find(session, eq("_id", ownerReference)).first();
+                Document anchor = historyMemberAnchors.find(session, eq("_id", ownerReference)).first();
+                if (row == null || candidate == null || observation == null || anchor == null) {
+                    return GraphOccurrenceRead.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+                }
+                if (!epoch.matches(row) || !epoch.matches(candidate) || !epoch.matches(observation)
+                        || !"COMMITTED".equals(candidate.getString("status"))
+                        || !Objects.equals(row.getString("_id"), candidate.getString("_id"))
+                        || !Objects.equals(row.getString("_id"), observation.getString("_id"))
+                        || !DeviceRecordIntegrity.candidateMatches(integrityKey, candidate)
+                        || !DeviceRecordIntegrity.candidateStateMatches(integrityKey, candidate)
+                        || !DeviceRecordIntegrity.candidateMatches(integrityKey, row)
+                        || !DeviceRecordIntegrity.membershipMatches(integrityKey, row)
+                        || !DeviceRecordIntegrity.snapshotMatches(integrityKey, row)
+                        || !DeviceHistoryMemberAnchor.matchesCopies(integrityKey, epoch, anchor, observation, row, candidate)
+                        || !DeviceSnapshotVersion.commitment(row).equals(row.getString("stageACommitment"))) {
+                    return GraphOccurrenceRead.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+                }
+                Date rowExpiry = row.getDate("expireAt");
+                Date terminalExpiry = candidate.getDate("terminalExpireAt");
+                Date anchorExpiry = anchor.getDate("expireAt");
+                if (rowExpiry == null || !rowExpiry.toInstant().isAfter(now) || terminalExpiry == null
+                        || !terminalExpiry.toInstant().isAfter(now) || anchorExpiry == null || !anchorExpiry.toInstant().isAfter(now)) {
+                    return GraphOccurrenceRead.unavailable(GraphReadReason.RETENTION_EXPIRED);
+                }
+                DeviceObservationStore.Provenance provenance = DeviceObservationStore.Provenance.from(row);
+                int keyVersion = row.getInteger("keyVersion");
+                GraphOccurrenceRead authorityRead = historyOutcome(authority.currentStatus(provenance, keyVersion));
+                if (authorityRead != null) { return authorityRead; }
+                Document progress = coverage.find(session, eq("_id", scopeId(row))).first();
+                if (progress == null) { return GraphOccurrenceRead.pending(GraphReadReason.COVERAGE_UNAVAILABLE); }
+                if (!epoch.matches(progress) || !DeviceRecordIntegrity.coverageMatches(integrityKey, progress)
+                        || !Objects.equals(progress.getInteger("keyVersion"), keyVersion)
+                        || !Objects.equals(progress.getString("populationCommitment"), row.getString("populationCommitment"))) {
+                    return GraphOccurrenceRead.unavailable(GraphReadReason.COVERAGE_UNAVAILABLE);
+                }
+                if (progress.getLong("coverageGeneration") < anchor.getLong("coverageGeneration")) {
+                    return GraphOccurrenceRead.conflict();
+                }
+                if (Boolean.TRUE.equals(progress.getBoolean("invalidated"))) {
+                    return GraphOccurrenceRead.denied(GraphReadReason.AUTHORITY_REVOKED);
+                }
+                GraphOccurrenceRead rowCoverageRead = historyOutcome(authority.coverageStatus(
+                        DeviceObservationStore.CoverageAuthority.from(row), row.getString("institution"),
+                        row.getString("source"), row.getString("populationCommitment"), keyVersion,
+                        row.getDate("coverageStart").toInstant()));
+                if (rowCoverageRead != null) { return rowCoverageRead; }
+                GraphOccurrenceRead progressCoverageRead = historyOutcome(authority.coverageStatus(
+                        DeviceObservationStore.CoverageAuthority.from(progress), progress.getString("institution"),
+                        progress.getString("source"), progress.getString("populationCommitment"), keyVersion,
+                        progress.getDate("coverageStart").toInstant()));
+                if (progressCoverageRead != null) { return progressCoverageRead; }
+                if (progress.getLong("sealedSequence") < row.getLong("sequence")
+                        || progress.getDate("watermark").toInstant().isBefore(row.getDate("eventTime").toInstant())
+                        || progress.getDate("coverageStart").toInstant().isAfter(row.getDate("eventTime").toInstant())
+                        || progress.getDate("continuousSince").toInstant().isAfter(row.getDate("eventTime").toInstant())) {
+                    return GraphOccurrenceRead.pending(GraphReadReason.COVERAGE_UNAVAILABLE);
+                }
+                if (hasActiveOperationalRevocation(session, epoch.scopeId(row.getString("institution"), row.getString("source"))
+                        + ':' + keyVersion + ':' + row.getString("device"), clock.instant())) {
+                    return GraphOccurrenceRead.denied(GraphReadReason.AUTHORITY_REVOKED);
+                }
+                Document binding = row.get("scoredBinding", Document.class);
+                if (binding == null) { return GraphOccurrenceRead.pending(GraphReadReason.SOURCE_UNAVAILABLE); }
+                if (!Integer.valueOf(1).equals(binding.getInteger("version"))) { return GraphOccurrenceRead.conflict(); }
+                SourceOccurrenceAccess.Reference scoredReference;
+                try {
+                    scoredReference = new SourceOccurrenceAccess.Reference(binding.getString("eventId"),
+                            Instant.parse(binding.getString("createdAt")), binding.getString("fingerprint"));
+                } catch (RuntimeException malformed) {
+                    return GraphOccurrenceRead.conflict();
+                }
+                if (!MongoSourceOccurrenceStore.INITIAL_RUN.equals(binding.getString("runId"))
+                        || score != null && (!DeviceScoredBinding.matches(row, score)
+                        || !MongoSourceOccurrenceStore.INITIAL_RUN.equals(score.runId()))) {
+                    return GraphOccurrenceRead.conflict();
+                }
+                return GraphOccurrenceRead.verified(new GraphOccurrenceSnapshot(ownerReference, row.getString("institution"), row.getString("source"),
+                        row.getString("device"), keyVersion,
+                        row.getDate("eventTime").toInstant(), provenance, DeviceObservationStore.CoverageAuthority.from(row),
+                        row.getString("populationCommitment"), anchor.getString("coverageCommitment"),
+                        anchor.getLong("coverageGeneration"), row.getDate("coverageStart").toInstant(),
+                        progress.getDate("watermark").toInstant(), rowExpiry.toInstant(),
+                        row.getString("stageACommitment"), scoredReference));
+            });
+        } catch (RuntimeException unavailable) {
+            return GraphOccurrenceRead.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
+    }
+
+    private static GraphOccurrenceRead historyOutcome(DeviceObservationStore.HistoryAuthority.Status status) {
+        if (status == null) { return GraphOccurrenceRead.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
+        return switch (status) {
+            case CURRENT -> null;
+            case PENDING -> GraphOccurrenceRead.pending(GraphReadReason.SOURCE_UNAVAILABLE);
+            case UNAVAILABLE -> GraphOccurrenceRead.unavailable(GraphReadReason.SOURCE_UNAVAILABLE);
+            case DENIED -> GraphOccurrenceRead.denied(GraphReadReason.GRANT_DENIED);
+            case REVOKED -> GraphOccurrenceRead.denied(GraphReadReason.AUTHORITY_REVOKED);
+            case CONFLICT -> GraphOccurrenceRead.conflict();
+        };
+    }
+
+    record GraphOccurrenceRead(State state, GraphReadReason reason, GraphOccurrenceSnapshot snapshot) {
+        enum State { VERIFIED, PENDING, UNAVAILABLE, DENIED, CONFLICT }
+        GraphOccurrenceRead {
+            if (state == null || reason == null || (state == State.VERIFIED)
+                    != (snapshot != null) || (state == State.VERIFIED) != (reason == GraphReadReason.NONE)) {
+                throw new IllegalArgumentException("DEVICE_GRAPH_OCCURRENCE_READ_INVALID");
+            }
+        }
+        static GraphOccurrenceRead verified(GraphOccurrenceSnapshot snapshot) {
+            return new GraphOccurrenceRead(State.VERIFIED, GraphReadReason.NONE, Objects.requireNonNull(snapshot));
+        }
+        static GraphOccurrenceRead pending(GraphReadReason reason) {
+            return new GraphOccurrenceRead(State.PENDING, reason, null);
+        }
+        static GraphOccurrenceRead unavailable(GraphReadReason reason) {
+            return new GraphOccurrenceRead(State.UNAVAILABLE, reason, null);
+        }
+        static GraphOccurrenceRead denied(GraphReadReason reason) {
+            return new GraphOccurrenceRead(State.DENIED, reason, null);
+        }
+        static GraphOccurrenceRead conflict() {
+            return new GraphOccurrenceRead(State.CONFLICT, GraphReadReason.CONFLICTING_EVIDENCE, null);
         }
     }
 

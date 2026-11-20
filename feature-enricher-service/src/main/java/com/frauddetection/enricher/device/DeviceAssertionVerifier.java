@@ -143,38 +143,81 @@ final class DeviceAssertionVerifier {
     }
 
     /** Policy check on a previously authenticated durable record; never authenticates an arbitrary caller record. */
-    boolean currentStoredObservation(DeviceObservationStore.Provenance p, com.frauddetection.common.events.source.SourceLineage lineage, int pseudonymVersion) {
+    boolean currentStoredObservation(DeviceObservationStore.Provenance p,
+                                    com.frauddetection.common.events.source.SourceLineage lineage,
+                                    int pseudonymVersion) {
+        return currentStoredObservationStatus(p, lineage, pseudonymVersion)
+                == DeviceObservationStore.HistoryAuthority.Status.CURRENT;
+    }
+
+    DeviceObservationStore.HistoryAuthority.Status currentStoredObservationStatus(
+            DeviceObservationStore.Provenance p, com.frauddetection.common.events.source.SourceLineage lineage,
+            int pseudonymVersion) {
         if (lineage == null || lineage.state() != com.frauddetection.common.events.source.SourceLineage.State.VERIFIED
-                || !p.receiptId().equals(lineage.receiptId()) || !p.enrichedCommitment().equals(lineage.eventCommitment())) { return false; }
+                || !p.receiptId().equals(lineage.receiptId())
+                || !p.enrichedCommitment().equals(lineage.eventCommitment())) {
+            return DeviceObservationStore.HistoryAuthority.Status.UNAVAILABLE;
+        }
         var origin = lineage.source();
         KeyId key = new KeyId(p.deviceIssuer(), origin.sourceEpoch(), p.deviceKeyVersion());
         Grant grant = grants.get(key);
         GrantCommitment commitment = grantCommitments.get(key);
-        if (grant == null || grant.role() != Role.OBSERVATION || grant.pseudonymKeyVersion() != pseudonymVersion
+        if (grant == null || grant.role() != Role.OBSERVATION) {
+            return DeviceObservationStore.HistoryAuthority.Status.DENIED;
+        }
+        SourceSignatureVerifier.Denied denial = assertionVerifier.receiptPolicyDenialForPersistedScope(p.deviceIssuer(), origin.institution(), origin.source(),
+                origin.sourceEpoch(), p.deviceKeyVersion(), origin.eventTime(), Role.OBSERVATION.purpose, AUDIENCE,
+                p.deviceKeyCommitment(), p.devicePolicyVersion(), p.proofTime());
+        if (denial != null) { return status(denial); }
+        if (grant.pseudonymKeyVersion() != pseudonymVersion
                 || !grant.sourceScope().matches(origin.issuer(), origin.institution(), origin.source(), origin.sourceEpoch())
                 || commitment == null || !commitment.authorization().equals(p.authorizationCommitment())
-                || !commitment.population().equals(p.populationCommitment()) || !origin.eventTime().equals(p.proofTime())) { return false; }
-        return assertionVerifier.receiptPolicyDenialForPersistedScope(p.deviceIssuer(), origin.institution(), origin.source(),
-                origin.sourceEpoch(), p.deviceKeyVersion(), origin.eventTime(), Role.OBSERVATION.purpose, AUDIENCE,
-                p.deviceKeyCommitment(), p.devicePolicyVersion(), p.proofTime()) == null;
+                || !commitment.population().equals(p.populationCommitment()) || !origin.eventTime().equals(p.proofTime())) {
+            return DeviceObservationStore.HistoryAuthority.Status.DENIED;
+        }
+        return DeviceObservationStore.HistoryAuthority.Status.CURRENT;
     }
 
     boolean currentStoredCoverage(DeviceObservationStore.CoverageAuthority p, DeviceEpoch epoch, String institution, String source,
                                   String populationCommitment, int pseudonymVersion, Instant coverageStart, DevicePseudonyms pseudonyms) {
+        return currentStoredCoverageStatus(p, epoch, institution, source, populationCommitment, pseudonymVersion,
+                coverageStart, pseudonyms) == DeviceObservationStore.HistoryAuthority.Status.CURRENT;
+    }
+
+    DeviceObservationStore.HistoryAuthority.Status currentStoredCoverageStatus(
+            DeviceObservationStore.CoverageAuthority p, DeviceEpoch epoch, String institution, String source,
+            String populationCommitment, int pseudonymVersion, Instant coverageStart, DevicePseudonyms pseudonyms) {
         KeyId key = new KeyId(p.issuer(), epoch.sourceEpoch(), p.keyVersion());
         Grant grant = grants.get(key);
         GrantCommitment commitment = grantCommitments.get(key);
-        if (grant == null || grant.role() != Role.COVERAGE || !epoch.sourceIssuer().equals(grant.sourceScope().sourceIssuer())
+        if (grant == null || grant.role() != Role.COVERAGE) {
+            return DeviceObservationStore.HistoryAuthority.Status.DENIED;
+        }
+        SourceSignatureVerifier.Denied denial = assertionVerifier.receiptPolicyDenialForPersistedScope(p.issuer(), grant.sourceScope().institution(),
+                grant.sourceScope().source(), epoch.sourceEpoch(), p.keyVersion(), p.proofTime(), Role.COVERAGE.purpose, AUDIENCE,
+                p.keyCommitment(), p.policyVersion(), p.proofTime());
+        if (denial != null) { return status(denial); }
+        if (!epoch.sourceIssuer().equals(grant.sourceScope().sourceIssuer())
                 || grant.pseudonymKeyVersion() != pseudonymVersion || pseudonyms.version() != pseudonymVersion
                 || commitment == null || !commitment.authorization().equals(p.authorizationCommitment())
                 || !commitment.population().equals(populationCommitment)
-                || coverageStart.isBefore(grant.population().earliestCoverageStart())) { return false; }
+                || coverageStart.isBefore(grant.population().earliestCoverageStart())) {
+            return DeviceObservationStore.HistoryAuthority.Status.DENIED;
+        }
         String grantInstitutionToken = grantInstitutionTokens.computeIfAbsent(key,
                 ignored -> pseudonyms.institution(grant.sourceScope().institution()));
-        if (!grantInstitutionToken.equals(institution) || !commitment.sourceCode().equals(source)) { return false; }
-        return assertionVerifier.receiptPolicyDenialForPersistedScope(p.issuer(), grant.sourceScope().institution(),
-                grant.sourceScope().source(), epoch.sourceEpoch(), p.keyVersion(), p.proofTime(), Role.COVERAGE.purpose, AUDIENCE,
-                p.keyCommitment(), p.policyVersion(), p.proofTime()) == null;
+        return grantInstitutionToken.equals(institution) && commitment.sourceCode().equals(source)
+                ? DeviceObservationStore.HistoryAuthority.Status.CURRENT
+                : DeviceObservationStore.HistoryAuthority.Status.DENIED;
+    }
+
+    private static DeviceObservationStore.HistoryAuthority.Status status(SourceSignatureVerifier.Denied denial) {
+        if (denial == null) { return DeviceObservationStore.HistoryAuthority.Status.CURRENT; }
+        return switch (denial) {
+            case TRUST_ANCHOR_REVOKED -> DeviceObservationStore.HistoryAuthority.Status.REVOKED;
+            case VERIFICATION_UNAVAILABLE -> DeviceObservationStore.HistoryAuthority.Status.UNAVAILABLE;
+            default -> DeviceObservationStore.HistoryAuthority.Status.DENIED;
+        };
     }
 
     private SourceSignatureVerifier.Verified signature(byte[] proof, byte[] payload, Role role) {

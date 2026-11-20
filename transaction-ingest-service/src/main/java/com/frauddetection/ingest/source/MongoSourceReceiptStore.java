@@ -45,6 +45,9 @@ import static com.mongodb.client.model.Updates.*;
 /** Owns source receipts and their encrypted, bounded RAW publication outbox; it does not read Device/Merchant history. */
 final class MongoSourceReceiptStore implements SourceReceiptStore {
     static final int ATTEMPTS = 3;
+    private static final int TRANSIENT_TRANSACTION_ATTEMPTS = 5;
+    private static final long TRANSIENT_RETRY_BASE_DELAY_MILLIS = 20;
+    private static final long TRANSIENT_RETRY_MAX_DELAY_MILLIS = 160;
     private static final int MAX_RECOVERY_EPOCHS = MongoSourceRawPublicationSchema.MAX_RECOVERY_EPOCHS;
     private static final JsonMapper RAW_JSON = JsonMapper.builder().findAndAddModules().build();
     private static final TransactionOptions TRANSACTION = TransactionOptions.builder().readConcern(ReadConcern.SNAPSHOT)
@@ -61,6 +64,7 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
     private final SourceRawPublicationCipher rawCipher;
     private final SourceRawPublicationProperties rawProperties;
     private final MongoCollection<Document> rawPublications;
+    private final RetryBackoff retryBackoff;
 
     MongoSourceReceiptStore(MongoClient client, String databaseName, Clock clock, Limits limits, SourceSignatureVerifier verifier) {
         this(client, databaseName, clock, limits, verifier, null, null,
@@ -70,6 +74,13 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
     MongoSourceReceiptStore(MongoClient client, String databaseName, Clock clock, Limits limits, SourceSignatureVerifier verifier,
                             MongoSourceLineage lineage, SourceRawPublicationCipher rawCipher,
                             SourceRawPublicationProperties rawProperties) {
+        this(client, databaseName, clock, limits, verifier, lineage, rawCipher, rawProperties,
+                MongoSourceReceiptStore::awaitTransientRetry);
+    }
+
+    MongoSourceReceiptStore(MongoClient client, String databaseName, Clock clock, Limits limits, SourceSignatureVerifier verifier,
+                            MongoSourceLineage lineage, SourceRawPublicationCipher rawCipher,
+                            SourceRawPublicationProperties rawProperties, RetryBackoff retryBackoff) {
         this.client = Objects.requireNonNull(client);
         this.clock = Objects.requireNonNull(clock);
         this.limits = Objects.requireNonNull(limits);
@@ -77,6 +88,7 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
         this.lineage = lineage;
         this.rawCipher = rawCipher;
         this.rawProperties = Objects.requireNonNull(rawProperties);
+        this.retryBackoff = Objects.requireNonNull(retryBackoff, "SOURCE_RETRY_BACKOFF_REQUIRED");
         if (rawProperties.enabled() && (lineage == null || rawCipher == null)) { throw invalid("RAW_PUBLICATION_DEPENDENCIES_REQUIRED"); }
         if (databaseName == null || !databaseName.matches("[a-z][a-z0-9_]{0,63}")) { throw invalid("CONFIGURATION_INVALID"); }
         var database = client.getDatabase(databaseName).withReadConcern(ReadConcern.MAJORITY)
@@ -315,24 +327,30 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
 
     private RawResult rawTransaction(SourceSignatureVerifier.Verified evidence, Function<ClientSession, RawResult> work) {
         if (evidence == null) { return rawResult(UNVERIFIED); }
-        if (verifier.currentDenial(evidence) != null) { return rawResult(REVOKED); }
-        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+        for (int attempt = 0; attempt < TRANSIENT_TRANSACTION_ATTEMPTS; attempt++) {
+            Status authorizationFailure = currentAuthorizationFailure(evidence);
+            if (authorizationFailure != null) { return rawResult(authorizationFailure); }
+            boolean retry = false;
             try (ClientSession session = client.startSession()) {
                 session.startTransaction(TRANSACTION);
                 try {
                     RawResult outcome = work.apply(session);
-                    if (verifier.currentDenial(evidence) != null) {
+                    authorizationFailure = currentAuthorizationFailure(evidence);
+                    if (authorizationFailure == REVOKED) {
                         abort(session);
                         return rawResult(REVOKED);
+                    }
+                    if (authorizationFailure != null) {
+                        abort(session);
+                        return rawResult(authorizationFailure);
                     }
                     commit(session);
                     return outcome;
                 } catch (MongoException failure) {
                     if (failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) { return rawResult(UNRESOLVED); }
                     abort(session);
-                    if ((failure.getCode() == 11000 || failure.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL))
-                            && attempt + 1 < ATTEMPTS) { continue; }
-                    return rawResult(UNRESOLVED);
+                    retry = retryable(failure) && attempt + 1 < TRANSIENT_TRANSACTION_ATTEMPTS;
+                    if (!retry) { return rawResult(UNRESOLVED); }
                 } catch (RawTransactionAbort aborted) {
                     abort(session);
                     return aborted.result;
@@ -341,8 +359,21 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
                     return rawResult(UNRESOLVED);
                 }
             } catch (RuntimeException unavailable) { return rawResult(UNRESOLVED); }
+            if (retry && !awaitRetry(attempt)) { return rawResult(UNRESOLVED); }
         }
         return rawResult(UNRESOLVED);
+    }
+
+    static boolean awaitTransientRetry(int failedAttempt) {
+        long delay = Math.min(TRANSIENT_RETRY_MAX_DELAY_MILLIS,
+                TRANSIENT_RETRY_BASE_DELAY_MILLIS << Math.min(failedAttempt, 3));
+        try {
+            TimeUnit.MILLISECONDS.sleep(delay);
+            return true;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private TransactionRawEvent restoreRaw(Document row, Receipt receipt) {
@@ -565,18 +596,24 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
 
     private Result authorized(SourceSignatureVerifier.Verified evidence, Function<ClientSession, Result> work) {
         if (evidence == null) { return result(UNVERIFIED); }
-        if (verifier.currentDenial(evidence) != null) { return result(REVOKED); }
+        Status authorizationFailure = currentAuthorizationFailure(evidence);
+        if (authorizationFailure != null) { return result(authorizationFailure); }
         return transaction(work, evidence);
     }
 
     private Result transaction(Function<ClientSession, Result> work, SourceSignatureVerifier.Verified authorization) {
-        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+        for (int attempt = 0; attempt < TRANSIENT_TRANSACTION_ATTEMPTS; attempt++) {
+            Status authorizationFailure = authorization == null ? null : currentAuthorizationFailure(authorization);
+            if (authorizationFailure != null) { return result(authorizationFailure); }
+            boolean retry = false;
             try (ClientSession session = client.startSession()) {
                 session.startTransaction(TRANSACTION);
                 try {
                     Result result = work.apply(session);
-                    if (authorization != null && verifier.currentDenial(authorization) != null) {
-                        abort(session); return result(REVOKED);
+                    authorizationFailure = authorization == null ? null : currentAuthorizationFailure(authorization);
+                    if (authorizationFailure != null) {
+                        abort(session);
+                        return result(authorizationFailure);
                     }
                     commit(session);
                     return result;
@@ -584,15 +621,33 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
                     // Never rerun a body after an unknown commit: only commit retries or an explicit later lookup.
                     if (failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) { return result(UNRESOLVED); }
                     abort(session);
-                    if ((failure.getCode() == 11000 || failure.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL))
-                            && attempt + 1 < ATTEMPTS) { continue; }
-                    return result(UNRESOLVED);
+                    retry = retryable(failure) && attempt + 1 < TRANSIENT_TRANSACTION_ATTEMPTS;
+                    if (!retry) { return result(UNRESOLVED); }
                 } catch (RuntimeException corruptOrUnavailable) {
                     abort(session); return result(UNRESOLVED);
                 }
             } catch (RuntimeException unavailable) { return result(UNRESOLVED); }
+            if (retry && !awaitRetry(attempt)) { return result(UNRESOLVED); }
         }
         return result(UNRESOLVED);
+    }
+
+    private Status currentAuthorizationFailure(SourceSignatureVerifier.Verified authorization) {
+        try {
+            return verifier.currentDenial(authorization) == null ? null : REVOKED;
+        } catch (RuntimeException unavailable) {
+            return UNRESOLVED;
+        }
+    }
+
+    private static boolean retryable(MongoException failure) {
+        return failure.getCode() == 11000
+                || failure.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL);
+    }
+
+    private boolean awaitRetry(int failedAttempt) {
+        try { return retryBackoff.await(failedAttempt); }
+        catch (RuntimeException unavailable) { return false; }
     }
 
     private void commit(ClientSession session) {
@@ -606,6 +661,11 @@ final class MongoSourceReceiptStore implements SourceReceiptStore {
     private void abort(ClientSession session) {
         try { if (session.hasActiveTransaction()) { session.abortTransaction(); } }
         catch (MongoException ignored) { /* No failure path reports a successful admission. */ }
+    }
+
+    @FunctionalInterface
+    interface RetryBackoff {
+        boolean await(int failedAttempt);
     }
     private boolean validCounter(Document counter) {
         return counter != null && counter.getInteger("schemaVersion", 0) == 1

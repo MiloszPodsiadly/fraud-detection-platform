@@ -1,6 +1,7 @@
 package com.frauddetection.enricher.device;
 
 import com.mongodb.ExplainVerbosity;
+import com.mongodb.client.MongoClient;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
@@ -32,6 +33,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -45,6 +48,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private VerifiedDeviceAdmissionIntegrationTest f;
     private MongoSourceOccurrenceStore occurrenceWriter;
     private SourceOccurrenceAccess occurrenceReader;
+    private SourceOccurrenceCipher occurrenceCipher;
     private MongoSourceLineage privateSource;
     private MongoClientHandle clients;
     private PrivateDeviceDiagnosticReader diagnostic;
@@ -68,11 +72,11 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         clients = new MongoClientHandle(VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceWriter(f.ownerClient, f.database),
                 VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceReader(f.ownerClient, f.database),
                 VerifiedDeviceAdmissionIntegrationTest.MONGO.diagnosticReader(f.ownerClient, f.database));
-        SourceOccurrenceCipher cipher = new SourceOccurrenceCipher("test-key", Map.of("test-key", Base64.getEncoder().encodeToString(VerifiedDeviceAdmissionIntegrationTest.randomKey())));
+        occurrenceCipher = sourceCipher();
         occurrenceWriter = new MongoSourceOccurrenceStore(clients.writer, f.database, "scored_writer", f.originVerifier,
-                VerifiedDeviceAdmissionIntegrationTest.CLOCK, cipher, Duration.ofHours(1));
+                VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher, Duration.ofHours(1));
         occurrenceReader = MongoSourceOccurrenceStore.readOnly(clients.sourceReader, f.database, "source_diagnostic_reader", f.originVerifier,
-                VerifiedDeviceAdmissionIntegrationTest.CLOCK, cipher,
+                VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher,
                 new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
         privateSource = new MongoSourceLineage(clients.sourceReader, f.database, "source_diagnostic_reader", MongoSourceLineage.Stage.SCORER,
                 f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
@@ -240,6 +244,543 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                         com.mongodb.client.model.Updates.set("stageACommitment", forged.getString("stageACommitment")),
                         com.mongodb.client.model.Updates.set("scoredBinding", forged.get("scoredBinding"))));
         assertThat(diagnostic.evaluate(fact(current), scored.reference).outcome()).isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
+    }
+
+    @Test void deviceGraphBridgeRevalidatesSignedOwnerEvidenceAndExactInitialScoreAfterRestart() throws Exception {
+        var event = f.event(f.A, "graph-device-event-one", "graph-device-transaction-one", "customer-1",
+                "graph-device-id", 1, VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(60));
+        var secondEvent = f.event(f.A, "graph-device-event-two", "graph-device-transaction-two", "customer-1",
+                "graph-device-id", 2, VerifiedDeviceAdmissionIntegrationTest.NOW);
+        var admission = f.adapter(f.A);
+        var firstTicket = f.stage(admission, event);
+        var secondTicket = f.stage(admission, secondEvent);
+        var seal = f.coverage(f.A, 2, f.A.start, VerifiedDeviceAdmissionIntegrationTest.NOW);
+        admission.seal(firstTicket, seal.proof(), seal.payload());
+        admission.commit(firstTicket);
+        admission.commit(secondTicket);
+        var scored = publish(event, "initial", "graph-device-score-one");
+        admission.bindScored(firstTicket, occurrenceReader, scored.reference);
+        var secondScored = publish(secondEvent, "initial", "graph-device-score-two");
+        admission.bindScored(secondTicket, occurrenceReader, secondScored.reference);
+
+        String institutionToken = f.pseudonyms.institution(f.A.institution);
+        String sourceCode = DevicePseudonyms.sourceCode("BANK");
+        String ownerReference = f.A.epoch().eventId(institutionToken, sourceCode,
+                f.pseudonyms.event(f.A.institution, event.id()));
+        String secondOwnerReference = f.A.epoch().eventId(institutionToken, sourceCode,
+                f.pseudonyms.event(f.A.institution, secondEvent.id()));
+        var sourceScope = new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch);
+        var relationGrant = DeviceGraphRelationGrant.testOnly(DeviceEpoch.digest("test-graph-relation-grant", f.database),
+                sourceScope, "transaction-ingest", 1, VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        var readGrant = DeviceGraphReadGrant.testOnly("graph_reader", sourceScope, "transaction-ingest", 1,
+                VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+
+        assertThatThrownBy(() -> DeviceGraphRelationAuthority.testOnly(clients.deviceReader, f.database, "device_reader",
+                f.A.epoch(), privateSource, f.origins, f.grants, occurrenceReader, f.pseudonyms,
+                VerifiedDeviceAdmissionIntegrationTest.CLOCK))
+                .hasMessage("DEVICE_GRAPH_READ_ONLY_PRINCIPAL_REQUIRED");
+
+        var firstReader = DeviceGraphRelationAuthority.testOnly(
+                VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database, "device_graph_reader"),
+                f.database, "device_graph_reader", f.A.epoch(), privateSource, f.origins, f.grants,
+                occurrenceReader, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        var admissionResolution = firstReader.admit(ownerReference, relationGrant);
+        assertThat(admissionResolution.state()).isEqualTo(DeviceGraphRelationResolution.State.VERIFIED);
+        var admitted = admissionResolution.relation().orElseThrow();
+        assertThat(firstReader.admit(DeviceEpoch.digest("guessed-device-owner-reference", "missing"), relationGrant).state())
+                .isEqualTo(DeviceGraphRelationResolution.State.UNAVAILABLE);
+        assertThat(admitted.reference().scoredOccurrence().runId()).isEqualTo("initial");
+        assertThat(admitted.reference().scoredOccurrence().createdAt()).isEqualTo(scored.event.createdAt());
+        assertThat(admitted.reference().associatedIdentityToken())
+                .isEqualTo(f.pseudonyms.device(f.A.institution, "graph-device-id"));
+        assertThat(admitted.toString()).doesNotContain("graph-device-id", "graph-device-transaction");
+
+        var graphEdges = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.admitAll(firstReader,
+                relationGrant, readGrant, List.of(ownerReference, secondOwnerReference), "graph_reader",
+                VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5), VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        assertThat(graphEdges).hasSize(2);
+        assertThat(graphEdges.get(0).to().canonicalId()).isEqualTo(graphEdges.get(1).to().canonicalId());
+        assertThat(graphEdges.get(0).canonicalId()).isNotEqualTo(graphEdges.get(1).canonicalId());
+        assertThat(graphEdges).allSatisfy(edge -> assertThat(edge.evidence().scoredOccurrence().runId()).isEqualTo("initial"));
+
+        List<MongoClient> restartedOwnerClients = new ArrayList<>();
+        com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade.Result persistedRoundTrip;
+        try {
+            persistedRoundTrip = com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade
+                    .persistAndReadAfterAdapterRestart(firstReader, () -> {
+                        MongoClient restartedSourceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO
+                                .occurrenceReader(f.ownerClient, f.database, "graph_source_restart", List.of());
+                        MongoClient restartedDeviceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO
+                                .graphReader(f.ownerClient, f.database, "device_graph_restart_after_graph");
+                        restartedOwnerClients.add(restartedSourceClient);
+                        restartedOwnerClients.add(restartedDeviceClient);
+                        SourceOccurrenceAccess restartedOccurrences = MongoSourceOccurrenceStore.readOnly(
+                                restartedSourceClient, f.database, "graph_source_restart", f.originVerifier,
+                                VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher,
+                                new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE,
+                                        "transaction-ingest"));
+                        MongoSourceLineage restartedSource = new MongoSourceLineage(restartedSourceClient, f.database,
+                                "graph_source_restart", MongoSourceLineage.Stage.SCORER, f.originVerifier,
+                                VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+                        return DeviceGraphRelationAuthority.testOnly(restartedDeviceClient, f.database,
+                                "device_graph_restart_after_graph", f.A.epoch(), restartedSource, f.origins, f.grants,
+                                restartedOccurrences, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+                    }, relationGrant, readGrant, List.of(ownerReference, secondOwnerReference), "graph_reader",
+                    VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
+                    VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(6));
+        } finally {
+            restartedOwnerClients.forEach(MongoClient::close);
+        }
+        assertThat(persistedRoundTrip.appendStates()).containsExactly("APPENDED", "APPENDED");
+        assertThat(persistedRoundTrip.replayStates()).containsExactly("EXISTING", "EXISTING");
+        assertThat(persistedRoundTrip.persistedRows()).isEqualTo(2);
+        assertThat(persistedRoundTrip.readOutcomes()).hasSize(2).allSatisfy(outcome ->
+                assertThat(outcome.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.VERIFIED_BOUNDED));
+        var roundTripEdges = persistedRoundTrip.readOutcomes().stream().flatMap(outcome -> outcome.edges().stream()).toList();
+        assertThat(roundTripEdges).containsExactly(graphEdges.get(0), graphEdges.get(1));
+        assertThat(roundTripEdges.get(0).to().canonicalId()).isEqualTo(roundTripEdges.get(1).to().canonicalId());
+
+        var restartedReader = DeviceGraphRelationAuthority.testOnly(
+                VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database, "device_graph_restart"),
+                f.database, "device_graph_restart", f.A.epoch(), privateSource, f.origins, f.grants,
+                occurrenceReader, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        Instant graphReadAt = VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5);
+        AtomicReference<DeviceGraphRelationPort> liveOwner = new AtomicReference<>(restartedReader);
+        var currentGraphRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                liveOwner::get, relationGrant, readGrant, graphEdges.get(0), "graph_reader", graphReadAt, null);
+        assertThat(currentGraphRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.VERIFIED_BOUNDED);
+        assertThat(currentGraphRead.edges()).containsExactly(graphEdges.get(0));
+
+        var revokedDuringRead = DeviceGraphRelationAuthority.testOnly(
+                VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database, "device_graph_revoked_during_read"),
+                f.database, "device_graph_revoked_during_read", f.A.epoch(), privateSource, f.origins,
+                revokedCoverageGrants(), occurrenceReader, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        liveOwner.set(restartedReader);
+        var revokedGraphRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                liveOwner::get, relationGrant, readGrant, graphEdges.get(0), "graph_reader", graphReadAt,
+                () -> liveOwner.set(revokedDuringRead));
+        assertThat(revokedGraphRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.DENIED);
+        assertThat(revokedGraphRead.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.AUTHORITY_REVOKED);
+        assertThat(revokedGraphRead.edges()).isEmpty();
+
+        var resolved = restartedReader.resolve(admitted.reference(), relationGrant, readGrant, "graph_reader")
+                .relation().orElseThrow();
+        assertThat(resolved.reference()).isEqualTo(admitted.reference());
+        var resolvedSecond = restartedReader.resolve(graphEdges.get(1).evidence(), relationGrant, readGrant, "graph_reader")
+                .relation().orElseThrow();
+        assertThat(resolvedSecond.reference()).isEqualTo(graphEdges.get(1).evidence());
+        var secondGraphRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                () -> restartedReader, relationGrant, readGrant, graphEdges.get(1), "graph_reader", graphReadAt, null);
+        assertThat(secondGraphRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.VERIFIED_BOUNDED);
+        assertThat(secondGraphRead.edges()).containsExactly(graphEdges.get(1));
+
+        var forged = admitted.reference();
+        var changedDevice = new com.frauddetection.enricher.graph.GraphEvidenceRef(forged.scope(), forged.occurrence(),
+                DeviceEpoch.digest("forged-graph-device", "different-device"), forged.pseudonymKeyVersion(),
+                forged.sourceReceiptReference(), forged.rawCommitment(), forged.enrichedCommitment(),
+                forged.ownerAssertionReference(), forged.coverageReference(), forged.policyReference(),
+                forged.scoredOccurrence(), forged.stageASnapshotCommitment(), forged.coverageFrom(), forged.asOf(),
+                forged.coverageGeneration(), forged.expiresAt());
+        assertThat(restartedReader.resolve(changedDevice, relationGrant, readGrant, "graph_reader").state())
+                .isEqualTo(DeviceGraphRelationResolution.State.UNAVAILABLE);
+        assertThat(restartedReader.resolve(admitted.reference(), null, readGrant, "graph_reader").state())
+                .isEqualTo(DeviceGraphRelationResolution.State.DENIED);
+        assertThat(restartedReader.resolve(admitted.reference(), relationGrant, readGrant, "someone_else").state())
+                .isEqualTo(DeviceGraphRelationResolution.State.DENIED);
+        var wrongEpochGrant = DeviceGraphRelationGrant.testOnly(DeviceEpoch.digest("test-wrong-epoch-grant", f.database),
+                new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", "epoch-b"), "transaction-ingest", 1,
+                VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        assertThat(restartedReader.resolve(admitted.reference(), wrongEpochGrant, readGrant, "graph_reader").state())
+                .isEqualTo(DeviceGraphRelationResolution.State.DENIED);
+        assertThat(restartedReader.resolve(admitted.reference(), wrongEpochGrant, readGrant, "graph_reader").reason())
+                .isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.GRANT_DENIED);
+        var wrongAudienceGrant = DeviceGraphRelationGrant.testOnly(
+                DeviceEpoch.digest("test-wrong-audience-grant", f.database),
+                new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
+                "untrusted-audience", 1, VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        var wrongAudience = restartedReader.resolve(admitted.reference(), wrongAudienceGrant, readGrant, "graph_reader");
+        assertThat(wrongAudience.state()).isEqualTo(DeviceGraphRelationResolution.State.DENIED);
+        assertThat(wrongAudience.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.GRANT_DENIED);
+
+        var revokedCoverage = DeviceGraphRelationAuthority.testOnly(
+                VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database, "device_graph_revoked"),
+                f.database, "device_graph_revoked", f.A.epoch(), privateSource, f.origins,
+                revokedCoverageGrants(), occurrenceReader, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        var revokedResolution = revokedCoverage.resolve(admitted.reference(), relationGrant, readGrant, "graph_reader");
+        assertThat(revokedResolution.state()).isEqualTo(DeviceGraphRelationResolution.State.DENIED);
+        assertThat(revokedResolution.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.AUTHORITY_REVOKED);
+
+        var scoredOccurrences = f.ownerClient.getDatabase(f.database).getCollection("source_scored_occurrences");
+        assertThat(scoredOccurrences.updateOne(com.mongodb.client.model.Filters.eq("eventId", scored.event.eventId()),
+                com.mongodb.client.model.Updates.set("fingerprint", "0".repeat(64))).getModifiedCount()).isEqualTo(1);
+        List<MongoClient> mismatchRestartClients = new ArrayList<>();
+        try {
+            MongoClient mismatchSourceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO
+                    .occurrenceReader(f.ownerClient, f.database, "graph_source_mismatch_restart", List.of());
+            MongoClient mismatchDeviceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO
+                    .graphReader(f.ownerClient, f.database, "device_graph_mismatch_restart");
+            mismatchRestartClients.add(mismatchSourceClient);
+            mismatchRestartClients.add(mismatchDeviceClient);
+            var mismatchOccurrences = com.frauddetection.common.events.source.MongoSourceOccurrenceStore.readOnly(
+                    mismatchSourceClient, f.database, "graph_source_mismatch_restart", f.originVerifier,
+                    VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher,
+                    new com.frauddetection.common.events.source.SourceSignatureVerifier.Context(
+                            DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
+            var mismatchSource = new com.frauddetection.common.events.source.MongoSourceLineage(mismatchSourceClient,
+                    f.database, "graph_source_mismatch_restart",
+                    com.frauddetection.common.events.source.MongoSourceLineage.Stage.SCORER, f.originVerifier,
+                    VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+            var afterMismatchRestart = DeviceGraphRelationAuthority.testOnly(mismatchDeviceClient, f.database,
+                    "device_graph_mismatch_restart", f.A.epoch(), mismatchSource, f.origins, f.grants,
+                    mismatchOccurrences, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+            assertThat(afterMismatchRestart.resolve(graphEdges.get(0).evidence(), relationGrant, readGrant, "graph_reader").state())
+                    .isEqualTo(DeviceGraphRelationResolution.State.UNAVAILABLE);
+            var unavailableRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                    () -> afterMismatchRestart, relationGrant, readGrant, graphEdges.get(0), "graph_reader", graphReadAt, null);
+            assertThat(unavailableRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.UNAVAILABLE);
+            assertThat(unavailableRead.edges()).isEmpty();
+
+            assertThat(scoredOccurrences.updateOne(com.mongodb.client.model.Filters.eq("eventId", scored.event.eventId()),
+                    com.mongodb.client.model.Updates.set("fingerprint", scored.reference.fingerprint())).getModifiedCount())
+                    .isEqualTo(1);
+            assertThat(afterMismatchRestart.resolve(graphEdges.get(0).evidence(), relationGrant, readGrant, "graph_reader").state())
+                    .isEqualTo(DeviceGraphRelationResolution.State.VERIFIED);
+            var recoveredRead = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                    () -> afterMismatchRestart, relationGrant, readGrant, graphEdges.get(0), "graph_reader", graphReadAt, null);
+            assertThat(recoveredRead.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.VERIFIED_BOUNDED);
+            assertThat(recoveredRead.edges()).containsExactly(graphEdges.get(0));
+        } finally {
+            mismatchRestartClients.forEach(MongoClient::close);
+        }
+    }
+
+    @Test void historicalGraphEdgeRemainsReadableAfterASecondValidSignedCoverageSeal() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("coverage_extension", "graph-device-coverage-extension");
+        List<MongoClient> restartedOwnerClients = new ArrayList<>();
+        AtomicReference<VerifiedDeviceGraphRelation> currentCoverageEvidence = new AtomicReference<>();
+        com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade.Result result;
+        try {
+            result = com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade
+                    .persistAndReadAfterAdapterRestart(fixture.owner(),
+                            () -> restartedGraphOwner("device_graph_c2_restart", restartedOwnerClients),
+                            fixture.relationGrant(), fixture.relationGrant(), fixture.readGrant(),
+                            List.of(fixture.edge().evidence().ownerAssertionReference()), fixture.principal(),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(6), () -> {
+                                try {
+                                    var extension = f.event(f.A, "graph-c2-event-two", "graph-c2-transaction-two",
+                                            "customer-1", "graph-device-coverage-extension", 2,
+                                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(30));
+                                    var adapter = f.adapter(f.A);
+                                    var ticket = f.stage(adapter, extension);
+                                    var c2 = f.coverage(f.A, 2, f.A.start,
+                                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(30));
+                                    adapter.seal(ticket, c2.proof(), c2.payload());
+                                    adapter.commit(ticket);
+                                    var scored = publish(extension, "initial", "graph-c2-score-two");
+                                    adapter.bindScored(ticket, occurrenceReader, scored.reference);
+                                    var c3Event = f.event(f.A, "graph-c3-event-three", "graph-c3-transaction-three",
+                                            "customer-1", "graph-device-coverage-extension-c3", 3,
+                                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(60));
+                                    var c3Ticket = f.stage(adapter, c3Event);
+                                    var c3 = f.coverage(f.A, 3, f.A.start,
+                                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(60));
+                                    adapter.seal(c3Ticket, c3.proof(), c3.payload());
+                                    adapter.commit(c3Ticket);
+                                    var c3Scored = publish(c3Event, "initial", "graph-c3-score-three");
+                                    adapter.bindScored(c3Ticket, occurrenceReader, c3Scored.reference);
+                                    currentCoverageEvidence.set(fixture.owner().admit(
+                                            fixture.edge().evidence().ownerAssertionReference(), fixture.relationGrant())
+                                            .relation().orElseThrow());
+                                } catch (Exception failure) {
+                                    throw new AssertionError("SIGNED_C2_FIXTURE_FAILED", failure);
+                                }
+                            });
+        } finally {
+            restartedOwnerClients.forEach(MongoClient::close);
+        }
+
+        assertThat(currentCoverageEvidence.get()).isNotNull();
+        assertThat(currentCoverageEvidence.get().reference().canonicalReferenceId())
+                .isEqualTo(fixture.edge().evidence().canonicalReferenceId());
+        var historicalResolution = fixture.owner().resolve(fixture.edge().evidence(), fixture.relationGrant(),
+                fixture.readGrant(), fixture.principal());
+        assertThat(historicalResolution.state()).isEqualTo(DeviceGraphRelationResolution.State.VERIFIED);
+        assertThat(historicalResolution.relation()).get().satisfies(relation ->
+                assertThat(relation.reference().canonicalReferenceId())
+                        .isEqualTo(fixture.edge().evidence().canonicalReferenceId()));
+        assertThat(result.persistedRows()).isEqualTo(1);
+        assertThat(result.postChangeReplayStates()).containsExactly("EXISTING");
+        assertThat(result.replayPreservedEvidence()).isTrue();
+        assertThat(result.readOutcomes()).singleElement().satisfies(outcome -> {
+            assertThat(outcome.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.VERIFIED_BOUNDED);
+            assertThat(outcome.edges()).containsExactly(fixture.edge());
+        });
+    }
+
+    @Test void exactGraphScoreMovesFromPendingToVerifiedWhenPublicationBecomesDurable() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("score_publication", "graph-device-score-publication");
+        AtomicBoolean published = new AtomicBoolean();
+        SourceOccurrenceAccess statusAwareOccurrences = new SourceOccurrenceAccess() {
+            @Override public Optional<SourceScoredOccurrence> find(SourceLineage authorization,
+                                                                   SourceOccurrenceAccess.Reference occurrence) {
+                return occurrenceReader.find(authorization, occurrence);
+            }
+
+            @Override public Resolution resolve(SourceLineage authorization,
+                                                SourceOccurrenceAccess.Reference occurrence) {
+                return published.get() ? occurrenceReader.resolve(authorization, occurrence) : Resolution.pending();
+            }
+        };
+        DeviceGraphRelationAuthority owner = DeviceGraphRelationAuthority.testOnly(fixture.ownerClient(), f.database,
+                "device_graph_score_publication", f.A.epoch(), privateSource, f.origins, f.grants,
+                statusAwareOccurrences, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+
+        var pending = owner.resolve(fixture.edge().evidence(), fixture.relationGrant(), fixture.readGrant(),
+                fixture.principal());
+        assertThat(pending.state()).isEqualTo(DeviceGraphRelationResolution.State.PENDING);
+        assertThat(pending.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.SOURCE_UNAVAILABLE);
+        assertThat(pending.relation()).isEmpty();
+
+        published.set(true);
+        var verified = owner.resolve(fixture.edge().evidence(), fixture.relationGrant(), fixture.readGrant(),
+                fixture.principal());
+        assertThat(verified.state()).isEqualTo(DeviceGraphRelationResolution.State.VERIFIED);
+        assertThat(verified.relation()).get().satisfies(relation -> {
+            assertThat(relation.reference()).isEqualTo(fixture.edge().evidence());
+            assertThat(relation.validUntil()).isAfter(relation.reference().asOf());
+            assertThat(relation.validUntil().compareTo(relation.reference().expiresAt())).isLessThanOrEqualTo(0);
+        });
+    }
+
+    @Test void explicitSourceReceiptRevocationIsDeniedWithAuthorityReason() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("source_revoked", "graph-device-source-revoked");
+        var update = f.ownerClient.getDatabase(f.database).getCollection("source_admission_identities")
+                .updateOne(com.mongodb.client.model.Filters.eq("_id", fixture.edge().evidence().sourceReceiptReference()),
+                        com.mongodb.client.model.Updates.set("state", "TOMBSTONED"));
+        assertThat(update.getModifiedCount()).isEqualTo(1);
+
+        var resolution = fixture.owner().resolve(fixture.edge().evidence(), fixture.relationGrant(),
+                fixture.readGrant(), fixture.principal());
+
+        assertThat(resolution.state()).isEqualTo(DeviceGraphRelationResolution.State.DENIED);
+        assertThat(resolution.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.AUTHORITY_REVOKED);
+    }
+
+    @Test void historicalGraphEdgeRemainsReadableAfterEquivalentRelationGrantRenewal() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("grant_renewal", "graph-device-grant-renewal");
+        var renewedGrant = DeviceGraphRelationGrant.testOnly(
+                DeviceEpoch.digest("test-graph-relation-grant-renewed", f.database),
+                new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
+                "transaction-ingest", 1,
+                VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        var renewedEvidence = fixture.owner().admit(fixture.edge().evidence().ownerAssertionReference(), renewedGrant)
+                .relation().orElseThrow();
+        assertThat(renewedEvidence.reference().policyReference())
+                .isEqualTo(fixture.edge().evidence().policyReference());
+        var historicGrantResolution = fixture.owner().resolve(fixture.edge().evidence(), renewedGrant,
+                fixture.readGrant(), fixture.principal());
+        assertThat(historicGrantResolution.state()).isEqualTo(DeviceGraphRelationResolution.State.VERIFIED);
+        List<MongoClient> restartedOwnerClients = new ArrayList<>();
+        com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade.Result result;
+        try {
+            result = com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade
+                    .persistAndReadAfterAdapterRestart(fixture.owner(),
+                            () -> restartedGraphOwner("device_graph_grant_restart", restartedOwnerClients),
+                            fixture.relationGrant(), renewedGrant, fixture.readGrant(),
+                            List.of(fixture.edge().evidence().ownerAssertionReference()), fixture.principal(),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(6), () -> { });
+        } finally {
+            restartedOwnerClients.forEach(MongoClient::close);
+        }
+
+        assertThat(result.persistedRows()).isEqualTo(1);
+        assertThat(result.postChangeReplayStates()).containsExactly("EXISTING");
+        assertThat(result.replayPreservedEvidence()).isTrue();
+        assertThat(result.readOutcomes()).singleElement().satisfies(outcome -> {
+            assertThat(outcome.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.VERIFIED_BOUNDED);
+            assertThat(outcome.edges()).containsExactly(fixture.edge());
+        });
+    }
+
+    @Test void transientOwnerMongoOutageDoesNotDurablyRevokeAnEdgeAndRecoveryKeepsItActive() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("owner_outage", "graph-device-owner-outage");
+        AtomicReference<DeviceGraphRelationPort> currentOwner = new AtomicReference<>(fixture.owner());
+        List<MongoClient> restartedOwnerClients = new ArrayList<>();
+        DeviceGraphReadGrant reconciliationReadGrant = DeviceGraphReadGrant.testOnly(
+                "graph_lifecycle_reconciler",
+                new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
+                "transaction-ingest", 1, VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade.LifecycleResult result;
+        try {
+            result = com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade
+                    .appendThenReconcileAfterOwnerChange(currentOwner::get, fixture.relationGrant(), fixture.readGrant(),
+                            reconciliationReadGrant,
+                            fixture.edge().evidence().ownerAssertionReference(), fixture.principal(),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofHours(1)),
+                            fixture.ownerClient()::close,
+                            () -> currentOwner.set(restartedGraphOwner("device_graph_outage_recovery", restartedOwnerClients)));
+        } finally {
+            restartedOwnerClients.forEach(MongoClient::close);
+        }
+
+        assertThat(result.appendState()).isEqualTo("APPENDED");
+        assertThat(result.reconciliationState()).isEqualTo("UNAVAILABLE");
+        assertThat(result.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(result.lifecycleAfterFirstReconciliation()).isEqualTo("ACTIVE");
+        assertThat(result.recoveryState()).isEqualTo("EXISTING");
+        assertThat(result.lifecycle()).isEqualTo("ACTIVE");
+        assertThat(result.persistedRows()).isEqualTo(1);
+    }
+
+    @Test void conflictingValidSignedSourceBindingFencesOneGraphRelationAfterOwnerRestart() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("signed_source_conflict", "graph-device-signed-source-conflict");
+        AtomicReference<DeviceGraphRelationPort> currentOwner = new AtomicReference<>(fixture.owner());
+        List<MongoClient> restartedOwnerClients = new ArrayList<>();
+        String reconciliationPrincipal = "graph_lifecycle_reconciler";
+        DeviceGraphReadGrant reconciliationReadGrant = DeviceGraphReadGrant.testOnly(reconciliationPrincipal,
+                new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
+                "transaction-ingest", 1, VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade.LifecycleResult result;
+        try {
+            result = com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade
+                    .appendThenReconcileAfterOwnerChange(currentOwner::get, fixture.relationGrant(), fixture.readGrant(),
+                            reconciliationReadGrant, fixture.edge().evidence().ownerAssertionReference(),
+                            fixture.principal(), VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(1), () -> {
+                                var conflictingProof = conflictingSignedProof(fixture.event());
+                                var ownerStatus = com.frauddetection.ingest.source.DeviceTestSourceReceipts
+                                        .admitConflictingSignedProof(f.ownerClient, f.database,
+                                                VerifiedDeviceAdmissionIntegrationTest.CLOCK, f.originVerifier,
+                                                conflictingProof, f.sourceReceiptCapacity);
+                                assertThat(ownerStatus).isEqualTo("CONFLICT");
+                                currentOwner.set(restartedGraphOwner("device_graph_signed_source_conflict_restart",
+                                        restartedOwnerClients));
+                                assertThat(currentOwner.get().resolve(fixture.edge().evidence(), fixture.relationGrant(),
+                                        reconciliationReadGrant, reconciliationPrincipal).state())
+                                        .isEqualTo(DeviceGraphRelationResolution.State.CONFLICT);
+                            },
+                            () -> currentOwner.set(restartedGraphOwner("device_graph_signed_conflict_recovery",
+                                    restartedOwnerClients)));
+        } finally {
+            restartedOwnerClients.forEach(MongoClient::close);
+        }
+
+        assertThat(result.appendState()).isEqualTo("APPENDED");
+        assertThat(result.reconciliationState()).isEqualTo("FENCED");
+        assertThat(result.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.CONFLICTING_EVIDENCE);
+        assertThat(result.lifecycleAfterFirstReconciliation()).isEqualTo("CONFLICT");
+        assertThat(result.recoveryState()).isEqualTo("FENCED");
+        assertThat(result.recoveryReason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.CONFLICTING_EVIDENCE);
+        assertThat(result.lifecycle()).isEqualTo("CONFLICT");
+        assertThat(result.replayAdmissionState()).isEqualTo("CONFLICT");
+        assertThat(result.edgesAfterFence()).isZero();
+        assertThat(result.immutableEvidencePreserved()).isTrue();
+        assertThat(result.persistedRows()).isEqualTo(1);
+    }
+
+    @Test void explicitLateSourceRevocationFencesAfterOneHourAndOwnerAdapterRestart() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("late_source_revoked", "graph-device-late-source-revoked");
+        AtomicReference<DeviceGraphRelationPort> currentOwner = new AtomicReference<>(fixture.owner());
+        List<MongoClient> restartedOwnerClients = new ArrayList<>();
+        DeviceGraphReadGrant reconciliationReadGrant = DeviceGraphReadGrant.testOnly(
+                "graph_lifecycle_reconciler",
+                new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
+                "transaction-ingest", 1, VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade.LifecycleResult result;
+        try {
+            result = com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade
+                    .appendThenReconcileAfterOwnerChange(currentOwner::get, fixture.relationGrant(), fixture.readGrant(),
+                            reconciliationReadGrant,
+                            fixture.edge().evidence().ownerAssertionReference(), fixture.principal(),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
+                            VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofHours(1)),
+                            () -> {
+                                f.ownerClient.getDatabase(f.database).getCollection("source_admission_identities")
+                                        .updateOne(com.mongodb.client.model.Filters.eq("_id",
+                                                        fixture.edge().evidence().sourceReceiptReference()),
+                                                com.mongodb.client.model.Updates.set("state", "TOMBSTONED"));
+                                fixture.ownerClient().close();
+                            },
+                            () -> currentOwner.set(restartedGraphOwner("device_graph_late_revoke_restart", restartedOwnerClients)));
+        } finally {
+            restartedOwnerClients.forEach(MongoClient::close);
+        }
+
+        assertThat(result.appendState()).isEqualTo("APPENDED");
+        assertThat(result.reconciliationState()).isEqualTo("UNAVAILABLE");
+        assertThat(result.lifecycleAfterFirstReconciliation()).isEqualTo("ACTIVE");
+        assertThat(result.recoveryState()).isEqualTo("FENCED");
+        assertThat(result.recoveryReason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.AUTHORITY_REVOKED);
+        assertThat(result.lifecycle()).isEqualTo("REVOKED");
+        assertThat(result.persistedRows()).isEqualTo(1);
+    }
+
+    @Test void graphReadRejectsDeletedSourceReceiptAfterFirstOwnerValidation() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("receipt_deleted", "graph-device-receipt");
+
+        var result = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                () -> fixture.owner(), fixture.relationGrant(), fixture.readGrant(), fixture.edge(), fixture.principal(),
+                fixture.readAt(), () -> assertThat(f.ownerClient.getDatabase(f.database)
+                        .getCollection("source_admission_receipts").deleteOne(com.mongodb.client.model.Filters.eq(
+                                "_id", fixture.edge().evidence().sourceReceiptReference())).getDeletedCount()).isEqualTo(1));
+
+        assertThat(result.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.SOURCE_UNAVAILABLE);
+        assertThat(result.edges()).isEmpty();
+    }
+
+    @Test void graphReadRejectsDeletedHistoryMemberAfterFirstOwnerValidation() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("member_deleted", "graph-device-member");
+
+        var result = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                () -> fixture.owner(), fixture.relationGrant(), fixture.readGrant(), fixture.edge(), fixture.principal(),
+                fixture.readAt(), () -> assertThat(f.ownerClient.getDatabase(f.database)
+                        .getCollection("device_history_member_anchors").deleteOne(com.mongodb.client.model.Filters.eq(
+                                "_id", fixture.edge().evidence().ownerAssertionReference())).getDeletedCount()).isEqualTo(1));
+
+        assertThat(result.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(result.edges()).isEmpty();
+    }
+
+    @Test void graphReadRejectsLoweredCoverageWatermarkAfterFirstOwnerValidation() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("watermark_lowered", "graph-device-watermark");
+        String coverageId = f.A.epoch().scopeId(f.pseudonyms.institution(f.A.institution),
+                DevicePseudonyms.sourceCode("BANK"));
+
+        var result = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                () -> fixture.owner(), fixture.relationGrant(), fixture.readGrant(), fixture.edge(), fixture.principal(),
+                fixture.readAt(), () -> assertThat(f.ownerClient.getDatabase(f.database)
+                        .getCollection("device_source_coverage").updateOne(com.mongodb.client.model.Filters.eq("_id", coverageId),
+                                com.mongodb.client.model.Updates.set("watermark", java.util.Date.from(
+                                        fixture.edge().evidence().occurrence().eventTime().minusMillis(1)))).getModifiedCount())
+                        .isEqualTo(1));
+
+        assertThat(result.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.COVERAGE_UNAVAILABLE);
+        assertThat(result.edges()).isEmpty();
+    }
+
+    @Test void graphReadRejectsPseudonymKeyRotationAfterFirstOwnerValidation() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("pseudonym_rotated", "graph-device-rotation");
+        var rotatedOwner = DeviceGraphRelationAuthority.testOnly(
+                VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database,
+                        "device_graph_rotated_pseudonym"), f.database, "device_graph_rotated_pseudonym", f.A.epoch(),
+                privateSource, f.origins, f.grants, occurrenceReader,
+                new DevicePseudonyms(VerifiedDeviceAdmissionIntegrationTest.randomKey(), f.pseudonyms.version()),
+                VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        AtomicReference<DeviceGraphRelationPort> currentOwner = new AtomicReference<>(fixture.owner());
+
+        var result = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.readWithDeviceOwner(
+                currentOwner::get, fixture.relationGrant(), fixture.readGrant(), fixture.edge(), fixture.principal(),
+                fixture.readAt(), () -> currentOwner.set(rotatedOwner));
+
+        assertThat(result.state()).isEqualTo(com.frauddetection.enricher.graph.GraphProjectionState.UNAVAILABLE);
+        assertThat(result.reason()).isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.OWNER_UNAVAILABLE);
+        assertThat(result.edges()).isEmpty();
     }
 
     @Test void lossOfAllPriorRepresentationsBeforeNextStageACannotBecomeFalseNovelty() throws Exception {
@@ -966,6 +1507,56 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                 SourceEventCommitment.raw(event.raw()), SourceEventCommitment.enriched(event.enriched()));
     }
 
+    private GraphReaderFixture graphReaderFixture(String suffix, String deviceId) throws Exception {
+        var event = f.event(f.A, "graph-read-" + suffix, "graph-read-transaction-" + suffix,
+                "customer-1", deviceId, 1, VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(60));
+        var admission = f.adapter(f.A);
+        var ticket = f.stage(admission, event);
+        var coverage = f.coverage(f.A, 1, f.A.start, VerifiedDeviceAdmissionIntegrationTest.NOW);
+        admission.seal(ticket, coverage.proof(), coverage.payload());
+        admission.commit(ticket);
+        var scored = publish(event, "initial", "graph-read-score-" + suffix);
+        admission.bindScored(ticket, occurrenceReader, scored.reference);
+
+        String institutionToken = f.pseudonyms.institution(f.A.institution);
+        String sourceCode = DevicePseudonyms.sourceCode("BANK");
+        String ownerReference = f.A.epoch().eventId(institutionToken, sourceCode,
+                f.pseudonyms.event(f.A.institution, event.id()));
+        var sourceScope = new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch);
+        var relationGrant = DeviceGraphRelationGrant.testOnly(
+                DeviceEpoch.digest("test-graph-read-grant", f.database, suffix), sourceScope, "transaction-ingest", 1,
+                VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        var readGrant = DeviceGraphReadGrant.testOnly("graph_reader", sourceScope, "transaction-ingest", 1,
+                VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
+        String mongoPrincipal = "device_graph_" + suffix;
+        MongoClient ownerClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database, mongoPrincipal);
+        var owner = DeviceGraphRelationAuthority.testOnly(ownerClient, f.database, mongoPrincipal, f.A.epoch(),
+                privateSource, f.origins, f.grants, occurrenceReader, f.pseudonyms,
+                VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        var edge = com.frauddetection.enricher.graph.GraphEvidenceAdmissionTestFacade.admitAll(owner, relationGrant,
+                readGrant, List.of(ownerReference), "graph_reader", VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5),
+                VerifiedDeviceAdmissionIntegrationTest.CLOCK).getFirst();
+        return new GraphReaderFixture(owner, ownerClient, relationGrant, readGrant, edge, "graph_reader",
+                VerifiedDeviceAdmissionIntegrationTest.NOW.plusSeconds(5), event);
+    }
+
+    private DeviceGraphRelationAuthority restartedGraphOwner(String principal, List<MongoClient> ownedClients) {
+        String sourcePrincipal = "graph_source_" + principal;
+        MongoClient sourceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceReader(f.ownerClient,
+                f.database, sourcePrincipal, List.of());
+        MongoClient deviceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient,
+                f.database, principal);
+        ownedClients.add(sourceClient);
+        ownedClients.add(deviceClient);
+        var restartedOccurrences = MongoSourceOccurrenceStore.readOnly(sourceClient, f.database, sourcePrincipal,
+                f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher,
+                new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
+        var restartedSource = new MongoSourceLineage(sourceClient, f.database, sourcePrincipal,
+                MongoSourceLineage.Stage.SCORER, f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        return DeviceGraphRelationAuthority.testOnly(deviceClient, f.database, principal, f.A.epoch(), restartedSource,
+                f.origins, f.grants, restartedOccurrences, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+    }
+
     private PrivateDeviceDiagnosticReader.ReadGrant readGrant(String customerToken) {
         return new PrivateDeviceDiagnosticReader.ReadGrant("device_reader", PrivateDeviceDiagnosticReader.PURPOSE,
                 PrivateDeviceDiagnosticReader.AUDIENCE, new DeviceAssertions.Scope("source-issuer", f.A.institution, "BANK", f.A.epoch),
@@ -990,6 +1581,26 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         }).toList();
     }
 
+    private SourceSignatureVerifier.Verified conflictingSignedProof(VerifiedDeviceAdmissionIntegrationTest.Event event) {
+        try {
+            var changed = (tools.jackson.databind.node.ObjectNode) VerifiedDeviceAdmissionIntegrationTest.JSON
+                    .readTree(event.sourcePayload());
+            changed.put("transactionId", event.raw().transactionId() + "-conflicting-signed-payload");
+            byte[] payload = VerifiedDeviceAdmissionIntegrationTest.JSON.writeValueAsBytes(changed);
+            SourceScope original = event.origin().scope();
+            SourceScope conflicting = new SourceScope(original.issuer(), original.institution(), original.source(),
+                    original.sourceEpoch(), original.signingKeyVersion(), original.sourceEventId(), original.eventTime(),
+                    original.purpose(), original.audience(), SourceSignedInput.payloadCommitment(payload));
+            byte[] proof = VerifiedDeviceAdmissionIntegrationTest.sign(conflicting, payload, f.originKey);
+            var verified = f.originVerifier.verify(proof, payload,
+                    new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
+            assertThat(verified).isInstanceOf(SourceSignatureVerifier.Verified.class);
+            return (SourceSignatureVerifier.Verified) verified;
+        } catch (Exception failure) {
+            throw new IllegalStateException("TEST_SOURCE_CONFLICT_PROOF_FAILED", failure);
+        }
+    }
+
     private SourceOccurrenceCipher sourceCipher() {
         byte[] key = VerifiedDeviceAdmissionIntegrationTest.randomKey();
         return new SourceOccurrenceCipher("test-key", Map.of("test-key", Base64.getEncoder().encodeToString(key)));
@@ -997,6 +1608,11 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
 
     private record Published(TransactionScoredEvent event, SourceOccurrenceAccess.Reference reference, byte[] wireBytes) { }
     private record ScoredRecord(TransactionScoredEvent event, byte[] bytes) { }
+    private record GraphReaderFixture(DeviceGraphRelationAuthority owner, MongoClient ownerClient,
+                                      DeviceGraphRelationGrant relationGrant,
+                                      DeviceGraphReadGrant readGrant,
+                                      com.frauddetection.enricher.graph.GraphEdgeFact edge, String principal,
+                                      Instant readAt, VerifiedDeviceAdmissionIntegrationTest.Event event) { }
     private record BenchmarkSample(long elapsedNanos, PrivateDeviceDiagnosticReader.Outcome outcome) { }
     private record QueryPlan(List<String> indexes, long documentsExamined, long keysExamined, long documentsReturned,
                              boolean inMemorySort, boolean collectionScan) { }

@@ -26,4 +26,14 @@ public final class DeviceTestSourceReceipts {
             throw new IllegalStateException("TEST_SOURCE_RAW_BINDING_FAILED");
         }
     }
+
+    /** Submits a second genuinely signed proof under the same source identity and returns the owner's result. */
+    public static String admitConflictingSignedProof(MongoClient client, String database, Clock clock,
+                                                     SourceSignatureVerifier policy,
+                                                     SourceSignatureVerifier.Verified evidence,
+                                                     int maximumReceipts) {
+        var receipts = new MongoSourceReceiptStore(client, database, clock,
+                new SourceReceiptStore.Limits(Duration.ofDays(30), Duration.ofDays(45), maximumReceipts), policy);
+        return receipts.admit(evidence).status().name();
+    }
 }

@@ -234,6 +234,15 @@ class MerchantAssertionVerifierTest {
     }
 
     @Test
+    void merchantSignerRolesDoNotAuthorizeGraphRelationPurpose() {
+        assertThat(List.of(Role.values()))
+                .containsExactly(Role.OBSERVATION, Role.COVERAGE);
+        assertThat(List.of(Role.values()).stream().map(Role::purpose))
+                .containsExactly(OBSERVATION_PURPOSE, COVERAGE_PURPOSE)
+                .doesNotContain("GRAPH_RELATION_PROJECTION");
+    }
+
+    @Test
     void duplicateUnknownMalformedAndOversizedAssertionsAreRejected() {
         Fixture fixture = new Fixture();
         byte[] valid = MerchantAssertionCodec.encodeObservation(fixture.observation());

@@ -29,10 +29,22 @@ final class VerifiedDeviceAdmission {
         this.originAudiences = origins.keys().stream().filter(k -> DeviceAssertionVerifier.TRANSACTION_PURPOSE.equals(k.purpose()))
                 .map(SourceVerificationProperties.TrustedKey::audience).distinct().toList();
         this.verifier = new DeviceAssertionVerifier(origins, grants, clock);
-        this.store = new MongoDeviceObservationStore(client, database, clock, epoch, new DeviceObservationStore.HistoryAuthority() {
+        this.store = new MongoDeviceObservationStore(client, database, clock, epoch,
+                historyAuthority(source, epoch, verifier, pseudonyms), pseudonyms);
+    }
+
+    static DeviceObservationStore.HistoryAuthority historyAuthority(MongoSourceLineage source, DeviceEpoch epoch,
+                                                                     DeviceAssertionVerifier verifier,
+                                                                     DevicePseudonyms pseudonyms) {
+        return new DeviceObservationStore.HistoryAuthority() {
             @Override public boolean current(DeviceObservationStore.Provenance p, int version) {
                 SourceLineage lineage = source.enrichedBinding(p.receiptId(), p.rawCommitment(), p.enrichedCommitment());
                 return currentLineage(p, version, lineage);
+            }
+            @Override public DeviceObservationStore.HistoryAuthority.Status currentStatus(
+                    DeviceObservationStore.Provenance p, int version) {
+                SourceLineage lineage = source.enrichedBinding(p.receiptId(), p.rawCommitment(), p.enrichedCommitment());
+                return currentLineageStatus(p, version, lineage);
             }
             @Override public boolean currentHistory(List<DeviceObservationStore.Provenance> provenance, int version) {
                 for (int start = 0; start < provenance.size(); start += MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH) {
@@ -50,15 +62,41 @@ final class VerifiedDeviceAdmission {
                 return true;
             }
             private boolean currentLineage(DeviceObservationStore.Provenance p, int version, SourceLineage lineage) {
-                return lineage.state() == SourceLineage.State.VERIFIED
-                        && epoch.equals(new DeviceEpoch(lineage.source().issuer(), lineage.source().sourceEpoch()))
-                        && verifier.currentStoredObservation(p, lineage, version);
+                return currentLineageStatus(p, version, lineage) == DeviceObservationStore.HistoryAuthority.Status.CURRENT;
+            }
+            private DeviceObservationStore.HistoryAuthority.Status currentLineageStatus(
+                    DeviceObservationStore.Provenance p, int version, SourceLineage lineage) {
+                if (lineage == null) { return DeviceObservationStore.HistoryAuthority.Status.UNAVAILABLE; }
+                if (lineage.state() != SourceLineage.State.VERIFIED) {
+                    return switch (lineage.state()) {
+                        case ORDER_PENDING -> DeviceObservationStore.HistoryAuthority.Status.PENDING;
+                        case UNAVAILABLE -> DeviceObservationStore.HistoryAuthority.Status.UNAVAILABLE;
+                        case REVOKED -> DeviceObservationStore.HistoryAuthority.Status.REVOKED;
+                        case CONFLICT -> DeviceObservationStore.HistoryAuthority.Status.CONFLICT;
+                        case UNVERIFIED -> DeviceObservationStore.HistoryAuthority.Status.DENIED;
+                        case VERIFIED -> throw new IllegalArgumentException("DEVICE_HISTORY_LINEAGE_STATE_INVALID");
+                    };
+                }
+                if (!epoch.equals(new DeviceEpoch(lineage.source().issuer(), lineage.source().sourceEpoch()))) {
+                    return DeviceObservationStore.HistoryAuthority.Status.DENIED;
+                }
+                if (!p.receiptId().equals(lineage.receiptId())
+                        || !p.enrichedCommitment().equals(lineage.eventCommitment())) {
+                    return DeviceObservationStore.HistoryAuthority.Status.CONFLICT;
+                }
+                return verifier.currentStoredObservationStatus(p, lineage, version);
             }
             @Override public boolean coverageCurrent(DeviceObservationStore.CoverageAuthority proof, String institution, String sourceCode,
                                                      String populationCommitment, int version, java.time.Instant coverageStart) {
                 return verifier.currentStoredCoverage(proof, epoch, institution, sourceCode, populationCommitment, version, coverageStart, pseudonyms);
             }
-        }, pseudonyms);
+            @Override public DeviceObservationStore.HistoryAuthority.Status coverageStatus(
+                    DeviceObservationStore.CoverageAuthority proof, String institution, String sourceCode,
+                    String populationCommitment, int version, java.time.Instant coverageStart) {
+                return verifier.currentStoredCoverageStatus(proof, epoch, institution, sourceCode,
+                        populationCommitment, version, coverageStart, pseudonyms);
+            }
+        };
     }
 
     Ticket stage(byte[] sourceProof, byte[] originalSourcePayload, byte[] deviceProof, byte[] originalAssertion,
