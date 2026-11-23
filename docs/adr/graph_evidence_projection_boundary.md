@@ -1,6 +1,6 @@
 # Graph evidence projection boundary
 
-Status snapshot (2026-11-23): G02-A/G02-C, G03-A/B/C, G04-A/B, G05-A/B/C, G06, and G07 are complete inside the disabled, test-only scope. G02-B Merchant remains OPTIONAL BLOCKED. Production projection remains NO-GO; this snapshot has no CI results for the current changes.
+Status snapshot (2026-11-23): G02-A/G02-C, G03-A/B/C, G04-A/B, G05-A/B/C, G06, and G07 are complete inside the disabled, test-only scope. FDP-156's FX-01–FX-08 repairs and current local evidence are recorded in the [Graph risk diagnostic candidate ADR](graph_risk_diagnostic_candidate.md). G02-B Merchant remains OPTIONAL BLOCKED. Production projection remains NO-GO; this snapshot has no exact-head CI result.
 
 ## Context
 
@@ -257,22 +257,11 @@ mvn "-Dmaven.repo.local=$PWD\.m2repo" -pl feature-enricher-service -am "-Dsurefi
 
 The first combined run exposed a test-fixture queue error in the new admission regression; the corrected focused unit class passed 10/10. The expanded two-edge E2E initially exposed an invalid `maxEdges + 1` adapter call to a method capped at the hard maximum; the bounded read now uses the configured maximum and the final E2E passed. No full Maven `verify` was run.
 
-## G06 signed two-hop scorer vertical
+## G06 two-hop owner and scorer evidence
 
-`GraphSignedABScorerIntegrationTest.signedKafkaOccurrencesProduceOneBoundedBRootedWitnessAndOnlyAnInternalDegradedDiagnostic` closes the positive A/B path using the existing Source and Device signing fixtures. Distinct signed Source events A and B have their own RAW/ENRICHED lineage and receipts; separate Device observations are admitted under the same scope and device pseudonym, with signed coverage through B. Each `INITIAL_RUN` scored event is written to Mongo, published to Kafka, consumed, and rebound through `SourceOccurrenceAccess`. Graph persists two independently owner-proved edges, exact replay returns `EXISTING`, and the stored row count remains two.
+The earlier `GraphSignedABScorerIntegrationTest` crossed a Maven test-classifier boundary and converted a previously positive DTO after the owner had changed. FDP-156 removes that cross-module test JAR and separates the proofs. `SignedGraphTwoHopAuthorityIntegrationTest` is the authenticated signed Source/Device/Kafka/Mongo/Graph owner-side test: it observes a fresh bounded two-hop result, admits a separately signed conflicting Source proof, then observes `CONFLICT` with no witness. `GraphRiskSignalEngineTest.freshConflictBetweenInitialReadAndOccurrenceBindingInvalidatesThePositive` independently proves that a scorer result must use the fresh typed owner outcome returned by `requireOccurrence`; a conflict between the first read and that fence maps to no positive diagnostic. The scorer adapter tests also bind the exact `ScoringContext` and keep the DTO redacted.
 
-After adapter reconstruction against persistent test containers, the first two-hop read is rooted at B and returns A as the strictly earlier witness. A test-scope scorer adapter binds that redacted result to B and obtains only the package-private `GraphRiskSignalEngine` `DEGRADED` diagnostic: score and risk are null, confidence is `UNKNOWN`, and contributions are empty. The captured scored Kafka payload is unchanged; public Engine Intelligence still has the existing four-engine contract and no graph entry. The test then observes a controlled bounded-owner outage (`UNAVAILABLE/OWNER_UNAVAILABLE`) with no witness, successful recovery to a verified witness, and a second valid signed Source proof contradicting B after Graph projection (`CONFLICT/CONFLICTING_EVIDENCE`) with no witness. The outage is injected at the test-only owner port; a separate existing signed-owner test closes Mongo to cover actual owner-store outage recovery.
-
-Validation ran on Windows 11, Eclipse Adoptium Java 21.0.10+7-LTS, Docker Desktop 29.5.2, Testcontainers 2.0.5, authenticated MongoDB 7.0 replica sets, and Kafka `apache/kafka:3.8.0`. The Source/Device and Graph stores use separate ephemeral Mongo replica sets. This is Java adapter reconstruction, not an OS or process restart. The test-only fixture is shared across modules through a test-classifier JAR; it adds no production API, signer, Graph provider, or runtime wiring. Docker is required for the E2E and authenticated Mongo suites; local success does not establish that CI ran them.
-
-| Focused batch | Result | Main coverage |
-|---|---:|---|
-| `GraphSignedABScorerIntegrationTest`, `GraphRiskSignalEngineTest` | 10 passed | Signed Kafka A/B vertical, B-rooted two-hop result, scorer boundary, outage recovery, post-projection signed conflict |
-| `GraphProjectionReaderTwoHopTest`, `GraphProjectionSchemaIntegrationTest`, and 10 selected `PrivateDeviceDiagnosticReaderIntegrationTest` methods | 45 passed | Bounded witness rules, Mongo schema/RBAC, signed owner replay, score publication, revocation, signed conflict, key rotation, receipt/member deletion, coverage loss |
-| `MongoGraphProjectionStoreIntegrationTest`, `GraphEvidenceAdmissionTest`, `MongoDeviceObservationTransactionCommitTest` | 36 passed | Competing writers, exact replay, unknown commit acknowledgement, immutable lifecycle fences, admission and bounded commit retries |
-
-
-The two-hop unit tests use controlled Graph/owner doubles for wrong scope/epoch/key, equal/future candidates, duplicate-root masquerading, policy revocation, candidate-set changes, limits, and deadlines. Existing signed-owner tests cover several of those owner failures through the one-hop Graph path; the new full Kafka A/B test directly exercises outage and signed Source contradiction through the two-hop path. This does not claim every adversarial case has its own full Kafka A/B execution. Mongo store recovery and competing-writer checks are independent authenticated Mongo integration tests. No full Maven `verify` was run.
+These are separate proofs, not a live Graph-to-scorer integration test. There is no production Graph provider, grant issuer, Spring bean, route, or scorer registry entry. The scorer's default adapter denies positive evidence. No score, risk contribution, alert, recommendation, or public Engine Intelligence v2 field is added. The Graph observation remains retrospective and does not establish what was known at scoring time. This limitation must remain explicit until a real, authorized adapter exists.
 
 ## G07 two-hop query plan and workload
 
