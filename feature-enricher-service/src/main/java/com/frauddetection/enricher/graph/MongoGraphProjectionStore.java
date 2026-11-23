@@ -200,6 +200,71 @@ final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProj
         return List.copyOf(result);
     }
 
+    @Override public List<GraphStoredEdge> findDeviceOccurrenceNeighbors(GraphIdentityScope scope,
+                                                                           List<GraphNodeRef> deviceNodes,
+                                                                           Instant fromInclusive,
+                                                                           Instant untilExclusive,
+                                                                           Instant asOf,
+                                                                           int limit,
+                                                                           java.time.Duration maxTime) {
+        if (!GraphProjectionSchema.READER.equals(authenticatedPrincipal)) {
+            throw new IllegalArgumentException("GRAPH_QUERY_PRINCIPAL_INVALID");
+        }
+        Objects.requireNonNull(maxTime, "GRAPH_QUERY_TIME_REQUIRED");
+        if (limit < 1 || limit > GraphQueryLimits.DEFAULT.maxEdges() + 1
+                || maxTime.isZero() || maxTime.isNegative() || maxTime.toMillis() < 1
+                || maxTime.compareTo(java.time.Duration.ofSeconds(5)) > 0) {
+            throw new IllegalArgumentException("GRAPH_QUERY_LIMIT_INVALID");
+        }
+        Document filter = deviceNeighborFilter(scope, deviceNodes, fromInclusive, untilExclusive, asOf);
+        var find = collection().find(filter).sort(deviceNeighborSort()).limit(limit)
+                .batchSize(Math.min(limit, GraphQueryLimits.DEFAULT.maxPageSize()))
+                .maxTime(maxTime.toMillis(), TimeUnit.MILLISECONDS);
+        List<GraphStoredEdge> result = new ArrayList<>(Math.min(limit, GraphQueryLimits.DEFAULT.maxPageSize()));
+        for (Document document : find) { result.add(GraphProjectionDocumentCodec.decode(document)); }
+        return List.copyOf(result);
+    }
+
+    static Document deviceNeighborFilter(GraphIdentityScope scope, List<GraphNodeRef> deviceNodes,
+                                         Instant fromInclusive, Instant untilExclusive, Instant asOf) {
+        Objects.requireNonNull(scope, "GRAPH_SCOPE_REQUIRED");
+        Objects.requireNonNull(deviceNodes, "GRAPH_DEVICE_NODES_REQUIRED");
+        Objects.requireNonNull(fromInclusive, "GRAPH_FROM_REQUIRED");
+        Objects.requireNonNull(untilExclusive, "GRAPH_UNTIL_REQUIRED");
+        Objects.requireNonNull(asOf, "GRAPH_AS_OF_REQUIRED");
+        GraphValidation.millisecondInstant(fromInclusive);
+        GraphValidation.millisecondInstant(untilExclusive);
+        GraphValidation.millisecondInstant(asOf);
+        if (deviceNodes.isEmpty() || deviceNodes.size() > GraphQueryLimits.DEFAULT.maxNodes()
+                || !untilExclusive.isAfter(fromInclusive) || untilExclusive.isAfter(asOf)) {
+            throw new IllegalArgumentException("GRAPH_DEVICE_QUERY_RANGE_INVALID");
+        }
+        List<Document> hubs = new ArrayList<>(deviceNodes.size());
+        java.util.Set<String> unique = new java.util.HashSet<>();
+        for (GraphNodeRef node : deviceNodes) {
+            if (node == null || node.kind() != GraphNodeKind.DEVICE_PSEUDONYM || !scope.equals(node.scope())
+                    || !unique.add(node.canonicalId())) {
+                throw new IllegalArgumentException("GRAPH_DEVICE_QUERY_HUB_INVALID");
+            }
+            hubs.add(new Document("device.token", node.identityToken())
+                    .append("device.keyVersion", node.pseudonymKeyVersion()));
+        }
+        Document filter = scopeFilter(scope)
+                .append("schemaVersion", GraphProjectionSchema.SCHEMA_VERSION)
+                .append("edgeType", GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE.name())
+                .append("occurrence.eventTime", new Document("$gte", java.util.Date.from(fromInclusive))
+                        .append("$lt", java.util.Date.from(untilExclusive)))
+                .append("lifecycle.state", GraphEdgeLifecycle.ACTIVE.name())
+                .append("lifecycle.admittedAt", new Document("$lte", java.util.Date.from(asOf)))
+                .append("lifecycle.validUntil", new Document("$gt", java.util.Date.from(asOf)));
+        filter.append("$or", hubs);
+        return filter;
+    }
+
+    static org.bson.conversions.Bson deviceNeighborSort() {
+        return ascending("device.token", "device.keyVersion", "occurrence.eventTime", "occurrence.token");
+    }
+
     private GraphAppendOutcome transactAppend(GraphEvidenceAdmission.AdmittedRelation initiallyAdmitted) {
         TransactionMutation mutation;
         MongoException unknownCommit = null;

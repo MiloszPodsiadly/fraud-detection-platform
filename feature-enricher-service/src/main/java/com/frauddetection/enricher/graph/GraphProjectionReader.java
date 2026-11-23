@@ -9,10 +9,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.LongSupplier;
 
 /** Internal, read-only and deliberately unwired bounded Graph projection reader. */
@@ -206,6 +209,254 @@ final class GraphProjectionReader {
                 verified.subList(start, end), next);
     }
 
+    GraphDeviceWitnessOutcome readAuthorizedOccurrenceDeviceWitnesses(String requestingPrincipal,
+                                                                       GraphPrivateReadGrant grant,
+                                                                       GraphIdentityScope exactScope,
+                                                                       GraphOccurrenceRef typedRoot) {
+        long started = nanoTime.getAsLong();
+        Instant diagnosticReadAt = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        if (grant == null || exactScope == null || typedRoot == null || requestingPrincipal == null
+                || !grant.matches(requestingPrincipal, exactScope, diagnosticReadAt)
+                || !exactScope.equals(typedRoot.scope())) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.DENIED, GraphReadReason.GRANT_DENIED);
+        }
+        if (typedRoot.eventTime().isAfter(diagnosticReadAt)) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.LIMIT_EXCEEDED);
+        }
+        GraphPolicyDecision initialGrant = verifyGrant(grant, requestingPrincipal, exactScope, diagnosticReadAt);
+        if (initialGrant != GraphPolicyDecision.AUTHORIZED) {
+            return witnessFailure(grantOutcome(initialGrant));
+        }
+
+        List<GraphStoredEdge> rootRows;
+        try {
+            rootRows = store.findOccurrenceNeighbors(exactScope, typedRoot, diagnosticReadAt,
+                    limits.maxEdges() + 1, remainingBudget(started));
+        } catch (MongoException | IllegalStateException unavailable) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, readFailure(started));
+        } catch (IllegalArgumentException invalid) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.REFERENCE_INVALID);
+        }
+        if (expired(started)) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.DEADLINE_EXCEEDED);
+        }
+        if (rootRows.size() > limits.maxEdges()) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                    GraphReadReason.TRUNCATED_UNVERIFIED);
+        }
+        if (rootRows.isEmpty()) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                    GraphReadReason.COVERAGE_UNAVAILABLE);
+        }
+
+        GraphNodeRef rootNode = GraphNodeRef.occurrence(typedRoot);
+        Set<String> nodeIds = new java.util.HashSet<>();
+        Set<String> edgeIds = new java.util.HashSet<>();
+        nodeIds.add(rootNode.canonicalId());
+        Map<String, GraphNodeRef> hubMap = new TreeMap<>();
+        for (GraphStoredEdge row : rootRows) {
+            GraphEdgeFact edge = row.edge();
+            GraphEvidenceRef evidence = edge.evidence();
+            if (row.lifecycle() != GraphEdgeLifecycle.ACTIVE || row.admittedAt().isAfter(diagnosticReadAt)
+                    || !row.validUntil().isAfter(diagnosticReadAt) || !evidence.expiresAt().isAfter(diagnosticReadAt)
+                    || !edge.from().equals(rootNode) || edge.type() != GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE
+                    || !evidence.occurrence().equals(typedRoot) || !evidence.scope().equals(exactScope)
+                    || edge.to().kind() != GraphNodeKind.DEVICE_PSEUDONYM
+                    || !edge.to().equals(GraphNodeRef.device(exactScope, evidence.associatedIdentityToken(),
+                    evidence.pseudonymKeyVersion()))) {
+                return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                        GraphReadReason.REFERENCE_INVALID);
+            }
+            if (!edgeIds.add(edge.canonicalId())) {
+                return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                        GraphReadReason.REFERENCE_INVALID);
+            }
+            GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(row, requestingPrincipal, started);
+            if (ownerFailure != null) { return witnessFailure(ownerFailure); }
+            hubMap.put(edge.to().canonicalId(), edge.to());
+            nodeIds.add(edge.to().canonicalId());
+            if (nodeIds.size() > limits.maxNodes()) {
+                return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                        GraphReadReason.TRUNCATED_UNVERIFIED);
+            }
+        }
+        if (expired(started)) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.DEADLINE_EXCEEDED);
+        }
+        GraphPolicyDecision hubGrant = verifyGrant(grant, requestingPrincipal, exactScope, clock.instant());
+        if (!grant.matches(requestingPrincipal, exactScope, clock.instant())
+                || hubGrant != GraphPolicyDecision.AUTHORIZED) {
+            return witnessFailure(grantOutcome(hubGrant == GraphPolicyDecision.AUTHORIZED
+                    ? GraphPolicyDecision.DENIED : hubGrant));
+        }
+
+        List<GraphNodeRef> hubs = List.copyOf(hubMap.values());
+        int remainingEdges = limits.maxEdges() - rootRows.size();
+        if (remainingEdges < 1) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                    GraphReadReason.TRUNCATED_UNVERIFIED);
+        }
+        Instant fromInclusive = typedRoot.eventTime().minus(limits.maxWindow());
+        if (fromInclusive.isBefore(Instant.EPOCH)) { fromInclusive = Instant.EPOCH; }
+        List<GraphStoredEdge> deviceRows;
+        int deviceLimit = remainingEdges + 1;
+        try {
+            deviceRows = store.findDeviceOccurrenceNeighbors(exactScope, hubs, fromInclusive,
+                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, remainingBudget(started));
+        } catch (MongoException | IllegalStateException unavailable) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, readFailure(started));
+        } catch (IllegalArgumentException invalid) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.REFERENCE_INVALID);
+        }
+        if (expired(started)) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.DEADLINE_EXCEEDED);
+        }
+        if (deviceRows.isEmpty()) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                    GraphReadReason.COVERAGE_UNAVAILABLE);
+        }
+        if (deviceRows.size() > remainingEdges) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                    GraphReadReason.TRUNCATED_UNVERIFIED);
+        }
+
+        for (GraphStoredEdge row : deviceRows) {
+            GraphEdgeFact edge = row.edge();
+            GraphEvidenceRef evidence = edge.evidence();
+            GraphNodeRef ownerHub = hubMap.get(edge.to().canonicalId());
+            GraphOccurrenceRef candidate = evidence.occurrence();
+            if (row.lifecycle() != GraphEdgeLifecycle.ACTIVE || row.admittedAt().isAfter(diagnosticReadAt)
+                    || !row.validUntil().isAfter(diagnosticReadAt) || !evidence.expiresAt().isAfter(diagnosticReadAt)
+                    || edge.type() != GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE
+                    || edge.from().kind() != GraphNodeKind.TRANSACTION_OCCURRENCE || ownerHub == null
+                    || !edge.to().equals(ownerHub) || !edge.from().scope().equals(exactScope)
+                    || !evidence.scope().equals(exactScope) || !candidate.scope().equals(exactScope)
+                    || !edge.from().identityToken().equals(candidate.occurrenceToken())
+                    || !candidate.eventTime().isBefore(typedRoot.eventTime())
+                    || candidate.eventTime().isBefore(fromInclusive) || candidate.equals(typedRoot)) {
+                return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                        GraphReadReason.REFERENCE_INVALID);
+            }
+            if (!edgeIds.add(edge.canonicalId())) {
+                return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                        GraphReadReason.REFERENCE_INVALID);
+            }
+            GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(row, requestingPrincipal, started);
+            if (ownerFailure != null) { return witnessFailure(ownerFailure); }
+            nodeIds.add(edge.from().canonicalId());
+            if (nodeIds.size() > limits.maxNodes()) {
+                return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                        GraphReadReason.TRUNCATED_UNVERIFIED);
+            }
+        }
+
+        List<GraphStoredEdge> rootAfterFirstOwnerPass;
+        List<GraphStoredEdge> deviceAfterFirstOwnerPass;
+        try {
+            rootAfterFirstOwnerPass = store.findOccurrenceNeighbors(exactScope, typedRoot, diagnosticReadAt,
+                    limits.maxEdges() + 1, remainingBudget(started));
+            deviceAfterFirstOwnerPass = store.findDeviceOccurrenceNeighbors(exactScope, hubs, fromInclusive,
+                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, remainingBudget(started));
+        } catch (MongoException | IllegalStateException unavailable) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, readFailure(started));
+        } catch (IllegalArgumentException invalid) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.REFERENCE_INVALID);
+        }
+        if (expired(started) || !rootRows.equals(rootAfterFirstOwnerPass)
+                || !deviceRows.equals(deviceAfterFirstOwnerPass)) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, expired(started)
+                    ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.TRUNCATED_UNVERIFIED);
+        }
+
+        for (GraphStoredEdge row : rootRows) {
+            GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(row, requestingPrincipal, started);
+            if (ownerFailure != null) { return witnessFailure(ownerFailure); }
+        }
+        for (GraphStoredEdge row : deviceRows) {
+            GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(row, requestingPrincipal, started);
+            if (ownerFailure != null) { return witnessFailure(ownerFailure); }
+        }
+
+        List<GraphStoredEdge> rootAfterSecondOwnerPass;
+        List<GraphStoredEdge> deviceAfterSecondOwnerPass;
+        try {
+            rootAfterSecondOwnerPass = store.findOccurrenceNeighbors(exactScope, typedRoot, diagnosticReadAt,
+                    limits.maxEdges() + 1, remainingBudget(started));
+            deviceAfterSecondOwnerPass = store.findDeviceOccurrenceNeighbors(exactScope, hubs, fromInclusive,
+                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, remainingBudget(started));
+        } catch (MongoException | IllegalStateException unavailable) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, readFailure(started));
+        } catch (IllegalArgumentException invalid) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.REFERENCE_INVALID);
+        }
+        if (expired(started) || !rootRows.equals(rootAfterSecondOwnerPass)
+                || !deviceRows.equals(deviceAfterSecondOwnerPass)) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, expired(started)
+                    ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.TRUNCATED_UNVERIFIED);
+        }
+        GraphPolicyDecision finalGrant = verifyGrant(grant, requestingPrincipal, exactScope, clock.instant());
+        if (!grant.matches(requestingPrincipal, exactScope, clock.instant())
+                || finalGrant != GraphPolicyDecision.AUTHORIZED) {
+            return witnessFailure(grantOutcome(finalGrant == GraphPolicyDecision.AUTHORIZED
+                    ? GraphPolicyDecision.DENIED : finalGrant));
+        }
+        if (expired(started)) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.DEADLINE_EXCEEDED);
+        }
+
+        GraphStoredEdge selectedPrior = deviceRows.stream()
+                .min(Comparator.comparing((GraphStoredEdge row) -> row.edge().evidence().occurrence().eventTime())
+                        .thenComparing(row -> row.edge().evidence().occurrence().occurrenceToken())
+                        .thenComparing(row -> row.edge().canonicalId()))
+                .orElseThrow();
+        GraphStoredEdge selectedRoot = rootRows.stream()
+                .filter(row -> row.edge().to().equals(selectedPrior.edge().to()))
+                .min(Comparator.comparing(GraphStoredEdge::admittedAt)
+                        .thenComparing(row -> row.edge().canonicalId()))
+                .orElse(null);
+        if (selectedRoot == null) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                    GraphReadReason.REFERENCE_INVALID);
+        }
+        Instant graphAssociationAdmittedAt = selectedRoot.admittedAt().isAfter(selectedPrior.admittedAt())
+                ? selectedRoot.admittedAt() : selectedPrior.admittedAt();
+        return GraphDeviceWitnessOutcome.verified(new GraphDeviceWitnessOutcome.Witness(typedRoot,
+                selectedPrior.edge().evidence().occurrence(), selectedPrior.edge().evidence().pseudonymKeyVersion(),
+                graphAssociationAdmittedAt, diagnosticReadAt));
+    }
+
+    private GraphReadOutcome revalidateOwnerWithinBudget(GraphStoredEdge row, String requestingPrincipal,
+                                                         long started) {
+        if (expired(started)) { return GraphReadOutcome.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+        Duration remaining;
+        try {
+            remaining = remainingBudget(started);
+        } catch (IllegalStateException exhausted) {
+            return GraphReadOutcome.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
+        }
+        GraphRelationResolution owner;
+        try {
+            owner = ownerAuthority.revalidate(row.edge().evidence(), requestingPrincipal, remaining);
+        } catch (RuntimeException unavailable) {
+            return GraphReadOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
+        if (expired(started)) { return GraphReadOutcome.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+        if (owner == null || owner.state() != GraphRelationResolution.State.VERIFIED) { return ownerOutcome(owner); }
+        if (!row.edge().evidence().equals(owner.evidence())) {
+            return GraphReadOutcome.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
+        Instant now = clock.instant();
+        if (row.lifecycle() != GraphEdgeLifecycle.ACTIVE || !row.validUntil().isAfter(now)
+                || !owner.validUntil().isAfter(now) || !row.edge().evidence().expiresAt().isAfter(now)) {
+            return GraphReadOutcome.unavailable(GraphReadReason.RETENTION_EXPIRED);
+        }
+        return null;
+    }
+
+    private static GraphDeviceWitnessOutcome witnessFailure(GraphReadOutcome outcome) {
+        return GraphDeviceWitnessOutcome.from(outcome);
+    }
+
     private GraphPolicyDecision verifyGrant(GraphPrivateReadGrant grant, String principal,
                                            GraphIdentityScope scope, Instant now) {
         try {
@@ -239,7 +490,7 @@ final class GraphProjectionReader {
     }
 
     private boolean expired(long started) {
-        return nanoTime.getAsLong() - started > limits.maxQueryTime().toNanos();
+        return nanoTime.getAsLong() - started >= limits.maxQueryTime().toNanos();
     }
 
     private Duration remainingBudget(long started) {

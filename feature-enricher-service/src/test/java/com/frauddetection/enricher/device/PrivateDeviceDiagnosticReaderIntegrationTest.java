@@ -44,16 +44,16 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private static final int PERFORMANCE_WARMUPS = 2;
     private static final int PERFORMANCE_SAMPLES = 20;
     private static final Duration PERFORMANCE_FIXTURE_WRITER_TIMEOUT = Duration.ofSeconds(30);
-    private static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
-    private VerifiedDeviceAdmissionIntegrationTest f;
-    private MongoSourceOccurrenceStore occurrenceWriter;
-    private SourceOccurrenceAccess occurrenceReader;
-    private SourceOccurrenceCipher occurrenceCipher;
-    private MongoSourceLineage privateSource;
+    static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
+    VerifiedDeviceAdmissionIntegrationTest f;
+    MongoSourceOccurrenceStore occurrenceWriter;
+    SourceOccurrenceAccess occurrenceReader;
+    SourceOccurrenceCipher occurrenceCipher;
+    MongoSourceLineage privateSource;
     private MongoClientHandle clients;
     private PrivateDeviceDiagnosticReader diagnostic;
-    private String topic;
-    private boolean topicCreated;
+    String topic;
+    boolean topicCreated;
 
     @BeforeAll static void start() throws Exception {
         VerifiedDeviceAdmissionIntegrationTest.MONGO.start();
@@ -1444,7 +1444,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // No persisted gap can be hidden by a reader restart.
     }
 
-    private Published publish(VerifiedDeviceAdmissionIntegrationTest.Event source, String runId, String scoreId) throws Exception {
+    Published publish(VerifiedDeviceAdmissionIntegrationTest.Event source, String runId, String scoreId) throws Exception {
         TransactionScoredEvent candidate = score(source, scoreId);
         var pending = occurrenceWriter.prepare(source.enriched(), runId, candidate);
         assertThat(pending.status()).isEqualTo(MongoSourceOccurrenceStore.Status.PENDING);
@@ -1581,7 +1581,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         }).toList();
     }
 
-    private SourceSignatureVerifier.Verified conflictingSignedProof(VerifiedDeviceAdmissionIntegrationTest.Event event) {
+    SourceSignatureVerifier.Verified conflictingSignedProof(VerifiedDeviceAdmissionIntegrationTest.Event event) {
         try {
             var changed = (tools.jackson.databind.node.ObjectNode) VerifiedDeviceAdmissionIntegrationTest.JSON
                     .readTree(event.sourcePayload());
@@ -1606,7 +1606,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         return new SourceOccurrenceCipher("test-key", Map.of("test-key", Base64.getEncoder().encodeToString(key)));
     }
 
-    private record Published(TransactionScoredEvent event, SourceOccurrenceAccess.Reference reference, byte[] wireBytes) { }
+    record Published(TransactionScoredEvent event, SourceOccurrenceAccess.Reference reference, byte[] wireBytes) { }
     private record ScoredRecord(TransactionScoredEvent event, byte[] bytes) { }
     private record GraphReaderFixture(DeviceGraphRelationAuthority owner, MongoClient ownerClient,
                                       DeviceGraphRelationGrant relationGrant,

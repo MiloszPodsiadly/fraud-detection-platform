@@ -185,8 +185,18 @@ class GraphProjectionSchemaIntegrationTest {
         collection.insertOne(GraphProjectionDocumentCodec.encode(secondOccurrence));
 
         Document logical = collection.find(logicalFilter(stored)).limit(1).explain(ExplainVerbosity.QUERY_PLANNER);
-        Document neighbors = collection.find(deviceFilter(stored)).sort(new Document("occurrence.eventTime", 1)
-                .append("occurrence.token", 1)).limit(32).explain(ExplainVerbosity.QUERY_PLANNER);
+        GraphNodeRef deviceHub = GraphNodeRef.device(scope,
+                stored.edge().evidence().associatedIdentityToken(), stored.edge().evidence().pseudonymKeyVersion());
+        Instant asOf = EVENT.plusSeconds(10);
+        Instant fromInclusive = EVENT.minus(Duration.ofDays(30));
+        Instant untilExclusive = EVENT.plusSeconds(1);
+        List<GraphNodeRef> queryHubs = List.of(deviceHub,
+                GraphNodeRef.device(scope, token("device:another"), 8));
+        Document deviceNeighborsFilter = MongoGraphProjectionStore.deviceNeighborFilter(scope, queryHubs,
+                fromInclusive, untilExclusive, asOf);
+        Document neighbors = collection.find(deviceNeighborsFilter).sort(MongoGraphProjectionStore.deviceNeighborSort())
+                .limit(GraphQueryLimits.DEFAULT.maxEdges() + 1).batchSize(GraphQueryLimits.DEFAULT.maxPageSize())
+                .explain(ExplainVerbosity.QUERY_PLANNER);
         Document occurrenceNeighbors = collection.find(occurrenceFilter(stored)).sort(new Document("_id", 1))
                 .limit(GraphQueryLimits.DEFAULT.maxEdges() + 1).explain(ExplainVerbosity.QUERY_PLANNER);
 
@@ -198,6 +208,33 @@ class GraphProjectionSchemaIntegrationTest {
         assertThat(store.findLogicalRelation(stored.edge())).contains(stored);
         assertThat(store.findNeighbors(GraphNodeRef.device(scope, stored.edge().evidence().associatedIdentityToken(), 7), 32))
                 .containsExactlyInAnyOrder(stored, secondOccurrence);
+        assertThat(store.findDeviceOccurrenceNeighbors(scope, queryHubs, fromInclusive, untilExclusive,
+                asOf, 32, Duration.ofSeconds(2))).containsExactlyInAnyOrder(stored, secondOccurrence);
+        DeviceNeighborBatchProbe batchProbe = new DeviceNeighborBatchProbe();
+        try (MongoClient monitoredReader = MONGO.monitoredReader(context.databaseName(), batchProbe)) {
+            GraphProjectionDao monitoredStore = new MongoGraphProjectionStore(
+                    monitoredReader.getDatabase(context.databaseName()), GraphProjectionSchema.READER);
+            monitoredStore.findDeviceOccurrenceNeighbors(scope, queryHubs, fromInclusive, untilExclusive,
+                    asOf, GraphQueryLimits.DEFAULT.maxEdges() + 1, Duration.ofSeconds(2));
+        }
+        assertThat(batchProbe.batchSizes).containsExactly(GraphQueryLimits.DEFAULT.maxPageSize());
+        assertThat(store.findDeviceOccurrenceNeighbors(scope,
+                List.of(GraphNodeRef.device(scope, stored.edge().evidence().associatedIdentityToken(), 8)),
+                fromInclusive, untilExclusive, asOf, 32, Duration.ofSeconds(2))).isEmpty();
+        GraphIdentityScope otherScope = scope("institution-b", "epoch-a");
+        assertThat(store.findDeviceOccurrenceNeighbors(otherScope,
+                List.of(GraphNodeRef.device(otherScope, stored.edge().evidence().associatedIdentityToken(), 7)),
+                fromInclusive, untilExclusive, asOf, 32, Duration.ofSeconds(2))).isEmpty();
+        MongoGraphProjectionStore writer = new MongoGraphProjectionStore(context.writerDatabase(), GraphProjectionSchema.WRITER);
+        assertThatThrownBy(() -> writer.findDeviceOccurrenceNeighbors(scope, List.of(deviceHub), fromInclusive,
+                untilExclusive, asOf, 32, Duration.ofSeconds(2))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("GRAPH_QUERY_PRINCIPAL_INVALID");
+        assertThatThrownBy(() -> store.findDeviceOccurrenceNeighbors(scope, List.of(deviceHub), fromInclusive,
+                untilExclusive, asOf, GraphQueryLimits.DEFAULT.maxEdges() + 2, Duration.ofSeconds(2)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("GRAPH_QUERY_LIMIT_INVALID");
+        assertThatThrownBy(() -> store.findDeviceOccurrenceNeighbors(scope, List.of(deviceHub), fromInclusive,
+                untilExclusive, asOf, 32, Duration.ofSeconds(6)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("GRAPH_QUERY_LIMIT_INVALID");
         assertThat(store.findOccurrenceNeighbors(scope, stored.edge().evidence().occurrence(), EVENT.plusSeconds(10),
                 GraphQueryLimits.DEFAULT.maxEdges() + 1, Duration.ofSeconds(2))).containsExactly(stored);
 
@@ -502,5 +539,20 @@ class GraphProjectionSchemaIntegrationTest {
         int schemaCommands() { return schemaCommands.get(); }
         int findCommands() { return findCommands.get(); }
         void reset() { schemaCommands.set(0); findCommands.set(0); }
+    }
+
+    private static final class DeviceNeighborBatchProbe implements CommandListener {
+        private final List<Integer> batchSizes = new ArrayList<>();
+
+        @Override public void commandStarted(CommandStartedEvent event) {
+            if (!"find".equals(event.getCommandName())
+                    || !GraphProjectionSchema.COLLECTION.equals(event.getCommand().getString("find").getValue())) {
+                return;
+            }
+            var batchSize = event.getCommand().get("batchSize");
+            if (batchSize != null && batchSize.isInt32()) { batchSizes.add(batchSize.asInt32().getValue()); }
+        }
+
+        @Override public void commandFailed(CommandFailedEvent event) { }
     }
 }

@@ -11,4 +11,15 @@ interface GraphProjectionDao {
     List<GraphStoredEdge> findNeighbors(GraphNodeRef node, int limit);
     List<GraphStoredEdge> findOccurrenceNeighbors(GraphIdentityScope scope, GraphOccurrenceRef occurrence,
                                                    Instant asOf, int limit, Duration maxTime);
+
+    /** Indexed reverse lookup; only the authorized occurrence-rooted reader may supply hubs. */
+    default List<GraphStoredEdge> findDeviceOccurrenceNeighbors(GraphIdentityScope scope,
+                                                                 List<GraphNodeRef> deviceNodes,
+                                                                 Instant fromInclusive,
+                                                                 Instant untilExclusive,
+                                                                 Instant asOf,
+                                                                 int limit,
+                                                                 Duration maxTime) {
+        throw new IllegalStateException("GRAPH_DEVICE_QUERY_UNAVAILABLE");
+    }
 }
