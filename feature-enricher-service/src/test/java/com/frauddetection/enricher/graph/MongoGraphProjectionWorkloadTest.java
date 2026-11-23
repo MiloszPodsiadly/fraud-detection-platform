@@ -33,6 +33,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -45,6 +46,7 @@ class MongoGraphProjectionWorkloadTest {
     private static final Instant NOW = Instant.parse("2026-11-18T12:00:00.000Z");
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
     private static final int SCOPE_COUNT = 4;
+    private static final int DEVICE_BUCKET_COUNT = 256;
     private static final int READ_SAMPLE_LIMIT = 100;
     private static final int WARMUP_READS = 10;
     private static final int WARMUP_WRITES = 10;
@@ -191,13 +193,46 @@ class MongoGraphProjectionWorkloadTest {
         assertThat(commands.findCommands.sum()).isEqualTo(readLatency.length * 3L);
 
         reportPlans(graphDatabase, evidence.get(evidence.size() - 1), NOW.plusSeconds(10), observations);
+        reportTwoHopPlan(graphDatabase, evidence.getFirst(), observations);
         reportDeviceHubBounds(readerStore, hubEvidence, scopes, observations);
-        reportNegativeAuthorityOutcomes(reader, authority, scopes, occurrences, evidence, sampleIndexes.getLast());
+
+        int positiveRootCount = observations - DEVICE_BUCKET_COUNT;
+        assertThat(positiveRootCount).as("synthetic scale has bounded prior neighbors").isPositive();
+        List<Integer> twoHopIndexes = sampledIndexes(positiveRootCount, READ_SAMPLE_LIMIT);
+        commands.reset();
+        long[] twoHopLatency = new long[twoHopIndexes.size()];
+        ConcurrentLinkedQueue<String> twoHopFailures = new ConcurrentLinkedQueue<>();
+        try (var pool = Executors.newFixedThreadPool(Math.max(2, Math.min(8, twoHopIndexes.size())))) {
+            List<Callable<Void>> reads = new ArrayList<>(twoHopIndexes.size());
+            for (int sample = 0; sample < twoHopIndexes.size(); sample++) {
+                int selectedSample = sample;
+                reads.add(() -> {
+                    int index = twoHopIndexes.get(selectedSample);
+                    long started = System.nanoTime();
+                    GraphDeviceWitnessOutcome result = performTwoHopRead(reader, scopes, occurrences, index);
+                    twoHopLatency[selectedSample] = System.nanoTime() - started;
+                    if (!verifiedWitness(result, occurrences.get(index))) {
+                        twoHopFailures.add("state=" + result.state() + ",reason=" + result.reason()
+                                + ",witness_present=" + result.witness().isPresent());
+                    }
+                    return null;
+                });
+            }
+            pool.invokeAll(reads).forEach(MongoGraphProjectionWorkloadTest::requireCompleted);
+        }
+        assertThat(twoHopFailures).as("all synthetic two-hop reads return an owner-verified witness").isEmpty();
+        assertThat(commands.findCommands.sum()).isEqualTo(twoHopLatency.length * 6L);
+        reportDistribution("two_hop_read_latency_us", twoHopLatency, 1_000d);
+        System.out.printf(Locale.ROOT,
+                "GRAPH_WORKLOAD_TWO_HOP scale=%d measured=%d mongo_find_commands=%d expected_find_commands=%d failed=%d owner_adapter=synthetic_in_memory%n",
+                observations, twoHopLatency.length, commands.findCommands.sum(), twoHopLatency.length * 6L,
+                twoHopFailures.size());
         reportMongoCommands(commands, observations);
+        reportNegativeAuthorityOutcomes(reader, authority, scopes, occurrences, evidence, sampleIndexes.getLast());
         memory.sample();
         memory.report(observations);
         System.out.printf(Locale.ROOT,
-                "GRAPH_WORKLOAD_LIMITS max_depth=%d max_nodes=%d max_edges=%d max_history_rows=%d max_window_seconds=%d max_query_ms=%d two_hop_reader=NOT_IMPLEMENTED%n",
+                "GRAPH_WORKLOAD_LIMITS max_depth=%d max_nodes=%d max_edges=%d max_history_rows=%d max_window_seconds=%d max_query_ms=%d two_hop_reader=BOUNDED_READ%n",
                 GraphQueryLimits.DEFAULT.maxDepth(), GraphQueryLimits.DEFAULT.maxNodes(),
                 GraphQueryLimits.DEFAULT.maxEdges(), GraphQueryLimits.DEFAULT.maxHistoryRows(),
                 GraphQueryLimits.DEFAULT.maxWindow().toSeconds(), GraphQueryLimits.DEFAULT.maxQueryTime().toMillis());
@@ -211,12 +246,14 @@ class MongoGraphProjectionWorkloadTest {
         GraphNodeRef device = GraphNodeRef.device(representative.scope(),
                 representative.associatedIdentityToken(), representative.pseudonymKeyVersion());
         List<GraphStoredEdge> bounded = readerStore.findNeighbors(device, GraphPolicyLimits.HARD_MAX_EDGES);
-        long totalForScope = evidence.stream().filter(ref -> ref.scope().equals(representative.scope())).count();
-        assertThat(bounded.size()).isEqualTo(Math.min(totalForScope, GraphPolicyLimits.HARD_MAX_EDGES));
+        long totalForHub = evidence.stream().filter(ref -> ref.scope().equals(representative.scope())
+                && ref.associatedIdentityToken().equals(representative.associatedIdentityToken())
+                && ref.pseudonymKeyVersion() == representative.pseudonymKeyVersion()).count();
+        assertThat(bounded.size()).isEqualTo(Math.min(totalForHub, GraphPolicyLimits.HARD_MAX_EDGES));
         System.out.printf(Locale.ROOT,
-                "GRAPH_WORKLOAD_DEVICE_HUB scale=%d scopes=%d scope_rows=%d requested_limit=%d returned=%d truncated=%s authorized_two_hop=NOT_AVAILABLE%n",
-                observations, scopes.size(), perScope, GraphPolicyLimits.HARD_MAX_EDGES, bounded.size(),
-                totalForScope > bounded.size());
+                "GRAPH_WORKLOAD_DEVICE_HUB scale=%d scopes=%d scope_rows=%d hub_rows=%d requested_limit=%d returned=%d truncated=%s authorized_two_hop=MEASURED%n",
+                observations, scopes.size(), perScope, totalForHub, GraphPolicyLimits.HARD_MAX_EDGES, bounded.size(),
+                totalForHub > bounded.size());
     }
 
     private static void reportNegativeAuthorityOutcomes(GraphProjectionReader reader, SyntheticAuthority authority,
@@ -268,6 +305,28 @@ class MongoGraphProjectionWorkloadTest {
         assertPlan(collection.find(occurrenceFilter).sort(ascending("_id"))
                         .limit(GraphQueryLimits.DEFAULT.maxEdges() + 1).explain(ExplainVerbosity.EXECUTION_STATS),
                 "graph_occurrence_neighbors", "authorized_occurrence", scale);
+    }
+
+    private static void reportTwoHopPlan(MongoDatabase database, GraphEvidenceRef root, int scale) {
+        GraphQueryLimits limits = GraphQueryLimits.DEFAULT;
+        Instant fromInclusive = root.occurrence().eventTime().minus(limits.maxWindow());
+        if (fromInclusive.isBefore(Instant.EPOCH)) { fromInclusive = Instant.EPOCH; }
+        GraphNodeRef hub = GraphNodeRef.device(root.scope(), root.associatedIdentityToken(),
+                root.pseudonymKeyVersion());
+        int limit = limits.maxEdges();
+        Document filter = MongoGraphProjectionStore.deviceNeighborFilter(root.scope(), List.of(hub),
+                fromInclusive, root.occurrence().eventTime(), NOW);
+        Document plan = database.getCollection(GraphProjectionSchema.COLLECTION).find(filter)
+                .sort(MongoGraphProjectionStore.deviceNeighborSort()).limit(limit)
+                .batchSize(Math.min(limit, limits.maxPageSize()))
+                .maxTime(limits.maxQueryTime().toMillis(), TimeUnit.MILLISECONDS)
+                .explain(ExplainVerbosity.EXECUTION_STATS);
+        assertPlan(plan, "graph_device_neighbors", "two_hop_prior_candidates", scale);
+        Document execution = plan.get("executionStats", Document.class);
+        int examined = ((Number) execution.get("totalDocsExamined")).intValue();
+        int returned = ((Number) execution.get("nReturned")).intValue();
+        assertThat(returned).isBetween(1, limit);
+        assertThat(examined).isBetween(returned, limit);
     }
 
     private static void assertPlan(Document plan, String expectedIndex, String label, int scale) {
@@ -335,6 +394,28 @@ class MongoGraphProjectionWorkloadTest {
                 occurrence.eventTime().minusSeconds(1), occurrence.eventTime().plusSeconds(1), 10, null);
     }
 
+    private static GraphDeviceWitnessOutcome performTwoHopRead(GraphProjectionReader reader,
+                                                                 List<GraphIdentityScope> scopes,
+                                                                 List<GraphOccurrenceRef> occurrences,
+                                                                 int index) {
+        GraphOccurrenceRef occurrence = occurrences.get(index);
+        GraphIdentityScope scope = scopes.get(index % SCOPE_COUNT);
+        GraphPrivateReadGrant grant = GraphPrivateReadGrant.testOnly("graph-workload-reader", scope, 1,
+                NOW.plusSeconds(60));
+        return reader.readAuthorizedOccurrenceDeviceWitnesses("graph-workload-reader", grant, scope, occurrence);
+    }
+
+    private static boolean verifiedWitness(GraphDeviceWitnessOutcome outcome, GraphOccurrenceRef root) {
+        if (outcome == null || outcome.state() != GraphProjectionState.VERIFIED_BOUNDED
+                || outcome.reason() != GraphReadReason.NONE || outcome.witness().isEmpty()) {
+            return false;
+        }
+        GraphDeviceWitnessOutcome.Witness witness = outcome.witness().orElseThrow();
+        return witness.root().equals(root) && witness.prior().scope().equals(root.scope())
+                && witness.prior().eventTime().isBefore(root.eventTime())
+                && witness.pseudonymKeyVersion() == 7;
+    }
+
     private static long serializedOutcomeBytes(GraphReadOutcome outcome) {
         List<Document> serializedEdges = outcome.edges().stream().map(edge -> GraphProjectionDocumentCodec.encode(
                 new GraphStoredEdge(edge, GraphEdgeLifecycle.ACTIVE, NOW.minusMillis(1), edge.evidence().expiresAt())))
@@ -372,10 +453,10 @@ class MongoGraphProjectionWorkloadTest {
     }
 
     private static GraphEvidenceRef evidence(int index, GraphIdentityScope scope) {
-        Instant eventTime = NOW.minusSeconds(10);
+        Instant eventTime = NOW.minusSeconds(index + 10L);
         GraphOccurrenceRef occurrence = new GraphOccurrenceRef(scope, token("occurrence-" + index), eventTime);
         String proof = "proof-" + index;
-        return new GraphEvidenceRef(scope, occurrence, token("shared-device-" + (index % SCOPE_COUNT)), 7,
+        return new GraphEvidenceRef(scope, occurrence, token("shared-device-" + (index % DEVICE_BUCKET_COUNT)), 7,
                 token("receipt-" + proof), token("raw-" + proof), token("enriched-" + proof),
                 token("assertion-" + proof), token("coverage-" + proof), token("policy-" + proof),
                 new GraphScoredOccurrenceRef(token("scored-" + proof), eventTime.plusMillis(1),
@@ -489,6 +570,17 @@ class MongoGraphProjectionWorkloadTest {
             GraphEvidenceRef current = evidenceByOwnerReference.get(expected.ownerAssertionReference());
             return current == null ? GraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE)
                     : GraphRelationResolution.verified(current, current.expiresAt());
+        }
+
+        @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal,
+                                                              Duration remainingBudget) {
+            if (remainingBudget == null || remainingBudget.isZero() || remainingBudget.isNegative()) {
+                return GraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
+            }
+            if (remainingBudget.compareTo(GraphQueryLimits.DEFAULT.maxQueryTime()) > 0) {
+                return GraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
+            }
+            return revalidate(expected, principal);
         }
     }
 
