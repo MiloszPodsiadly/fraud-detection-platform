@@ -28,6 +28,28 @@ Candidate for consolidation:
 - No
 - Rationale: This is the broad backend regression baseline and should stay diagnosable.
 
+## Signed Graph to scorer E2E
+
+Job ID:
+- `graph-signed-e2e`
+
+Purpose:
+- Prove the disabled Graph candidate against live signed owner evidence and a bounded dense-device read.
+
+Proves:
+- Non-skipped signed Source/Device/coverage/`INITIAL_RUN`/Kafka/Mongo Graph-to-scorer E2E.
+- Real 100-prior same-device hub reports owner checks, database cost, elapsed time, and deadline outcome.
+- Surefire XML requires both signed classes to pass without skips.
+
+Does not prove:
+- Production Graph authorization/activation, a production SLO, or a globally atomic snapshot.
+
+Execution:
+- Maven profile `graph-signed-e2e`, Docker/Testcontainers, and explicit E2E selectors.
+
+Required for merge:
+- Yes
+
 ## Institutional Reliability Proof
 
 Job ID:

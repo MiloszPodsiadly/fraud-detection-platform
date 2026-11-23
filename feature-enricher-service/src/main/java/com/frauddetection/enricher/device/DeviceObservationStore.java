@@ -185,6 +185,17 @@ interface DeviceObservationStore {
         default Status currentStatus(Provenance provenance, int pseudonymKeyVersion) {
             return current(provenance, pseudonymKeyVersion) ? Status.CURRENT : Status.UNAVAILABLE;
         }
+        default Status currentStatus(Provenance provenance, int pseudonymKeyVersion, Duration remainingBudget) {
+            if (remainingBudget == null || remainingBudget.isZero() || remainingBudget.isNegative()) {
+                return Status.UNAVAILABLE;
+            }
+            long started = System.nanoTime();
+            long budgetNanos;
+            try { budgetNanos = remainingBudget.toNanos(); }
+            catch (ArithmeticException overflow) { budgetNanos = Long.MAX_VALUE; }
+            Status result = currentStatus(provenance, pseudonymKeyVersion);
+            return System.nanoTime() - started >= budgetNanos ? Status.UNAVAILABLE : result;
+        }
         default boolean currentHistory(List<Provenance> provenance, int pseudonymKeyVersion) {
             return provenance.stream().allMatch(item -> current(item, pseudonymKeyVersion));
         }

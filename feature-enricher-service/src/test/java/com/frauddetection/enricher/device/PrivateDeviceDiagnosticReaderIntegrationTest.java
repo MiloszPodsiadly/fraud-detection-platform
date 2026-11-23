@@ -175,6 +175,77 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - wallStarted)).isGreaterThanOrEqualTo(5_000);
     }
 
+    @Test void graphOwnerMongoStallsAtDeviceSourceAndInitialScoreStagesRespectOneDeadline() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("owner_budget_stalls", "graph-device-owner-budget-stalls",
+                "fdp156-device-owner-budget");
+        String sourcePrincipal = "graph_source_budget_stalls";
+        String scorePrincipal = "graph_score_budget_stalls";
+        MongoClient sourceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceReader(f.ownerClient,
+                f.database, sourcePrincipal, List.of(), "fdp156-source-owner-budget");
+        MongoClient scoreClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceReader(f.ownerClient,
+                f.database, scorePrincipal, List.of(), "fdp156-score-owner-budget");
+        MongoSourceLineage currentSource = new MongoSourceLineage(sourceClient, f.database, sourcePrincipal,
+                MongoSourceLineage.Stage.SCORER, f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        SourceOccurrenceAccess currentScores = MongoSourceOccurrenceStore.readOnly(scoreClient, f.database, scorePrincipal,
+                f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher,
+                new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
+        DeviceGraphRelationAuthority budgetedOwner = DeviceGraphRelationAuthority.testOnly(fixture.ownerClient(),
+                f.database, "device_graph_owner_budget_stalls", f.A.epoch(), currentSource, f.origins, f.grants,
+                currentScores, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+
+        List<Map.Entry<String, String>> stages = List.of(
+                Map.entry("Device", "fdp156-device-owner-budget"),
+                Map.entry("Source", "fdp156-source-owner-budget"),
+                Map.entry("INITIAL_RUN score", "fdp156-score-owner-budget"));
+        for (var stage : stages) {
+            configureFindStall(stage.getValue());
+            VerifiedDeviceAdmissionIntegrationTest.MONGO.resetReadOperations();
+            long started = System.nanoTime();
+            DeviceGraphRelationResolution result;
+            long elapsedMillis;
+            try {
+                result = budgetedOwner.resolve(fixture.edge().evidence(), fixture.relationGrant(), fixture.readGrant(),
+                        fixture.principal(), Duration.ofSeconds(5));
+                elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            } finally {
+                disableFindStall();
+            }
+            long readCommands = VerifiedDeviceAdmissionIntegrationTest.MONGO.readOperationCounts().values().stream()
+                    .mapToLong(Long::longValue).sum();
+            System.out.printf("FDP156-REV2-004 stage=%s state=%s reason=%s elapsedMs=%d readCommands=%d%n",
+                    stage.getKey(), result.state(), result.reason(), elapsedMillis, readCommands);
+
+            assertThat(result.state()).as(stage.getKey()).isEqualTo(DeviceGraphRelationResolution.State.UNAVAILABLE);
+            assertThat(result.reason()).as(stage.getKey())
+                    .isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.DEADLINE_EXCEEDED);
+            assertThat(result.relation()).as(stage.getKey()).isEmpty();
+            assertThat(elapsedMillis).as(stage.getKey() + " bounded wall time with 5s socket/CSOT tolerance")
+                    .isLessThan(6_500);
+            assertThat(readCommands).as(stage.getKey() + " bounded Mongo reads").isBetween(1L, 32L);
+            assertThat(DeviceGraphRelationAuthority.activeOwnerReadWorkers())
+                    .as(stage.getKey() + " bounded workers")
+                    .isLessThanOrEqualTo(DeviceGraphRelationAuthority.maxOwnerReadWorkers());
+            assertThat(DeviceGraphRelationAuthority.queuedOwnerReadWorkers()).as(stage.getKey() + " no queued reads").isZero();
+        }
+        long workerDrainDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (DeviceGraphRelationAuthority.activeOwnerReadWorkers() > 0 && System.nanoTime() < workerDrainDeadline) {
+            Thread.sleep(25);
+        }
+        assertThat(DeviceGraphRelationAuthority.activeOwnerReadWorkers()).as("stalled Mongo reads release workers").isZero();
+    }
+
+    private void configureFindStall(String applicationName) {
+        f.ownerClient.getDatabase("admin").runCommand(new org.bson.Document("configureFailPoint", "failCommand")
+                .append("mode", new org.bson.Document("times", 1))
+                .append("data", new org.bson.Document("failCommands", List.of("find"))
+                        .append("appName", applicationName).append("blockConnection", true).append("blockTimeMS", 8_000)));
+    }
+
+    private void disableFindStall() {
+        f.ownerClient.getDatabase("admin").runCommand(new org.bson.Document("configureFailPoint", "failCommand")
+                .append("mode", "off"));
+    }
+
     @Test void publishedScoredFactAuthorizesOnlyExactCompletePreEventSnapshotAndBoundedPredicates() throws Exception {
         Instant priorTime = VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(3_600);
         var prior = f.event(f.A, "source-before", "transaction-before", "customer-1", "device-old", 1, priorTime);
@@ -1508,6 +1579,10 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     }
 
     private GraphReaderFixture graphReaderFixture(String suffix, String deviceId) throws Exception {
+        return graphReaderFixture(suffix, deviceId, null);
+    }
+
+    private GraphReaderFixture graphReaderFixture(String suffix, String deviceId, String mongoApplicationName) throws Exception {
         var event = f.event(f.A, "graph-read-" + suffix, "graph-read-transaction-" + suffix,
                 "customer-1", deviceId, 1, VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(60));
         var admission = f.adapter(f.A);
@@ -1529,7 +1604,8 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         var readGrant = DeviceGraphReadGrant.testOnly("graph_reader", sourceScope, "transaction-ingest", 1,
                 VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
         String mongoPrincipal = "device_graph_" + suffix;
-        MongoClient ownerClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database, mongoPrincipal);
+        MongoClient ownerClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database,
+                mongoPrincipal, mongoApplicationName);
         var owner = DeviceGraphRelationAuthority.testOnly(ownerClient, f.database, mongoPrincipal, f.A.epoch(),
                 privateSource, f.origins, f.grants, occurrenceReader, f.pseudonyms,
                 VerifiedDeviceAdmissionIntegrationTest.CLOCK);

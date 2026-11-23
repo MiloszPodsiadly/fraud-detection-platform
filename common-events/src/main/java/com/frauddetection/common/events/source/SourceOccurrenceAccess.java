@@ -1,6 +1,7 @@
 package com.frauddetection.common.events.source;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.util.Optional;
 
 @FunctionalInterface
@@ -11,6 +12,19 @@ public interface SourceOccurrenceAccess {
     default Resolution resolve(SourceLineage authorization, Reference occurrence) {
         return find(authorization, occurrence).map(Resolution::verified)
                 .orElseGet(Resolution::unavailable);
+    }
+
+    /** Budgeted current-owner lookup; implementations should apply the remaining time to each blocking read. */
+    default Resolution resolve(SourceLineage authorization, Reference occurrence, Duration remainingBudget) {
+        if (remainingBudget == null || remainingBudget.isNegative() || remainingBudget.isZero()) {
+            return Resolution.unavailable();
+        }
+        long started = System.nanoTime();
+        long budgetNanos;
+        try { budgetNanos = remainingBudget.toNanos(); }
+        catch (ArithmeticException overflow) { budgetNanos = Long.MAX_VALUE; }
+        Resolution result = resolve(authorization, occurrence);
+        return System.nanoTime() - started >= budgetNanos ? Resolution.unavailable() : result;
     }
 
     static SourceOccurrenceAccess disabled() { return (authorization, occurrence) -> Optional.empty(); }

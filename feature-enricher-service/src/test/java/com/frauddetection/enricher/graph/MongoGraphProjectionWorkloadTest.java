@@ -11,6 +11,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.event.CommandFailedEvent;
 import com.mongodb.event.CommandListener;
 import com.mongodb.event.CommandStartedEvent;
+import com.mongodb.event.CommandSucceededEvent;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -56,6 +57,162 @@ class MongoGraphProjectionWorkloadTest {
     void boundedGraphWorkloadReportsMeasuredLatencyPlansAndResourceEnvelope() throws Exception {
         List<Integer> scales = selectedScales(System.getProperty("graph.store.workload.scale", "1000,5000,10000"));
         for (int scale : scales) { runScale(scale); }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "graph.twoHop.denseBenchmark", matches = "true")
+    void singleHubDenseTwoHopMeasuresVerifiedAndTruncatedBounds() throws Exception {
+        for (int priorOccurrences : List.of(100, 500, 1_000)) {
+            runDenseTwoHopScale(priorOccurrences);
+        }
+    }
+
+    private static void runDenseTwoHopScale(int priorOccurrences) throws Exception {
+        try (GraphProjectionMongoFixture mongo = new GraphProjectionMongoFixture()) {
+            mongo.start();
+            try (MongoClient root = mongo.root()) {
+                String databaseName = "graph_dense_" + priorOccurrences + "_"
+                        + UUID.randomUUID().toString().replace("-", "");
+                try (MongoClient schemaOwner = mongo.schemaOwner(root, databaseName);
+                     MongoClient ignoredWriter = mongo.writer(root, databaseName);
+                     MongoClient ignoredReader = mongo.reader(root, databaseName)) {
+                    GraphProjectionSchema.bootstrapEmptyDatabase(schemaOwner.getDatabase(databaseName));
+                }
+                CommandProbe commands = new CommandProbe();
+                try (MongoClient writerClient = monitoredClient(mongo, GraphProjectionSchema.WRITER,
+                        databaseName, commands);
+                     MongoClient readerClient = monitoredClient(mongo, GraphProjectionSchema.READER,
+                             databaseName, commands)) {
+                    MongoDatabase database = root.getDatabase(databaseName);
+                    SyntheticAuthority authority = new SyntheticAuthority();
+                    GraphEvidenceAdmission admission = new GraphEvidenceAdmission(authority,
+                            (principal, purpose, scope, deadline, now) -> GraphPolicyDecision.AUTHORIZED, CLOCK);
+                    MongoGraphProjectionStore writer = new MongoGraphProjectionStore(writerClient, databaseName,
+                            GraphProjectionSchema.WRITER, admission, CLOCK);
+                    MongoGraphProjectionStore readerStore = new MongoGraphProjectionStore(
+                            readerClient.getDatabase(databaseName), GraphProjectionSchema.READER);
+                    GraphProjectionReader reader = new GraphProjectionReader(readerStore, authority,
+                            (grant, principal, scope, now) -> grant.matches(principal, scope, now)
+                                    ? GraphPolicyDecision.AUTHORIZED : GraphPolicyDecision.DENIED,
+                            GraphQueryLimits.DEFAULT, new GraphReadCursorCodec(new byte[32]), CLOCK);
+
+                    GraphIdentityScope scope = new GraphIdentityScope(token("dense-issuer"),
+                            token("dense-institution"), token("dense-source"), token("dense-epoch"), 2);
+                    String deviceToken = token("one-dense-device-hub");
+                    List<GraphEvidenceRef> evidence = new ArrayList<>(priorOccurrences + 1);
+                    for (int index = 0; index <= priorOccurrences; index++) {
+                        GraphEvidenceRef ref = denseEvidence(index, priorOccurrences, scope, deviceToken);
+                        authority.admit(ref);
+                        GraphAdmissionOutcome admitted = admission.admit(new GraphAdmissionRequest(
+                                ref.ownerAssertionReference(), "graph-dense-writer", NOW.plusSeconds(5)));
+                        assertThat(admitted.state()).isEqualTo(GraphAdmissionState.ADMITTED);
+                        assertThat(writer.appendVerified(admitted.relation()).state())
+                                .isEqualTo(GraphAppendState.APPENDED);
+                        evidence.add(ref);
+                    }
+
+                    GraphEvidenceRef rootEvidence = evidence.getLast();
+                    GraphOccurrenceRef rootOccurrence = rootEvidence.occurrence();
+                    GraphPrivateReadGrant grant = GraphPrivateReadGrant.testOnly("graph-dense-reader", scope, 1,
+                            NOW.plusSeconds(60));
+                    long expectedEdges = priorOccurrences + 1L;
+                    assertThat(database.getCollection(GraphProjectionSchema.COLLECTION).countDocuments())
+                            .isEqualTo(expectedEdges);
+                    Set<String> occurrenceTokens = new HashSet<>();
+                    database.getCollection(GraphProjectionSchema.COLLECTION)
+                            .distinct("occurrence.token", String.class).into(occurrenceTokens);
+                    Set<String> deviceTokens = new HashSet<>();
+                    database.getCollection(GraphProjectionSchema.COLLECTION)
+                            .distinct("device.token", String.class).into(deviceTokens);
+                    long expectedNodes = occurrenceTokens.size() + deviceTokens.size();
+                    assertThat(occurrenceTokens).hasSize(priorOccurrences + 1);
+                    assertThat(deviceTokens).hasSize(1);
+                    assertThat(expectedNodes).isEqualTo(priorOccurrences + 2L);
+                    reportDenseEnvironment(mongo, root, priorOccurrences, expectedEdges, expectedNodes);
+                    reportTwoHopPlan(database, rootEvidence, priorOccurrences);
+
+                    for (int warmup = 0; warmup < WARMUP_READS; warmup++) {
+                        assertDenseOutcome(reader.readAuthorizedOccurrenceDeviceWitnesses(
+                                "graph-dense-reader", grant, scope, rootOccurrence), rootOccurrence,
+                                priorOccurrences);
+                    }
+                    commands.reset();
+                    authority.resetRevalidationCount();
+                    long[] latencyNanos = new long[100];
+                    int positive = 0;
+                    int truncated = 0;
+                    long maxDocumentsPerRead = 0;
+                    long maxFindsPerRead = 0;
+                    long maxGetMoresPerRead = 0;
+                    for (int sample = 0; sample < latencyNanos.length; sample++) {
+                        long docsBefore = commands.documentsReturned();
+                        long findsBefore = commands.findCount();
+                        long getMoresBefore = commands.getMoreCount();
+                        long started = System.nanoTime();
+                        GraphDeviceWitnessOutcome outcome = reader.readAuthorizedOccurrenceDeviceWitnesses(
+                                "graph-dense-reader", grant, scope, rootOccurrence);
+                        latencyNanos[sample] = System.nanoTime() - started;
+                        assertDenseOutcome(outcome, rootOccurrence, priorOccurrences);
+                        if (outcome.state() == GraphProjectionState.VERIFIED_BOUNDED) { positive++; }
+                        if (outcome.reason() == GraphReadReason.TRUNCATED_UNVERIFIED) { truncated++; }
+                        long docs = commands.documentsReturned() - docsBefore;
+                        long finds = commands.findCount() - findsBefore;
+                        long getMores = commands.getMoreCount() - getMoresBefore;
+                        maxDocumentsPerRead = Math.max(maxDocumentsPerRead, docs);
+                        maxFindsPerRead = Math.max(maxFindsPerRead, finds);
+                        maxGetMoresPerRead = Math.max(maxGetMoresPerRead, getMores);
+                        assertThat(docs).isLessThanOrEqualTo(3L * (GraphQueryLimits.DEFAULT.maxEdges() + 1L));
+                        assertThat(finds).isLessThanOrEqualTo(6);
+                        assertThat(getMores).isLessThanOrEqualTo(3);
+                    }
+
+                    if (priorOccurrences == 100) {
+                        assertThat(positive).isEqualTo(latencyNanos.length);
+                        assertThat(truncated).isZero();
+                        assertThat(maxDocumentsPerRead).isEqualTo(3L * (priorOccurrences + 1L));
+                        assertThat(authority.revalidationCount()).isEqualTo(4 * latencyNanos.length);
+                    } else {
+                        assertThat(positive).isZero();
+                        assertThat(truncated).isEqualTo(latencyNanos.length);
+                        assertThat(maxDocumentsPerRead)
+                                .isEqualTo(GraphQueryLimits.DEFAULT.maxEdges() + 1L);
+                        assertThat(maxFindsPerRead).isLessThanOrEqualTo(2L);
+                        assertThat(authority.revalidationCount()).isLessThanOrEqualTo(2 * latencyNanos.length);
+                    }
+                    GraphDeviceWitnessOutcome wrongPrincipal = reader.readAuthorizedOccurrenceDeviceWitnesses(
+                            "unrelated-principal", grant, scope, rootOccurrence);
+                    assertThat(wrongPrincipal.state()).isEqualTo(GraphProjectionState.DENIED);
+                    assertThat(wrongPrincipal.witness()).isEmpty();
+
+                    reportDistribution("two_hop_dense_latency_ms_" + priorOccurrences, latencyNanos, 1_000_000d);
+                    System.out.printf(Locale.ROOT,
+                            "GRAPH_TWO_HOP_DENSE edges=%d nodes=%d root_plus_priors=%d hub_degree=%d samples=%d warmups=%d owner_model=synthetic_in_memory outcome=%s positive=%d truncated=%d find=%d getMore=%d documents=%d max_documents_per_read=%d max_find_per_read=%d max_getMore_per_read=%d owner_revalidations=%d index=graph_device_neighbors auth_negative=DENIED%n",
+                            expectedEdges, expectedNodes, occurrenceTokens.size(), priorOccurrences,
+                            latencyNanos.length, WARMUP_READS,
+                            priorOccurrences == 100 ? "VERIFIED_BOUNDED" : "TRUNCATED_UNVERIFIED",
+                            positive, truncated, commands.findCount(), commands.getMoreCount(),
+                            commands.documentsReturned(), maxDocumentsPerRead, maxFindsPerRead,
+                            maxGetMoresPerRead, authority.revalidationCount());
+                }
+            }
+        }
+    }
+
+    private static void assertDenseOutcome(GraphDeviceWitnessOutcome outcome, GraphOccurrenceRef root,
+                                           int priorOccurrences) {
+        if (priorOccurrences == 100) {
+            assertThat(outcome.state()).isEqualTo(GraphProjectionState.VERIFIED_BOUNDED);
+            assertThat(outcome.reason()).isEqualTo(GraphReadReason.NONE);
+            assertThat(outcome.witness()).isPresent().get().satisfies(witness -> {
+                assertThat(witness.root()).isEqualTo(root);
+                assertThat(witness.prior().eventTime()).isBefore(root.eventTime());
+                assertThat(witness.prior().scope()).isEqualTo(root.scope());
+            });
+        } else {
+            assertThat(outcome.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+            assertThat(outcome.reason()).isEqualTo(GraphReadReason.TRUNCATED_UNVERIFIED);
+            assertThat(outcome.witness()).isEmpty();
+        }
     }
 
     private static void runScale(int observations) throws Exception {
@@ -313,7 +470,7 @@ class MongoGraphProjectionWorkloadTest {
         if (fromInclusive.isBefore(Instant.EPOCH)) { fromInclusive = Instant.EPOCH; }
         GraphNodeRef hub = GraphNodeRef.device(root.scope(), root.associatedIdentityToken(),
                 root.pseudonymKeyVersion());
-        int limit = limits.maxEdges();
+        int limit = limits.maxEdges() + 1;
         Document filter = MongoGraphProjectionStore.deviceNeighborFilter(root.scope(), List.of(hub),
                 fromInclusive, root.occurrence().eventTime(), NOW);
         Document plan = database.getCollection(GraphProjectionSchema.COLLECTION).find(filter)
@@ -465,6 +622,20 @@ class MongoGraphProjectionWorkloadTest {
                 NOW.plus(Duration.ofDays(3)));
     }
 
+    private static GraphEvidenceRef denseEvidence(int index, int priorOccurrences,
+                                                   GraphIdentityScope scope, String sharedDeviceToken) {
+        Instant eventTime = index == priorOccurrences ? NOW : NOW.minusSeconds(priorOccurrences - index + 1L);
+        GraphOccurrenceRef occurrence = new GraphOccurrenceRef(scope, token("dense-occurrence-" + index), eventTime);
+        String proof = "dense-proof-" + priorOccurrences + '-' + index;
+        return new GraphEvidenceRef(scope, occurrence, sharedDeviceToken, 7,
+                token("dense-receipt-" + proof), token("dense-raw-" + proof), token("dense-enriched-" + proof),
+                token("dense-assertion-" + proof), token("dense-coverage-" + proof), token("dense-policy-" + proof),
+                new GraphScoredOccurrenceRef(token("dense-scored-" + proof), eventTime.plusMillis(1),
+                        token("dense-fingerprint-" + proof), GraphScoredOccurrenceRef.INITIAL_RUN),
+                token("dense-snapshot-" + proof), eventTime.minusSeconds(300), eventTime, 1,
+                NOW.plus(Duration.ofDays(3)));
+    }
+
     private static GraphEvidenceRef evidenceWithDifferentProof(GraphEvidenceRef existing) {
         return new GraphEvidenceRef(existing.scope(), existing.occurrence(), token("rotated-device"),
                 existing.pseudonymKeyVersion(), token("rotated-receipt"), existing.rawCommitment(),
@@ -506,10 +677,28 @@ class MongoGraphProjectionWorkloadTest {
                 host.getMemory(), host.getCpuQuota(), host.getCpuPeriod(), scale);
     }
 
+    private static void reportDenseEnvironment(GraphProjectionMongoFixture mongo, MongoClient root,
+                                              int priorOccurrences, long rows, long nodes) {
+        String version = root.getDatabase("admin").runCommand(new Document("buildInfo", 1)).getString("version");
+        HostConfig host = mongo.hostConfig();
+        Runtime runtime = Runtime.getRuntime();
+        String mavenVersion = System.getProperty("benchmark.maven.version");
+        if (mavenVersion == null || mavenVersion.isBlank()) {
+            throw new IllegalStateException("DENSE_BENCHMARK_MAVEN_VERSION_REQUIRED");
+        }
+        System.out.printf(Locale.ROOT,
+                "GRAPH_TWO_HOP_DENSE_ENV java=%s maven=%s os=%s/%s mongo=%s image=%s docker_mode=testcontainers cpus=%d jvm_max_heap_bytes=%d docker_memory_limit_bytes=%d docker_cpu_quota=%d docker_cpu_period=%d samples=100 warmups=10 graph_edges=%d graph_nodes=%d root_plus_priors=%d hub_degree=%d owner_model=synthetic_in_memory topology=single_replica_set_member%n",
+                System.getProperty("java.version"), mavenVersion,
+                System.getProperty("os.name"), System.getProperty("os.version"), version,
+                mongo.imageName(), runtime.availableProcessors(), runtime.maxMemory(), host.getMemory(),
+                host.getCpuQuota(), host.getCpuPeriod(), rows, nodes, rows, priorOccurrences);
+    }
+
     private static void reportMongoCommands(CommandProbe commands, int observations) {
         System.out.printf(Locale.ROOT,
-                "GRAPH_WORKLOAD_COMMANDS scale=%d find=%d started=%d failed=%d retryable_failures=%d write_conflicts=%d duplicate_key_conflicts=%d%n",
-                observations, commands.findCommands.sum(), commands.started.sum(), commands.failed.sum(),
+                "GRAPH_WORKLOAD_COMMANDS scale=%d find=%d getMore=%d documents_returned=%d started=%d failed=%d retryable_failures=%d write_conflicts=%d duplicate_key_conflicts=%d%n",
+                observations, commands.findCount(), commands.getMoreCount(), commands.documentsReturned(),
+                commands.started.sum(), commands.failed.sum(),
                 commands.retryableFailures.sum(), commands.writeConflicts.sum(), commands.duplicateKeyConflicts.sum());
     }
 
@@ -550,9 +739,12 @@ class MongoGraphProjectionWorkloadTest {
     private static final class SyntheticAuthority implements GraphRelationAuthority {
         private final Map<String, GraphEvidenceRef> evidenceByOwnerReference = new ConcurrentHashMap<>();
         private final Set<String> revokedReferences = ConcurrentHashMap.newKeySet();
+        private final AtomicInteger revalidationCount = new AtomicInteger();
 
         void admit(GraphEvidenceRef evidence) { evidenceByOwnerReference.put(evidence.ownerAssertionReference(), evidence); }
         void revoke(GraphEvidenceRef evidence) { revokedReferences.add(evidence.ownerAssertionReference()); }
+        int revalidationCount() { return revalidationCount.get(); }
+        void resetRevalidationCount() { revalidationCount.set(0); }
         void replace(GraphEvidenceRef previous, GraphEvidenceRef current) {
             evidenceByOwnerReference.put(previous.ownerAssertionReference(), current);
         }
@@ -564,6 +756,11 @@ class MongoGraphProjectionWorkloadTest {
         }
 
         @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+            revalidationCount.incrementAndGet();
+            return current(expected);
+        }
+
+        private GraphRelationResolution current(GraphEvidenceRef expected) {
             if (revokedReferences.contains(expected.ownerAssertionReference())) {
                 return GraphRelationResolution.denied(GraphReadReason.AUTHORITY_REVOKED);
             }
@@ -574,19 +771,22 @@ class MongoGraphProjectionWorkloadTest {
 
         @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal,
                                                               Duration remainingBudget) {
+            revalidationCount.incrementAndGet();
             if (remainingBudget == null || remainingBudget.isZero() || remainingBudget.isNegative()) {
                 return GraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
             }
             if (remainingBudget.compareTo(GraphQueryLimits.DEFAULT.maxQueryTime()) > 0) {
                 return GraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
             }
-            return revalidate(expected, principal);
+            return current(expected);
         }
     }
 
     private static final class CommandProbe implements CommandListener {
         private final LongAdder started = new LongAdder();
         private final LongAdder findCommands = new LongAdder();
+        private final LongAdder getMoreCommands = new LongAdder();
+        private final LongAdder documentsReturned = new LongAdder();
         private final LongAdder failed = new LongAdder();
         private final LongAdder retryableFailures = new LongAdder();
         private final LongAdder writeConflicts = new LongAdder();
@@ -595,6 +795,16 @@ class MongoGraphProjectionWorkloadTest {
         @Override public void commandStarted(CommandStartedEvent event) {
             started.increment();
             if ("find".equals(event.getCommandName())) { findCommands.increment(); }
+            if ("getMore".equals(event.getCommandName())) { getMoreCommands.increment(); }
+        }
+
+        @Override public void commandSucceeded(CommandSucceededEvent event) {
+            var cursorValue = event.getResponse().get("cursor");
+            if (cursorValue == null || !cursorValue.isDocument()) { return; }
+            var cursor = cursorValue.asDocument();
+            var batch = cursor.get("firstBatch");
+            if (batch == null) { batch = cursor.get("nextBatch"); }
+            if (batch != null && batch.isArray()) { documentsReturned.add(batch.asArray().size()); }
         }
 
         @Override public void commandFailed(CommandFailedEvent event) {
@@ -613,10 +823,16 @@ class MongoGraphProjectionWorkloadTest {
         void reset() {
             started.reset();
             findCommands.reset();
+            getMoreCommands.reset();
+            documentsReturned.reset();
             failed.reset();
             retryableFailures.reset();
             writeConflicts.reset();
             duplicateKeyConflicts.reset();
         }
+
+        long findCount() { return findCommands.sum(); }
+        long getMoreCount() { return getMoreCommands.sum(); }
+        long documentsReturned() { return documentsReturned.sum(); }
     }
 }

@@ -4,6 +4,7 @@ import com.frauddetection.common.events.device.DeviceRiskEvidence;
 import com.frauddetection.common.events.source.SourceScoredOccurrence;
 import com.frauddetection.common.events.source.SourceOccurrenceAccess;
 import com.frauddetection.common.events.source.MongoSourceOccurrenceStore;
+import com.frauddetection.common.events.source.MongoOperationBudget;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.CountryFact;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.HistoryFact;
 import com.frauddetection.common.events.device.DeviceRiskEvidence.NetworkFact;
@@ -201,16 +202,21 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
      * references; BSON stays inside this owner package and no proof bytes are reconstructed.
      */
     GraphOccurrenceRead graphOccurrence(String ownerReference, SourceScoredOccurrence score) {
+        return graphOccurrence(ownerReference, score, null);
+    }
+
+    GraphOccurrenceRead graphOccurrence(String ownerReference, SourceScoredOccurrence score,
+                                        MongoOperationBudget budget) {
         if (integrityKey == null || ownerReference == null || !DeviceObservationStore.TOKEN.matcher(ownerReference).matches()) {
             return GraphOccurrenceRead.denied(GraphReadReason.REFERENCE_INVALID);
         }
         try {
             return transaction(session -> {
                 Instant now = clock.instant();
-                Document row = occurrences.find(session, eq("_id", ownerReference)).first();
-                Document candidate = candidates.find(session, eq("_id", ownerReference)).first();
-                Document observation = observations.find(session, eq("_id", ownerReference)).first();
-                Document anchor = historyMemberAnchors.find(session, eq("_id", ownerReference)).first();
+                Document row = findFirst(occurrences, session, eq("_id", ownerReference), budget);
+                Document candidate = findFirst(candidates, session, eq("_id", ownerReference), budget);
+                Document observation = findFirst(observations, session, eq("_id", ownerReference), budget);
+                Document anchor = findFirst(historyMemberAnchors, session, eq("_id", ownerReference), budget);
                 if (row == null || candidate == null || observation == null || anchor == null) {
                     return GraphOccurrenceRead.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
                 }
@@ -236,9 +242,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                 }
                 DeviceObservationStore.Provenance provenance = DeviceObservationStore.Provenance.from(row);
                 int keyVersion = row.getInteger("keyVersion");
-                GraphOccurrenceRead authorityRead = historyOutcome(authority.currentStatus(provenance, keyVersion));
+                DeviceObservationStore.HistoryAuthority.Status currentSourceStatus = budget == null
+                        ? authority.currentStatus(provenance, keyVersion)
+                        : authority.currentStatus(provenance, keyVersion, budget.remaining());
+                GraphOccurrenceRead authorityRead = historyOutcome(currentSourceStatus);
                 if (authorityRead != null) { return authorityRead; }
-                Document progress = coverage.find(session, eq("_id", scopeId(row))).first();
+                Document progress = findFirst(coverage, session, eq("_id", scopeId(row)), budget);
                 if (progress == null) { return GraphOccurrenceRead.pending(GraphReadReason.COVERAGE_UNAVAILABLE); }
                 if (!epoch.matches(progress) || !DeviceRecordIntegrity.coverageMatches(integrityKey, progress)
                         || !Objects.equals(progress.getInteger("keyVersion"), keyVersion)
@@ -268,7 +277,7 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                     return GraphOccurrenceRead.pending(GraphReadReason.COVERAGE_UNAVAILABLE);
                 }
                 if (hasActiveOperationalRevocation(session, epoch.scopeId(row.getString("institution"), row.getString("source"))
-                        + ':' + keyVersion + ':' + row.getString("device"), clock.instant())) {
+                        + ':' + keyVersion + ':' + row.getString("device"), clock.instant(), budget)) {
                     return GraphOccurrenceRead.denied(GraphReadReason.AUTHORITY_REVOKED);
                 }
                 Document binding = row.get("scoredBinding", Document.class);
@@ -293,10 +302,21 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                         anchor.getLong("coverageGeneration"), row.getDate("coverageStart").toInstant(),
                         progress.getDate("watermark").toInstant(), rowExpiry.toInstant(),
                         row.getString("stageACommitment"), scoredReference));
-            });
+            }, budget);
         } catch (RuntimeException unavailable) {
-            return GraphOccurrenceRead.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+            return GraphOccurrenceRead.unavailable(budget != null && budget.expired()
+                    ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.OWNER_UNAVAILABLE);
         }
+    }
+
+    private static Document findFirst(MongoCollection<Document> collection, ClientSession session,
+                                      org.bson.conversions.Bson filter, MongoOperationBudget budget) {
+        if (budget == null) { return collection.find(session, filter).first(); }
+        budget.check();
+        // The transaction owns the CSOT deadline; per-collection withTimeout would change timeoutMS mid-transaction.
+        Document result = collection.find(session, filter).first();
+        budget.check();
+        return result;
     }
 
     private static GraphOccurrenceRead historyOutcome(DeviceObservationStore.HistoryAuthority.Status status) {
@@ -968,6 +988,12 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
         return tombstone != null && !isExpired(tombstone, "expireAt", now);
     }
 
+    private boolean hasActiveOperationalRevocation(ClientSession session, String id, Instant now,
+                                                   MongoOperationBudget budget) {
+        Document tombstone = findFirst(revocationTombstones, session, eq("_id", id), budget);
+        return tombstone != null && !isExpired(tombstone, "expireAt", now);
+    }
+
     private static boolean terminalCandidateExpired(Document candidate, Instant now) {
         return !"STAGED".equals(candidate.getString("status"))
                 && (!candidate.containsKey("terminalExpireAt")
@@ -1279,14 +1305,24 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
     }
 
     private <T> T transaction(Function<ClientSession, T> body) {
+        return transaction(body, null);
+    }
+
+    private <T> T transaction(Function<ClientSession, T> body, MongoOperationBudget budget) {
         for (int attempt = 0; attempt < MAX_TRANSACTION_ATTEMPTS; attempt++) {
             try (ClientSession session = client.startSession()) {
-                session.startTransaction(TRANSACTION_OPTIONS);
+                if (budget != null) {
+                    budget.check();
+                    session.startTransaction(budget.transactionOptions(TRANSACTION_OPTIONS));
+                } else {
+                    session.startTransaction(TRANSACTION_OPTIONS);
+                }
                 T result;
                 try {
                     result = body.apply(session);
+                    if (budget != null) { budget.check(); }
                 } catch (RuntimeException exception) {
-                    if (session.hasActiveTransaction()) {
+                    if (session.hasActiveTransaction() && (budget == null || !budget.expired())) {
                         session.abortTransaction();
                     }
                     if (exception instanceof MongoException mongo
@@ -1297,13 +1333,14 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                     throw exception;
                 }
                 try {
-                    commitWithUnknownResultRetry(session);
+                    if (budget == null) { commitWithUnknownResultRetry(session); }
+                    else { commitWithUnknownResultRetry(session, budget); }
                     return result;
                 } catch (RuntimeException exception) {
                     if (exception instanceof MongoException mongo
                             && mongo.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)
                             && attempt + 1 < MAX_TRANSACTION_ATTEMPTS) {
-                        if (session.hasActiveTransaction()) {
+                        if (session.hasActiveTransaction() && (budget == null || !budget.expired())) {
                             session.abortTransaction();
                         }
                         continue;
@@ -1328,6 +1365,21 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
             } catch (MongoException exception) {
                 if (!exception.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)
                         || attempt + 1 == MAX_COMMIT_ACK_ATTEMPTS) {
+                    throw exception;
+                }
+            }
+        }
+    }
+
+    private static void commitWithUnknownResultRetry(ClientSession session, MongoOperationBudget budget) {
+        for (int attempt = 0; attempt < MAX_COMMIT_ACK_ATTEMPTS; attempt++) {
+            budget.check();
+            try {
+                session.commitTransaction();
+                return;
+            } catch (MongoException exception) {
+                if (!exception.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)
+                        || attempt + 1 == MAX_COMMIT_ACK_ATTEMPTS || budget.expired()) {
                     throw exception;
                 }
             }

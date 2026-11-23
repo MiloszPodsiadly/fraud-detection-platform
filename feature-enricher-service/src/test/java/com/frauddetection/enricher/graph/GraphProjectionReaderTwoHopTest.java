@@ -69,6 +69,16 @@ class GraphProjectionReaderTwoHopTest {
 
         assertThat(forward.witness().orElseThrow().prior()).isEqualTo(earliest.edge().evidence().occurrence());
         assertThat(reversed.witness().orElseThrow()).isEqualTo(forward.witness().orElseThrow());
+        assertThat(owner.revalidations).hasValue(8);
+        assertThat(owner.revalidatedOwnerReferences).containsExactly(
+                root.edge().evidence().ownerAssertionReference(),
+                earliest.edge().evidence().ownerAssertionReference(),
+                root.edge().evidence().ownerAssertionReference(),
+                earliest.edge().evidence().ownerAssertionReference(),
+                root.edge().evidence().ownerAssertionReference(),
+                earliest.edge().evidence().ownerAssertionReference(),
+                root.edge().evidence().ownerAssertionReference(),
+                earliest.edge().evidence().ownerAssertionReference());
     }
 
     @Test
@@ -230,7 +240,7 @@ class GraphProjectionReaderTwoHopTest {
         GraphIdentityScope scope = scope("epoch-a");
         GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
         GraphStoredEdge prior = stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60));
-        int[][] expectedReads = {{1, 0}, {3, 3}};
+        int[][] expectedReads = {{1, 0}, {1, 1}};
 
         for (int revokeOnCheck = 2; revokeOnCheck <= 3; revokeOnCheck++) {
             int revokeAt = revokeOnCheck;
@@ -330,23 +340,20 @@ class GraphProjectionReaderTwoHopTest {
     }
 
     @Test
-    void grantExpiryBetweenRootAndDevicePhasesStopsBeforeSecondGraphQuery() {
+    void grantExpiryBetweenRootAndDevicePhasesStopsBeforeDeviceQuery() {
         GraphIdentityScope scope = scope("epoch-a");
         GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
         GraphStoredEdge prior = stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60));
-        AtomicReference<Instant> now = new AtomicReference<>(READ_AT);
+        AtomicInteger clockReads = new AtomicInteger();
         Clock advancing = new Clock() {
             @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
             @Override public Clock withZone(java.time.ZoneId zone) { return this; }
-            @Override public Instant instant() { return now.get(); }
-        };
-        GraphPrivateReadGrant expiring = grant(scope, READ_AT.plusSeconds(1));
-        RecordingAuthority owner = new RecordingAuthority() {
-            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
-                now.set(READ_AT.plusSeconds(2));
-                return GraphRelationResolution.verified(expected, expected.expiresAt());
+            @Override public Instant instant() {
+                return clockReads.incrementAndGet() <= 2 ? READ_AT : READ_AT.plusSeconds(2);
             }
         };
+        GraphPrivateReadGrant expiring = grant(scope, READ_AT.plusSeconds(1));
+        RecordingAuthority owner = new RecordingAuthority();
         FakeStore store = new FakeStore(List.of(root, prior));
 
         GraphDeviceWitnessOutcome outcome = read(store, owner, scope, root.edge().evidence().occurrence(),
@@ -356,6 +363,7 @@ class GraphProjectionReaderTwoHopTest {
         assertThat(outcome.reason()).isEqualTo(GraphReadReason.GRANT_DENIED);
         assertThat(store.rootReads).hasValue(1);
         assertThat(store.deviceReads).hasValue(0);
+        assertThat(owner.revalidations).hasValue(0);
     }
 
     @Test
@@ -471,7 +479,7 @@ class GraphProjectionReaderTwoHopTest {
         GraphIdentityScope scope = scope("epoch-a");
         GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
         GraphStoredEdge prior = stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60));
-        int[][] expectedReads = {{1, 0}, {1, 1}, {2, 2}, {2, 2}};
+        int[][] expectedReads = {{1, 1}, {1, 1}, {2, 2}, {2, 2}};
 
         for (int expireOnRevalidation = 1; expireOnRevalidation <= expectedReads.length; expireOnRevalidation++) {
             int failAt = expireOnRevalidation;
@@ -599,6 +607,7 @@ class GraphProjectionReaderTwoHopTest {
     private static class RecordingAuthority implements GraphRelationAuthority {
         final AtomicInteger revalidations = new AtomicInteger();
         final List<Duration> remainingBudgets = new ArrayList<>();
+        final List<String> revalidatedOwnerReferences = new ArrayList<>();
 
         @Override public GraphRelationResolution resolveForAdmission(String ownerReference) {
             return GraphRelationResolution.unavailable(GraphReadReason.NOT_SUPPORTED);
@@ -606,6 +615,7 @@ class GraphProjectionReaderTwoHopTest {
 
         @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
             revalidations.incrementAndGet();
+            revalidatedOwnerReferences.add(expected.ownerAssertionReference());
             return GraphRelationResolution.verified(expected, expected.expiresAt());
         }
 

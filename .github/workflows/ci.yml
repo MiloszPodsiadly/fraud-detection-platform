@@ -51,6 +51,73 @@ jobs:
       - name: Build and test backend modules
         run: mvn -B -U verify -Dproject.root=${{ github.workspace }} -Dsurefire.failIfNoSpecifiedTests=false
 
+  graph-signed-e2e:
+    name: Signed Graph to scorer E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Record exact tested revision
+        run: |
+          TESTED_GIT_SHA=$(git rev-parse HEAD)
+          test "$TESTED_GIT_SHA" = "$GITHUB_SHA"
+          echo "TESTED_GIT_SHA=$TESTED_GIT_SHA" >> "$GITHUB_ENV"
+          echo "Signed Graph E2E revision: $TESTED_GIT_SHA"
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify Docker is available for signed owner fixtures
+        run: docker version
+
+      - name: Run the live signed Graph-to-scorer proof
+        run: mvn -B -Pgraph-signed-e2e -pl fraud-scoring-service -am -Dtest=GraphRiskSignalEngineSignedMongoE2ETest,GraphRiskSignalEngineSignedDenseMongoE2ETest -Dsurefire.failIfNoSpecifiedTests=false verify
+
+      - name: Require the live E2E report to contain a passing, non-skipped test
+        run: |
+          REPORT=fraud-scoring-service/target/surefire-reports/TEST-com.frauddetection.scoring.graph.GraphRiskSignalEngineSignedMongoE2ETest.xml
+          test -f "$REPORT"
+          grep -Eq '<testsuite[^>]*tests="[1-9][0-9]*"' "$REPORT"
+          grep -Eq '<testsuite[^>]*failures="0"' "$REPORT"
+          grep -Eq '<testsuite[^>]*errors="0"' "$REPORT"
+          grep -Eq '<testsuite[^>]*skipped="0"' "$REPORT"
+
+      - name: Require the real signed dense-owner report to contain a passing, non-skipped test
+        run: |
+          REPORT=fraud-scoring-service/target/surefire-reports/TEST-com.frauddetection.scoring.graph.GraphRiskSignalEngineSignedDenseMongoE2ETest.xml
+          test -f "$REPORT"
+          grep -Eq '<testsuite[^>]*tests="1"' "$REPORT"
+          grep -Eq '<testsuite[^>]*failures="0"' "$REPORT"
+          grep -Eq '<testsuite[^>]*errors="0"' "$REPORT"
+          grep -Eq '<testsuite[^>]*skipped="0"' "$REPORT"
+          grep -q 'name="realSignedHundredPriorHubMeasuresOwnerAndDatabaseCostUnderTheScorerDeadline"' "$REPORT"
+
+      - name: Run the dense single-hub Graph benchmark
+        run: |
+          MAVEN_VERSION="$(mvn -version | awk 'NR == 1 {print $3}')"
+          mvn -B -pl feature-enricher-service -am \
+            -Dtest=MongoGraphProjectionWorkloadTest#singleHubDenseTwoHopMeasuresVerifiedAndTruncatedBounds \
+            -Dgraph.twoHop.denseBenchmark=true \
+            "-Dbenchmark.maven.version=${MAVEN_VERSION}" \
+            -Dsurefire.failIfNoSpecifiedTests=false test
+
+      - name: Require the dense benchmark report to contain its passing, non-skipped selector
+        run: |
+          REPORT=feature-enricher-service/target/surefire-reports/TEST-com.frauddetection.enricher.graph.MongoGraphProjectionWorkloadTest.xml
+          test -f "$REPORT"
+          grep -Eq '<testsuite[^>]*tests="1"' "$REPORT"
+          grep -Eq '<testsuite[^>]*failures="0"' "$REPORT"
+          grep -Eq '<testsuite[^>]*errors="0"' "$REPORT"
+          grep -Eq '<testsuite[^>]*skipped="0"' "$REPORT"
+          grep -q 'name="singleHubDenseTwoHopMeasuresVerifiedAndTruncatedBounds"' "$REPORT"
+
   institutional-reliability:
     name: Institutional Reliability Proof
     runs-on: ubuntu-latest

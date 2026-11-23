@@ -160,13 +160,8 @@ class MongoGraphProjectionStoreIntegrationTest {
                     assertThat(result.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
                     assertThat(result.reason()).isEqualTo(GraphReadReason.TRUNCATED_UNVERIFIED);
                     assertThat(result.witness()).isEmpty();
-                    if (candidateCount < 256) {
-                        // 126 priors fit root + hub + 126 occurrences = 128 nodes; the next distinct node fails.
-                        assertThat(ownerChecks).hasValue(128);
-                    } else {
-                        // The 256th candidate is the maxEdges+1 sentinel after the root edge is counted.
-                        assertThat(ownerChecks).hasValue(1);
-                    }
+                    // Structurally invalid or over-bound snapshots fail before choosing an owner-authenticated pair.
+                    assertThat(ownerChecks).hasValue(0);
                 }
                 assertThat(commands.findLimits).isNotEmpty().allSatisfy(limit ->
                         assertThat(limit).isBetween(1, GraphQueryLimits.DEFAULT.maxEdges() + 1));
@@ -219,7 +214,7 @@ class MongoGraphProjectionStoreIntegrationTest {
             assertThat(overflow.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
             assertThat(overflow.reason()).isEqualTo(GraphReadReason.TRUNCATED_UNVERIFIED);
             assertThat(overflow.witness()).isEmpty();
-            assertThat(ownerChecks).hasValue(3);
+            assertThat(ownerChecks).hasValue(0);
             assertThat(commands.findLimits).hasSize(2).contains(257, 254);
             assertThat(commands.findBatchSizes).containsOnly(GraphQueryLimits.DEFAULT.maxPageSize());
             assertThat(commands.findMaxTimeMillis).allSatisfy(maxTime -> assertThat(maxTime).isBetween(1, 5_000));

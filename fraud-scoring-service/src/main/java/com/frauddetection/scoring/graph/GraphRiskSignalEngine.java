@@ -75,13 +75,17 @@ final class GraphRiskSignalEngine implements FraudSignalEngine, AutoCloseable {
                 return unavailable(GraphRiskDiagnosticPolicy.ReasonCode.GRAPH_PROVIDER_NOT_CONFIGURED);
             }
             if (read.status() == GraphRiskEvidenceRead.Status.VERIFIED_POSITIVE) {
+                if (!read.isBoundTo(context) || read.binding() == null) {
+                    return unavailable(GraphRiskDiagnosticPolicy.ReasonCode.GRAPH_AUTHORITY_DENIED);
+                }
                 // A shaped positive description is not authority; require a fresh typed owner result.
                 GraphRiskEvidenceRead current = access.requireOccurrence(context, read);
                 if (current == null) {
                     return unavailable(GraphRiskDiagnosticPolicy.ReasonCode.GRAPH_PROVIDER_NOT_CONFIGURED);
                 }
                 if (current.status() == GraphRiskEvidenceRead.Status.VERIFIED_POSITIVE
-                        && !current.witnesses().equals(read.witnesses())) {
+                        && (!current.isBoundTo(context) || !Objects.equals(current.binding(), read.binding())
+                        || !current.witnesses().equals(read.witnesses()))) {
                     return unavailable(GraphRiskDiagnosticPolicy.ReasonCode.GRAPH_AUTHORITY_DENIED);
                 }
                 read = current;

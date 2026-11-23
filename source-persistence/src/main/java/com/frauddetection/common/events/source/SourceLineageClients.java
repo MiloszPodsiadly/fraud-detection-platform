@@ -15,7 +15,11 @@ public final class SourceLineageClients {
             if (connection.getCredential() == null || !properties.expectedMongoUser().equals(connection.getCredential().getUserName())) {
                 throw new IllegalArgumentException("SOURCE_LINEAGE_CREDENTIAL_REQUIRED");
             }
-            return MongoClients.create(MongoClientSettings.builder().applyConnectionString(connection).timeout(5, TimeUnit.SECONDS).build());
+            return MongoClients.create(MongoClientSettings.builder().applyConnectionString(connection)
+                    .timeout(5, TimeUnit.SECONDS)
+                    .applyToClusterSettings(settings -> settings.serverSelectionTimeout(5, TimeUnit.SECONDS))
+                    .applyToSocketSettings(settings -> settings.connectTimeout(5, TimeUnit.SECONDS)
+                            .readTimeout(5, TimeUnit.SECONDS)).build());
         } catch (RuntimeException invalid) { throw new IllegalArgumentException("SOURCE_LINEAGE_CONNECTION_CONFIGURATION_INVALID"); }
     }
 }

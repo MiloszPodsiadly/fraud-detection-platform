@@ -276,8 +276,6 @@ final class GraphProjectionReader {
                 return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
                         GraphReadReason.REFERENCE_INVALID);
             }
-            GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(row, requestingPrincipal, started);
-            if (ownerFailure != null) { return witnessFailure(ownerFailure); }
             hubMap.put(edge.to().canonicalId(), edge.to());
             nodeIds.add(edge.to().canonicalId());
             if (nodeIds.size() > limits.maxNodes()) {
@@ -347,14 +345,38 @@ final class GraphProjectionReader {
                 return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
                         GraphReadReason.REFERENCE_INVALID);
             }
-            GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(row, requestingPrincipal, started);
-            if (ownerFailure != null) { return witnessFailure(ownerFailure); }
             nodeIds.add(edge.from().canonicalId());
             if (nodeIds.size() > limits.maxNodes()) {
                 return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
                         GraphReadReason.TRUNCATED_UNVERIFIED);
             }
         }
+
+        // The candidate rows are untrusted and all were structurally checked above. A single witness
+        // uses only this deterministic root/prior pair, so owner authority is independently re-read
+        // twice for those exact rows while the complete candidate snapshots fence both phases.
+        GraphStoredEdge selectedPrior = deviceRows.stream()
+                .min(Comparator.comparing((GraphStoredEdge row) -> row.edge().evidence().occurrence().eventTime())
+                        .thenComparing(row -> row.edge().evidence().occurrence().occurrenceToken())
+                        .thenComparing(row -> row.edge().canonicalId()))
+                .orElseThrow();
+        GraphStoredEdge selectedRoot = rootRows.stream()
+                .filter(row -> row.edge().to().equals(selectedPrior.edge().to()))
+                .min(Comparator.comparing(GraphStoredEdge::admittedAt)
+                        .thenComparing(row -> row.edge().canonicalId()))
+                .orElse(null);
+        if (selectedRoot == null) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                    GraphReadReason.REFERENCE_INVALID);
+        }
+        GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(selectedRoot, requestingPrincipal, started);
+        if (ownerFailure == null) {
+            ownerFailure = currentGrantFailure(grant, requestingPrincipal, exactScope);
+            if (ownerFailure == null) {
+                ownerFailure = revalidateOwnerWithinBudget(selectedPrior, requestingPrincipal, started);
+            }
+        }
+        if (ownerFailure != null) { return witnessFailure(ownerFailure); }
 
         List<GraphStoredEdge> rootAfterFirstOwnerPass;
         List<GraphStoredEdge> deviceAfterFirstOwnerPass;
@@ -375,14 +397,14 @@ final class GraphProjectionReader {
                     ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.TRUNCATED_UNVERIFIED);
         }
 
-        for (GraphStoredEdge row : rootRows) {
-            GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(row, requestingPrincipal, started);
-            if (ownerFailure != null) { return witnessFailure(ownerFailure); }
+        ownerFailure = revalidateOwnerWithinBudget(selectedRoot, requestingPrincipal, started);
+        if (ownerFailure == null) {
+            ownerFailure = currentGrantFailure(grant, requestingPrincipal, exactScope);
+            if (ownerFailure == null) {
+                ownerFailure = revalidateOwnerWithinBudget(selectedPrior, requestingPrincipal, started);
+            }
         }
-        for (GraphStoredEdge row : deviceRows) {
-            GraphReadOutcome ownerFailure = revalidateOwnerWithinBudget(row, requestingPrincipal, started);
-            if (ownerFailure != null) { return witnessFailure(ownerFailure); }
-        }
+        if (ownerFailure != null) { return witnessFailure(ownerFailure); }
 
         List<GraphStoredEdge> rootAfterSecondOwnerPass;
         List<GraphStoredEdge> deviceAfterSecondOwnerPass;
@@ -412,20 +434,6 @@ final class GraphProjectionReader {
             return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, GraphReadReason.DEADLINE_EXCEEDED);
         }
 
-        GraphStoredEdge selectedPrior = deviceRows.stream()
-                .min(Comparator.comparing((GraphStoredEdge row) -> row.edge().evidence().occurrence().eventTime())
-                        .thenComparing(row -> row.edge().evidence().occurrence().occurrenceToken())
-                        .thenComparing(row -> row.edge().canonicalId()))
-                .orElseThrow();
-        GraphStoredEdge selectedRoot = rootRows.stream()
-                .filter(row -> row.edge().to().equals(selectedPrior.edge().to()))
-                .min(Comparator.comparing(GraphStoredEdge::admittedAt)
-                        .thenComparing(row -> row.edge().canonicalId()))
-                .orElse(null);
-        if (selectedRoot == null) {
-            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
-                    GraphReadReason.REFERENCE_INVALID);
-        }
         Instant graphAssociationAdmittedAt = selectedRoot.admittedAt().isAfter(selectedPrior.admittedAt())
                 ? selectedRoot.admittedAt() : selectedPrior.admittedAt();
         return GraphDeviceWitnessOutcome.verified(new GraphDeviceWitnessOutcome.Witness(typedRoot,
@@ -457,6 +465,18 @@ final class GraphProjectionReader {
         if (row.lifecycle() != GraphEdgeLifecycle.ACTIVE || !row.validUntil().isAfter(now)
                 || !owner.validUntil().isAfter(now) || !row.edge().evidence().expiresAt().isAfter(now)) {
             return GraphReadOutcome.unavailable(GraphReadReason.RETENTION_EXPIRED);
+        }
+        return null;
+    }
+
+    private GraphReadOutcome currentGrantFailure(GraphPrivateReadGrant grant, String requestingPrincipal,
+                                                  GraphIdentityScope exactScope) {
+        Instant now = clock.instant();
+        GraphPolicyDecision decision = verifyGrant(grant, requestingPrincipal, exactScope, now);
+        if (!grant.matches(requestingPrincipal, exactScope, now)
+                || decision != GraphPolicyDecision.AUTHORIZED) {
+            return grantOutcome(decision == GraphPolicyDecision.AUTHORIZED
+                    ? GraphPolicyDecision.DENIED : decision);
         }
         return null;
     }

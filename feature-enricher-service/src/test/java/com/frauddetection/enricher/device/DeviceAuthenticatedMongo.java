@@ -90,6 +90,11 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
 
     MongoClient owner() { return connect("source_owner", "ephemeral-owner-only", "admin"); }
     void resetReadOperations() { readOperations.clear(); }
+    void resetReadMetrics() {
+        readOperations.clear();
+        readDocuments.clear();
+        readRequestCollections.clear();
+    }
     Map<String, Long> readOperationCounts() {
         Map<String, Long> snapshot = new TreeMap<>();
         readOperations.forEach((key, value) -> snapshot.put(key, value.sum()));
@@ -125,9 +130,16 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
     MongoClient consumer(MongoClient owner, String database, boolean enricher) {
         return consumer(owner, database, enricher, false);
     }
+    MongoClient enricher(MongoClient owner, String database, String principal) {
+        return consumer(owner, database, true, false, principal);
+    }
     MongoClient occurrenceWriter(MongoClient owner, String database) { return consumer(owner, database, false, true); }
     private MongoClient consumer(MongoClient owner, String database, boolean enricher, boolean occurrenceWriter) {
         String user = enricher ? "enricher" : occurrenceWriter ? "scored_writer" : "scorer";
+        return consumer(owner, database, enricher, occurrenceWriter, user);
+    }
+    private MongoClient consumer(MongoClient owner, String database, boolean enricher, boolean occurrenceWriter,
+                                 String user) {
         var db = owner.getDatabase(database);
         List<Document> privileges = new ArrayList<>();
         privileges.add(privilege(database, "", List.of("listCollections")));
@@ -162,6 +174,11 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
     }
 
     MongoClient occurrenceReader(MongoClient owner, String database, String user, List<Document> additionalPrivileges) {
+        return occurrenceReader(owner, database, user, additionalPrivileges, null);
+    }
+
+    MongoClient occurrenceReader(MongoClient owner, String database, String user, List<Document> additionalPrivileges,
+                                 String applicationName) {
         List<Document> privileges = new ArrayList<>();
         privileges.add(privilege(database, "", List.of("listCollections")));
         for (String collection : List.of("source_admission_identities", "source_admission_receipts", "source_lineage_raw", "source_lineage_enriched")) {
@@ -172,7 +189,7 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
             privileges.add(privilege(database, collection, collection.equals("source_scored_occurrences") ? List.of("find", "listIndexes") : List.of("listIndexes")));
         }
         privileges.addAll(additionalPrivileges);
-        return readPrincipal(owner, database, user, privileges);
+        return readPrincipal(owner, database, user, privileges, applicationName);
     }
 
     MongoClient diagnosticReader(MongoClient owner, String database) {
@@ -185,6 +202,10 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
     }
 
     MongoClient graphReader(MongoClient owner, String database, String user) {
+        return graphReader(owner, database, user, null);
+    }
+
+    MongoClient graphReader(MongoClient owner, String database, String user, String applicationName) {
         List<Document> privileges = new ArrayList<>();
         privileges.add(privilege(database, "", List.of("listCollections")));
         for (String collection : List.of("device_observation_candidates", "device_observations",
@@ -192,14 +213,19 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
                 "device_operational_revocation_tombstones")) {
             privileges.add(privilege(database, collection, List.of("find")));
         }
-        return readPrincipal(owner, database, user, privileges);
+        return readPrincipal(owner, database, user, privileges, applicationName);
     }
 
     private MongoClient readPrincipal(MongoClient owner, String database, String user, List<Document> privileges) {
+        return readPrincipal(owner, database, user, privileges, null);
+    }
+
+    private MongoClient readPrincipal(MongoClient owner, String database, String user, List<Document> privileges,
+                                     String applicationName) {
         var db = owner.getDatabase(database);
         db.runCommand(new Document("createRole", user).append("privileges", privileges).append("roles", List.of()));
         db.runCommand(new Document("createUser", user).append("pwd", "ephemeral-reader-only").append("roles", List.of(user)));
-        return connect(user, "ephemeral-reader-only", database);
+        return connect(user, "ephemeral-reader-only", database, applicationName);
     }
 
     private static Document privilege(String db, String collection, List<String> actions) {
@@ -217,7 +243,10 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
                 + "/?directConnection=true" + (authDatabase == null ? "" : "&authSource=" + authDatabase);
         MongoClient client = MongoClients.create(MongoClientSettings.builder().applicationName(applicationName)
                 .addCommandListener(readOperationListener).applyConnectionString(new ConnectionString(uri))
-                .timeout(timeout.toMillis(), TimeUnit.MILLISECONDS).build());
+                .timeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+                .applyToClusterSettings(settings -> settings.serverSelectionTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS))
+                .applyToSocketSettings(settings -> settings.connectTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+                        .readTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)).build());
         clients.add(client);
         return client;
     }

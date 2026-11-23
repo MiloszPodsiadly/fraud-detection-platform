@@ -2,6 +2,7 @@ package com.frauddetection.enricher.device;
 
 import com.frauddetection.common.events.source.MongoSourceLineage;
 import com.frauddetection.common.events.source.MongoSourceOccurrenceStore;
+import com.frauddetection.common.events.source.MongoOperationBudget;
 import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.common.events.source.SourceOccurrenceAccess;
 import com.frauddetection.common.events.source.SourceScoredOccurrence;
@@ -19,7 +20,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Device-owned, read-only bridge. It is inert unless assembled with the explicit test-only grants;
@@ -27,6 +35,18 @@ import java.util.concurrent.TimeUnit;
  */
 final class DeviceGraphRelationAuthority implements DeviceGraphRelationPort {
     private static final long MAX_VALIDATION_NANOS = TimeUnit.SECONDS.toNanos(5);
+    private static final int MAX_OWNER_READ_WORKERS = 8;
+    private static final AtomicInteger OWNER_WORKER_SEQUENCE = new AtomicInteger();
+    private static final ThreadPoolExecutor OWNER_READ_WORKERS = new ThreadPoolExecutor(0,
+            MAX_OWNER_READ_WORKERS, 30, TimeUnit.SECONDS, new SynchronousQueue<>(), task -> {
+                Thread worker = new Thread(task, "graph-owner-read-" + OWNER_WORKER_SEQUENCE.incrementAndGet());
+                worker.setDaemon(true);
+                return worker;
+            }, new ThreadPoolExecutor.AbortPolicy());
+
+    static {
+        OWNER_READ_WORKERS.allowCoreThreadTimeOut(true);
+    }
 
     private final MongoDeviceObservationStore store;
     private final MongoSourceLineage source;
@@ -106,48 +126,96 @@ final class DeviceGraphRelationAuthority implements DeviceGraphRelationPort {
                                                           DeviceGraphRelationGrant relationGrant,
                                                           DeviceGraphReadGrant readGrant,
                                                           String requestingPrincipal, long budgetNanos) {
-        long started = System.nanoTime();
+        MongoOperationBudget ownerBudget;
+        try { ownerBudget = MongoOperationBudget.starting(Duration.ofNanos(budgetNanos)); }
+        catch (RuntimeException invalid) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+        Future<DeviceGraphRelationResolution> read;
         try {
-            MongoDeviceObservationStore.GraphOccurrenceRead beforeRead = store.graphOccurrence(ownerReference, null);
+            MongoOperationBudget sharedBudget = ownerBudget;
+            read = OWNER_READ_WORKERS.submit(() -> resolveCurrentOnWorker(ownerReference, expected,
+                    relationGrant, readGrant, requestingPrincipal, sharedBudget));
+        } catch (RejectedExecutionException saturated) {
+            return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        }
+        try {
+            return read.get(ownerBudget.remainingNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException expired) {
+            read.cancel(true);
+            return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
+        } catch (InterruptedException interrupted) {
+            read.cancel(true);
+            Thread.currentThread().interrupt();
+            return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        } catch (ExecutionException failed) {
+            return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+        } catch (RuntimeException expired) {
+            read.cancel(true);
+            return DeviceGraphRelationResolution.unavailable(ownerBudget.expired()
+                    ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.OWNER_UNAVAILABLE);
+        }
+    }
+
+    private DeviceGraphRelationResolution resolveCurrentOnWorker(String ownerReference, GraphEvidenceRef expected,
+                                                                  DeviceGraphRelationGrant relationGrant,
+                                                                  DeviceGraphReadGrant readGrant,
+                                                                  String requestingPrincipal,
+                                                                  MongoOperationBudget ownerBudget) {
+        try {
+            MongoDeviceObservationStore.GraphOccurrenceRead beforeRead = store.graphOccurrence(ownerReference, null,
+                    ownerBudget);
+            if (ownerBudget.expired()) {
+                return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
+            }
             if (beforeRead.state() != MongoDeviceObservationStore.GraphOccurrenceRead.State.VERIFIED) {
                 return ownerOutcome(beforeRead);
             }
             GraphOccurrenceSnapshot before = beforeRead.snapshot();
-            if (expired(started, budgetNanos)) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
 
-            SourceLineage initialSource = resolveSource(before);
+            SourceLineage initialSource = resolveSource(before, ownerBudget.remaining());
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
             DeviceGraphRelationResolution initialAuthorization = sourceOutcome(initialSource, before, relationGrant,
                     readGrant, requestingPrincipal);
             if (initialAuthorization != null) { return initialAuthorization; }
-            if (expired(started, budgetNanos)) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
-            SourceOccurrenceAccess.Resolution initialScoreResult = scoredOccurrences.resolve(initialSource, before.scoredReference());
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+            SourceOccurrenceAccess.Resolution initialScoreResult = scoredOccurrences.resolve(initialSource,
+                    before.scoredReference(), ownerBudget.remaining());
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
             DeviceGraphRelationResolution initialScoreOutcome = scoreOutcome(initialScoreResult);
             if (initialScoreOutcome != null) { return initialScoreOutcome; }
             SourceScoredOccurrence initialScore = initialScoreResult.occurrence();
             if (!exactScore(initialScore, initialSource, before)) {
                 return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
             }
-            if (expired(started, budgetNanos)) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
 
-            MongoDeviceObservationStore.GraphOccurrenceRead currentRead = store.graphOccurrence(ownerReference, initialScore);
+            MongoDeviceObservationStore.GraphOccurrenceRead currentRead = store.graphOccurrence(ownerReference,
+                    initialScore, ownerBudget);
+            if (ownerBudget.expired()) {
+                return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
+            }
             if (currentRead.state() != MongoDeviceObservationStore.GraphOccurrenceRead.State.VERIFIED) {
                 return ownerOutcome(currentRead);
             }
             GraphOccurrenceSnapshot current = currentRead.snapshot();
             if (!before.equals(current)) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE); }
-            if (expired(started, budgetNanos)) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
-            SourceLineage finalSource = resolveSource(current);
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+            SourceLineage finalSource = resolveSource(current, ownerBudget.remaining());
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
             DeviceGraphRelationResolution finalAuthorization = sourceOutcome(finalSource, current, relationGrant,
                     readGrant, requestingPrincipal);
             if (finalAuthorization != null) { return finalAuthorization; }
-            SourceOccurrenceAccess.Resolution finalScoreResult = scoredOccurrences.resolve(finalSource, current.scoredReference());
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+            SourceOccurrenceAccess.Resolution finalScoreResult = scoredOccurrences.resolve(finalSource,
+                    current.scoredReference(), ownerBudget.remaining());
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
             DeviceGraphRelationResolution finalScoreOutcome = scoreOutcome(finalScoreResult);
             if (finalScoreOutcome != null) { return finalScoreOutcome; }
             SourceScoredOccurrence finalScore = finalScoreResult.occurrence();
             if (!exactScore(finalScore, finalSource, current) || !sameScore(initialScore, finalScore)) {
                 return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
             }
-            if (expired(started, budgetNanos)) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
+            if (ownerBudget.expired()) { return DeviceGraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED); }
 
             GraphEvidenceRef resolved = evidence(ownerReference, current, finalSource.source(), finalScore, relationGrant);
             if (expected != null && !expected.equals(resolved)) {
@@ -161,14 +229,20 @@ final class DeviceGraphRelationAuthority implements DeviceGraphRelationPort {
             }
             return DeviceGraphRelationResolution.verified(new VerifiedDeviceGraphRelation(resolved, validUntil));
         } catch (RuntimeException unavailable) {
-            return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+            return DeviceGraphRelationResolution.unavailable(ownerBudget.expired()
+                    ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.OWNER_UNAVAILABLE);
         }
     }
 
-    private SourceLineage resolveSource(GraphOccurrenceSnapshot snapshot) {
+    private SourceLineage resolveSource(GraphOccurrenceSnapshot snapshot, Duration remainingBudget) {
         DeviceObservationStore.Provenance provenance = snapshot.provenance();
-        return source.enrichedBinding(provenance.receiptId(), provenance.rawCommitment(), provenance.enrichedCommitment());
+        return source.enrichedBinding(provenance.receiptId(), provenance.rawCommitment(),
+                provenance.enrichedCommitment(), remainingBudget);
     }
+
+    static int activeOwnerReadWorkers() { return OWNER_READ_WORKERS.getActiveCount(); }
+    static int queuedOwnerReadWorkers() { return OWNER_READ_WORKERS.getQueue().size(); }
+    static int maxOwnerReadWorkers() { return MAX_OWNER_READ_WORKERS; }
 
     private DeviceGraphRelationResolution sourceOutcome(SourceLineage lineage, GraphOccurrenceSnapshot snapshot,
                                                         DeviceGraphRelationGrant relationGrant,
@@ -279,7 +353,4 @@ final class DeviceGraphRelationAuthority implements DeviceGraphRelationPort {
                 snapshot.eventTime(), snapshot.coverageGeneration(), snapshot.expiresAt());
     }
 
-    private static boolean expired(long started, long budgetNanos) {
-        return System.nanoTime() - started >= budgetNanos;
-    }
 }

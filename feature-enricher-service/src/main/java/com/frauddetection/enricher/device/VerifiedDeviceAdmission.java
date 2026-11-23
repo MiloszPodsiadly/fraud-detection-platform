@@ -46,6 +46,12 @@ final class VerifiedDeviceAdmission {
                 SourceLineage lineage = source.enrichedBinding(p.receiptId(), p.rawCommitment(), p.enrichedCommitment());
                 return currentLineageStatus(p, version, lineage);
             }
+            @Override public DeviceObservationStore.HistoryAuthority.Status currentStatus(
+                    DeviceObservationStore.Provenance p, int version, java.time.Duration remainingBudget) {
+                SourceLineage lineage = source.enrichedBinding(p.receiptId(), p.rawCommitment(),
+                        p.enrichedCommitment(), remainingBudget);
+                return currentLineageStatus(p, version, lineage);
+            }
             @Override public boolean currentHistory(List<DeviceObservationStore.Provenance> provenance, int version) {
                 for (int start = 0; start < provenance.size(); start += MongoSourceLineage.MAX_ENRICHED_BINDING_BATCH) {
                     List<DeviceObservationStore.Provenance> batch = provenance.subList(start,

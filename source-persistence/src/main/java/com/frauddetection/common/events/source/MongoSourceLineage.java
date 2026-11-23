@@ -191,11 +191,28 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         return transaction(session -> recoverEnriched(session, receiptId, commitment));
     }
 
+    SourceLineage recoverEnriched(String receiptId, String commitment, Duration remainingBudget) {
+        if (!validBudget(remainingBudget)) { return absent(UNAVAILABLE); }
+        MongoOperationBudget budget = MongoOperationBudget.starting(remainingBudget);
+        return transaction(session -> recoverEnriched(session, receiptId, commitment, budget),
+                absent(UNAVAILABLE), budget);
+    }
+
     SourceLineage recoverEnriched(ClientSession session, String receiptId, String commitment) {
         if (session == null || !session.hasActiveTransaction()) { return absent(UNAVAILABLE); }
         Document link = database.getCollection(ENRICHED).find(session, eq("eventCommitment", commitment)).first();
         if (link == null || !receiptId.equals(link.getString("receiptId"))) { return absent(UNAVAILABLE); }
         return enrichedLink(session, link, commitment);
+    }
+
+    private SourceLineage recoverEnriched(ClientSession session, String receiptId, String commitment,
+                                          MongoOperationBudget budget) {
+        if (session == null || !session.hasActiveTransaction()) { return absent(UNAVAILABLE); }
+        budget.check();
+        Document link = database.getCollection(ENRICHED).find(session, eq("eventCommitment", commitment)).first();
+        budget.check();
+        if (link == null || !receiptId.equals(link.getString("receiptId"))) { return absent(UNAVAILABLE); }
+        return enrichedLink(session, link, commitment, budget);
     }
 
     Instant receiptExpiry(String receiptId) {
@@ -1246,6 +1263,23 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         });
     }
 
+    /** Same signed binding read, with the caller's remaining monotonic budget applied to the transaction and each query. */
+    public SourceLineage enrichedBinding(String receiptId, String rawCommitment, String enrichedCommitment,
+                                         Duration remainingBudget) {
+        if (!hash(receiptId) || !hash(rawCommitment) || !hash(enrichedCommitment)
+                || !validBudget(remainingBudget)) { return absent(UNAVAILABLE); }
+        MongoOperationBudget budget = MongoOperationBudget.starting(remainingBudget);
+        return transaction(session -> {
+            budget.check();
+            Document link = database.getCollection(ENRICHED).find(session,
+                    and(eq("receiptId", receiptId), eq("eventCommitment", enrichedCommitment))).first();
+            budget.check();
+            if (link == null) { return absent(UNAVAILABLE); }
+            if (!rawCommitment.equals(link.getString("parentCommitment"))) { return absent(CONFLICT); }
+            return enrichedLink(session, link, enrichedCommitment, budget);
+        }, absent(UNAVAILABLE), budget);
+    }
+
     /** Resolves a bounded set of exact source bindings in one source snapshot, while rechecking each receipt policy. */
     public List<SourceLineage> enrichedBindings(List<EnrichedBinding> bindings) {
         if (bindings == null || bindings.isEmpty()) { return List.of(); }
@@ -1339,6 +1373,16 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         return enrichedLink(link, raw, receipt, commitment);
     }
 
+    private SourceLineage enrichedLink(ClientSession session, Document link, String commitment,
+                                       MongoOperationBudget budget) {
+        budget.check();
+        Document raw = database.getCollection(RAW).find(session,
+                eq("eventCommitment", link.getString("parentCommitment"))).first();
+        budget.check();
+        Receipt receipt = receipt(session, link.getString("receiptId"), budget);
+        return enrichedLink(link, raw, receipt, commitment);
+    }
+
     private SourceLineage enrichedLink(Document link, Document raw, Receipt receipt, String commitment) {
         if (link == null) { return absent(CONFLICT); }
         String linkEventId = link.getString("eventId");
@@ -1401,6 +1445,15 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         return receipt(identity, row, id);
     }
 
+    private Receipt receipt(ClientSession session, String id, MongoOperationBudget budget) {
+        budget.check();
+        Document identity = database.getCollection(IDENTITIES).find(session, eq("_id", id)).first();
+        budget.check();
+        Document row = database.getCollection(RECEIPTS).find(session, eq("_id", id)).first();
+        budget.check();
+        return receipt(identity, row, id);
+    }
+
     private Receipt receipt(Document identity, Document row, String id) {
         if (identity == null || row == null) { return Receipt.absent(UNAVAILABLE); }
         if (identity.getInteger("schemaVersion", 0) != 1 || row.getInteger("schemaVersion", 0) != 1) { return Receipt.absent(UNAVAILABLE); }
@@ -1445,32 +1498,51 @@ public final class MongoSourceLineage implements SourceLineageAccess {
         return transaction(work, absent(UNAVAILABLE));
     }
     private <T> T transaction(Function<ClientSession, T> work, T unavailable) {
+        return transaction(work, unavailable, null);
+    }
+    private <T> T transaction(Function<ClientSession, T> work, T unavailable,
+                              MongoOperationBudget budget) {
         for (int attempt = 0; attempt < 3; attempt++) {
             try (ClientSession session = client.startSession()) {
-                session.startTransaction(TRANSACTION);
+                if (budget != null) {
+                    budget.check();
+                    session.startTransaction(budget.transactionOptions(TRANSACTION));
+                } else {
+                    session.startTransaction(TRANSACTION);
+                }
                 try {
                     T result = work.apply(session);
+                    if (budget != null) { budget.check(); }
                     for (int commitAttempt = 0; ; commitAttempt++) {
+                        if (budget != null) { budget.check(); }
                         try { session.commitTransaction(); return result; }
                         catch (MongoException failure) {
-                            if (!failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL) || commitAttempt == 2) {
+                            if (!failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)
+                                    || commitAttempt == 2 || budget != null && budget.expired()) {
                                 if (failure.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) { return unavailable; }
                                 throw failure;
                             }
                         }
                     }
                 } catch (RuntimeException failure) {
+                    if (budget != null && budget.expired()) { return unavailable; }
                     if (failure instanceof MongoException mongo && mongo.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) {
                         return unavailable;
                     }
                     try { if (session.hasActiveTransaction()) { session.abortTransaction(); } } catch (RuntimeException ignored) { }
                     if (failure instanceof MongoException mongo && (mongo.getCode() == 11000
-                            || mongo.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)) && attempt < 2) { continue; }
+                            || mongo.hasErrorLabel(MongoException.TRANSIENT_TRANSACTION_ERROR_LABEL)) && attempt < 2) {
+                        if (budget != null && budget.expired()) { return unavailable; }
+                        continue;
+                    }
                     return unavailable;
                 }
             } catch (RuntimeException failure) { return unavailable; }
         }
         return unavailable;
+    }
+    private static boolean validBudget(Duration budget) {
+        return budget != null && !budget.isZero() && !budget.isNegative();
     }
     private static Instant canonicalTime(String value) {
         Instant time = Instant.parse(value);

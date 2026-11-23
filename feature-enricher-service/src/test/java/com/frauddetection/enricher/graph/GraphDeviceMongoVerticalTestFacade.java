@@ -6,6 +6,9 @@ import com.frauddetection.enricher.device.DeviceGraphRelationGrant;
 import com.frauddetection.enricher.device.DeviceGraphRelationPort;
 import com.frauddetection.enricher.device.VerifiedDeviceGraphRelation;
 import com.mongodb.client.MongoClient;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
+import com.mongodb.event.CommandSucceededEvent;
 import org.bson.Document;
 
 import java.time.Clock;
@@ -14,9 +17,12 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 
 /** Test-only assembly of the real Device owner bridge and authenticated Mongo Graph adapters. */
 public final class GraphDeviceMongoVerticalTestFacade {
@@ -57,7 +63,55 @@ public final class GraphDeviceMongoVerticalTestFacade {
                                                                   Runnable afterRecoveryBeforeFinalRead) throws Exception {
         return persistAndRead(deviceOwner, restartedDeviceOwner, relationGrant, relationGrant, deviceReadGrant,
                 ownerOccurrenceReferences, requestingPrincipal, admissionDeadline, readAt, () -> { }, true,
-                afterRecoveryBeforeFinalRead);
+                afterRecoveryBeforeFinalRead, null, null, true);
+    }
+
+    /** Keeps the authenticated Graph reader and signed owner clients live through the callback. */
+    public static Result persistAndReadTwoHopInLiveSession(DeviceGraphRelationPort deviceOwner,
+                                                            Supplier<DeviceGraphRelationPort> restartedDeviceOwner,
+                                                            DeviceGraphRelationGrant relationGrant,
+                                                            DeviceGraphReadGrant deviceReadGrant,
+                                                            List<String> ownerOccurrenceReferences,
+                                                            String requestingPrincipal,
+                                                            Instant admissionDeadline,
+                                                            Instant readAt,
+                                                            Consumer<LiveTwoHopReadSession> liveSessionCallback,
+                                                            Runnable admitSignedConflict) throws Exception {
+        return persistAndReadTwoHopInLiveSession(deviceOwner, restartedDeviceOwner, relationGrant, deviceReadGrant,
+                ownerOccurrenceReferences, requestingPrincipal, admissionDeadline, readAt, liveSessionCallback,
+                admitSignedConflict, true);
+    }
+
+    /** Dense signed-owner workload skips per-row setup reads so callback counters describe only the measured pass. */
+    public static Result persistAndReadTwoHopDenseInLiveSession(DeviceGraphRelationPort deviceOwner,
+                                                                  Supplier<DeviceGraphRelationPort> restartedDeviceOwner,
+                                                                  DeviceGraphRelationGrant relationGrant,
+                                                                  DeviceGraphReadGrant deviceReadGrant,
+                                                                  List<String> ownerOccurrenceReferences,
+                                                                  String requestingPrincipal,
+                                                                  Instant admissionDeadline,
+                                                                  Instant readAt,
+                                                                  Consumer<LiveTwoHopReadSession> liveSessionCallback,
+                                                                  Runnable admitSignedConflict) throws Exception {
+        return persistAndReadTwoHopInLiveSession(deviceOwner, restartedDeviceOwner, relationGrant, deviceReadGrant,
+                ownerOccurrenceReferences, requestingPrincipal, admissionDeadline, readAt, liveSessionCallback,
+                admitSignedConflict, false);
+    }
+
+    private static Result persistAndReadTwoHopInLiveSession(DeviceGraphRelationPort deviceOwner,
+                                                              Supplier<DeviceGraphRelationPort> restartedDeviceOwner,
+                                                              DeviceGraphRelationGrant relationGrant,
+                                                              DeviceGraphReadGrant deviceReadGrant,
+                                                              List<String> ownerOccurrenceReferences,
+                                                              String requestingPrincipal,
+                                                              Instant admissionDeadline,
+                                                              Instant readAt,
+                                                              Consumer<LiveTwoHopReadSession> liveSessionCallback,
+                                                              Runnable admitSignedConflict,
+                                                              boolean readOccurrenceNeighbors) throws Exception {
+        return persistAndRead(deviceOwner, restartedDeviceOwner, relationGrant, relationGrant, deviceReadGrant,
+                ownerOccurrenceReferences, requestingPrincipal, admissionDeadline, readAt, () -> { }, true,
+                () -> { }, liveSessionCallback, admitSignedConflict, readOccurrenceNeighbors);
     }
 
     public static Result persistAndReadAfterAdapterRestart(DeviceGraphRelationPort deviceOwner,
@@ -72,7 +126,7 @@ public final class GraphDeviceMongoVerticalTestFacade {
                                                             Runnable afterGraphWrite) throws Exception {
         return persistAndRead(deviceOwner, restartedDeviceOwner, relationGrant, revalidationGrant, deviceReadGrant,
                 ownerOccurrenceReferences, requestingPrincipal, admissionDeadline, readAt, afterGraphWrite, false,
-                () -> { });
+                () -> { }, null, null, true);
     }
 
     private static Result persistAndRead(DeviceGraphRelationPort deviceOwner,
@@ -86,7 +140,10 @@ public final class GraphDeviceMongoVerticalTestFacade {
                                          Instant readAt,
                                          Runnable afterGraphWrite,
                                          boolean readTwoHop,
-                                         Runnable afterRecoveryBeforeFinalRead) throws Exception {
+                                         Runnable afterRecoveryBeforeFinalRead,
+                                         Consumer<LiveTwoHopReadSession> liveSessionCallback,
+                                         Runnable admitSignedConflict,
+                                         boolean readOccurrenceNeighbors) throws Exception {
         if (ownerOccurrenceReferences == null || ownerOccurrenceReferences.isEmpty()
                 || ownerOccurrenceReferences.stream().distinct().count() != ownerOccurrenceReferences.size()) {
             throw new IllegalArgumentException("GRAPH_VERTICAL_REQUIRES_DISTINCT_OWNER_REFERENCES");
@@ -100,7 +157,9 @@ public final class GraphDeviceMongoVerticalTestFacade {
             MongoClient schemaOwner = mongo.schemaOwner(root, databaseName);
             GraphProjectionSchema.bootstrapEmptyDatabase(schemaOwner.getDatabase(databaseName));
             MongoClient writerClient = mongo.writer(root, databaseName);
-            MongoClient readerClient = mongo.reader(root, databaseName);
+            GraphCommandProbe graphCommands = new GraphCommandProbe();
+            mongo.reader(root, databaseName).close(); // Creates the least-privilege reader principal before monitoring it.
+            MongoClient readerClient = mongo.monitoredReader(databaseName, graphCommands);
 
             AtomicReference<GraphIdentityScope> ownerScope = new AtomicReference<>();
             GraphRelationAuthority authority = authority(deviceOwner, relationGrant, deviceReadGrant,
@@ -173,8 +232,10 @@ public final class GraphDeviceMongoVerticalTestFacade {
             DeviceGraphRelationPort freshDeviceOwner = postChangeOwner;
             AtomicBoolean ownerAvailable = new AtomicBoolean(true);
             DeviceGraphRelationPort boundedReadOwner = withTransientOutage(freshDeviceOwner, ownerAvailable);
-            GraphRelationAuthority restartedAuthority = authority(boundedReadOwner, revalidationGrant, deviceReadGrant,
-                    requestingPrincipal, ownerScope);
+            AtomicInteger ownerRevalidations = new AtomicInteger();
+            OwnerReadProbe ownerProbe = new OwnerReadProbe(persisted.getLast().edge().evidence().occurrence());
+            GraphRelationAuthority restartedAuthority = authority(() -> boundedReadOwner, revalidationGrant, deviceReadGrant,
+                    requestingPrincipal, ownerScope, ownerRevalidations, ownerProbe);
             GraphEvidenceRef evidence = persisted.getFirst().edge().evidence();
             Instant grantExpiresAt = persisted.stream().map(row -> row.edge().evidence().expiresAt())
                     .min(Instant::compareTo).orElseThrow();
@@ -187,11 +248,13 @@ public final class GraphDeviceMongoVerticalTestFacade {
             GraphProjectionReader restartedReader = new GraphProjectionReader(restartedReaderStore, restartedAuthority,
                     graphGrantVerifier, GraphQueryLimits.DEFAULT, new GraphReadCursorCodec(new byte[32]), readClock);
             List<GraphReadOutcome> reads = new ArrayList<>(persisted.size());
-            for (GraphStoredEdge row : persisted) {
-                GraphOccurrenceRef occurrence = row.edge().evidence().occurrence();
-                reads.add(restartedReader.readAuthorizedOccurrenceNeighbors(requestingPrincipal, graphGrant,
-                        evidence.scope(), occurrence, occurrence.eventTime().minus(Duration.ofHours(1)),
-                        occurrence.eventTime().plusMillis(1), 10, null));
+            if (readOccurrenceNeighbors) {
+                for (GraphStoredEdge row : persisted) {
+                    GraphOccurrenceRef occurrence = row.edge().evidence().occurrence();
+                    reads.add(restartedReader.readAuthorizedOccurrenceNeighbors(requestingPrincipal, graphGrant,
+                            evidence.scope(), occurrence, occurrence.eventTime().minus(Duration.ofHours(1)),
+                            occurrence.eventTime().plusMillis(1), 10, null));
+                }
             }
             TwoHopRead twoHopRead = null;
             TwoHopRead outageRead = null;
@@ -207,7 +270,16 @@ public final class GraphDeviceMongoVerticalTestFacade {
                 ownerAvailable.set(true);
                 recoveredRead = TwoHopRead.from(restartedReader.readAuthorizedOccurrenceDeviceWitnesses(
                         requestingPrincipal, graphGrant, evidence.scope(), rootOccurrence));
-                afterRecoveryBeforeFinalRead.run();
+                if (liveSessionCallback != null) {
+                    LiveTwoHopReadSession session = new LiveTwoHopReadSession(restartedReader, requestingPrincipal,
+                            graphGrant, evidence.scope(), rootOccurrence, ownerRevalidations, admitSignedConflict,
+                            graphCommands, ownerProbe);
+                    liveSessionCallback.accept(session);
+                    session.admitSignedConflictIfNeeded();
+                } else {
+                    afterRecoveryBeforeFinalRead.run();
+                    if (admitSignedConflict != null) { admitSignedConflict.run(); }
+                }
                 conflictRead = TwoHopRead.from(restartedReader.readAuthorizedOccurrenceDeviceWitnesses(
                         requestingPrincipal, graphGrant, evidence.scope(), rootOccurrence));
             }
@@ -355,12 +427,35 @@ public final class GraphDeviceMongoVerticalTestFacade {
                                                      DeviceGraphReadGrant deviceReadGrant,
                                                      String requestingPrincipal,
                                                      AtomicReference<GraphIdentityScope> ownerScope) {
+        return authority(currentDeviceOwner, relationGrant, deviceReadGrant, requestingPrincipal, ownerScope,
+                new AtomicInteger());
+    }
+
+    private static GraphRelationAuthority authority(Supplier<DeviceGraphRelationPort> currentDeviceOwner,
+                                                     DeviceGraphRelationGrant relationGrant,
+                                                     DeviceGraphReadGrant deviceReadGrant,
+                                                     String requestingPrincipal,
+                                                     AtomicReference<GraphIdentityScope> ownerScope,
+                                                     AtomicInteger ownerRevalidations) {
+        return authority(currentDeviceOwner, relationGrant, deviceReadGrant, requestingPrincipal, ownerScope,
+                ownerRevalidations, new OwnerReadProbe(null));
+    }
+
+    private static GraphRelationAuthority authority(Supplier<DeviceGraphRelationPort> currentDeviceOwner,
+                                                     DeviceGraphRelationGrant relationGrant,
+                                                     DeviceGraphReadGrant deviceReadGrant,
+                                                     String requestingPrincipal,
+                                                     AtomicReference<GraphIdentityScope> ownerScope,
+                                                     AtomicInteger ownerRevalidations,
+                                                     OwnerReadProbe ownerProbe) {
         return new GraphRelationAuthority() {
             @Override public GraphRelationResolution resolveForAdmission(String reference) {
                 return graphResolution(currentDeviceOwner.get().admit(reference, relationGrant), ownerScope);
             }
 
             @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                ownerRevalidations.incrementAndGet();
+                ownerProbe.record(expected);
                 if (!requestingPrincipal.equals(principal)) {
                     return GraphRelationResolution.denied(GraphReadReason.GRANT_DENIED);
                 }
@@ -370,6 +465,8 @@ public final class GraphDeviceMongoVerticalTestFacade {
 
             @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal,
                                                                   Duration remainingBudget) {
+                ownerRevalidations.incrementAndGet();
+                ownerProbe.record(expected);
                 if (!requestingPrincipal.equals(principal)) {
                     return GraphRelationResolution.denied(GraphReadReason.GRANT_DENIED);
                 }
@@ -427,7 +524,8 @@ public final class GraphDeviceMongoVerticalTestFacade {
 
     public record TwoHopRead(String state, String reason, Instant rootTime, Instant priorTime,
                              int pseudonymKeyVersion, Instant graphAssociationAdmittedAt,
-                             Instant diagnosticReadAt) {
+                             Instant diagnosticReadAt, GraphOccurrenceRef rootOccurrence,
+                             GraphOccurrenceRef priorOccurrence) {
         static TwoHopRead from(GraphDeviceWitnessOutcome outcome) {
             var witness = outcome.witness().orElse(null);
             return new TwoHopRead(outcome.state().name(), outcome.reason().name(),
@@ -435,8 +533,136 @@ public final class GraphDeviceMongoVerticalTestFacade {
                     witness == null ? null : witness.prior().eventTime(),
                     witness == null ? 0 : witness.pseudonymKeyVersion(),
                     witness == null ? null : witness.graphAssociationAdmittedAt(),
-                    witness == null ? null : witness.diagnosticReadAt());
+                    witness == null ? null : witness.diagnosticReadAt(),
+                    witness == null ? null : witness.root(), witness == null ? null : witness.prior());
         }
+    }
+
+    public record GraphReadMetrics(long findCommands, long getMoreCommands, long documentsReturned) { }
+
+    public record OwnerValidationMetrics(long selectedRootFirstPass, long selectedPriorFirstPass,
+                                         long selectedRootSecondPass, long selectedPriorSecondPass) { }
+
+    /** Test-only authorized reader. Its lifetime is bounded by the fixture callback. */
+    public static final class LiveTwoHopReadSession {
+        private final GraphProjectionReader reader;
+        private final String principal;
+        private final GraphPrivateReadGrant grant;
+        private final GraphIdentityScope scope;
+        private final GraphOccurrenceRef rootOccurrence;
+        private final AtomicInteger ownerRevalidations;
+        private final Runnable signedConflictAdmission;
+        private final GraphCommandProbe graphCommands;
+        private final OwnerReadProbe ownerProbe;
+        private final AtomicBoolean conflictAdmitted = new AtomicBoolean();
+
+        private LiveTwoHopReadSession(GraphProjectionReader reader, String principal,
+                                      GraphPrivateReadGrant grant, GraphIdentityScope scope,
+                                      GraphOccurrenceRef rootOccurrence, AtomicInteger ownerRevalidations,
+                                      Runnable signedConflictAdmission, GraphCommandProbe graphCommands,
+                                      OwnerReadProbe ownerProbe) {
+            this.reader = reader;
+            this.principal = principal;
+            this.grant = grant;
+            this.scope = scope;
+            this.rootOccurrence = rootOccurrence;
+            this.ownerRevalidations = ownerRevalidations;
+            this.signedConflictAdmission = signedConflictAdmission;
+            this.graphCommands = graphCommands;
+            this.ownerProbe = ownerProbe;
+        }
+
+        public TwoHopRead readCurrent() { return readAs(principal); }
+
+        public TwoHopRead readAs(String requestingPrincipal) {
+            return TwoHopRead.from(reader.readAuthorizedOccurrenceDeviceWitnesses(
+                    requestingPrincipal, grant, scope, rootOccurrence));
+        }
+
+        public GraphOccurrenceRef rootOccurrence() { return rootOccurrence; }
+
+        public int ownerRevalidationCount() { return ownerRevalidations.get(); }
+
+        public void resetMeasurementMetrics() {
+            ownerRevalidations.set(0);
+            graphCommands.reset();
+            ownerProbe.reset();
+        }
+
+        public GraphReadMetrics graphReadMetrics() { return graphCommands.snapshot(); }
+        public OwnerValidationMetrics ownerValidationMetrics() { return ownerProbe.snapshot(); }
+
+        public void admitSignedConflict() {
+            if (!conflictAdmitted.compareAndSet(false, true)) {
+                throw new IllegalStateException("SIGNED_GRAPH_CONFLICT_ALREADY_ADMITTED");
+            }
+            if (signedConflictAdmission == null) {
+                throw new IllegalStateException("SIGNED_GRAPH_CONFLICT_ADMISSION_REQUIRED");
+            }
+            signedConflictAdmission.run();
+        }
+
+        private void admitSignedConflictIfNeeded() {
+            if (!conflictAdmitted.get()) { admitSignedConflict(); }
+        }
+    }
+
+    private static final class OwnerReadProbe {
+        private final GraphOccurrenceRef root;
+        private final AtomicInteger call = new AtomicInteger();
+        private final AtomicInteger rootFirst = new AtomicInteger();
+        private final AtomicInteger priorFirst = new AtomicInteger();
+        private final AtomicInteger rootSecond = new AtomicInteger();
+        private final AtomicInteger priorSecond = new AtomicInteger();
+
+        OwnerReadProbe(GraphOccurrenceRef root) { this.root = root; }
+
+        void record(GraphEvidenceRef evidence) {
+            int index = call.getAndIncrement() % 4;
+            boolean isRoot = root != null && root.equals(evidence.occurrence());
+            if (index < 2) { (isRoot ? rootFirst : priorFirst).incrementAndGet(); }
+            else { (isRoot ? rootSecond : priorSecond).incrementAndGet(); }
+        }
+
+        void reset() {
+            call.set(0);
+            rootFirst.set(0);
+            priorFirst.set(0);
+            rootSecond.set(0);
+            priorSecond.set(0);
+        }
+
+        OwnerValidationMetrics snapshot() {
+            return new OwnerValidationMetrics(rootFirst.get(), priorFirst.get(), rootSecond.get(), priorSecond.get());
+        }
+    }
+
+    private static final class GraphCommandProbe implements CommandListener {
+        private final AtomicInteger finds = new AtomicInteger();
+        private final AtomicInteger getMores = new AtomicInteger();
+        private final LongAdder documents = new LongAdder();
+
+        @Override public void commandStarted(CommandStartedEvent event) {
+            if ("find".equals(event.getCommandName())) { finds.incrementAndGet(); }
+            if ("getMore".equals(event.getCommandName())) { getMores.incrementAndGet(); }
+        }
+
+        @Override public void commandSucceeded(CommandSucceededEvent event) {
+            var cursorValue = event.getResponse().get("cursor");
+            if (cursorValue == null || !cursorValue.isDocument()) { return; }
+            var cursor = cursorValue.asDocument();
+            var batch = cursor.get("firstBatch");
+            if (batch == null) { batch = cursor.get("nextBatch"); }
+            if (batch != null && batch.isArray()) { documents.add(batch.asArray().size()); }
+        }
+
+        void reset() {
+            finds.set(0);
+            getMores.set(0);
+            documents.reset();
+        }
+
+        GraphReadMetrics snapshot() { return new GraphReadMetrics(finds.get(), getMores.get(), documents.sum()); }
     }
 
     public record LifecycleResult(String appendState, String reconciliationState, GraphReadReason reason,

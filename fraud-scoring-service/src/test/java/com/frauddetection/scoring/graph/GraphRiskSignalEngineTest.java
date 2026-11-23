@@ -76,97 +76,41 @@ class GraphRiskSignalEngineTest {
     }
 
     @Test
-    void independentlyBoundPositiveIsDegradedAndNeverContributesScoreOrRisk() {
+    void anUnverifiedSourceContextCannotMintBoundPositiveEvidence() {
         ScoringContext context = context();
-        GraphRiskEvidenceRead read = GraphRiskEvidenceRead.verifiedPositive(witness());
-        AtomicInteger reads = new AtomicInteger();
-        AtomicInteger occurrenceChecks = new AtomicInteger();
-        GraphRiskEvidenceAccess access = new GraphRiskEvidenceAccess() {
-            @Override public GraphRiskEvidenceRead read(ScoringContext current) {
-                reads.incrementAndGet();
-                return read;
-            }
-
-            @Override public GraphRiskEvidenceRead requireOccurrence(ScoringContext current,
-                                                                      GraphRiskEvidenceRead evidence) {
-                occurrenceChecks.incrementAndGet();
-                if (current != context || evidence != read) { return GraphRiskEvidenceRead.denied(); }
-                return evidence;
-            }
-        };
-
-        try (var engine = candidate(access, DEADLINE)) {
-            FraudSignalEvaluation result = engine.evaluate(context);
-
-            assertThat(result.status()).isEqualTo(FraudEngineStatus.DEGRADED);
-            assertEnvelope(result);
-            assertThat(result.reasonCodes()).containsExactly("GRAPH_SHARED_DEVICE_OCCURRENCES_OBSERVED",
-                    GraphRiskSignalEngine.NOT_CALIBRATED_REASON);
-            assertThat(result.statusReason()).isEqualTo(GraphRiskSignalEngine.NOT_CALIBRATED_REASON);
-            assertThat(result.evidence()).singleElement().satisfies(evidence -> {
-                assertThat(evidence.evidenceType()).isEqualTo(FraudEngineEvidenceType.GRAPH_SIGNAL);
-                assertThat(evidence.reasonCode()).isEqualTo("GRAPH_SHARED_DEVICE_OCCURRENCES_OBSERVED");
-                assertThat(evidence.status()).isEqualTo(FraudEngineEvidenceStatus.AVAILABLE);
-                assertThat(evidence.description()).contains("retrospective").doesNotContain("fraud", "customer", "physical device");
-            });
-            assertThat(reads).hasValue(1);
-            assertThat(occurrenceChecks).hasValue(1);
-            assertThat(result.toString()).doesNotContain(context.transaction().customerId(), context.correlationId());
-        }
+        assertThatThrownBy(() -> boundPositive(context))
+                .hasMessage("GRAPH_EVIDENCE_BINDING_SOURCE_INVALID");
     }
 
     @Test
     void anUnboundPositiveDescriptionIsDeniedAndNeverReusesEvidence() {
         ScoringContext context = context();
-        GraphRiskEvidenceRead positive = GraphRiskEvidenceRead.verifiedPositive(witness());
-        GraphRiskEvidenceAccess unbound = current -> positive;
+        GraphRiskEvidenceRead unboundPositive = GraphRiskEvidenceRead.verifiedPositive(witness());
+        GraphRiskEvidenceAccess unbound = current -> unboundPositive;
         try (var engine = candidate(unbound, DEADLINE)) {
             assertUnavailable(engine.evaluate(context), ReasonCode.GRAPH_AUTHORITY_DENIED);
-        }
-
-        AtomicInteger reads = new AtomicInteger();
-        GraphRiskEvidenceAccess changesBetweenCalls = new GraphRiskEvidenceAccess() {
-            @Override public GraphRiskEvidenceRead read(ScoringContext current) {
-                return reads.getAndIncrement() == 0 ? positive
-                        : GraphRiskEvidenceRead.unavailable(Reason.OWNER_UNAVAILABLE);
-            }
-            @Override public GraphRiskEvidenceRead requireOccurrence(ScoringContext current,
-                                                                      GraphRiskEvidenceRead evidence) {
-                return evidence;
-            }
-        };
-        try (var engine = candidate(changesBetweenCalls, DEADLINE)) {
-            assertThat(engine.evaluate(context).status()).isEqualTo(FraudEngineStatus.DEGRADED);
-            FraudSignalEvaluation freshFailure = engine.evaluate(context);
-            assertUnavailable(freshFailure, ReasonCode.GRAPH_AUTHORITY_UNAVAILABLE);
-            assertThat(freshFailure.evidence()).allSatisfy(evidence ->
-                    assertThat(evidence.status()).isEqualTo(FraudEngineEvidenceStatus.UNAVAILABLE));
-            assertThat(reads).hasValue(2);
         }
     }
 
     @Test
-    void freshConflictBetweenInitialReadAndOccurrenceBindingInvalidatesThePositive() {
+    void unboundPositiveCannotReachTheFreshOwnerCheck() {
         ScoringContext context = context();
-        GraphRiskEvidenceRead stalePositive = GraphRiskEvidenceRead.verifiedPositive(witness());
         AtomicInteger bindingChecks = new AtomicInteger();
         GraphRiskEvidenceAccess conflictBetweenChecks = new GraphRiskEvidenceAccess() {
-            @Override public GraphRiskEvidenceRead read(ScoringContext current) { return stalePositive; }
+            @Override public GraphRiskEvidenceRead read(ScoringContext current) {
+                return GraphRiskEvidenceRead.verifiedPositive(witness());
+            }
 
             @Override public GraphRiskEvidenceRead requireOccurrence(ScoringContext current,
                                                                       GraphRiskEvidenceRead candidate) {
                 bindingChecks.incrementAndGet();
-                assertThat(current).isSameAs(context);
-                assertThat(candidate).isSameAs(stalePositive);
                 return GraphRiskEvidenceRead.conflict();
             }
         };
 
         try (var engine = candidate(conflictBetweenChecks, DEADLINE)) {
-            FraudSignalEvaluation result = engine.evaluate(context);
-
-            assertUnavailable(result, ReasonCode.GRAPH_OWNER_CONFLICT);
-            assertThat(bindingChecks).hasValue(1);
+            assertUnavailable(engine.evaluate(context), ReasonCode.GRAPH_AUTHORITY_DENIED);
+            assertThat(bindingChecks).hasValue(0);
         }
     }
 
@@ -304,6 +248,12 @@ class GraphRiskSignalEngineTest {
 
     private static GraphRiskEvidenceRead.WitnessDescription witness() {
         return new GraphRiskEvidenceRead.WitnessDescription(ROOT, PRIOR, GRAPH_ADMITTED, READ_AT);
+    }
+
+    private static GraphRiskEvidenceRead boundPositive(ScoringContext context) {
+        String exactOccurrence = String.join("\u001f", "a".repeat(64), "b".repeat(64), "c".repeat(64),
+                "d".repeat(64), "1", "e".repeat(64), "2026-10-02T10:00:00Z");
+        return GraphRiskEvidenceRead.verifiedPositive(witness(), context, exactOccurrence);
     }
 
     @Configuration(proxyBeanMethods = false)
