@@ -87,9 +87,11 @@ class GraphRiskSignalEngineTest {
                 return read;
             }
 
-            @Override public void requireOccurrence(ScoringContext current, GraphRiskEvidenceRead evidence) {
+            @Override public GraphRiskEvidenceRead requireOccurrence(ScoringContext current,
+                                                                      GraphRiskEvidenceRead evidence) {
                 occurrenceChecks.incrementAndGet();
-                if (current != context || evidence != read) { throw new SecurityException("TEST_BINDING_MISMATCH"); }
+                if (current != context || evidence != read) { return GraphRiskEvidenceRead.denied(); }
+                return evidence;
             }
         };
 
@@ -128,7 +130,10 @@ class GraphRiskSignalEngineTest {
                 return reads.getAndIncrement() == 0 ? positive
                         : GraphRiskEvidenceRead.unavailable(Reason.OWNER_UNAVAILABLE);
             }
-            @Override public void requireOccurrence(ScoringContext current, GraphRiskEvidenceRead evidence) { }
+            @Override public GraphRiskEvidenceRead requireOccurrence(ScoringContext current,
+                                                                      GraphRiskEvidenceRead evidence) {
+                return evidence;
+            }
         };
         try (var engine = candidate(changesBetweenCalls, DEADLINE)) {
             assertThat(engine.evaluate(context).status()).isEqualTo(FraudEngineStatus.DEGRADED);
@@ -137,6 +142,31 @@ class GraphRiskSignalEngineTest {
             assertThat(freshFailure.evidence()).allSatisfy(evidence ->
                     assertThat(evidence.status()).isEqualTo(FraudEngineEvidenceStatus.UNAVAILABLE));
             assertThat(reads).hasValue(2);
+        }
+    }
+
+    @Test
+    void freshConflictBetweenInitialReadAndOccurrenceBindingInvalidatesThePositive() {
+        ScoringContext context = context();
+        GraphRiskEvidenceRead stalePositive = GraphRiskEvidenceRead.verifiedPositive(witness());
+        AtomicInteger bindingChecks = new AtomicInteger();
+        GraphRiskEvidenceAccess conflictBetweenChecks = new GraphRiskEvidenceAccess() {
+            @Override public GraphRiskEvidenceRead read(ScoringContext current) { return stalePositive; }
+
+            @Override public GraphRiskEvidenceRead requireOccurrence(ScoringContext current,
+                                                                      GraphRiskEvidenceRead candidate) {
+                bindingChecks.incrementAndGet();
+                assertThat(current).isSameAs(context);
+                assertThat(candidate).isSameAs(stalePositive);
+                return GraphRiskEvidenceRead.conflict();
+            }
+        };
+
+        try (var engine = candidate(conflictBetweenChecks, DEADLINE)) {
+            FraudSignalEvaluation result = engine.evaluate(context);
+
+            assertUnavailable(result, ReasonCode.GRAPH_OWNER_CONFLICT);
+            assertThat(bindingChecks).hasValue(1);
         }
     }
 

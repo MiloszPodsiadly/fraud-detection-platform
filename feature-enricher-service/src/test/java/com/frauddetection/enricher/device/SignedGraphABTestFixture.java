@@ -17,11 +17,11 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
-/** Test-only signed Source + Device + Kafka + Graph fixture for the scorer adapter proof. */
-public final class SignedGraphABTestFixture {
+/** Test-only signed Source + Device + Kafka + Graph fixture for owner-side authority proof. */
+final class SignedGraphABTestFixture {
     private SignedGraphABTestFixture() { }
 
-    public static Evidence create() throws Exception {
+    static Evidence create() throws Exception {
         PrivateDeviceDiagnosticReaderIntegrationTest.start();
         PrivateDeviceDiagnosticReaderIntegrationTest sourceDevice = new PrivateDeviceDiagnosticReaderIntegrationTest();
         List<MongoClient> graphOwnerClients = new ArrayList<>();
@@ -128,11 +128,11 @@ public final class SignedGraphABTestFixture {
                 f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
     }
 
-    public record Evidence(TransactionEnrichedEvent rootTransaction, String rootTransactionId,
-                           String rootCorrelationId, Instant priorTime, Instant rootTime, Instant readAt,
-                           GraphDeviceMongoVerticalTestFacade.Result graph, long deviceOccurrenceRows,
-                           long scoredOccurrenceRows, int adapterReconstructions,
-                           TransactionScoredEvent rootScoredEvent, byte[] rootScoredWireBytes) {
+    record Evidence(TransactionEnrichedEvent rootTransaction, String rootTransactionId,
+                    String rootCorrelationId, Instant priorTime, Instant rootTime, Instant readAt,
+                    GraphDeviceMongoVerticalTestFacade.Result graph, long deviceOccurrenceRows,
+                    long scoredOccurrenceRows, int adapterReconstructions,
+                    TransactionScoredEvent rootScoredEvent, byte[] rootScoredWireBytes) {
         public Evidence {
             rootScoredWireBytes = rootScoredWireBytes.clone();
         }

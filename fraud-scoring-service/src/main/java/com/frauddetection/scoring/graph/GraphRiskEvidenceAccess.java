@@ -11,11 +11,11 @@ import java.util.Objects;
 interface GraphRiskEvidenceAccess {
     GraphRiskEvidenceRead read(ScoringContext context);
 
-    /** Implementations must independently bind the returned observation to the authorized occurrence. */
-    default void requireOccurrence(ScoringContext context, GraphRiskEvidenceRead evidence) {
+    /** Re-reads owner authority and returns the current typed result bound to this exact occurrence. */
+    default GraphRiskEvidenceRead requireOccurrence(ScoringContext context, GraphRiskEvidenceRead evidence) {
         Objects.requireNonNull(context, "GRAPH_SCORING_CONTEXT_REQUIRED");
         Objects.requireNonNull(evidence, "GRAPH_EVIDENCE_READ_REQUIRED");
-        throw new SecurityException("GRAPH_EVIDENCE_NOT_ADMITTED");
+        return GraphRiskEvidenceRead.denied();
     }
 
     /** Safe default in the absence of an explicitly provisioned test-only provider. */

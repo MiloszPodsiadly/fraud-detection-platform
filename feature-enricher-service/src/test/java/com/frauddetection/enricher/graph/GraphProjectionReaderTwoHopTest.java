@@ -91,6 +91,57 @@ class GraphProjectionReaderTwoHopTest {
     }
 
     @Test
+    void depthOneDeniesTwoHopBeforeOwnerOrDaoIoAndKeepsDenialPrecedence() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
+        FakeStore store = new FakeStore(List.of(root,
+                stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60))));
+        RecordingAuthority owner = new RecordingAuthority();
+        GraphQueryLimits depthOne = new GraphQueryLimits(1, GraphQueryLimits.DEFAULT.maxNodes(),
+                GraphQueryLimits.DEFAULT.maxEdges(), GraphQueryLimits.DEFAULT.maxWindow(),
+                GraphQueryLimits.DEFAULT.maxHistoryRows(), GraphQueryLimits.DEFAULT.maxPageSize(),
+                GraphQueryLimits.DEFAULT.maxQueryTime());
+        GraphProjectionReader reader = reader(store, owner, depthOne, Clock.fixed(READ_AT, ZoneOffset.UTC),
+                System::nanoTime);
+
+        GraphDeviceWitnessOutcome denied = reader.readAuthorizedOccurrenceDeviceWitnesses(
+                "other-principal", grant(scope), scope, root.edge().evidence().occurrence());
+        GraphDeviceWitnessOutcome limited = reader.readAuthorizedOccurrenceDeviceWitnesses(
+                PRINCIPAL, grant(scope), scope, root.edge().evidence().occurrence());
+
+        assertThat(denied.state()).isEqualTo(GraphProjectionState.DENIED);
+        assertThat(limited.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(limited.reason()).isEqualTo(GraphReadReason.LIMIT_EXCEEDED);
+        assertThat(limited.witness()).isEmpty();
+        assertThat(store.rootReads).hasValue(0);
+        assertThat(store.deviceReads).hasValue(0);
+        assertThat(owner.revalidations).hasValue(0);
+    }
+
+    @Test
+    void effectivePageBatchLimitReachesEveryRepeatedSnapshotWithoutCappingResults() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
+        GraphStoredEdge prior = stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60));
+
+        for (int maxPageSize : List.of(1, 10, 100)) {
+            GraphQueryLimits limits = new GraphQueryLimits(2, 128, 256, Duration.ofDays(30),
+                    1_000, maxPageSize, Duration.ofSeconds(5));
+            FakeStore store = new FakeStore(List.of(root, prior));
+            GraphProjectionReader reader = reader(store, new RecordingAuthority(), limits,
+                    Clock.fixed(READ_AT, ZoneOffset.UTC), System::nanoTime);
+
+            GraphDeviceWitnessOutcome outcome = reader.readAuthorizedOccurrenceDeviceWitnesses(
+                    PRINCIPAL, grant(scope), scope, root.edge().evidence().occurrence());
+
+            assertThat(outcome.state()).isEqualTo(GraphProjectionState.VERIFIED_BOUNDED);
+            assertThat(outcome.witness()).isPresent();
+            assertThat(store.rootPageSizes).hasSize(3).containsOnly(maxPageSize);
+            assertThat(store.devicePageSizes).hasSize(3).containsOnly(maxPageSize);
+        }
+    }
+
+    @Test
     void readerHasNoCallerSuppliedDeviceHubParameter() throws Exception {
         var method = GraphProjectionReader.class.getDeclaredMethod("readAuthorizedOccurrenceDeviceWitnesses",
                 String.class, GraphPrivateReadGrant.class, GraphIdentityScope.class, GraphOccurrenceRef.class);
@@ -571,6 +622,8 @@ class GraphProjectionReaderTwoHopTest {
         final AtomicInteger deviceReads = new AtomicInteger();
         final List<Duration> rootBudgets = new ArrayList<>();
         final List<Duration> deviceBudgets = new ArrayList<>();
+        final List<Integer> rootPageSizes = new ArrayList<>();
+        final List<Integer> devicePageSizes = new ArrayList<>();
         Runnable afterFirstDeviceRead;
         boolean reverseDeviceResults;
 
@@ -581,9 +634,11 @@ class GraphProjectionReaderTwoHopTest {
 
         @Override public List<GraphStoredEdge> findOccurrenceNeighbors(GraphIdentityScope scope,
                                                                        GraphOccurrenceRef occurrence,
-                                                                       Instant asOf, int limit, Duration maxTime) {
+                                                                       Instant asOf, int limit, int maxPageSize,
+                                                                       Duration maxTime) {
             rootReads.incrementAndGet();
             rootBudgets.add(maxTime);
+            rootPageSizes.add(maxPageSize);
             return rows.stream().filter(row -> row.edge().evidence().occurrence().equals(occurrence)
                             && row.edge().evidence().scope().equals(scope)
                             && row.lifecycle() == GraphEdgeLifecycle.ACTIVE && !row.admittedAt().isAfter(asOf)
@@ -597,9 +652,11 @@ class GraphProjectionReaderTwoHopTest {
                                                                               Instant untilExclusive,
                                                                               Instant asOf,
                                                                               int limit,
+                                                                              int maxPageSize,
                                                                               Duration maxTime) {
             int call = deviceReads.incrementAndGet();
             deviceBudgets.add(maxTime);
+            devicePageSizes.add(maxPageSize);
             Set<String> hubs = deviceNodes.stream().map(GraphNodeRef::canonicalId)
                     .collect(java.util.stream.Collectors.toSet());
             List<GraphStoredEdge> result = rows.stream().filter(row -> row.edge().evidence().scope().equals(scope)

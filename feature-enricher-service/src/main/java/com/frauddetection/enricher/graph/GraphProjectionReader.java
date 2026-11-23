@@ -89,7 +89,7 @@ final class GraphProjectionReader {
         List<GraphStoredEdge> stored;
         try {
             stored = store.findOccurrenceNeighbors(exactScope, typedRoot, asOf,
-                    limits.maxEdges() + 1, limits.maxQueryTime());
+                    limits.maxEdges() + 1, limits.maxPageSize(), limits.maxQueryTime());
         } catch (MongoException | IllegalStateException unavailable) {
             return GraphReadOutcome.unavailable(readFailure(started));
         } catch (IllegalArgumentException invalid) {
@@ -147,7 +147,7 @@ final class GraphProjectionReader {
         List<GraphStoredEdge> postOwnerSnapshot;
         try {
             postOwnerSnapshot = store.findOccurrenceNeighbors(exactScope, typedRoot, asOf,
-                    limits.maxEdges() + 1, remainingBudget(started));
+                    limits.maxEdges() + 1, limits.maxPageSize(), remainingBudget(started));
         } catch (MongoException | IllegalStateException unavailable) {
             return GraphReadOutcome.unavailable(readFailure(started));
         } catch (IllegalArgumentException invalid) {
@@ -166,7 +166,7 @@ final class GraphProjectionReader {
         List<GraphStoredEdge> finalGraphSnapshot;
         try {
             finalGraphSnapshot = store.findOccurrenceNeighbors(exactScope, typedRoot, asOf,
-                    limits.maxEdges() + 1, remainingBudget(started));
+                    limits.maxEdges() + 1, limits.maxPageSize(), remainingBudget(started));
         } catch (MongoException | IllegalStateException unavailable) {
             return GraphReadOutcome.unavailable(readFailure(started));
         } catch (IllegalArgumentException invalid) {
@@ -227,11 +227,16 @@ final class GraphProjectionReader {
         if (initialGrant != GraphPolicyDecision.AUTHORIZED) {
             return witnessFailure(grantOutcome(initialGrant));
         }
+        // Principal, scope and grant denial take precedence; configured depth is checked before owner or DAO I/O.
+        if (limits.maxDepth() < 2) {
+            return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE,
+                    GraphReadReason.LIMIT_EXCEEDED);
+        }
 
         List<GraphStoredEdge> rootRows;
         try {
             rootRows = store.findOccurrenceNeighbors(exactScope, typedRoot, diagnosticReadAt,
-                    limits.maxEdges() + 1, remainingBudget(started));
+                    limits.maxEdges() + 1, limits.maxPageSize(), remainingBudget(started));
         } catch (MongoException | IllegalStateException unavailable) {
             return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, readFailure(started));
         } catch (IllegalArgumentException invalid) {
@@ -302,7 +307,8 @@ final class GraphProjectionReader {
         int deviceLimit = remainingEdges + 1;
         try {
             deviceRows = store.findDeviceOccurrenceNeighbors(exactScope, hubs, fromInclusive,
-                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, remainingBudget(started));
+                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, limits.maxPageSize(),
+                    remainingBudget(started));
         } catch (MongoException | IllegalStateException unavailable) {
             return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, readFailure(started));
         } catch (IllegalArgumentException invalid) {
@@ -354,9 +360,10 @@ final class GraphProjectionReader {
         List<GraphStoredEdge> deviceAfterFirstOwnerPass;
         try {
             rootAfterFirstOwnerPass = store.findOccurrenceNeighbors(exactScope, typedRoot, diagnosticReadAt,
-                    limits.maxEdges() + 1, remainingBudget(started));
+                    limits.maxEdges() + 1, limits.maxPageSize(), remainingBudget(started));
             deviceAfterFirstOwnerPass = store.findDeviceOccurrenceNeighbors(exactScope, hubs, fromInclusive,
-                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, remainingBudget(started));
+                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, limits.maxPageSize(),
+                    remainingBudget(started));
         } catch (MongoException | IllegalStateException unavailable) {
             return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, readFailure(started));
         } catch (IllegalArgumentException invalid) {
@@ -381,9 +388,10 @@ final class GraphProjectionReader {
         List<GraphStoredEdge> deviceAfterSecondOwnerPass;
         try {
             rootAfterSecondOwnerPass = store.findOccurrenceNeighbors(exactScope, typedRoot, diagnosticReadAt,
-                    limits.maxEdges() + 1, remainingBudget(started));
+                    limits.maxEdges() + 1, limits.maxPageSize(), remainingBudget(started));
             deviceAfterSecondOwnerPass = store.findDeviceOccurrenceNeighbors(exactScope, hubs, fromInclusive,
-                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, remainingBudget(started));
+                    typedRoot.eventTime(), diagnosticReadAt, deviceLimit, limits.maxPageSize(),
+                    remainingBudget(started));
         } catch (MongoException | IllegalStateException unavailable) {
             return GraphDeviceWitnessOutcome.nonVerified(GraphProjectionState.UNAVAILABLE, readFailure(started));
         } catch (IllegalArgumentException invalid) {

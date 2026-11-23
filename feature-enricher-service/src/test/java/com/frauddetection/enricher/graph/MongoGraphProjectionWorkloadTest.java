@@ -317,7 +317,7 @@ class MongoGraphProjectionWorkloadTest {
         Document filter = MongoGraphProjectionStore.deviceNeighborFilter(root.scope(), List.of(hub),
                 fromInclusive, root.occurrence().eventTime(), NOW);
         Document plan = database.getCollection(GraphProjectionSchema.COLLECTION).find(filter)
-                .sort(MongoGraphProjectionStore.deviceNeighborSort()).limit(limit)
+                .sort(MongoGraphProjectionStore.deviceNeighborSort()).hintString("graph_device_neighbors").limit(limit)
                 .batchSize(Math.min(limit, limits.maxPageSize()))
                 .maxTime(limits.maxQueryTime().toMillis(), TimeUnit.MILLISECONDS)
                 .explain(ExplainVerbosity.EXECUTION_STATS);

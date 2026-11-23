@@ -31,9 +31,7 @@ class GraphRiskEvidenceAccessTest {
         assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(result.reason()).isEqualTo(Reason.PROVIDER_NOT_CONFIGURED);
         assertThat(result.witnesses()).isEmpty();
-        assertThatThrownBy(() -> access.requireOccurrence(context, positiveRead()))
-                .isInstanceOf(SecurityException.class)
-                .hasMessage("GRAPH_EVIDENCE_NOT_ADMITTED");
+        assertThat(access.requireOccurrence(context, positiveRead()).status()).isEqualTo(Status.DENIED);
     }
 
     @Test
@@ -41,9 +39,8 @@ class GraphRiskEvidenceAccessTest {
         ScoringContext forged = context("caller-selected-correlation");
         GraphRiskEvidenceRead forgedDescription = positiveRead();
 
-        assertThatThrownBy(() -> GraphRiskEvidenceAccess.unavailable()
-                .requireOccurrence(forged, forgedDescription))
-                .isInstanceOf(SecurityException.class);
+        assertThat(GraphRiskEvidenceAccess.unavailable().requireOccurrence(forged, forgedDescription).status())
+                .isEqualTo(Status.DENIED);
         assertThat(GraphRiskEvidenceAccess.unavailable().read(forged).status())
                 .isNotEqualTo(Status.VERIFIED_POSITIVE);
     }

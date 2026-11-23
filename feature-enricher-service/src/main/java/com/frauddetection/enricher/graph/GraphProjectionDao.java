@@ -10,7 +10,7 @@ interface GraphProjectionDao {
     Optional<GraphStoredEdge> findLogicalRelation(GraphEdgeFact candidate);
     List<GraphStoredEdge> findNeighbors(GraphNodeRef node, int limit);
     List<GraphStoredEdge> findOccurrenceNeighbors(GraphIdentityScope scope, GraphOccurrenceRef occurrence,
-                                                   Instant asOf, int limit, Duration maxTime);
+                                                   Instant asOf, int limit, int maxPageSize, Duration maxTime);
 
     /** Indexed reverse lookup; only the authorized occurrence-rooted reader may supply hubs. */
     default List<GraphStoredEdge> findDeviceOccurrenceNeighbors(GraphIdentityScope scope,
@@ -19,6 +19,7 @@ interface GraphProjectionDao {
                                                                  Instant untilExclusive,
                                                                  Instant asOf,
                                                                  int limit,
+                                                                 int maxPageSize,
                                                                  Duration maxTime) {
         throw new IllegalStateException("GRAPH_DEVICE_QUERY_UNAVAILABLE");
     }

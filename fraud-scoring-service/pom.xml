@@ -77,14 +77,6 @@
         </dependency>
         <dependency>
             <groupId>com.frauddetection</groupId>
-            <artifactId>feature-enricher-service</artifactId>
-            <version>${project.version}</version>
-            <type>test-jar</type>
-            <classifier>tests</classifier>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.frauddetection</groupId>
             <artifactId>transaction-ingest-service</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>

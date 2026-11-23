@@ -153,15 +153,18 @@ class FraudEngineContractRuntimeIsolationTest {
     void existingScoringRuntimeDoesNotWireSignalEngineFoundation() throws Exception {
         Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
         Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
+        Path reviewedGraphCandidate = scoringRoot.resolve("graph/GraphRiskSignalEngine.java");
         String existingScoringRuntime = javaSourcesExcept(
                 scoringRoot,
                 scoringRoot.resolve("engine"),
                 scoringRoot.resolve("device"),
                 scoringRoot.resolve("merchant/MerchantRiskSignalEngine.java"),
+                reviewedGraphCandidate,
                 scoringRoot.resolve("orchestration"),
                 reviewedProducerWiring
         );
         String runtimeConfiguration = Files.readString(reviewedProducerWiring);
+        String graphCandidate = Files.readString(reviewedGraphCandidate);
         String deviceProperties = Files.readString(scoringRoot.resolve("config/DeviceRiskEngineProperties.java"));
         String runtimeValidator = Files.readString(
                 scoringRoot.resolve("config/EngineIntelligenceRuntimeConfigurationValidator.java")
@@ -170,6 +173,7 @@ class FraudEngineContractRuntimeIsolationTest {
 
         assertThat(existingScoringRuntime)
                 .doesNotContain("FraudSignalEngine")
+                .doesNotContain("GraphRiskSignalEngine")
                 .doesNotContain("MerchantRiskSignalEngine")
                 .doesNotContain("FraudEngineDescriptor")
                 .doesNotContain("FraudEngineResult")
@@ -180,7 +184,12 @@ class FraudEngineContractRuntimeIsolationTest {
                 .contains("List.of(ruleBasedSignalEngine, pythonMlSignalEngine)")
                 .contains("List.of(ruleBasedSignalEngine, pythonMlSignalEngine, velocity)")
                 .doesNotContain("DeviceRiskSignalEngine")
-                .doesNotContain("MerchantRiskSignalEngine");
+                .doesNotContain("MerchantRiskSignalEngine")
+                .doesNotContain("GraphRiskSignalEngine")
+                .doesNotContain("graph.primary");
+        assertThat(graphCandidate)
+                .contains("final class GraphRiskSignalEngine")
+                .doesNotContain("public class GraphRiskSignalEngine", "@Component", "@Service", "@Configuration");
         assertThat(deviceProperties).contains("@DefaultValue(\"false\") boolean enabled");
         assertThat(runtimeValidator)
                 .contains("if (deviceRiskEngineProperties.enabled())")
