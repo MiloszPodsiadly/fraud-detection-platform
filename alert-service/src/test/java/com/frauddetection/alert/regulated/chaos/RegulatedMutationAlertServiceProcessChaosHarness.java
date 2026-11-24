@@ -164,11 +164,13 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         servicePort = freePort();
         try {
             Files.createDirectories(logDirectory);
-            serviceProcess = new ProcessBuilder(alertServiceCommand(logName, additionalArgs))
+            ProcessBuilder processBuilder = new ProcessBuilder(alertServiceCommand(logName, additionalArgs))
                     .directory(Path.of("").toAbsolutePath().toFile())
                     .redirectOutput(logDirectory.resolve(logName + "-stdout.log").toFile())
-                    .redirectError(logDirectory.resolve(logName + "-stderr.log").toFile())
-                    .start();
+                    .redirectError(logDirectory.resolve(logName + "-stderr.log").toFile());
+            processBuilder.environment().put("REDIS_USERNAME", FraudPlatformContainers.redisAlertUsername());
+            processBuilder.environment().put("REDIS_PASSWORD", FraudPlatformContainers.redisAlertPassword());
+            serviceProcess = processBuilder.start();
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to start real alert-service JVM for FDP-36 chaos proof", exception);
         }

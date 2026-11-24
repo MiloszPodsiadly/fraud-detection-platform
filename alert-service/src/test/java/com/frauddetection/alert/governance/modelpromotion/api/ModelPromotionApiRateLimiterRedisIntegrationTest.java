@@ -1,5 +1,6 @@
 package com.frauddetection.alert.governance.modelpromotion.api;
 
+import com.frauddetection.common.testsupport.container.RedisTestSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,7 +9,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -23,29 +23,32 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ModelPromotionApiRateLimiterRedisIntegrationTest {
 
     @Container
-    static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335"))
-            .withExposedPorts(6379);
+    static final GenericContainer<?> REDIS = RedisTestSupport.newContainer();
 
     private LettuceConnectionFactory connections;
     private StringRedisTemplate template;
+    private LettuceConnectionFactory adminConnections;
+    private StringRedisTemplate adminTemplate;
     private ModelPromotionApiRateLimiter first;
     private ModelPromotionApiRateLimiter second;
 
     @BeforeEach
     void setUp() {
-        connections = new LettuceConnectionFactory(REDIS.getHost(), REDIS.getMappedPort(6379));
-        connections.afterPropertiesSet();
-        connections.start();
+        connections = RedisTestSupport.newConnectionFactory(REDIS,
+                RedisTestSupport.alertUsername(), RedisTestSupport.alertPassword());
         template = new StringRedisTemplate(connections);
         template.afterPropertiesSet();
+        adminTemplate = RedisTestSupport.newAdminTemplate(REDIS);
+        adminConnections = (LettuceConnectionFactory) adminTemplate.getConnectionFactory();
         first = limiter(30, 100, Duration.ofSeconds(30));
         second = limiter(30, 100, Duration.ofSeconds(30));
-        template.getConnectionFactory().getConnection().serverCommands().flushDb();
+        adminTemplate.getConnectionFactory().getConnection().serverCommands().flushDb();
     }
 
     @AfterEach
     void tearDown() {
         if (connections != null) connections.destroy();
+        if (adminConnections != null) adminConnections.destroy();
     }
 
     @Test

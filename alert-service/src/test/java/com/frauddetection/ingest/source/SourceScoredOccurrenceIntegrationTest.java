@@ -9,6 +9,8 @@ import com.frauddetection.common.events.contract.*;
 import com.frauddetection.common.events.kafka.*;
 import com.frauddetection.common.events.source.*;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
+import com.frauddetection.common.testsupport.container.KafkaImageReference;
+import com.frauddetection.common.testsupport.container.RedisTestSupport;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
 import com.frauddetection.enricher.messaging.KafkaTransactionEnrichedEventPublisher;
@@ -56,6 +58,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import com.frauddetection.enricher.persistence.RedisFeatureStore;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -95,7 +98,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class SourceScoredOccurrenceIntegrationTest {
     private static final AuthenticatedSourceMongo MONGO = new AuthenticatedSourceMongo();
-    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0@sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069");
+    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName());
     private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();
     private static final String ENCRYPTION_KEY = Base64.getEncoder().encodeToString(new byte[32]);
     private static final SourceOriginProofs ORIGIN_PROOFS = new SourceOriginProofs(new SourceOriginProperties(true,
@@ -180,11 +183,15 @@ class SourceScoredOccurrenceIntegrationTest {
     }
 
     @Test void productionRedisFeatureStorePreservesExactLineageAndExistingDuplicateSuppression() throws Exception {
-        try (var redis = new GenericContainer<>(org.testcontainers.utility.DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335")).withExposedPorts(6379)) {
+        try (var redis = RedisTestSupport.newContainer()) {
             redis.start();
             var resources = DefaultClientResources.builder().ioThreadPoolSize(2).computationThreadPoolSize(2).build();
-            var connections = new LettuceConnectionFactory(new RedisStandaloneConfiguration(redis.getHost(), redis.getMappedPort(6379)),
+            var redisConfiguration = new RedisStandaloneConfiguration(redis.getHost(), redis.getMappedPort(6379));
+            redisConfiguration.setUsername(RedisTestSupport.featureUsername());
+            redisConfiguration.setPassword(RedisPassword.of(RedisTestSupport.featurePassword()));
+            var connections = new LettuceConnectionFactory(redisConfiguration,
                     LettuceClientConfiguration.builder().clientResources(resources).commandTimeout(Duration.ofSeconds(3)).build());
+            var admin = RedisTestSupport.newAdminTemplate(redis);
             try {
                 connections.afterPropertiesSet(); connections.start();
                 var redisTemplate = new StringRedisTemplate(connections); redisTemplate.afterPropertiesSet();
@@ -214,6 +221,10 @@ class SourceScoredOccurrenceIntegrationTest {
                         .append("scoringOccurrenceKafkaMongoMillis", scoringNanos / 1_000_000d)
                         .append("alertProjectionMongoMillis", projectionNanos / 1_000_000d)
                         .append("note", "single local Testcontainers sample; ingress/enrichment includes test-consumer round trips; diagnostic, not an SLO").toJson());
+                String redisVersion;
+                try (var adminConnection = admin.getConnectionFactory().getConnection()) {
+                    redisVersion = adminConnection.serverCommands().info("server").getProperty("redis_version");
+                }
                 try (var connection = connections.getConnection()) {
                     assertThat(connection.ping()).isEqualTo("PONG");
                     var limits = redis.getContainerInfo().getHostConfig();
@@ -223,18 +234,25 @@ class SourceScoredOccurrenceIntegrationTest {
                             .append("mongoVersion", ownerClient.getDatabase("admin").runCommand(new Document("buildInfo", 1)).getString("version"))
                             .append("kafkaImage", KAFKA.getDockerImageName()).append("kafkaMemoryBytes", KAFKA.getContainerInfo().getHostConfig().getMemory())
                             .append("kafkaNanoCpus", KAFKA.getContainerInfo().getHostConfig().getNanoCPUs())
-                            .append("redisImage", redis.getDockerImageName()).append("redisVersion", connection.serverCommands().info("server").getProperty("redis_version"))
+                            .append("redisImage", redis.getDockerImageName()).append("redisVersion", redisVersion)
                             .append("redisMemoryBytes", limits.getMemory()).append("redisNanoCpus", limits.getNanoCPUs()).toJson());
                 }
-            } finally { connections.destroy(); resources.shutdown(0, 1, TimeUnit.SECONDS).get(5, TimeUnit.SECONDS); }
+            } finally {
+                RedisTestSupport.close(admin);
+                connections.destroy();
+                resources.shutdown(0, 1, TimeUnit.SECONDS).get(5, TimeUnit.SECONDS);
+            }
         }
     }
 
     @Test void independentEnrichedRecoveryPublishesStoredSnapshotAfterProducerFailureWithoutRawRedelivery() throws Exception {
-        try (var redis = new GenericContainer<>(org.testcontainers.utility.DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335")).withExposedPorts(6379)) {
+        try (var redis = RedisTestSupport.newContainer()) {
             redis.start();
             var resources = DefaultClientResources.builder().ioThreadPoolSize(2).computationThreadPoolSize(2).build();
-            var connections = new LettuceConnectionFactory(new RedisStandaloneConfiguration(redis.getHost(), redis.getMappedPort(6379)),
+            var redisConfiguration = new RedisStandaloneConfiguration(redis.getHost(), redis.getMappedPort(6379));
+            redisConfiguration.setUsername(RedisTestSupport.featureUsername());
+            redisConfiguration.setPassword(RedisPassword.of(RedisTestSupport.featurePassword()));
+            var connections = new LettuceConnectionFactory(redisConfiguration,
                     LettuceClientConfiguration.builder().clientResources(resources).commandTimeout(Duration.ofSeconds(3)).build());
             try {
                 connections.afterPropertiesSet(); connections.start();

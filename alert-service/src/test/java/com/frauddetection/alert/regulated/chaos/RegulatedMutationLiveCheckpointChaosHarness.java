@@ -125,6 +125,8 @@ public final class RegulatedMutationLiveCheckpointChaosHarness implements AutoCl
                 .withNetwork(FraudPlatformContainers.network())
                 .withNetworkAliases("alert-service-fdp38-fixture")
                 .withExposedPorts(8080)
+                .withEnv("REDIS_USERNAME", FraudPlatformContainers.redisAlertUsername())
+                .withEnv("REDIS_PASSWORD", FraudPlatformContainers.redisAlertPassword())
                 .withCommand(args.toArray(String[]::new));
         try {
             Files.createDirectories(logDirectory);

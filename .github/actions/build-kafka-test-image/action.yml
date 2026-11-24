@@ -1,0 +1,11 @@
+name: Build patched Kafka test image
+description: Build the repository's pinned Kafka distribution on the patched Temurin runtime for Testcontainers.
+runs:
+  using: composite
+  steps:
+    - name: Build the local Kafka image
+      shell: bash
+      run: >-
+        docker build --pull --platform linux/amd64
+        --file deployment/Dockerfile.kafka
+        --tag apache/kafka:4.4.0-temurin-25.0.5.1_2 .

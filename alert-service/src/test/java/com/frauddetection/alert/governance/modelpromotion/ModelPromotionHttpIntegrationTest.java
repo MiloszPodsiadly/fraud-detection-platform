@@ -81,6 +81,8 @@ class ModelPromotionHttpIntegrationTest extends AbstractIntegrationTest {
         registry.add("spring.mongodb.uri", () -> FraudPlatformContainers.mongodb().getReplicaSetUrl("model_promotion_http_test"));
         registry.add("spring.data.redis.host", () -> FraudPlatformContainers.redis().getHost());
         registry.add("spring.data.redis.port", () -> FraudPlatformContainers.redis().getMappedPort(6379));
+        registry.add("spring.data.redis.username", FraudPlatformContainers::redisAlertUsername);
+        registry.add("spring.data.redis.password", FraudPlatformContainers::redisAlertPassword);
         registry.add("app.kafka.topics.transaction-scored", () -> "transactions.scored.model-promotion-http.test");
         registry.add("app.kafka.topics.fraud-alerts", () -> "fraud.alerts.model-promotion-http.test");
         registry.add("app.kafka.topics.fraud-decisions", () -> "fraud.decisions.model-promotion-http.test");

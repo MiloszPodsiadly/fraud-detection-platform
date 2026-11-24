@@ -10,6 +10,7 @@ import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.source.*;
+import com.frauddetection.common.testsupport.container.KafkaImageReference;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.*;
@@ -79,7 +80,7 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     private static final Limits LIMITS = new Limits(Duration.ofHours(1), Duration.ofDays(2), Duration.ofDays(4),
             Duration.ofDays(3), Duration.ofMinutes(2), 100, 100, 100, 1_000);
     private static final TestMongo MONGO = new TestMongo();
-    private static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0@sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069"));
+    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName());
 
     private final KeyPair sourceKey = key();
     private final KeyPair observationKey = key();

@@ -8,6 +8,8 @@ import test from "node:test";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const checker = path.join(repositoryRoot, "scripts", "check-compose-security-config.mjs");
+const isolatedDockerConfig = fs.mkdtempSync(path.join(os.tmpdir(), "compose-test-docker-config-"));
+process.on("exit", () => fs.rmSync(isolatedDockerConfig, { recursive: true, force: true }));
 const sourceOverlay = path.join(
   repositoryRoot,
   "deployment",
@@ -15,6 +17,15 @@ const sourceOverlay = path.join(
 );
 const target = "/run/model-shadow-performance";
 const sourceExpression = "${MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT:-./local-generated/model-shadow-performance}";
+const composeFixtureCredentials = Object.freeze({
+  MONGODB_ROOT_PASSWORD: "test-fixture-mongo-root-8c4a3f2d7b1e6a90",
+  MONGODB_GOVERNANCE_PASSWORD: "test-fixture-governance-2d9f6b4c1a8e7f30",
+  MONGODB_TRUST_AUTHORITY_PASSWORD: "test-fixture-trust-authority-7f3a9c2d6b1e8a40",
+  MONGODB_ALERTS_PASSWORD: "test-fixture-alerts-4b8e1d7c3a9f6025",
+  MONGODB_POLICY_PUBLISHER_PASSWORD: "test-fixture-publisher-9a2d6f3b8c1e7045",
+  REDIS_FEATURE_ENRICHER_PASSWORD: "test-fixture-feature-redis-5d8a2c7f1b9e6043",
+  REDIS_ALERT_PASSWORD: "test-fixture-alert-redis-3e7b1a9d5c2f8046"
+});
 const canonicalSource = fs.readFileSync(sourceOverlay, "utf8").replaceAll("\r\n", "\n");
 const canonicalMount = [
   "      - type: bind",
@@ -29,7 +40,15 @@ test("validates the actual source YAML and actual resolved Compose output", () =
   assertSourcePasses(sourceOverlay);
   const compose = resolveActualCompose("deployment/.env.example");
   assert.equal(compose.status, 0, compose.stderr || compose.error?.message);
-  assertResolvedPasses(JSON.parse(compose.stdout));
+  const config = JSON.parse(compose.stdout);
+  assertResolvedPasses(config);
+  assertComposeFixtureCredentials(config);
+});
+
+test("keeps synthetic MongoDB and Redis fixture credentials distinct", () => {
+  const values = Object.values(composeFixtureCredentials);
+  assert.equal(new Set(values).size, values.length);
+  assert.ok(values.every((value) => value.length >= 32));
 });
 
 test("uses Compose interpolation as the authority for default, env-file, and shell roots", () => {
@@ -40,13 +59,14 @@ test("uses Compose interpolation as the authority for default, env-file, and she
     const shellRoot = path.join(temporary, "shell parent with spaces", "model-shadow-performance");
     writeArtifactRootSentinel(envRoot);
     writeArtifactRootSentinel(shellRoot);
-    fs.writeFileSync(envFile, `MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT=${envRoot}\n`, "utf8");
+    writeComposeFixtureEnv(envFile, envRoot);
 
     const fromEnvFile = resolveActualCompose(envFile);
     assert.equal(fromEnvFile.status, 0, fromEnvFile.stderr || fromEnvFile.error?.message);
     const envConfig = JSON.parse(fromEnvFile.stdout);
     assert.equal(exactModelMount(envConfig).source, envRoot);
     assertResolvedPasses(envConfig);
+    assertComposeFixtureCredentials(envConfig);
     const resolvedSourceFile = path.join(temporary, "resolved-source.txt");
     const exported = runResolved(envConfig, true, resolvedSourceFile);
     assert.equal(exported.status, 0, exported.stderr || exported.stdout);
@@ -673,6 +693,11 @@ function runKeyLoaderSource(cwd) {
 }
 
 function resolveActualCompose(envFile, environment = {}) {
+  const childEnvironment = { ...process.env, ...composeFixtureCredentials, ...environment };
+  childEnvironment.DOCKER_CONFIG = isolatedDockerConfig;
+  if (!Object.hasOwn(environment, "MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT")) {
+    delete childEnvironment.MODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT;
+  }
   return spawnSync("docker", [
     "compose",
     "--env-file", envFile,
@@ -682,7 +707,7 @@ function resolveActualCompose(envFile, environment = {}) {
   ], {
     cwd: repositoryRoot,
     encoding: "utf8",
-    env: { ...process.env, ...environment }
+    env: childEnvironment
   });
 }
 
@@ -700,8 +725,30 @@ function resolveHardenedCompose() {
     "config", "--format", "json"
   ], {
     cwd: repositoryRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: { ...process.env, ...composeFixtureCredentials, DOCKER_CONFIG: isolatedDockerConfig }
   });
+}
+
+function writeComposeFixtureEnv(envFile, artifactRoot) {
+  const examplePath = path.join(repositoryRoot, "deployment", ".env.example");
+  let contents = fs.readFileSync(examplePath, "utf8");
+  for (const [name, value] of Object.entries(composeFixtureCredentials)) {
+    const expression = new RegExp(`^${name}=.*$`, "m");
+    assert.match(contents, expression, `deployment/.env.example is missing ${name}`);
+    contents = contents.replace(expression, `${name}=${value}`);
+  }
+  contents += `\nMODEL_SHADOW_PERFORMANCE_ARTIFACT_ROOT=${artifactRoot}\n`;
+  fs.writeFileSync(envFile, contents, "utf8");
+}
+
+function assertComposeFixtureCredentials(config) {
+  const resolvedValues = Object.values(config.services ?? {}).flatMap((service) =>
+    Object.values(service.environment ?? {}).map(String)
+  );
+  for (const [name, value] of Object.entries(composeFixtureCredentials)) {
+    assert.ok(resolvedValues.includes(value), `Compose did not resolve fixture variable ${name}`);
+  }
 }
 
 function exactModelMount(config) {

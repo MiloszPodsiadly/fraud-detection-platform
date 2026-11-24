@@ -30,12 +30,16 @@ x-java-healthcheck: &java-healthcheck
 services:
   kafka:
     <<: *service-defaults
-    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
+    image: apache/kafka:4.4.0-temurin-25.0.5.1_2
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.kafka
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
@@ -43,6 +47,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 15s
@@ -51,7 +57,7 @@ services:
       start_period: 20s
 
   kafka-topics-init:
-    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
+    image: apache/kafka:4.4.0-temurin-25.0.5.1_2
     depends_on:
       kafka:
         condition: service_healthy
@@ -114,7 +120,7 @@ services:
   # Standalone local Redis. Redis Cluster is unsupported by the model-promotion quota Lua script.
   redis:
     <<: *service-defaults
-    image: redis:8.12.0-alpine@sha256:5af80107c1eeecb484a2269b80a26d12bfa6521787da4663bd9f19f60a163483
+    image: redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289
     command: ["/bin/sh", "/opt/redis-entrypoint.sh"]
     environment:
       REDIS_FEATURE_ENRICHER_PASSWORD: ${REDIS_FEATURE_ENRICHER_PASSWORD:?Set REDIS_FEATURE_ENRICHER_PASSWORD in deployment/.env}
@@ -435,6 +441,7 @@ networks:
 
 volumes:
   audit-trust-keys:
+  kafka-data:
   mongodb-data:
   redis-data:
   prometheus-data:

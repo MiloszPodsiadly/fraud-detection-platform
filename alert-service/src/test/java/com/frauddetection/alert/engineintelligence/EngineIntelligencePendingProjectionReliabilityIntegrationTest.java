@@ -77,6 +77,8 @@ class EngineIntelligencePendingProjectionReliabilityIntegrationTest {
         registry.add("spring.mongodb.uri", () -> FraudPlatformContainers.mongodb().getReplicaSetUrl("ei_pending_test"));
         registry.add("spring.data.redis.host", () -> FraudPlatformContainers.redis().getHost());
         registry.add("spring.data.redis.port", () -> FraudPlatformContainers.redis().getMappedPort(6379));
+        registry.add("spring.data.redis.username", FraudPlatformContainers::redisAlertUsername);
+        registry.add("spring.data.redis.password", FraudPlatformContainers::redisAlertPassword);
         registry.add("app.kafka.topics.transaction-scored", () -> SOURCE_TOPIC);
         registry.add("app.kafka.topics.fraud-alerts", () -> "fraud.alerts.ei-pending." + SUFFIX);
         registry.add("app.kafka.topics.fraud-decisions", () -> "fraud.decisions.ei-pending." + SUFFIX);

@@ -5,6 +5,7 @@ import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.events.source.*;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
+import com.frauddetection.common.testsupport.container.RedisTestSupport;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.config.SourceEnrichedPublicationRecoveryProperties;
@@ -941,12 +942,11 @@ class SourceLineagePipelineIntegrationTest {
                     .all().get(30, TimeUnit.SECONDS);
         }
 
-        LettuceConnectionFactory redisFactory = new LettuceConnectionFactory(
-                FraudPlatformContainers.redis().getHost(), FraudPlatformContainers.redis().getMappedPort(6379));
-        redisFactory.afterPropertiesSet();
+        LettuceConnectionFactory redisFactory = RedisTestSupport.newConnectionFactory(FraudPlatformContainers.redis(),
+                RedisTestSupport.featureUsername(), RedisTestSupport.featurePassword());
         StringRedisTemplate realRedis = new StringRedisTemplate(redisFactory);
         realRedis.afterPropertiesSet();
-        realRedis.getConnectionFactory().getConnection().serverCommands().flushAll();
+        RedisTestSupport.flushAll(FraudPlatformContainers.redis());
 
         Map<String, Object> producerProperties = new HashMap<>();
         producerProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, FraudPlatformContainers.kafka().getBootstrapServers());
@@ -1059,7 +1059,7 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(initialOutbox.published()).isFalse();
             TransactionEnrichedEvent canonical = initialOutbox.event();
             FeatureNamespace namespace = FeatureNamespace.attested(enricher.raw(raw));
-            Set<String> historyKeys = realRedis.keys("feature:v3:attested:*");
+            Set<String> historyKeys = RedisTestSupport.keys(FraudPlatformContainers.redis(), "feature:v3:attested:*");
             assertThat(historyKeys).hasSize(6);
             assertThat(realRedis.opsForZSet().zCard(historyKeys.stream().filter(k -> k.endsWith(":customer:transactions")).findFirst().orElseThrow()))
                     .isEqualTo(1L);
@@ -1087,7 +1087,7 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(laterOutbox).isNotNull();
             assertThat(laterOutbox.historyApplied()).isTrue();
             assertThat(laterOutbox.published()).isTrue();
-            historyKeys = realRedis.keys("feature:v3:attested:*");
+            historyKeys = RedisTestSupport.keys(FraudPlatformContainers.redis(), "feature:v3:attested:*");
             assertThat(realRedis.opsForZSet().zCard(historyKeys.stream().filter(k -> k.endsWith(":customer:transactions")).findFirst().orElseThrow()))
                     .isEqualTo(1L);
             assertThat(realRedis.opsForZSet().zCard(historyKeys.stream().filter(k -> k.endsWith(":transactions") && k.contains(":merchant:")).findFirst().orElseThrow()))
@@ -1191,7 +1191,7 @@ class SourceLineagePipelineIntegrationTest {
                     .countDocuments(eq("receiptId", lateLineage.receiptId()))).isZero();
         } finally {
             container.stop();
-            realRedis.getConnectionFactory().getConnection().serverCommands().flushAll();
+            RedisTestSupport.flushAll(FraudPlatformContainers.redis());
             redisFactory.destroy();
             rawFactory.destroy();
             enrichedFactory.destroy();
@@ -1201,12 +1201,11 @@ class SourceLineagePipelineIntegrationTest {
 
     @Test void durableBusinessIdentityFenceRejectsReusedTransactionIdAfterRedisMarkerLoss() throws Exception {
         FraudPlatformContainers.startAll();
-        LettuceConnectionFactory redisFactory = new LettuceConnectionFactory(
-                FraudPlatformContainers.redis().getHost(), FraudPlatformContainers.redis().getMappedPort(6379));
-        redisFactory.afterPropertiesSet();
+        LettuceConnectionFactory redisFactory = RedisTestSupport.newConnectionFactory(FraudPlatformContainers.redis(),
+                RedisTestSupport.featureUsername(), RedisTestSupport.featurePassword());
         StringRedisTemplate realRedis = new StringRedisTemplate(redisFactory);
         realRedis.afterPropertiesSet();
-        realRedis.getConnectionFactory().getConnection().serverCommands().flushAll();
+        RedisTestSupport.flushAll(FraudPlatformContainers.redis());
         try {
             FeatureStore realFeatureStore = new RedisFeatureStore(realRedis,
                     new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8),
@@ -1241,10 +1240,10 @@ class SourceLineagePipelineIntegrationTest {
                     .countDocuments(eq("recordType", "FENCE"))).isEqualTo(1L);
 
             FeatureNamespace namespace = FeatureNamespace.attested(enricher.raw(a));
-            Set<String> keys = realRedis.keys("feature:v3:attested:*");
+            Set<String> keys = RedisTestSupport.keys(FraudPlatformContainers.redis(), "feature:v3:attested:*");
             String commitmentHash = keys.stream().filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
             String businessIds = keys.stream().filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow();
-            realRedis.delete(List.of(commitmentHash, businessIds));
+            RedisTestSupport.delete(FraudPlatformContainers.redis(), List.of(commitmentHash, businessIds));
             assertThat(realFeatureStore.hasRecordedTransaction(b, namespace)).isFalse();
 
             assertThat(enricher.prepareEnrichedPublication(b, enrichedCandidate(b)).authority().state()).isEqualTo(CONFLICT);
@@ -1285,7 +1284,7 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(merchantHistory).hasSize(1);
             assertThat(realRedis.opsForZSet().zCard(merchantHistory.getFirst())).isEqualTo(1L);
         } finally {
-            realRedis.getConnectionFactory().getConnection().serverCommands().flushAll();
+            RedisTestSupport.flushAll(FraudPlatformContainers.redis());
             redisFactory.destroy();
         }
     }
@@ -2172,11 +2171,11 @@ class SourceLineagePipelineIntegrationTest {
 
         var redis = FraudPlatformContainers.redis();
         if (!redis.isRunning()) { redis.start(); }
-        var connectionFactory = new LettuceConnectionFactory(redis.getHost(), redis.getMappedPort(6379));
+        var connectionFactory = RedisTestSupport.newConnectionFactory(redis, RedisTestSupport.featureUsername(), RedisTestSupport.featurePassword());
         connectionFactory.afterPropertiesSet();
         var redisTemplate = new StringRedisTemplate(connectionFactory);
         redisTemplate.afterPropertiesSet();
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        RedisTestSupport.flushAll(redis);
         try {
             var store = new RedisFeatureStore(redisTemplate, new com.frauddetection.enricher.config.FeatureStoreProperties(
                     Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)),
@@ -2226,7 +2225,7 @@ class SourceLineagePipelineIntegrationTest {
             }
             assertThat(store.loadSnapshot(first, firstNamespace).recentTransactionCount()).isEqualTo(1);
         } finally {
-            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+            RedisTestSupport.flushAll(redis);
             connectionFactory.destroy();
         }
 
@@ -2237,11 +2236,11 @@ class SourceLineagePipelineIntegrationTest {
     @Test void lateRejectedObservationRetainsTerminalDispositionAfterAnotherAdmissionReusesGate() throws Exception {
         var redis = FraudPlatformContainers.redis();
         if (!redis.isRunning()) { redis.start(); }
-        var connectionFactory = new LettuceConnectionFactory(redis.getHost(), redis.getMappedPort(6379));
+        var connectionFactory = RedisTestSupport.newConnectionFactory(redis, RedisTestSupport.featureUsername(), RedisTestSupport.featurePassword());
         connectionFactory.afterPropertiesSet();
         var redisTemplate = new StringRedisTemplate(connectionFactory);
         redisTemplate.afterPropertiesSet();
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        RedisTestSupport.flushAll(redis);
         try {
             var store = new RedisFeatureStore(redisTemplate, new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7),
                     Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
@@ -2384,7 +2383,7 @@ class SourceLineagePipelineIntegrationTest {
             assertThat(published).extracting(TransactionEnrichedEvent::transactionId)
                     .containsExactly(first.transactionId(), later.transactionId(), next.transactionId());
 
-            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+            RedisTestSupport.flushAll(redis);
             assertThatThrownBy(() -> restartedService.enrich(delayed, delayedProof))
                     .isInstanceOf(com.frauddetection.enricher.exception.OutOfOrderFeatureEventException.class)
                     .hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
@@ -2466,7 +2465,7 @@ class SourceLineagePipelineIntegrationTest {
                             ackLater.transactionId())
                     .doesNotContain(ackDelayed.transactionId());
         } finally {
-            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+            RedisTestSupport.flushAll(redis);
             connectionFactory.destroy();
         }
     }
@@ -2474,11 +2473,11 @@ class SourceLineagePipelineIntegrationTest {
     @Test void pendingEarlierRawCannotBeOvertakenBySameCustomerAdmissionOrRecovery() throws Exception {
         var redis = FraudPlatformContainers.redis();
         if (!redis.isRunning()) { redis.start(); }
-        var connectionFactory = new LettuceConnectionFactory(redis.getHost(), redis.getMappedPort(6379));
+        var connectionFactory = RedisTestSupport.newConnectionFactory(redis, RedisTestSupport.featureUsername(), RedisTestSupport.featurePassword());
         connectionFactory.afterPropertiesSet();
         var redisTemplate = new StringRedisTemplate(connectionFactory);
         redisTemplate.afterPropertiesSet();
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        RedisTestSupport.flushAll(redis);
         try {
             var store = new RedisFeatureStore(redisTemplate, new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7),
                     Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
@@ -2590,7 +2589,7 @@ class SourceLineagePipelineIntegrationTest {
                     .isEqualTo(new BigDecimal("62.00"));
             assertThat(score(completeB).event()).isNotNull();
         } finally {
-            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+            RedisTestSupport.flushAll(redis);
             connectionFactory.destroy();
         }
     }

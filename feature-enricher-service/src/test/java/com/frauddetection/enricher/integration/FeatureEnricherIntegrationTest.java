@@ -5,6 +5,8 @@ import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
+import com.frauddetection.common.testsupport.container.RedisTestSupport;
+import com.frauddetection.common.testsupport.container.TestContainerProperties;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -43,8 +45,8 @@ class FeatureEnricherIntegrationTest extends AbstractIntegrationTest {
         FraudPlatformContainers.startAll();
         registry.add("spring.kafka.bootstrap-servers", () -> FraudPlatformContainers.kafka().getBootstrapServers());
         registry.add("spring.kafka.producer.compression-type", () -> "snappy");
-        registry.add("spring.data.redis.host", () -> FraudPlatformContainers.redis().getHost());
-        registry.add("spring.data.redis.port", () -> FraudPlatformContainers.redis().getMappedPort(6379));
+        TestContainerProperties.featureEnricherRedisProperties()
+                .forEach((key, value) -> registry.add(key, () -> value));
         registry.add("app.kafka.topics.transaction-raw", () -> "transactions.raw.test");
         registry.add("app.kafka.topics.transaction-enriched", () -> "transactions.enriched.test");
         registry.add("app.kafka.topics.transactions-dead-letter", () -> "transactions.dead-letter.test");
@@ -52,7 +54,12 @@ class FeatureEnricherIntegrationTest extends AbstractIntegrationTest {
 
     @AfterEach
     void clearRedis() {
-        stringRedisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        StringRedisTemplate admin = RedisTestSupport.newAdminTemplate(FraudPlatformContainers.redis());
+        try {
+            admin.getConnectionFactory().getConnection().serverCommands().flushAll();
+        } finally {
+            RedisTestSupport.close(admin);
+        }
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.frauddetection.enricher.persistence;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.common.events.source.SourceScope;
+import com.frauddetection.common.testsupport.container.RedisTestSupport;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.exception.FeatureEnrichmentException;
@@ -18,7 +19,6 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
@@ -55,7 +55,9 @@ class RedisMerchantHistoryBenchmarkTest {
 
     private GenericContainer<?> redisContainer;
     private LettuceConnectionFactory connectionFactory;
+    private LettuceConnectionFactory adminConnectionFactory;
     private StringRedisTemplate redis;
+    private StringRedisTemplate adminRedis;
     private RedisFeatureStore store;
     private FeatureNamespace namespace;
     private String v3MerchantKey;
@@ -65,15 +67,16 @@ class RedisMerchantHistoryBenchmarkTest {
 
     @BeforeAll
     void startRedis() throws Exception {
-        redisContainer = new GenericContainer<>(DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335"))
-                .withExposedPorts(6379)
+        redisContainer = RedisTestSupport.newContainer()
                 .withCreateContainerCmdModifier(command -> command.getHostConfig()
                         .withMemory(REDIS_MEMORY_LIMIT_BYTES).withMemorySwap(REDIS_MEMORY_LIMIT_BYTES));
         redisContainer.start();
-        connectionFactory = new LettuceConnectionFactory(redisContainer.getHost(), redisContainer.getMappedPort(6379));
-        connectionFactory.afterPropertiesSet();
+        connectionFactory = RedisTestSupport.newConnectionFactory(redisContainer,
+                RedisTestSupport.featureUsername(), RedisTestSupport.featurePassword());
         redis = new StringRedisTemplate(connectionFactory);
         redis.afterPropertiesSet();
+        adminRedis = RedisTestSupport.newAdminTemplate(redisContainer);
+        adminConnectionFactory = (LettuceConnectionFactory) adminRedis.getConnectionFactory();
         store = new RedisFeatureStore(redis, new FeatureStoreProperties(Duration.ofMinutes(1), Duration.ofDays(7),
                 Duration.ofDays(8), Duration.ofDays(180), Duration.ofDays(30)), new CurrencyAmountConverter());
         namespace = namespace();
@@ -97,6 +100,7 @@ class RedisMerchantHistoryBenchmarkTest {
     @AfterAll
     void stopRedisConnection() {
         if (connectionFactory != null) { connectionFactory.destroy(); }
+        if (adminConnectionFactory != null) { adminConnectionFactory.destroy(); }
         if (redisContainer != null) { redisContainer.stop(); }
     }
 
@@ -141,7 +145,7 @@ class RedisMerchantHistoryBenchmarkTest {
     }
 
     private void measure(Scenario scenario, int warmups, int iterations, String profile) {
-        redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+        adminRedis.getConnectionFactory().getConnection().serverCommands().flushDb();
         seed(scenario);
         long expected = scenario.expectedUnionSize();
         for (int index = 0; index < warmups; index++) {
@@ -202,7 +206,7 @@ class RedisMerchantHistoryBenchmarkTest {
     }
 
     private void assertMalformedDuplicateFailsClosed() {
-        redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+        adminRedis.getConnectionFactory().getConnection().serverCommands().flushDb();
         byte[] sharedId = "conflicting-timestamp".getBytes(StandardCharsets.UTF_8);
         double score = EVENT_TIME.minusSeconds(60).toEpochMilli();
         redis.opsForZSet().add(v3MerchantKey, "conflicting-timestamp", score);
@@ -216,7 +220,7 @@ class RedisMerchantHistoryBenchmarkTest {
     }
 
     private Properties redisInfo(String section) {
-        return redis.getConnectionFactory().getConnection().serverCommands().info(section);
+        return adminRedis.getConnectionFactory().getConnection().serverCommands().info(section);
     }
 
     private static long redisCalls(Properties info) {

@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
+
+# The binary distribution below is the sole Kafka runtime source. This pinned image
+# supplies only the official 4.4.0 Docker packaging scripts and entrypoint.
+FROM apache/kafka:4.4.0@sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f AS kafka-docker-assets
+
+# Download the final Apache release archive and validate its published checksum.
+FROM eclipse-temurin:25.0.5.1_2-jre-alpine-3.24@sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89 AS kafka-artifact
+
+USER root
+
+RUN apk add --no-cache coreutils wget \
+    && wget -O /tmp/kafka.tgz https://downloads.apache.org/kafka/4.4.0/kafka_2.13-4.4.0.tgz \
+    && echo 'f5ceba8a265ab6bb2d68362b1f6859a95e15d60ef92ba83b43fdf065b557dc18e98d6383c15b9977320e25b3a2c8b6f11decb17b0fa6c0f163423793a0eb95cb  /tmp/kafka.tgz' | sha512sum -c -
+
+FROM eclipse-temurin:25.0.5.1_2-jre-alpine-3.24@sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89 AS runtime
+
+USER root
+
+RUN apk add --no-cache bash gcompat \
+    && adduser -h /home/appuser -D --shell /bin/bash appuser \
+    && mkdir -p /opt/kafka /var/lib/kafka/data /etc/kafka/secrets /etc/kafka/docker /usr/logs /mnt/shared/config \
+    && chown appuser:appuser -R /usr/logs /mnt/shared/config \
+    && chown appuser:root -R /var/lib/kafka /etc/kafka/secrets /etc/kafka \
+    && chmod -R ug+w /etc/kafka /var/lib/kafka /etc/kafka/secrets
+
+# Mount the checked archive during extraction so the tarball never enters the final image.
+RUN --mount=type=bind,from=kafka-artifact,source=/tmp/kafka.tgz,target=/tmp/kafka.tgz,ro \
+    tar -xzf /tmp/kafka.tgz --strip-components=1 -C /opt/kafka \
+    && chown -R appuser:appuser /opt/kafka \
+    && test -f /opt/kafka/libs/kafka_2.13-4.4.0.jar \
+    && test -x /opt/kafka/bin/kafka-server-start.sh
+
+# The JSA archives from the official image are tied to its vulnerable Temurin 25.0.4.1.
+# Keep the upstream launch flow, removing only its optional class-data-sharing flags.
+RUN --mount=type=bind,from=kafka-docker-assets,source=/etc/kafka/docker,target=/mnt/kafka-docker,ro \
+    cp -a /mnt/kafka-docker/. /etc/kafka/docker/ \
+    && test "$(grep -Ec 'SharedArchiveFile=/opt/kafka/(kafka|storage)\.jsa' /etc/kafka/docker/launch)" -eq 2 \
+    && sed -i -E '/SharedArchiveFile=\/opt\/kafka\/(kafka|storage)\.jsa/d' /etc/kafka/docker/launch \
+    && ! grep -q 'SharedArchiveFile=' /etc/kafka/docker/launch \
+    && chmod -R ug+w /etc/kafka /var/lib/kafka /etc/kafka/secrets
+
+COPY --from=kafka-docker-assets /__cacert_entrypoint.sh /__cacert_entrypoint.sh
+
+ENV KAFKA_HOME=/opt/kafka
+ENV PATH=/opt/kafka/bin:${PATH}
+
+RUN java -XshowSettings:properties -version 2>&1 \
+    | grep -Fx '    java.version = 25.0.5.1' \
+    && java -XshowSettings:properties -version 2>&1 \
+    | grep -E '^    java.runtime.version = 25\.0\.5\.1\+2(-LTS)?$' \
+    && java -XshowSettings:properties -version 2>&1 \
+    | grep -Fx '    java.vendor = Eclipse Adoptium'
+
+LABEL org.opencontainers.image.title="Apache Kafka with patched Temurin JRE" \
+      org.opencontainers.image.version="4.4.0" \
+      org.opencontainers.image.vendor="Apache Software Foundation" \
+      org.opencontainers.image.base.name="eclipse-temurin:25.0.5.1_2-jre-alpine-3.24" \
+      org.opencontainers.image.base.digest="sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89" \
+      io.fdp.kafka.distribution.sha512="f5ceba8a265ab6bb2d68362b1f6859a95e15d60ef92ba83b43fdf065b557dc18e98d6383c15b9977320e25b3a2c8b6f11decb17b0fa6c0f163423793a0eb95cb" \
+      io.fdp.java.version="25.0.5.1+2"
+
+EXPOSE 9092
+USER appuser
+ENTRYPOINT ["/__cacert_entrypoint.sh"]
+CMD ["/etc/kafka/docker/run"]

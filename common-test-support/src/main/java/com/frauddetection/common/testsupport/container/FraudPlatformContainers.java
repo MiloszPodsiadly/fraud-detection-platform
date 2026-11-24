@@ -10,9 +10,8 @@ public final class FraudPlatformContainers {
 
     private static final Network NETWORK = Network.newNetwork();
 
-    private static final DockerImageName KAFKA_IMAGE = DockerImageName.parse("apache/kafka:3.8.0@sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069");
+    private static final DockerImageName KAFKA_IMAGE = KafkaImageReference.dockerImageName();
     private static final DockerImageName MONGODB_IMAGE = DockerImageName.parse("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
-    private static final DockerImageName REDIS_IMAGE = DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335");
 
     private static final KafkaContainer KAFKA_CONTAINER = new KafkaContainer(KAFKA_IMAGE)
             .withNetwork(NETWORK)
@@ -23,8 +22,7 @@ public final class FraudPlatformContainers {
             .withNetwork(NETWORK)
             .withNetworkAliases("mongodb");
 
-    private static final GenericContainer<?> REDIS_CONTAINER = new GenericContainer<>(REDIS_IMAGE)
-            .withExposedPorts(6379)
+    private static final GenericContainer<?> REDIS_CONTAINER = RedisTestSupport.newContainer()
             .withNetwork(NETWORK)
             .withNetworkAliases("redis");
 
@@ -69,5 +67,29 @@ public final class FraudPlatformContainers {
 
     public static String redisNetworkHost() {
         return "redis";
+    }
+
+    public static String redisFeatureUsername() {
+        return RedisTestSupport.featureUsername();
+    }
+
+    public static String redisFeaturePassword() {
+        return RedisTestSupport.featurePassword();
+    }
+
+    public static String redisAlertUsername() {
+        return RedisTestSupport.alertUsername();
+    }
+
+    public static String redisAlertPassword() {
+        return RedisTestSupport.alertPassword();
+    }
+
+    public static String redisTestAdminUsername() {
+        return RedisTestSupport.testAdminUsername();
+    }
+
+    public static String redisTestAdminPassword() {
+        return RedisTestSupport.testAdminPassword();
     }
 }
