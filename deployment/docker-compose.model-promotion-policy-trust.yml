@@ -50,7 +50,7 @@ services:
 
   model-promotion-observation-key-loader:
     profiles: !reset []
-    image: eclipse-temurin:21.0.13.1_2-jre@sha256:b57b0a974dc5ba8b24009a97aeb9ffd178e172727736279e5de73605f40c6813
+    image: eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
     restart: "no"
     network_mode: none
     entrypoint:
@@ -79,7 +79,7 @@ services:
 
   model-promotion-policy-key-loader:
     profiles: !reset []
-    image: eclipse-temurin:21.0.13.1_2-jre@sha256:b57b0a974dc5ba8b24009a97aeb9ffd178e172727736279e5de73605f40c6813
+    image: eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
     restart: "no"
     network_mode: none
     entrypoint:

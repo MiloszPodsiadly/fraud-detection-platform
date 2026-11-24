@@ -294,7 +294,8 @@
                         <configuration>
                             <rules>
                                 <requireJavaVersion>
-                                    <version>[21,22)</version>
+                                    <!-- RequireJavaVersion normalizes 21.0.13.1 to 21.0.13-1; the vendor-aware runtime verifier enforces the approved build. -->
+                                    <version>[21.0.13-1,22)</version>
                                 </requireJavaVersion>
                                 <banDynamicVersions>
                                     <ignores>

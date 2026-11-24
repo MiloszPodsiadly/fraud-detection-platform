@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-FROM maven:3.10.2-eclipse-temurin-21-noble@sha256:f42efdf68c79ca9aa8f022ec4358e340b31e2692cd3d6ac0fbe112c838c5a47b AS build
-RUN java -version
+FROM maven:3.10.2-eclipse-temurin-21-noble@sha256:c8d5fcc6bbda32e415cd6a2f4d091c52f768e12594cfdb396dd2712c4b609369 AS build
+COPY scripts/ci/verify-temurin-java-runtime.sh /usr/local/bin/verify-temurin-java-runtime
+RUN chmod 0555 /usr/local/bin/verify-temurin-java-runtime && /usr/local/bin/verify-temurin-java-runtime
+COPY scripts/ci/exec-with-verified-temurin-java.sh /usr/local/bin/exec-with-verified-temurin-java
+RUN chmod 0555 /usr/local/bin/exec-with-verified-temurin-java
 
 ARG MODULE_NAME
 
@@ -36,8 +39,11 @@ COPY model-promotion-policy-publisher/src model-promotion-policy-publisher/src
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -pl "${MODULE_NAME}" -am -Dmaven.test.skip=true package
 
-FROM eclipse-temurin:21.0.13.1_2-jre@sha256:b57b0a974dc5ba8b24009a97aeb9ffd178e172727736279e5de73605f40c6813
-RUN java -version
+FROM eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
+COPY scripts/ci/verify-temurin-java-runtime.sh /usr/local/bin/verify-temurin-java-runtime
+RUN chmod 0555 /usr/local/bin/verify-temurin-java-runtime && /usr/local/bin/verify-temurin-java-runtime
+COPY scripts/ci/exec-with-verified-temurin-java.sh /usr/local/bin/exec-with-verified-temurin-java
+RUN chmod 0555 /usr/local/bin/exec-with-verified-temurin-java
 
 ARG MODULE_NAME
 
@@ -55,4 +61,4 @@ USER 10001:10001
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+CMD ["/usr/local/bin/exec-with-verified-temurin-java", "-jar", "/app/app.jar"]

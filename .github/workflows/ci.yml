@@ -35,14 +35,10 @@ jobs:
       - name: Test CI selector guard fail-closed behavior
         run: node --test scripts/ci/verify-ci-test-selectors.test.mjs
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Use canonical ready shadow model artifact for backend tests
         run: cp ml-inference-service/app/model_artifact.json /tmp/model_artifact.json
@@ -136,14 +132,10 @@ jobs:
           echo "TESTED_GIT_SHA=$TESTED_GIT_SHA" >> "$GITHUB_ENV"
           echo "Institutional reliability revision: $TESTED_GIT_SHA"
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -179,14 +171,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -225,14 +213,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -407,14 +391,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -431,14 +411,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -468,14 +444,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -526,14 +498,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -585,14 +553,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -800,14 +764,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -850,14 +810,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -951,14 +907,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -990,14 +942,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -1084,14 +1032,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -1239,14 +1183,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21.0.13.1+2"
           cache: maven
-      - name: Record patched Java runtime version
-        run: java -version
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
