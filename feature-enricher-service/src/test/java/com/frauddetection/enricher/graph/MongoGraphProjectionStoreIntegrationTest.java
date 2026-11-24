@@ -155,13 +155,13 @@ class MongoGraphProjectionStoreIntegrationTest {
                     assertThat(result.state()).as("single-hub candidateCount=%d result=%s", candidateCount, result)
                             .isEqualTo(GraphProjectionState.VERIFIED_BOUNDED);
                     assertThat(result.witness()).isPresent();
-                    assertThat(ownerChecks.get()).isGreaterThan(1);
+                    assertThat(ownerChecks).hasValue(2 * (candidateCount + 1));
                 } else {
                     assertThat(result.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
                     assertThat(result.reason()).isEqualTo(GraphReadReason.TRUNCATED_UNVERIFIED);
                     assertThat(result.witness()).isEmpty();
-                    // Structurally invalid or over-bound snapshots fail before choosing an owner-authenticated pair.
-                    assertThat(ownerChecks).hasValue(0);
+                    // Root authority is required for the reverse query; over-bound priors then fail before prior-owner I/O.
+                    assertThat(ownerChecks).hasValue(1);
                 }
                 assertThat(commands.findLimits).isNotEmpty().allSatisfy(limit ->
                         assertThat(limit).isBetween(1, GraphQueryLimits.DEFAULT.maxEdges() + 1));
@@ -198,6 +198,7 @@ class MongoGraphProjectionStoreIntegrationTest {
             assertThat(exactly256.state()).as("256-edge result=%s", exactly256)
                     .isEqualTo(GraphProjectionState.VERIFIED_BOUNDED);
             assertThat(exactly256.witness()).isPresent();
+            assertThat(ownerChecks).hasValue(2 * atLimit.size());
             assertThat(commands.findLimits).hasSize(6).allSatisfy(limit ->
                     assertThat(limit).isBetween(1, GraphQueryLimits.DEFAULT.maxEdges() + 1));
             assertThat(commands.getMoreCount).isLessThanOrEqualTo(6);
@@ -214,7 +215,7 @@ class MongoGraphProjectionStoreIntegrationTest {
             assertThat(overflow.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
             assertThat(overflow.reason()).isEqualTo(GraphReadReason.TRUNCATED_UNVERIFIED);
             assertThat(overflow.witness()).isEmpty();
-            assertThat(ownerChecks).hasValue(0);
+            assertThat(ownerChecks).hasValue(3);
             assertThat(commands.findLimits).hasSize(2).contains(257, 254);
             assertThat(commands.findBatchSizes).containsOnly(GraphQueryLimits.DEFAULT.maxPageSize());
             assertThat(commands.findMaxTimeMillis).allSatisfy(maxTime -> assertThat(maxTime).isBetween(1, 5_000));

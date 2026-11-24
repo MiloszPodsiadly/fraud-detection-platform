@@ -54,6 +54,9 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private PrivateDeviceDiagnosticReader diagnostic;
     String topic;
     boolean topicCreated;
+    private KafkaProducer<String, byte[]> scoredProducer;
+    private KafkaConsumer<String, byte[]> scoredConsumer;
+    private final Map<String, ScoredRecord> consumedScoredEvents = new HashMap<>();
 
     @BeforeAll static void start() throws Exception {
         VerifiedDeviceAdmissionIntegrationTest.MONGO.start();
@@ -89,8 +92,19 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     }
 
     @AfterEach void cleanUp() {
-        if (f != null) { f.cleanup(); }
-        if (clients != null) { clients.close(); }
+        try {
+            if (scoredProducer != null) { scoredProducer.close(); }
+        } finally {
+            try {
+                if (scoredConsumer != null) { scoredConsumer.close(); }
+            } finally {
+                try {
+                    if (f != null) { f.cleanup(); }
+                } finally {
+                    if (clients != null) { clients.close(); }
+                }
+            }
+        }
     }
 
     @Test void occurrenceReaderRejectsUnneededFindPrivileges() {
@@ -1528,10 +1542,8 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
             }
         }
         byte[] bytes = new JacksonKafkaSerializer<TransactionScoredEvent>().serialize(topic, claim.event());
-        try (KafkaProducer<String, byte[]> producer = new KafkaProducer<>(Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
-                ProducerConfig.ACKS_CONFIG, "all"), new StringSerializer(), new ByteArraySerializer())) {
-            producer.send(new ProducerRecord<>(topic, claim.event().eventId(), bytes)).get(15, TimeUnit.SECONDS);
-        }
+        scoredProducer().send(new ProducerRecord<>(topic, claim.event().eventId(), bytes))
+                .get(15, TimeUnit.SECONDS);
         var acknowledged = new JacksonKafkaDeserializer<>(TransactionScoredEvent.class).deserialize(topic, bytes);
         var published = occurrenceWriter.confirm(pending.id(), acknowledged, claim.claimId());
         assertThat(published.status()).isEqualTo(MongoSourceOccurrenceStore.Status.PUBLISHED);
@@ -1542,26 +1554,45 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     }
 
     private ScoredRecord consume(String expectedId) {
-        Properties properties = new Properties();
-        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
-        properties.put(ConsumerConfig.GROUP_ID_CONFIG, "device-private-test-" + UUID.randomUUID());
-        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties)) {
-            consumer.subscribe(List.of(topic));
-            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
-            while (System.nanoTime() < until) {
-                var records = consumer.poll(Duration.ofMillis(250));
-                for (var record : records) {
-                    if (expectedId.equals(record.key())) {
-                        return new ScoredRecord(new JacksonKafkaDeserializer<>(TransactionScoredEvent.class).deserialize(topic, record.value()), record.value());
-                    }
-                }
+        ScoredRecord buffered = consumedScoredEvents.remove(expectedId);
+        if (buffered != null) { return buffered; }
+        KafkaConsumer<String, byte[]> consumer = scoredConsumer();
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (System.nanoTime() < until) {
+            var records = consumer.poll(Duration.ofMillis(250));
+            for (var record : records) {
+                ScoredRecord consumed = new ScoredRecord(
+                        new JacksonKafkaDeserializer<>(TransactionScoredEvent.class).deserialize(topic, record.value()),
+                        record.value());
+                if (expectedId.equals(record.key())) { return consumed; }
+                if (record.key() != null) { consumedScoredEvents.putIfAbsent(record.key(), consumed); }
             }
         }
         throw new AssertionError("SCORED_KAFKA_RECORD_NOT_RECEIVED");
+    }
+
+    private KafkaProducer<String, byte[]> scoredProducer() {
+        if (scoredProducer == null) {
+            scoredProducer = new KafkaProducer<>(Map.of(
+                    ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                    ProducerConfig.ACKS_CONFIG, "all"), new StringSerializer(), new ByteArraySerializer());
+        }
+        return scoredProducer;
+    }
+
+    private KafkaConsumer<String, byte[]> scoredConsumer() {
+        if (scoredConsumer == null) {
+            Properties properties = new Properties();
+            properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
+            properties.put(ConsumerConfig.GROUP_ID_CONFIG, "device-private-test-" + UUID.randomUUID());
+            properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+            properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+            properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+            properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+            scoredConsumer = new KafkaConsumer<>(properties);
+            scoredConsumer.subscribe(List.of(topic));
+        }
+        return scoredConsumer;
     }
 
     private TransactionScoredEvent score(VerifiedDeviceAdmissionIntegrationTest.Event source, String id) {

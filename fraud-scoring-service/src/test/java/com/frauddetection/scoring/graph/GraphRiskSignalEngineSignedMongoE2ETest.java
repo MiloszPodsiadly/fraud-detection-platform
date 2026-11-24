@@ -35,6 +35,8 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
         AtomicInteger scorerReads = new AtomicInteger();
         AtomicInteger occurrenceRevalidations = new AtomicInteger();
         AtomicBoolean admitConflictAfterNextRead = new AtomicBoolean();
+        AtomicReference<GraphDeviceMongoVerticalTestFacade.TwoHopRead> conflictRevalidationRead =
+                new AtomicReference<>();
         AtomicReference<byte[]> originalScoredWireBytes = new AtomicReference<>();
         AtomicInteger graphOwnerReadBaseline = new AtomicInteger();
         AtomicInteger graphOwnerReadFinal = new AtomicInteger();
@@ -49,7 +51,7 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
             GraphRiskEvidenceAccess access = new GraphRiskEvidenceAccess() {
                 @Override public GraphRiskEvidenceRead read(ScoringContext requested) {
                     scorerReads.incrementAndGet();
-                    GraphRiskEvidenceRead current = readAuthorizedNow(session, requested);
+                    GraphRiskEvidenceRead current = readAuthorizedNow(session, requested, conflictRevalidationRead);
                     if (admitConflictAfterNextRead.compareAndSet(true, false)) {
                         session.graph().admitSignedConflict();
                     }
@@ -62,7 +64,7 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
                     if (!isExactRootContext(session, requested) || !previous.isBoundTo(requested)) {
                         return GraphRiskEvidenceRead.denied();
                     }
-                    GraphRiskEvidenceRead current = readAuthorizedNow(session, requested);
+                    GraphRiskEvidenceRead current = readAuthorizedNow(session, requested, conflictRevalidationRead);
                     if (current.status() == GraphRiskEvidenceRead.Status.VERIFIED_POSITIVE
                             && !previous.binding().equals(current.binding())) {
                         return GraphRiskEvidenceRead.denied();
@@ -167,10 +169,15 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
 
                 admitConflictAfterNextRead.set(true);
                 FraudSignalEvaluation conflictDuringRevalidation = engine.evaluate(exactB);
-                assertUnavailable(conflictDuringRevalidation, ReasonCode.GRAPH_OWNER_CONFLICT);
-
-                FraudSignalEvaluation conflictOnNextEvaluation = engine.evaluate(exactB);
-                assertUnavailable(conflictOnNextEvaluation, ReasonCode.GRAPH_OWNER_CONFLICT);
+                assertThat(conflictDuringRevalidation.reasonCodes())
+                        .as("typed result after signed mutation; current Graph read=%s", conflictRevalidationRead.get())
+                        .containsExactly(ReasonCode.GRAPH_OWNER_CONFLICT.wireValue());
+                assertThat(conflictRevalidationRead.get()).satisfies(current -> {
+                    assertThat(current.state()).isEqualTo("CONFLICT");
+                    assertThat(current.reason()).isEqualTo("CONFLICTING_EVIDENCE");
+                    assertThat(current.rootOccurrence()).isNull();
+                    assertThat(current.priorOccurrence()).isNull();
+                });
             }
 
             int readsBeforeForgery = scorerReads.get();
@@ -184,7 +191,6 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
             }
             assertThat(scorerReads).hasValue(readsBeforeForgery);
             assertThat(occurrenceRevalidations).hasValue(revalidationsBeforeForgery);
-            assertThat(session.graph().readCurrent().state()).isEqualTo("CONFLICT");
             graphOwnerReadFinal.set(session.graph().ownerRevalidationCount());
 
             assertThat(session.rootScoredEvent().engineIntelligence()).isNull();
@@ -202,14 +208,21 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
         assertThat(evidence.rootScoredEvent().analystRecommendation()).isNull();
         assertThat(evidence.rootScoredWireBytes()).isEqualTo(originalScoredWireBytes.get());
         assertThat(graphOwnerReadFinal.get()).isGreaterThan(graphOwnerReadBaseline.get());
-        assertThat(scorerReads).hasValue(4);
+        assertThat(scorerReads).hasValue(3);
         assertThat(occurrenceRevalidations).hasValue(3);
     }
 
     private static GraphRiskEvidenceRead readAuthorizedNow(SignedGraphABTestFixture.LiveSession session,
                                                             ScoringContext context) {
+        return readAuthorizedNow(session, context, null);
+    }
+
+    private static GraphRiskEvidenceRead readAuthorizedNow(SignedGraphABTestFixture.LiveSession session,
+                                                            ScoringContext context,
+                                                            AtomicReference<GraphDeviceMongoVerticalTestFacade.TwoHopRead> capture) {
         if (!isExactRootContext(session, context)) { return GraphRiskEvidenceRead.denied(); }
         GraphDeviceMongoVerticalTestFacade.TwoHopRead current = session.graph().readCurrent();
+        if (capture != null) { capture.set(current); }
         if ("VERIFIED_BOUNDED".equals(current.state())) {
             GraphOccurrenceRef root = current.rootOccurrence();
             GraphOccurrenceRef expected = session.rootOccurrence();

@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.frauddetection.scoring.graph.GraphRiskDiagnosticPolicy.ReasonCode;
 import static com.frauddetection.scoring.graph.GraphRiskEvidenceRead.Reason;
@@ -151,21 +152,35 @@ class GraphRiskSignalEngineTest {
     void timedOutReadIsCancelledAndReturnsUnavailable() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch returnedLatePositive = new CountDownLatch(1);
+        AtomicReference<GraphRiskEvidenceRead> lateRead = new AtomicReference<>();
+        AtomicReference<Thread> workerThread = new AtomicReference<>();
         GraphRiskEvidenceAccess blocking = current -> {
+            workerThread.set(Thread.currentThread());
             entered.countDown();
             try { new CountDownLatch(1).await(); }
             catch (InterruptedException cancelled) {
                 interrupted.countDown();
                 Thread.currentThread().interrupt();
             }
-            return GraphRiskEvidenceRead.verifiedPositive(witness());
+            GraphRiskEvidenceRead late = GraphRiskEvidenceRead.verifiedPositive(witness());
+            lateRead.set(late);
+            returnedLatePositive.countDown();
+            return late;
         };
         try (var engine = candidate(blocking, Duration.ofMillis(150))) {
             FraudSignalEvaluation result = engine.evaluate(context());
             assertUnavailable(result, ReasonCode.GRAPH_READ_DEADLINE_EXCEEDED);
             assertThat(entered.getCount()).isZero();
             assertThat(interrupted.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(returnedLatePositive.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(lateRead.get()).isNotNull();
+            assertThat(lateRead.get().status()).isEqualTo(GraphRiskEvidenceRead.Status.VERIFIED_POSITIVE);
         }
+        Thread worker = workerThread.get();
+        assertThat(worker).isNotNull();
+        worker.join(TimeUnit.SECONDS.toMillis(2));
+        assertThat(worker.isAlive()).isFalse();
     }
 
     @Test

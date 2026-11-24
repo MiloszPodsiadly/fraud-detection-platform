@@ -145,6 +145,8 @@ class MongoGraphProjectionWorkloadTest {
                     long maxFindsPerRead = 0;
                     long maxGetMoresPerRead = 0;
                     for (int sample = 0; sample < latencyNanos.length; sample++) {
+                        int ownerChecksBefore = authority.revalidationCount();
+                        int ownerTraceSizeBefore = authority.revalidationTraceSize();
                         long docsBefore = commands.documentsReturned();
                         long findsBefore = commands.findCount();
                         long getMoresBefore = commands.getMoreCount();
@@ -155,6 +157,15 @@ class MongoGraphProjectionWorkloadTest {
                         assertDenseOutcome(outcome, rootOccurrence, priorOccurrences);
                         if (outcome.state() == GraphProjectionState.VERIFIED_BOUNDED) { positive++; }
                         if (outcome.reason() == GraphReadReason.TRUNCATED_UNVERIFIED) { truncated++; }
+                        int checksForRead = authority.revalidationCount() - ownerChecksBefore;
+                        List<String> ownerReferencesForRead = authority.revalidationTraceFrom(ownerTraceSizeBefore);
+                        if (priorOccurrences == 100) {
+                            assertThat(checksForRead).isEqualTo(2 * (priorOccurrences + 1));
+                        } else {
+                            assertThat(checksForRead).isEqualTo(1);
+                            assertThat(ownerReferencesForRead)
+                                    .containsExactly(rootEvidence.ownerAssertionReference());
+                        }
                         long docs = commands.documentsReturned() - docsBefore;
                         long finds = commands.findCount() - findsBefore;
                         long getMores = commands.getMoreCount() - getMoresBefore;
@@ -170,14 +181,15 @@ class MongoGraphProjectionWorkloadTest {
                         assertThat(positive).isEqualTo(latencyNanos.length);
                         assertThat(truncated).isZero();
                         assertThat(maxDocumentsPerRead).isEqualTo(3L * (priorOccurrences + 1L));
-                        assertThat(authority.revalidationCount()).isEqualTo(4 * latencyNanos.length);
+                        assertThat(authority.revalidationCount())
+                                .isEqualTo(2 * (priorOccurrences + 1) * latencyNanos.length);
                     } else {
                         assertThat(positive).isZero();
                         assertThat(truncated).isEqualTo(latencyNanos.length);
                         assertThat(maxDocumentsPerRead)
                                 .isEqualTo(GraphQueryLimits.DEFAULT.maxEdges() + 1L);
                         assertThat(maxFindsPerRead).isLessThanOrEqualTo(2L);
-                        assertThat(authority.revalidationCount()).isLessThanOrEqualTo(2 * latencyNanos.length);
+                        assertThat(authority.revalidationCount()).isEqualTo(latencyNanos.length);
                     }
                     GraphDeviceWitnessOutcome wrongPrincipal = reader.readAuthorizedOccurrenceDeviceWitnesses(
                             "unrelated-principal", grant, scope, rootOccurrence);
@@ -740,11 +752,19 @@ class MongoGraphProjectionWorkloadTest {
         private final Map<String, GraphEvidenceRef> evidenceByOwnerReference = new ConcurrentHashMap<>();
         private final Set<String> revokedReferences = ConcurrentHashMap.newKeySet();
         private final AtomicInteger revalidationCount = new AtomicInteger();
+        private final List<String> revalidatedOwnerReferences = new ArrayList<>();
 
         void admit(GraphEvidenceRef evidence) { evidenceByOwnerReference.put(evidence.ownerAssertionReference(), evidence); }
         void revoke(GraphEvidenceRef evidence) { revokedReferences.add(evidence.ownerAssertionReference()); }
         int revalidationCount() { return revalidationCount.get(); }
-        void resetRevalidationCount() { revalidationCount.set(0); }
+        int revalidationTraceSize() { return revalidatedOwnerReferences.size(); }
+        List<String> revalidationTraceFrom(int index) {
+            return List.copyOf(revalidatedOwnerReferences.subList(index, revalidatedOwnerReferences.size()));
+        }
+        void resetRevalidationCount() {
+            revalidationCount.set(0);
+            revalidatedOwnerReferences.clear();
+        }
         void replace(GraphEvidenceRef previous, GraphEvidenceRef current) {
             evidenceByOwnerReference.put(previous.ownerAssertionReference(), current);
         }
@@ -757,6 +777,7 @@ class MongoGraphProjectionWorkloadTest {
 
         @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
             revalidationCount.incrementAndGet();
+            revalidatedOwnerReferences.add(expected.ownerAssertionReference());
             return current(expected);
         }
 
@@ -772,6 +793,7 @@ class MongoGraphProjectionWorkloadTest {
         @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal,
                                                               Duration remainingBudget) {
             revalidationCount.incrementAndGet();
+            revalidatedOwnerReferences.add(expected.ownerAssertionReference());
             if (remainingBudget == null || remainingBudget.isZero() || remainingBudget.isNegative()) {
                 return GraphRelationResolution.unavailable(GraphReadReason.DEADLINE_EXCEEDED);
             }

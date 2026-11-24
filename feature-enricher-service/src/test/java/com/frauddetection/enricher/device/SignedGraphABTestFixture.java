@@ -10,6 +10,7 @@ import com.frauddetection.common.events.source.SourceReceiptIdentity;
 import com.frauddetection.common.events.source.SourceSignatureVerifier;
 import com.frauddetection.enricher.graph.GraphDeviceMongoVerticalTestFacade;
 import com.frauddetection.enricher.graph.GraphOccurrenceRef;
+import com.frauddetection.enricher.graph.GraphQueryLimits;
 import com.mongodb.client.MongoClient;
 
 import java.time.Duration;
@@ -41,7 +42,16 @@ public final class SignedGraphABTestFixture {
         if (priorCount < 1 || priorCount > 100 || scorer == null) {
             throw new IllegalArgumentException("SIGNED_GRAPH_DENSE_FIXTURE_ARGUMENT_INVALID");
         }
-        return run(scorer, priorCount);
+        return run(scorer, priorCount, GraphQueryLimits.DEFAULT);
+    }
+
+    /** Test-only Graph deadline override keeps a dense Graph cutoff distinct from the scorer's own deadline. */
+    public static Evidence withLiveDenseSession(int priorCount, GraphQueryLimits readLimits,
+                                                Consumer<LiveSession> scorer) throws Exception {
+        if (priorCount < 1 || priorCount > 100 || scorer == null || readLimits == null) {
+            throw new IllegalArgumentException("SIGNED_GRAPH_DENSE_FIXTURE_ARGUMENT_INVALID");
+        }
+        return run(scorer, priorCount, readLimits);
     }
 
     private static Evidence run(Consumer<LiveSession> scorer) throws Exception {
@@ -49,6 +59,10 @@ public final class SignedGraphABTestFixture {
     }
 
     private static Evidence run(Consumer<LiveSession> scorer, int priorCount) throws Exception {
+        return run(scorer, priorCount, GraphQueryLimits.DEFAULT);
+    }
+
+    private static Evidence run(Consumer<LiveSession> scorer, int priorCount, GraphQueryLimits readLimits) throws Exception {
         PrivateDeviceDiagnosticReaderIntegrationTest.start();
         PrivateDeviceDiagnosticReaderIntegrationTest sourceDevice = new PrivateDeviceDiagnosticReaderIntegrationTest();
         List<MongoClient> graphOwnerClients = new ArrayList<>();
@@ -159,7 +173,8 @@ public final class SignedGraphABTestFixture {
             GraphDeviceMongoVerticalTestFacade.Result graph = priorCount > 1
                     ? GraphDeviceMongoVerticalTestFacade.persistAndReadTwoHopDenseInLiveSession(initialOwner,
                     restartedOwner, relationGrant, readGrant, ownerReferences, principal,
-                    rootTime.plusSeconds(5), rootTime.plusSeconds(6), liveCallback, admitSignedSourceContradiction)
+                    rootTime.plusSeconds(5), rootTime.plusSeconds(6), liveCallback,
+                    admitSignedSourceContradiction, readLimits)
                     : GraphDeviceMongoVerticalTestFacade.persistAndReadTwoHopInLiveSession(initialOwner,
                     restartedOwner, relationGrant, readGrant, ownerReferences, principal,
                     rootTime.plusSeconds(5), rootTime.plusSeconds(6), liveCallback, admitSignedSourceContradiction);
