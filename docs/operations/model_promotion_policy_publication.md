@@ -88,7 +88,8 @@ java -jar $jar author --policy "$run/policy.json" --approval-trust "$fixture/app
 # B: inspect the frozen draft, author submission and SHA-256; choose APPROVED or REJECTED before $effectiveFrom.
 java -jar $jar approve --submission "$run/author.json" --approval-trust "$fixture/approval/trusted-approvals.json" --approver-private-key "$fixture/approval/approver-b.private-key.pkcs8.base64" --approver-identity local-dev-policy-approver-b --approver-key-id local-dev-approver-b-key-1 --decision APPROVED --expires-at $expiresAt --out "$run/decision.json"
 java -jar $jar publish --policy "$run/policy.json" --approval "$run/decision.json" --approval-trust "$fixture/approval/trusted-approvals.json" --trusted-issuers "$fixture/trusted-issuers.json" --publisher-private-key "$fixture/approval/publisher.private-key.pkcs8.base64" --issuer-private-key "$fixture/private-key.pkcs8.base64" --dry-run
-$env:MODEL_PROMOTION_PUBLISH_MONGODB_URI = 'mongodb://127.0.0.1:27017/fraud_alerts?directConnection=true&replicaSet=rs0'
+$env:MONGODB_POLICY_PUBLISHER_PASSWORD = '<copy the local value from deployment/.env>'
+$env:MODEL_PROMOTION_PUBLISH_MONGODB_URI = "mongodb://policy_publisher_app:$env:MONGODB_POLICY_PUBLISHER_PASSWORD@127.0.0.1:27017/fraud_alerts?authSource=fraud_alerts&directConnection=true&replicaSet=rs0"
 java -jar $jar publish --policy "$run/policy.json" --approval "$run/decision.json" --approval-trust "$fixture/approval/trusted-approvals.json" --trusted-issuers "$fixture/trusted-issuers.json" --publisher-private-key "$fixture/approval/publisher.private-key.pkcs8.base64" --issuer-private-key "$fixture/private-key.pkcs8.base64"
 ```
 
@@ -109,7 +110,8 @@ java -jar "$jar" author --policy "$run/policy.json" --approval-trust "$fixture/a
 # B: inspect the exact frozen draft and digest; choose APPROVED or REJECTED before effective_from.
 java -jar "$jar" approve --submission "$run/author.json" --approval-trust "$fixture/approval/trusted-approvals.json" --approver-private-key "$fixture/approval/approver-b.private-key.pkcs8.base64" --approver-identity local-dev-policy-approver-b --approver-key-id local-dev-approver-b-key-1 --decision APPROVED --expires-at "$expires_at" --out "$run/decision.json"
 java -jar "$jar" publish --policy "$run/policy.json" --approval "$run/decision.json" --approval-trust "$fixture/approval/trusted-approvals.json" --trusted-issuers "$fixture/trusted-issuers.json" --publisher-private-key "$fixture/approval/publisher.private-key.pkcs8.base64" --issuer-private-key "$fixture/private-key.pkcs8.base64" --dry-run
-MODEL_PROMOTION_PUBLISH_MONGODB_URI='mongodb://127.0.0.1:27017/fraud_alerts?directConnection=true&replicaSet=rs0' java -jar "$jar" publish --policy "$run/policy.json" --approval "$run/decision.json" --approval-trust "$fixture/approval/trusted-approvals.json" --trusted-issuers "$fixture/trusted-issuers.json" --publisher-private-key "$fixture/approval/publisher.private-key.pkcs8.base64" --issuer-private-key "$fixture/private-key.pkcs8.base64"
+export MONGODB_POLICY_PUBLISHER_PASSWORD='<copy the local value from deployment/.env>'
+MODEL_PROMOTION_PUBLISH_MONGODB_URI="mongodb://policy_publisher_app:${MONGODB_POLICY_PUBLISHER_PASSWORD}@127.0.0.1:27017/fraud_alerts?authSource=fraud_alerts&directConnection=true&replicaSet=rs0" java -jar "$jar" publish --policy "$run/policy.json" --approval "$run/decision.json" --approval-trust "$fixture/approval/trusted-approvals.json" --trusted-issuers "$fixture/trusted-issuers.json" --publisher-private-key "$fixture/approval/publisher.private-key.pkcs8.base64" --issuer-private-key "$fixture/private-key.pkcs8.base64"
 ```
 
 For a real policy instead of a demo draft, author a `ModelPromotionPolicyDraft` JSON and run
