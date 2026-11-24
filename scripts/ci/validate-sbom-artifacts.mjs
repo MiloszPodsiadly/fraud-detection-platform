@@ -1,9 +1,19 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 
 const files = process.argv.slice(2);
+const testedGitSha = process.env.TESTED_GIT_SHA;
+
+if (!/^[a-f0-9]{40}$/.test(testedGitSha ?? '')) {
+  throw new Error('TESTED_GIT_SHA must contain the 40-character commit SHA tested by CI.');
+}
+const actualGitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+if (actualGitSha !== testedGitSha) {
+  throw new Error(`SBOM source revision ${actualGitSha} does not match tested Git SHA ${testedGitSha}.`);
+}
 
 if (files.length === 0) {
   throw new Error('At least one SBOM path is required.');
@@ -12,6 +22,7 @@ if (files.length === 0) {
 const workspace = process.cwd();
 const manifest = {
   generatedBy: 'scripts/ci/validate-sbom-artifacts.mjs',
+  testedGitSha,
   files: [],
 };
 
