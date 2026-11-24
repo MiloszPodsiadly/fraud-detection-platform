@@ -92,6 +92,14 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     }
 
     @AfterEach void cleanUp() {
+        cleanUp(true);
+    }
+
+    void cleanUpForContainerShutdown() {
+        cleanUp(false);
+    }
+
+    private void cleanUp(boolean dropDatabase) {
         try {
             if (scoredProducer != null) { scoredProducer.close(); }
         } finally {
@@ -99,7 +107,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                 if (scoredConsumer != null) { scoredConsumer.close(); }
             } finally {
                 try {
-                    if (f != null) { f.cleanup(); }
+                    if (dropDatabase && f != null) { f.cleanup(); }
                 } finally {
                     if (clients != null) { clients.close(); }
                 }

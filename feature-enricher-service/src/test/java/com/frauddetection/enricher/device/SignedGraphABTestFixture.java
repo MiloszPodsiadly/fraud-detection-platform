@@ -186,9 +186,15 @@ public final class SignedGraphABTestFixture {
                     prior.raw().transactionTimestamp(), rootTime, rootTime.plusSeconds(6), graph, deviceOccurrences, scoredOccurrences,
                     adapterReconstructions.get(), rootScore.event(), rootScore.wireBytes());
         } finally {
-            graphOwnerClients.forEach(MongoClient::close);
-            if (initialized) { sourceDevice.cleanUp(); }
-            PrivateDeviceDiagnosticReaderIntegrationTest.stop();
+            try {
+                graphOwnerClients.forEach(MongoClient::close);
+            } finally {
+                try {
+                    if (initialized) { sourceDevice.cleanUpForContainerShutdown(); }
+                } finally {
+                    PrivateDeviceDiagnosticReaderIntegrationTest.stop();
+                }
+            }
         }
     }
 

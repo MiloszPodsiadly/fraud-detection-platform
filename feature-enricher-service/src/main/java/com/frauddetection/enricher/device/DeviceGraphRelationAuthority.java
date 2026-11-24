@@ -147,10 +147,13 @@ final class DeviceGraphRelationAuthority implements DeviceGraphRelationPort {
             Thread.currentThread().interrupt();
             return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
         } catch (ExecutionException failed) {
-            return DeviceGraphRelationResolution.unavailable(GraphReadReason.OWNER_UNAVAILABLE);
+            return DeviceGraphRelationResolution.unavailable(ownerBudget.expired()
+                    || MongoOperationBudget.isDeadlineFailure(failed.getCause())
+                    ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.OWNER_UNAVAILABLE);
         } catch (RuntimeException expired) {
             read.cancel(true);
             return DeviceGraphRelationResolution.unavailable(ownerBudget.expired()
+                    || MongoOperationBudget.isDeadlineFailure(expired)
                     ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.OWNER_UNAVAILABLE);
         }
     }
@@ -230,6 +233,7 @@ final class DeviceGraphRelationAuthority implements DeviceGraphRelationPort {
             return DeviceGraphRelationResolution.verified(new VerifiedDeviceGraphRelation(resolved, validUntil));
         } catch (RuntimeException unavailable) {
             return DeviceGraphRelationResolution.unavailable(ownerBudget.expired()
+                    || MongoOperationBudget.isDeadlineFailure(unavailable)
                     ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.OWNER_UNAVAILABLE);
         }
     }

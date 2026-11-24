@@ -28,6 +28,7 @@ import java.util.Set;
 /** Real replica set with authentication enabled; credentials exist only in this ephemeral test server. */
 final class DeviceAuthenticatedMongo implements AutoCloseable {
     static final Duration DEFAULT_CLIENT_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration CLEANUP_CLIENT_TIMEOUT = Duration.ofSeconds(30);
     private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0"))
             .withExposedPorts(27017).withStartupTimeout(Duration.ofSeconds(60))
             .withCommand("bash", "-c", "openssl rand -base64 756 > /tmp/lineage-key; chmod 400 /tmp/lineage-key; "
@@ -89,6 +90,10 @@ final class DeviceAuthenticatedMongo implements AutoCloseable {
     }
 
     MongoClient owner() { return connect("source_owner", "ephemeral-owner-only", "admin"); }
+    MongoClient ownerForCleanup() {
+        return connect("source_owner", "ephemeral-owner-only", "admin", "device-test-cleanup",
+                CLEANUP_CLIENT_TIMEOUT);
+    }
     void resetReadOperations() { readOperations.clear(); }
     void resetReadMetrics() {
         readOperations.clear();

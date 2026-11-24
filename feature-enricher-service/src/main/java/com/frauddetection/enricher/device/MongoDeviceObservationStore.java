@@ -304,9 +304,16 @@ final class MongoDeviceObservationStore implements DeviceObservationStore {
                         row.getString("stageACommitment"), scoredReference));
             }, budget);
         } catch (RuntimeException unavailable) {
-            return GraphOccurrenceRead.unavailable(budget != null && budget.expired()
-                    ? GraphReadReason.DEADLINE_EXCEEDED : GraphReadReason.OWNER_UNAVAILABLE);
+            return GraphOccurrenceRead.unavailable(graphOccurrenceFailureReason(unavailable, budget));
         }
+    }
+
+    static GraphReadReason graphOccurrenceFailureReason(Throwable failure, MongoOperationBudget budget) {
+        if (budget == null) { return GraphReadReason.OWNER_UNAVAILABLE; }
+        if (budget.expired() || MongoOperationBudget.isDeadlineFailure(failure)) {
+            return GraphReadReason.DEADLINE_EXCEEDED;
+        }
+        return GraphReadReason.OWNER_UNAVAILABLE;
     }
 
     private static Document findFirst(MongoCollection<Document> collection, ClientSession session,

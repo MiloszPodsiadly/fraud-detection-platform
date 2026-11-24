@@ -61,7 +61,11 @@ class VerifiedDeviceAdmissionIntegrationTest {
         sourceReaderClient = MONGO.consumer(ownerClient, database, false);
         reader = new MongoSourceLineage(sourceReaderClient, database, "scorer", MongoSourceLineage.Stage.SCORER, originVerifier, CLOCK);
     }
-    @AfterEach void cleanup() { ownerClient.getDatabase(database).drop(); }
+    @AfterEach void cleanup() {
+        MongoClient cleanupClient = MONGO.ownerForCleanup();
+        try { cleanupClient.getDatabase(database).drop(); }
+        finally { cleanupClient.close(); }
+    }
 
     @Test void actualReceiptRawEnrichedAndIndependentDeviceProofCommitAnImmutablePreEventSnapshot() {
         var admission = adapter(A);

@@ -388,7 +388,12 @@ public final class MongoSourceOccurrenceStore {
             }
             return new Lookup(SourceLineage.State.VERIFIED, new SourceScoredOccurrence(current.source(), current.receiptId(),
                     current.eventCommitment(), occurrence.eventId(), occurrence.createdAt(), row.getString("fingerprint"), row.getString("runId")));
-        } catch (RuntimeException unavailable) { return absent(); }
+        } catch (RuntimeException unavailable) {
+            if (budget != null && (budget.expired() || MongoOperationBudget.isDeadlineFailure(unavailable))) {
+                throw unavailable;
+            }
+            return absent();
+        }
     }
 
     /** Only a current signed Source lineage contradiction is terminal; outbox drift is ambiguous. */
@@ -407,6 +412,7 @@ public final class MongoSourceOccurrenceStore {
             return current.state() == SourceLineage.State.CONFLICT ? new Lookup(SourceLineage.State.CONFLICT, null)
                     : current.state() == SourceLineage.State.VERIFIED ? absent() : new Lookup(current.state(), null);
         } catch (RuntimeException expired) {
+            if (budget.expired() || MongoOperationBudget.isDeadlineFailure(expired)) { throw expired; }
             return absent();
         }
     }

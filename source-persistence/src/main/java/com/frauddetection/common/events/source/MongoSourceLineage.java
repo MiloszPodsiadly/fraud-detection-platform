@@ -1525,6 +1525,7 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                         }
                     }
                 } catch (RuntimeException failure) {
+                    if (budget != null && MongoOperationBudget.isDeadlineFailure(failure)) { throw failure; }
                     if (budget != null && budget.expired()) { return unavailable; }
                     if (failure instanceof MongoException mongo && mongo.hasErrorLabel(MongoException.UNKNOWN_TRANSACTION_COMMIT_RESULT_LABEL)) {
                         return unavailable;
@@ -1537,7 +1538,10 @@ public final class MongoSourceLineage implements SourceLineageAccess {
                     }
                     return unavailable;
                 }
-            } catch (RuntimeException failure) { return unavailable; }
+            } catch (RuntimeException failure) {
+                if (budget != null && MongoOperationBudget.isDeadlineFailure(failure)) { throw failure; }
+                return unavailable;
+            }
         }
         return unavailable;
     }

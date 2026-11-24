@@ -1,5 +1,7 @@
 package com.frauddetection.common.events.source;
 
+import com.mongodb.MongoException;
+import com.mongodb.MongoOperationTimeoutException;
 import com.mongodb.TransactionOptions;
 import com.mongodb.client.MongoCollection;
 
@@ -26,6 +28,18 @@ public final class MongoOperationBudget {
 
     public static MongoOperationBudget starting(Duration budget) {
         return new MongoOperationBudget(budget);
+    }
+
+    public static boolean isDeadlineFailure(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof MongoOperationTimeoutException
+                    || cause instanceof MongoException mongo && mongo.getCode() == 50
+                    || cause instanceof IllegalStateException state
+                    && "MONGO_OPERATION_DEADLINE_EXCEEDED".equals(state.getMessage())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public long remainingNanos() {
