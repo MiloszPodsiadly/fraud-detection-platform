@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -28,6 +29,7 @@ import static com.mongodb.client.model.Sorts.ascending;
 final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProjectionDao {
     private static final int MAX_TRANSACTION_ATTEMPTS = 3;
     private static final int MAX_COMMIT_ACK_ATTEMPTS = 3;
+    private static final int MAX_DEVICE_HUBS_PER_QUERY = 16;
     private static final TransactionOptions TRANSACTION = TransactionOptions.builder()
             .readConcern(ReadConcern.SNAPSHOT).writeConcern(WriteConcern.MAJORITY)
             .readPreference(ReadPreference.primary()).build();
@@ -174,7 +176,8 @@ final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProj
     }
 
     @Override public List<GraphStoredEdge> findOccurrenceNeighbors(GraphIdentityScope scope, GraphOccurrenceRef occurrence,
-                                                                    Instant asOf, int limit, java.time.Duration maxTime) {
+                                                                    Instant asOf, int limit, int maxPageSize,
+                                                                    java.time.Duration maxTime) {
         Objects.requireNonNull(scope, "GRAPH_SCOPE_REQUIRED");
         Objects.requireNonNull(occurrence, "GRAPH_OCCURRENCE_REQUIRED");
         if (!scope.equals(occurrence.scope())) { throw new IllegalArgumentException("GRAPH_QUERY_SCOPE_INVALID"); }
@@ -182,6 +185,7 @@ final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProj
         Objects.requireNonNull(maxTime, "GRAPH_QUERY_TIME_REQUIRED");
         if (!GraphProjectionSchema.READER.equals(authenticatedPrincipal)
                 || limit < 1 || limit > GraphQueryLimits.DEFAULT.maxEdges() + 1
+                || maxPageSize < 1 || maxPageSize > GraphQueryLimits.DEFAULT.maxPageSize()
                 || maxTime.isZero() || maxTime.isNegative() || maxTime.toMillis() < 1
                 || maxTime.compareTo(java.time.Duration.ofSeconds(5)) > 0) {
             throw new IllegalArgumentException("GRAPH_QUERY_LIMIT_INVALID");
@@ -194,10 +198,115 @@ final class MongoGraphProjectionStore implements GraphProjectionStore, GraphProj
                 .append("lifecycle.admittedAt", new Document("$lte", java.util.Date.from(asOf)))
                 .append("lifecycle.validUntil", new Document("$gt", java.util.Date.from(asOf)));
         var find = collection().find(filter).sort(ascending("_id")).limit(limit)
+                .batchSize(Math.min(limit, maxPageSize))
                 .maxTime(maxTime.toMillis(), TimeUnit.MILLISECONDS);
-        List<GraphStoredEdge> result = new ArrayList<>(limit);
+        List<GraphStoredEdge> result = new ArrayList<>(Math.min(limit, maxPageSize));
         for (Document document : find) { result.add(GraphProjectionDocumentCodec.decode(document)); }
         return List.copyOf(result);
+    }
+
+    @Override public List<GraphStoredEdge> findDeviceOccurrenceNeighbors(GraphIdentityScope scope,
+                                                                           List<GraphNodeRef> deviceNodes,
+                                                                           Instant fromInclusive,
+                                                                           Instant untilExclusive,
+                                                                           Instant asOf,
+                                                                           int limit,
+                                                                           int maxPageSize,
+                                                                           java.time.Duration maxTime) {
+        if (!GraphProjectionSchema.READER.equals(authenticatedPrincipal)) {
+            throw new IllegalArgumentException("GRAPH_QUERY_PRINCIPAL_INVALID");
+        }
+        Objects.requireNonNull(maxTime, "GRAPH_QUERY_TIME_REQUIRED");
+        if (limit < 1 || limit > GraphQueryLimits.DEFAULT.maxEdges() + 1
+                || maxPageSize < 1 || maxPageSize > GraphQueryLimits.DEFAULT.maxPageSize()
+                || maxTime.isZero() || maxTime.isNegative() || maxTime.toMillis() < 1
+                || maxTime.compareTo(java.time.Duration.ofSeconds(5)) > 0) {
+            throw new IllegalArgumentException("GRAPH_QUERY_LIMIT_INVALID");
+        }
+        deviceNeighborFilter(scope, deviceNodes, fromInclusive, untilExclusive, asOf);
+        long started = System.nanoTime();
+        List<GraphStoredEdge> result = new ArrayList<>(Math.min(limit, maxPageSize));
+        for (List<GraphNodeRef> hubChunk : deviceNeighborChunks(deviceNodes)) {
+            int remaining = limit - result.size();
+            if (remaining == 0) { break; }
+            long remainingMillis = remainingQueryMillis(started, maxTime);
+            Document filter = deviceNeighborFilter(scope, hubChunk, fromInclusive, untilExclusive, asOf);
+            var find = collection().find(filter).sort(deviceNeighborSort())
+                    .hintString("graph_device_neighbors").limit(remaining)
+                    .batchSize(Math.min(remaining, maxPageSize))
+                    .maxTime(remainingMillis, TimeUnit.MILLISECONDS);
+            for (Document document : find) {
+                result.add(GraphProjectionDocumentCodec.decode(document));
+                if (result.size() == limit) { break; }
+            }
+        }
+        result.sort(Comparator
+                .comparing((GraphStoredEdge row) -> row.edge().to().identityToken())
+                .thenComparingInt(row -> row.edge().to().pseudonymKeyVersion())
+                .thenComparing(row -> row.edge().evidence().occurrence().eventTime())
+                .thenComparing(row -> row.edge().evidence().occurrence().occurrenceToken()));
+        return List.copyOf(result);
+    }
+
+    static List<List<GraphNodeRef>> deviceNeighborChunks(List<GraphNodeRef> deviceNodes) {
+        Objects.requireNonNull(deviceNodes, "GRAPH_DEVICE_NODES_REQUIRED");
+        if (deviceNodes.isEmpty() || deviceNodes.size() > GraphQueryLimits.DEFAULT.maxNodes()) {
+            throw new IllegalArgumentException("GRAPH_DEVICE_QUERY_RANGE_INVALID");
+        }
+        List<List<GraphNodeRef>> chunks = new ArrayList<>((deviceNodes.size() + MAX_DEVICE_HUBS_PER_QUERY - 1)
+                / MAX_DEVICE_HUBS_PER_QUERY);
+        for (int start = 0; start < deviceNodes.size(); start += MAX_DEVICE_HUBS_PER_QUERY) {
+            chunks.add(List.copyOf(deviceNodes.subList(start,
+                    Math.min(start + MAX_DEVICE_HUBS_PER_QUERY, deviceNodes.size()))));
+        }
+        return List.copyOf(chunks);
+    }
+
+    private static long remainingQueryMillis(long started, java.time.Duration budget) {
+        long remainingNanos = budget.toNanos() - (System.nanoTime() - started);
+        long remainingMillis = TimeUnit.NANOSECONDS.toMillis(remainingNanos);
+        if (remainingMillis < 1) { throw new IllegalStateException("GRAPH_QUERY_DEADLINE_EXCEEDED"); }
+        return remainingMillis;
+    }
+
+    static Document deviceNeighborFilter(GraphIdentityScope scope, List<GraphNodeRef> deviceNodes,
+                                         Instant fromInclusive, Instant untilExclusive, Instant asOf) {
+        Objects.requireNonNull(scope, "GRAPH_SCOPE_REQUIRED");
+        Objects.requireNonNull(deviceNodes, "GRAPH_DEVICE_NODES_REQUIRED");
+        Objects.requireNonNull(fromInclusive, "GRAPH_FROM_REQUIRED");
+        Objects.requireNonNull(untilExclusive, "GRAPH_UNTIL_REQUIRED");
+        Objects.requireNonNull(asOf, "GRAPH_AS_OF_REQUIRED");
+        GraphValidation.millisecondInstant(fromInclusive);
+        GraphValidation.millisecondInstant(untilExclusive);
+        GraphValidation.millisecondInstant(asOf);
+        if (deviceNodes.isEmpty() || deviceNodes.size() > GraphQueryLimits.DEFAULT.maxNodes()
+                || !untilExclusive.isAfter(fromInclusive) || untilExclusive.isAfter(asOf)) {
+            throw new IllegalArgumentException("GRAPH_DEVICE_QUERY_RANGE_INVALID");
+        }
+        List<Document> hubs = new ArrayList<>(deviceNodes.size());
+        java.util.Set<String> unique = new java.util.HashSet<>();
+        for (GraphNodeRef node : deviceNodes) {
+            if (node == null || node.kind() != GraphNodeKind.DEVICE_PSEUDONYM || !scope.equals(node.scope())
+                    || !unique.add(node.canonicalId())) {
+                throw new IllegalArgumentException("GRAPH_DEVICE_QUERY_HUB_INVALID");
+            }
+            hubs.add(new Document("device.token", node.identityToken())
+                    .append("device.keyVersion", node.pseudonymKeyVersion()));
+        }
+        Document filter = scopeFilter(scope)
+                .append("schemaVersion", GraphProjectionSchema.SCHEMA_VERSION)
+                .append("edgeType", GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE.name())
+                .append("occurrence.eventTime", new Document("$gte", java.util.Date.from(fromInclusive))
+                        .append("$lt", java.util.Date.from(untilExclusive)))
+                .append("lifecycle.state", GraphEdgeLifecycle.ACTIVE.name())
+                .append("lifecycle.admittedAt", new Document("$lte", java.util.Date.from(asOf)))
+                .append("lifecycle.validUntil", new Document("$gt", java.util.Date.from(asOf)));
+        filter.append("$or", hubs);
+        return filter;
+    }
+
+    static org.bson.conversions.Bson deviceNeighborSort() {
+        return ascending("device.token", "device.keyVersion", "occurrence.eventTime", "occurrence.token");
     }
 
     private GraphAppendOutcome transactAppend(GraphEvidenceAdmission.AdmittedRelation initiallyAdmitted) {

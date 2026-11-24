@@ -96,6 +96,7 @@ public final class GraphEvidenceAdmissionTestFacade {
             @Override public List<GraphStoredEdge> findOccurrenceNeighbors(GraphIdentityScope scope,
                                                                             GraphOccurrenceRef occurrence,
                                                                             Instant asOf, int limit,
+                                                                            int maxPageSize,
                                                                             java.time.Duration maxTime) {
                 if (stored.lifecycle() != GraphEdgeLifecycle.ACTIVE || !scope.equals(evidence.scope())
                         || !occurrence.equals(evidence.occurrence()) || !stored.admittedAt().isBefore(asOf)

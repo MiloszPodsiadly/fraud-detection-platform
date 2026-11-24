@@ -106,7 +106,10 @@ final class GraphProjectionMongoFixture implements AutoCloseable {
         String uri = "mongodb://" + user + ':' + password + '@' + address
                 + "/?directConnection=true&authSource=" + authDatabase;
         MongoClientSettings.Builder settings = MongoClientSettings.builder()
-                .applyConnectionString(new ConnectionString(uri)).timeout(5, TimeUnit.SECONDS);
+                .applyConnectionString(new ConnectionString(uri)).timeout(5, TimeUnit.SECONDS)
+                .applyToClusterSettings(cluster -> cluster.serverSelectionTimeout(5, TimeUnit.SECONDS))
+                .applyToSocketSettings(socket -> socket.connectTimeout(5, TimeUnit.SECONDS)
+                        .readTimeout(5, TimeUnit.SECONDS));
         if (listener != null) { settings.addCommandListener(listener); }
         MongoClient client = MongoClients.create(settings.build());
         clients.add(client);

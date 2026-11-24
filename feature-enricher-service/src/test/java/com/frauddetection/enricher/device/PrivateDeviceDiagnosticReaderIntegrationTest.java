@@ -44,16 +44,19 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private static final int PERFORMANCE_WARMUPS = 2;
     private static final int PERFORMANCE_SAMPLES = 20;
     private static final Duration PERFORMANCE_FIXTURE_WRITER_TIMEOUT = Duration.ofSeconds(30);
-    private static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
-    private VerifiedDeviceAdmissionIntegrationTest f;
-    private MongoSourceOccurrenceStore occurrenceWriter;
-    private SourceOccurrenceAccess occurrenceReader;
-    private SourceOccurrenceCipher occurrenceCipher;
-    private MongoSourceLineage privateSource;
+    static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
+    VerifiedDeviceAdmissionIntegrationTest f;
+    MongoSourceOccurrenceStore occurrenceWriter;
+    SourceOccurrenceAccess occurrenceReader;
+    SourceOccurrenceCipher occurrenceCipher;
+    MongoSourceLineage privateSource;
     private MongoClientHandle clients;
     private PrivateDeviceDiagnosticReader diagnostic;
-    private String topic;
-    private boolean topicCreated;
+    String topic;
+    boolean topicCreated;
+    private KafkaProducer<String, byte[]> scoredProducer;
+    private KafkaConsumer<String, byte[]> scoredConsumer;
+    private final Map<String, ScoredRecord> consumedScoredEvents = new HashMap<>();
 
     @BeforeAll static void start() throws Exception {
         VerifiedDeviceAdmissionIntegrationTest.MONGO.start();
@@ -89,8 +92,27 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     }
 
     @AfterEach void cleanUp() {
-        if (f != null) { f.cleanup(); }
-        if (clients != null) { clients.close(); }
+        cleanUp(true);
+    }
+
+    void cleanUpForContainerShutdown() {
+        cleanUp(false);
+    }
+
+    private void cleanUp(boolean dropDatabase) {
+        try {
+            if (scoredProducer != null) { scoredProducer.close(); }
+        } finally {
+            try {
+                if (scoredConsumer != null) { scoredConsumer.close(); }
+            } finally {
+                try {
+                    if (dropDatabase && f != null) { f.cleanup(); }
+                } finally {
+                    if (clients != null) { clients.close(); }
+                }
+            }
+        }
     }
 
     @Test void occurrenceReaderRejectsUnneededFindPrivileges() {
@@ -173,6 +195,77 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         assertThat(delayedReader.evaluate(fact(current), currentScore.reference).outcome())
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE);
         assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - wallStarted)).isGreaterThanOrEqualTo(5_000);
+    }
+
+    @Test void graphOwnerMongoStallsAtDeviceSourceAndInitialScoreStagesRespectOneDeadline() throws Exception {
+        GraphReaderFixture fixture = graphReaderFixture("owner_budget_stalls", "graph-device-owner-budget-stalls",
+                "fdp156-device-owner-budget");
+        String sourcePrincipal = "graph_source_budget_stalls";
+        String scorePrincipal = "graph_score_budget_stalls";
+        MongoClient sourceClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceReader(f.ownerClient,
+                f.database, sourcePrincipal, List.of(), "fdp156-source-owner-budget");
+        MongoClient scoreClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.occurrenceReader(f.ownerClient,
+                f.database, scorePrincipal, List.of(), "fdp156-score-owner-budget");
+        MongoSourceLineage currentSource = new MongoSourceLineage(sourceClient, f.database, sourcePrincipal,
+                MongoSourceLineage.Stage.SCORER, f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+        SourceOccurrenceAccess currentScores = MongoSourceOccurrenceStore.readOnly(scoreClient, f.database, scorePrincipal,
+                f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK, occurrenceCipher,
+                new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest"));
+        DeviceGraphRelationAuthority budgetedOwner = DeviceGraphRelationAuthority.testOnly(fixture.ownerClient(),
+                f.database, "device_graph_owner_budget_stalls", f.A.epoch(), currentSource, f.origins, f.grants,
+                currentScores, f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
+
+        List<Map.Entry<String, String>> stages = List.of(
+                Map.entry("Device", "fdp156-device-owner-budget"),
+                Map.entry("Source", "fdp156-source-owner-budget"),
+                Map.entry("INITIAL_RUN score", "fdp156-score-owner-budget"));
+        for (var stage : stages) {
+            configureFindStall(stage.getValue());
+            VerifiedDeviceAdmissionIntegrationTest.MONGO.resetReadOperations();
+            long started = System.nanoTime();
+            DeviceGraphRelationResolution result;
+            long elapsedMillis;
+            try {
+                result = budgetedOwner.resolve(fixture.edge().evidence(), fixture.relationGrant(), fixture.readGrant(),
+                        fixture.principal(), Duration.ofSeconds(5));
+                elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            } finally {
+                disableFindStall();
+            }
+            long readCommands = VerifiedDeviceAdmissionIntegrationTest.MONGO.readOperationCounts().values().stream()
+                    .mapToLong(Long::longValue).sum();
+            System.out.printf("FDP156-REV2-004 stage=%s state=%s reason=%s elapsedMs=%d readCommands=%d%n",
+                    stage.getKey(), result.state(), result.reason(), elapsedMillis, readCommands);
+
+            assertThat(result.state()).as(stage.getKey()).isEqualTo(DeviceGraphRelationResolution.State.UNAVAILABLE);
+            assertThat(result.reason()).as(stage.getKey())
+                    .isEqualTo(com.frauddetection.enricher.graph.GraphReadReason.DEADLINE_EXCEEDED);
+            assertThat(result.relation()).as(stage.getKey()).isEmpty();
+            assertThat(elapsedMillis).as(stage.getKey() + " bounded wall time with 5s socket/CSOT tolerance")
+                    .isLessThan(6_500);
+            assertThat(readCommands).as(stage.getKey() + " bounded Mongo reads").isBetween(1L, 32L);
+            assertThat(DeviceGraphRelationAuthority.activeOwnerReadWorkers())
+                    .as(stage.getKey() + " bounded workers")
+                    .isLessThanOrEqualTo(DeviceGraphRelationAuthority.maxOwnerReadWorkers());
+            assertThat(DeviceGraphRelationAuthority.queuedOwnerReadWorkers()).as(stage.getKey() + " no queued reads").isZero();
+        }
+        long workerDrainDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (DeviceGraphRelationAuthority.activeOwnerReadWorkers() > 0 && System.nanoTime() < workerDrainDeadline) {
+            Thread.sleep(25);
+        }
+        assertThat(DeviceGraphRelationAuthority.activeOwnerReadWorkers()).as("stalled Mongo reads release workers").isZero();
+    }
+
+    private void configureFindStall(String applicationName) {
+        f.ownerClient.getDatabase("admin").runCommand(new org.bson.Document("configureFailPoint", "failCommand")
+                .append("mode", new org.bson.Document("times", 1))
+                .append("data", new org.bson.Document("failCommands", List.of("find"))
+                        .append("appName", applicationName).append("blockConnection", true).append("blockTimeMS", 8_000)));
+    }
+
+    private void disableFindStall() {
+        f.ownerClient.getDatabase("admin").runCommand(new org.bson.Document("configureFailPoint", "failCommand")
+                .append("mode", "off"));
     }
 
     @Test void publishedScoredFactAuthorizesOnlyExactCompletePreEventSnapshotAndBoundedPredicates() throws Exception {
@@ -1444,7 +1537,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                 .isEqualTo(PrivateDeviceDiagnosticReader.Outcome.UNAVAILABLE); // No persisted gap can be hidden by a reader restart.
     }
 
-    private Published publish(VerifiedDeviceAdmissionIntegrationTest.Event source, String runId, String scoreId) throws Exception {
+    Published publish(VerifiedDeviceAdmissionIntegrationTest.Event source, String runId, String scoreId) throws Exception {
         TransactionScoredEvent candidate = score(source, scoreId);
         var pending = occurrenceWriter.prepare(source.enriched(), runId, candidate);
         assertThat(pending.status()).isEqualTo(MongoSourceOccurrenceStore.Status.PENDING);
@@ -1457,10 +1550,8 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
             }
         }
         byte[] bytes = new JacksonKafkaSerializer<TransactionScoredEvent>().serialize(topic, claim.event());
-        try (KafkaProducer<String, byte[]> producer = new KafkaProducer<>(Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
-                ProducerConfig.ACKS_CONFIG, "all"), new StringSerializer(), new ByteArraySerializer())) {
-            producer.send(new ProducerRecord<>(topic, claim.event().eventId(), bytes)).get(15, TimeUnit.SECONDS);
-        }
+        scoredProducer().send(new ProducerRecord<>(topic, claim.event().eventId(), bytes))
+                .get(15, TimeUnit.SECONDS);
         var acknowledged = new JacksonKafkaDeserializer<>(TransactionScoredEvent.class).deserialize(topic, bytes);
         var published = occurrenceWriter.confirm(pending.id(), acknowledged, claim.claimId());
         assertThat(published.status()).isEqualTo(MongoSourceOccurrenceStore.Status.PUBLISHED);
@@ -1471,26 +1562,45 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     }
 
     private ScoredRecord consume(String expectedId) {
-        Properties properties = new Properties();
-        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
-        properties.put(ConsumerConfig.GROUP_ID_CONFIG, "device-private-test-" + UUID.randomUUID());
-        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties)) {
-            consumer.subscribe(List.of(topic));
-            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
-            while (System.nanoTime() < until) {
-                var records = consumer.poll(Duration.ofMillis(250));
-                for (var record : records) {
-                    if (expectedId.equals(record.key())) {
-                        return new ScoredRecord(new JacksonKafkaDeserializer<>(TransactionScoredEvent.class).deserialize(topic, record.value()), record.value());
-                    }
-                }
+        ScoredRecord buffered = consumedScoredEvents.remove(expectedId);
+        if (buffered != null) { return buffered; }
+        KafkaConsumer<String, byte[]> consumer = scoredConsumer();
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (System.nanoTime() < until) {
+            var records = consumer.poll(Duration.ofMillis(250));
+            for (var record : records) {
+                ScoredRecord consumed = new ScoredRecord(
+                        new JacksonKafkaDeserializer<>(TransactionScoredEvent.class).deserialize(topic, record.value()),
+                        record.value());
+                if (expectedId.equals(record.key())) { return consumed; }
+                if (record.key() != null) { consumedScoredEvents.putIfAbsent(record.key(), consumed); }
             }
         }
         throw new AssertionError("SCORED_KAFKA_RECORD_NOT_RECEIVED");
+    }
+
+    private KafkaProducer<String, byte[]> scoredProducer() {
+        if (scoredProducer == null) {
+            scoredProducer = new KafkaProducer<>(Map.of(
+                    ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                    ProducerConfig.ACKS_CONFIG, "all"), new StringSerializer(), new ByteArraySerializer());
+        }
+        return scoredProducer;
+    }
+
+    private KafkaConsumer<String, byte[]> scoredConsumer() {
+        if (scoredConsumer == null) {
+            Properties properties = new Properties();
+            properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
+            properties.put(ConsumerConfig.GROUP_ID_CONFIG, "device-private-test-" + UUID.randomUUID());
+            properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+            properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+            properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+            properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+            scoredConsumer = new KafkaConsumer<>(properties);
+            scoredConsumer.subscribe(List.of(topic));
+        }
+        return scoredConsumer;
     }
 
     private TransactionScoredEvent score(VerifiedDeviceAdmissionIntegrationTest.Event source, String id) {
@@ -1508,6 +1618,10 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     }
 
     private GraphReaderFixture graphReaderFixture(String suffix, String deviceId) throws Exception {
+        return graphReaderFixture(suffix, deviceId, null);
+    }
+
+    private GraphReaderFixture graphReaderFixture(String suffix, String deviceId, String mongoApplicationName) throws Exception {
         var event = f.event(f.A, "graph-read-" + suffix, "graph-read-transaction-" + suffix,
                 "customer-1", deviceId, 1, VerifiedDeviceAdmissionIntegrationTest.NOW.minusSeconds(60));
         var admission = f.adapter(f.A);
@@ -1529,7 +1643,8 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         var readGrant = DeviceGraphReadGrant.testOnly("graph_reader", sourceScope, "transaction-ingest", 1,
                 VerifiedDeviceAdmissionIntegrationTest.NOW.plus(Duration.ofDays(40)));
         String mongoPrincipal = "device_graph_" + suffix;
-        MongoClient ownerClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database, mongoPrincipal);
+        MongoClient ownerClient = VerifiedDeviceAdmissionIntegrationTest.MONGO.graphReader(f.ownerClient, f.database,
+                mongoPrincipal, mongoApplicationName);
         var owner = DeviceGraphRelationAuthority.testOnly(ownerClient, f.database, mongoPrincipal, f.A.epoch(),
                 privateSource, f.origins, f.grants, occurrenceReader, f.pseudonyms,
                 VerifiedDeviceAdmissionIntegrationTest.CLOCK);
@@ -1581,7 +1696,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         }).toList();
     }
 
-    private SourceSignatureVerifier.Verified conflictingSignedProof(VerifiedDeviceAdmissionIntegrationTest.Event event) {
+    SourceSignatureVerifier.Verified conflictingSignedProof(VerifiedDeviceAdmissionIntegrationTest.Event event) {
         try {
             var changed = (tools.jackson.databind.node.ObjectNode) VerifiedDeviceAdmissionIntegrationTest.JSON
                     .readTree(event.sourcePayload());
@@ -1606,7 +1721,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
         return new SourceOccurrenceCipher("test-key", Map.of("test-key", Base64.getEncoder().encodeToString(key)));
     }
 
-    private record Published(TransactionScoredEvent event, SourceOccurrenceAccess.Reference reference, byte[] wireBytes) { }
+    record Published(TransactionScoredEvent event, SourceOccurrenceAccess.Reference reference, byte[] wireBytes) { }
     private record ScoredRecord(TransactionScoredEvent event, byte[] bytes) { }
     private record GraphReaderFixture(DeviceGraphRelationAuthority owner, MongoClient ownerClient,
                                       DeviceGraphRelationGrant relationGrant,

@@ -10,6 +10,7 @@ import com.mongodb.TransactionOptions;
 import com.mongodb.WriteConcern;
 import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 import tools.jackson.databind.json.JsonMapper;
@@ -324,27 +325,62 @@ public final class MongoSourceOccurrenceStore {
                     case REVOKED, UNAVAILABLE, UNVERIFIED -> Resolution.unavailable();
                 };
             }
+
+            @Override public Resolution resolve(SourceLineage authorization,
+                                                SourceOccurrenceAccess.Reference occurrence,
+                                                Duration remainingBudget) {
+                if (authorization == null || authorization.state() != SourceLineage.State.VERIFIED || occurrence == null
+                        || !expectedContext.purpose().equals(authorization.source().purpose())
+                        || !expectedContext.audience().equals(authorization.source().audience())
+                        || remainingBudget == null || remainingBudget.isZero() || remainingBudget.isNegative()) {
+                    return Resolution.unavailable();
+                }
+                Lookup lookup = MongoSourceOccurrenceStore.this.lookup(occurrence, authorization, remainingBudget);
+                return switch (lookup.state()) {
+                    case VERIFIED -> Resolution.verified(lookup.binding());
+                    case ORDER_PENDING -> Resolution.pending();
+                    case CONFLICT -> Resolution.conflict();
+                    case REVOKED, UNAVAILABLE, UNVERIFIED -> Resolution.unavailable();
+                };
+            }
         };
     }
 
     private Lookup lookup(SourceOccurrenceAccess.Reference occurrence, SourceLineage authorization) {
+        return lookup(occurrence, authorization, null);
+    }
+
+    private Lookup lookup(SourceOccurrenceAccess.Reference occurrence, SourceLineage authorization,
+                          Duration remainingBudget) {
+        MongoOperationBudget budget;
+        try { budget = remainingBudget == null ? null : MongoOperationBudget.starting(remainingBudget); }
+        catch (RuntimeException expired) { return absent(); }
         try {
             if (authorization == null || authorization.state() != SourceLineage.State.VERIFIED) { return absent(); }
-            Document row = db.getCollection(OCCURRENCES).find(and(eq("eventId", occurrence.eventId()),
+            MongoCollection<Document> occurrences = db.getCollection(OCCURRENCES);
+            if (budget != null) { occurrences = budget.withTimeout(occurrences); }
+            Document row = occurrences.find(and(eq("eventId", occurrence.eventId()),
                     eq("eventCreatedAt", occurrence.createdAt().toString()))).first();
+            if (budget != null) { budget.check(); }
             if (row == null) { return new Lookup(SourceLineage.State.ORDER_PENDING, null); }
             if (!authorization.receiptId().equals(row.getString("receiptId"))
                     || !occurrence.fingerprint().equals(row.getString("fingerprint"))
                     || !authorization.eventCommitment().equals(row.getString("enrichedCommitment"))) {
-                return mismatchOutcome(authorization);
+                return mismatchOutcome(authorization, budget);
             }
-            Result result = restore(row, authorization.receiptId());
+            Result result = restore(row, authorization.receiptId(), authorization.eventCommitment(),
+                    (receipt, commitment) -> budget == null ? lineage.recoverEnriched(receipt, commitment)
+                            : lineage.recoverEnriched(receipt, commitment, budget.remaining()));
+            if (budget != null) { budget.check(); }
             if (result.status == Status.PENDING || result.status == Status.PUBLISHING) {
                 return new Lookup(SourceLineage.State.ORDER_PENDING, null);
             }
-            if (result.status == Status.CONFLICT) { return mismatchOutcome(authorization); }
+            if (result.status == Status.CONFLICT) { return mismatchOutcome(authorization, budget); }
             if (result.status != Status.PUBLISHED) { return absent(); }
-            SourceLineage current = lineage.recoverEnriched(row.getString("receiptId"), row.getString("enrichedCommitment"));
+            SourceLineage current = budget == null
+                    ? lineage.recoverEnriched(row.getString("receiptId"), row.getString("enrichedCommitment"))
+                    : lineage.recoverEnriched(row.getString("receiptId"), row.getString("enrichedCommitment"), budget.remaining());
+            if (budget != null) { budget.check(); }
             if (current.state() != SourceLineage.State.VERIFIED) { return new Lookup(current.state(), null); }
             if (!current.source().equals(authorization.source())
                     || !current.eventCommitment().equals(authorization.eventCommitment())) {
@@ -352,7 +388,12 @@ public final class MongoSourceOccurrenceStore {
             }
             return new Lookup(SourceLineage.State.VERIFIED, new SourceScoredOccurrence(current.source(), current.receiptId(),
                     current.eventCommitment(), occurrence.eventId(), occurrence.createdAt(), row.getString("fingerprint"), row.getString("runId")));
-        } catch (RuntimeException unavailable) { return absent(); }
+        } catch (RuntimeException unavailable) {
+            if (budget != null && (budget.expired() || MongoOperationBudget.isDeadlineFailure(unavailable))) {
+                throw unavailable;
+            }
+            return absent();
+        }
     }
 
     /** Only a current signed Source lineage contradiction is terminal; outbox drift is ambiguous. */
@@ -360,6 +401,20 @@ public final class MongoSourceOccurrenceStore {
         SourceLineage current = lineage.recoverEnriched(authorization.receiptId(), authorization.eventCommitment());
         return current.state() == SourceLineage.State.CONFLICT ? new Lookup(SourceLineage.State.CONFLICT, null)
                 : current.state() == SourceLineage.State.VERIFIED ? absent() : new Lookup(current.state(), null);
+    }
+
+    private Lookup mismatchOutcome(SourceLineage authorization, MongoOperationBudget budget) {
+        if (budget == null) { return mismatchOutcome(authorization); }
+        try {
+            SourceLineage current = lineage.recoverEnriched(authorization.receiptId(),
+                    authorization.eventCommitment(), budget.remaining());
+            budget.check();
+            return current.state() == SourceLineage.State.CONFLICT ? new Lookup(SourceLineage.State.CONFLICT, null)
+                    : current.state() == SourceLineage.State.VERIFIED ? absent() : new Lookup(current.state(), null);
+        } catch (RuntimeException expired) {
+            if (budget.expired() || MongoOperationBudget.isDeadlineFailure(expired)) { throw expired; }
+            return absent();
+        }
     }
 
     public List<String> pending(int limit) {

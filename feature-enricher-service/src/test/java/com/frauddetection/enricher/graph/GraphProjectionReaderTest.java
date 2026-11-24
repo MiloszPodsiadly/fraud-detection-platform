@@ -33,7 +33,9 @@ class GraphProjectionReaderTest {
         GraphStoredEdge second = stored(scope, "occurrence-two", "shared-device");
         FakeStore store = new FakeStore(List.of(first, second));
         RecordingAuthority owners = new RecordingAuthority();
-        GraphProjectionReader reader = reader(store, owners, GraphPolicyDecision.AUTHORIZED);
+        GraphQueryLimits depthOne = new GraphQueryLimits(1, 128, 256, Duration.ofDays(30),
+                1_000, 100, Duration.ofSeconds(5));
+        GraphProjectionReader reader = reader(store, owners, GraphPolicyDecision.AUTHORIZED, depthOne);
 
         GraphReadOutcome firstRead = read(reader, grant(scope), scope, first.edge().evidence().occurrence(), 10, null);
         GraphReadOutcome secondRead = read(reader, grant(scope), scope, second.edge().evidence().occurrence(), 10, null);
@@ -318,8 +320,13 @@ class GraphProjectionReaderTest {
 
     private static GraphProjectionReader reader(FakeStore store, GraphRelationAuthority owners,
                                                 GraphPolicyDecision grantDecision) {
+        return reader(store, owners, grantDecision, GraphQueryLimits.DEFAULT);
+    }
+
+    private static GraphProjectionReader reader(FakeStore store, GraphRelationAuthority owners,
+                                                GraphPolicyDecision grantDecision, GraphQueryLimits limits) {
         return new GraphProjectionReader(store, owners,
-                (grant, principal, scope, now) -> grantDecision, GraphQueryLimits.DEFAULT,
+                (grant, principal, scope, now) -> grantDecision, limits,
                 new GraphReadCursorCodec(CURSOR_KEY), CLOCK);
     }
 
@@ -383,7 +390,8 @@ class GraphProjectionReaderTest {
         @Override public List<GraphStoredEdge> findNeighbors(GraphNodeRef node, int limit) { return List.of(); }
 
         @Override public List<GraphStoredEdge> findOccurrenceNeighbors(GraphIdentityScope scope, GraphOccurrenceRef occurrence,
-                                                                        Instant asOf, int limit, Duration maxTime) {
+                                                                        Instant asOf, int limit, int maxPageSize,
+                                                                        Duration maxTime) {
             boolean firstRead = reads.incrementAndGet() == 1;
             List<GraphStoredEdge> result = rows.stream().filter(row -> row.edge().from().scope().equals(scope)
                             && row.edge().evidence().occurrence().equals(occurrence)
