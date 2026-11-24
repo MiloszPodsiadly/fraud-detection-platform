@@ -41,6 +41,9 @@ record GraphRiskEvidenceRead(Status status, Reason reason, List<WitnessDescripti
                 || !reason.allowedFor(status)) {
             throw new IllegalArgumentException("GRAPH_EVIDENCE_READ_INCONSISTENT");
         }
+        if (positive && binding != null && !witnesses.getFirst().hasStableIdentity()) {
+            throw new IllegalArgumentException("GRAPH_WITNESS_COMMITMENT_REQUIRED");
+        }
     }
 
     static GraphRiskEvidenceRead verifiedPositive(WitnessDescription witness) {
@@ -73,6 +76,23 @@ record GraphRiskEvidenceRead(Status status, Reason reason, List<WitnessDescripti
 
     boolean isBoundTo(ScoringContext context) {
         return binding != null && binding.matches(context);
+    }
+
+    /** Compares independently authorized reads of one bound witness while allowing its read clock to advance. */
+    boolean sameBoundWitnessAtNonRegressingReadTime(GraphRiskEvidenceRead fresh) {
+        if (status != Status.VERIFIED_POSITIVE || fresh == null || fresh.status != Status.VERIFIED_POSITIVE
+                || binding == null || !binding.equals(fresh.binding)
+                || witnesses.size() != 1 || fresh.witnesses.size() != 1) {
+            return false;
+        }
+        WitnessDescription previous = witnesses.getFirst();
+        WitnessDescription current = fresh.witnesses.getFirst();
+        return previous.hasStableIdentity() && current.hasStableIdentity()
+                && previous.rootEventTime().equals(current.rootEventTime())
+                && previous.priorEventTime().equals(current.priorEventTime())
+                && previous.graphAssociationAdmittedAt().equals(current.graphAssociationAdmittedAt())
+                && previous.stableWitnessCommitment().equals(current.stableWitnessCommitment())
+                && !current.diagnosticReadAt().isBefore(previous.diagnosticReadAt());
     }
 
     static GraphRiskEvidenceRead truncated() {
@@ -228,12 +248,21 @@ record GraphRiskEvidenceRead(Status status, Reason reason, List<WitnessDescripti
 
     /** Carries temporal meaning only; source and occurrence identifiers remain inside the authority adapter. */
     record WitnessDescription(Instant rootEventTime, Instant priorEventTime,
-                               Instant graphAssociationAdmittedAt, Instant diagnosticReadAt) {
+                               Instant graphAssociationAdmittedAt, Instant diagnosticReadAt,
+                               String stableWitnessCommitment) {
+        WitnessDescription(Instant rootEventTime, Instant priorEventTime,
+                           Instant graphAssociationAdmittedAt, Instant diagnosticReadAt) {
+            this(rootEventTime, priorEventTime, graphAssociationAdmittedAt, diagnosticReadAt, null);
+        }
+
         WitnessDescription {
             requireMillis(rootEventTime);
             requireMillis(priorEventTime);
             requireMillis(graphAssociationAdmittedAt);
             requireMillis(diagnosticReadAt);
+            if (stableWitnessCommitment != null && !isDigest(stableWitnessCommitment)) {
+                throw new IllegalArgumentException("GRAPH_WITNESS_COMMITMENT_INVALID");
+            }
             Duration priorWindow = Duration.between(priorEventTime, rootEventTime);
             if (!priorEventTime.isBefore(rootEventTime) || priorWindow.compareTo(MAX_WITNESS_WINDOW) > 0
                     || diagnosticReadAt.isBefore(rootEventTime)
@@ -247,6 +276,14 @@ record GraphRiskEvidenceRead(Status status, Reason reason, List<WitnessDescripti
             if (value.getNano() % ChronoUnit.MILLIS.getDuration().toNanos() != 0) {
                 throw new IllegalArgumentException("GRAPH_WITNESS_TIME_PRECISION_INVALID");
             }
+        }
+
+        private boolean hasStableIdentity() {
+            return stableWitnessCommitment != null && isDigest(stableWitnessCommitment);
+        }
+
+        private static boolean isDigest(String value) {
+            return value != null && value.matches("[0-9a-f]{64}");
         }
 
         @Override public String toString() { return "GraphRiskWitnessDescription[redacted]"; }

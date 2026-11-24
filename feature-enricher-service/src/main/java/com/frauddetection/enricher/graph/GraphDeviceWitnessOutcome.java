@@ -48,12 +48,16 @@ final class GraphDeviceWitnessOutcome {
     @Override public String toString() { return "GraphDeviceWitnessOutcome[" + state + "," + reason + ",redacted]"; }
 
     record Witness(GraphOccurrenceRef root, GraphOccurrenceRef prior, int pseudonymKeyVersion,
-                   Instant graphAssociationAdmittedAt, Instant diagnosticReadAt) {
+                   Instant graphAssociationAdmittedAt, Instant diagnosticReadAt,
+                   String stableWitnessCommitment) {
         Witness {
             Objects.requireNonNull(root, "GRAPH_ROOT_REQUIRED");
             Objects.requireNonNull(prior, "GRAPH_PRIOR_REQUIRED");
             GraphValidation.millisecondInstant(graphAssociationAdmittedAt);
             Objects.requireNonNull(diagnosticReadAt, "GRAPH_DIAGNOSTIC_READ_AT_REQUIRED");
+            if (stableWitnessCommitment == null || !stableWitnessCommitment.matches("[0-9a-f]{64}")) {
+                throw new IllegalArgumentException("GRAPH_WITNESS_COMMITMENT_INVALID");
+            }
             GraphValidation.version(pseudonymKeyVersion);
             GraphValidation.millisecondInstant(diagnosticReadAt);
             if (!root.scope().equals(prior.scope()) || !prior.eventTime().isBefore(root.eventTime())

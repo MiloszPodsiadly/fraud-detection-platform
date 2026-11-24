@@ -262,7 +262,8 @@ class GraphRiskSignalEngineTest {
     }
 
     private static GraphRiskEvidenceRead.WitnessDescription witness() {
-        return new GraphRiskEvidenceRead.WitnessDescription(ROOT, PRIOR, GRAPH_ADMITTED, READ_AT);
+        return new GraphRiskEvidenceRead.WitnessDescription(ROOT, PRIOR, GRAPH_ADMITTED, READ_AT,
+                "a".repeat(64));
     }
 
     private static GraphRiskEvidenceRead boundPositive(ScoringContext context) {

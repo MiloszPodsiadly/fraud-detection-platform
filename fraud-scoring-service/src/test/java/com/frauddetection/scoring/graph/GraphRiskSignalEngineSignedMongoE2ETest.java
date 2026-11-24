@@ -37,6 +37,8 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
         AtomicBoolean admitConflictAfterNextRead = new AtomicBoolean();
         AtomicReference<GraphDeviceMongoVerticalTestFacade.TwoHopRead> conflictRevalidationRead =
                 new AtomicReference<>();
+        AtomicReference<GraphRiskEvidenceRead> initialClockRead = new AtomicReference<>();
+        AtomicReference<GraphRiskEvidenceRead> freshClockRead = new AtomicReference<>();
         AtomicReference<byte[]> originalScoredWireBytes = new AtomicReference<>();
         AtomicInteger graphOwnerReadBaseline = new AtomicInteger();
         AtomicInteger graphOwnerReadFinal = new AtomicInteger();
@@ -51,7 +53,8 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
             GraphRiskEvidenceAccess access = new GraphRiskEvidenceAccess() {
                 @Override public GraphRiskEvidenceRead read(ScoringContext requested) {
                     scorerReads.incrementAndGet();
-                    GraphRiskEvidenceRead current = readAuthorizedNow(session, requested, conflictRevalidationRead);
+                    GraphRiskEvidenceRead current = readAuthorizedNow(session, requested);
+                    initialClockRead.set(current);
                     if (admitConflictAfterNextRead.compareAndSet(true, false)) {
                         session.graph().admitSignedConflict();
                     }
@@ -64,9 +67,11 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
                     if (!isExactRootContext(session, requested) || !previous.isBoundTo(requested)) {
                         return GraphRiskEvidenceRead.denied();
                     }
+                    session.graph().advanceReaderClockBy(Duration.ofMillis(1));
                     GraphRiskEvidenceRead current = readAuthorizedNow(session, requested, conflictRevalidationRead);
+                    freshClockRead.set(current);
                     if (current.status() == GraphRiskEvidenceRead.Status.VERIFIED_POSITIVE
-                            && !previous.binding().equals(current.binding())) {
+                            && !previous.sameBoundWitnessAtNonRegressingReadTime(current)) {
                         return GraphRiskEvidenceRead.denied();
                     }
                     return current;
@@ -82,6 +87,12 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
                 assertThat(scorerReads).hasValue(1);
                 assertThat(occurrenceRevalidations).hasValue(1);
                 assertThat(session.graph().ownerRevalidationCount()).isGreaterThan(ownerReadsBefore);
+                assertThat(initialClockRead.get().witnesses().getFirst().diagnosticReadAt())
+                        .isNotEqualTo(freshClockRead.get().witnesses().getFirst().diagnosticReadAt());
+                assertThat(initialClockRead.get().witnesses().getFirst().stableWitnessCommitment())
+                        .isEqualTo(freshClockRead.get().witnesses().getFirst().stableWitnessCommitment());
+                assertThat(initialClockRead.get().sameBoundWitnessAtNonRegressingReadTime(freshClockRead.get()))
+                        .isTrue();
 
                 GraphRiskEvidenceRead exactRead = readAuthorizedNow(session, exactB);
                 assertThat(exactRead.isBoundTo(exactB)).isTrue();
@@ -145,7 +156,8 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
                 GraphRiskEvidenceRead alteredWitness = GraphRiskEvidenceRead.verifiedPositive(
                         new GraphRiskEvidenceRead.WitnessDescription(session.rootTime(),
                                 session.priorTime().minusSeconds(1), exactRead.witnesses().getFirst().graphAssociationAdmittedAt(),
-                                exactRead.witnesses().getFirst().diagnosticReadAt()), exactB,
+                                exactRead.witnesses().getFirst().diagnosticReadAt(),
+                                exactRead.witnesses().getFirst().stableWitnessCommitment()), exactB,
                         exactOccurrenceIdentity(rootOccurrence));
                 GraphRiskEvidenceAccess witnessDrift = new GraphRiskEvidenceAccess() {
                     @Override public GraphRiskEvidenceRead read(ScoringContext requested) { return alteredWitness; }
@@ -236,7 +248,8 @@ class GraphRiskSignalEngineSignedMongoE2ETest {
             }
             return GraphRiskEvidenceRead.verifiedPositive(new GraphRiskEvidenceRead.WitnessDescription(
                     current.rootTime(), current.priorTime(), current.graphAssociationAdmittedAt(),
-                    current.diagnosticReadAt()), context, exactOccurrenceIdentity(root));
+                    current.diagnosticReadAt(), current.stableWitnessCommitment()), context,
+                    exactOccurrenceIdentity(root));
         }
         return switch (current.state()) {
             case "CONFLICT" -> GraphRiskEvidenceRead.conflict();

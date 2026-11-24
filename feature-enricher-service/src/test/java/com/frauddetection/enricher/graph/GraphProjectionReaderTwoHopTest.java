@@ -1,5 +1,6 @@
 package com.frauddetection.enricher.graph;
 
+import com.mongodb.MongoException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -50,6 +51,239 @@ class GraphProjectionReaderTwoHopTest {
         assertThat(outcome.toString()).doesNotContain(root.edge().evidence().occurrence().occurrenceToken(),
                 prior.edge().evidence().occurrence().occurrenceToken(),
                 root.edge().evidence().associatedIdentityToken());
+    }
+
+    @Test
+    void ownerExpiryOnANonSelectedPriorDuringFinalSnapshotPreventsWitnessReturn() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
+        GraphStoredEdge selectedPrior = stored(scope, "prior-oldest", "device-D", 7,
+                ROOT_TIME.minusSeconds(120));
+        GraphStoredEdge nonSelectedPrior = stored(scope, "prior-later", "device-D", 7,
+                ROOT_TIME.minusSeconds(60));
+        Instant ownerExpiry = READ_AT.plusSeconds(10);
+        MutableClock clock = new MutableClock(READ_AT);
+        FakeStore store = new FakeStore(List.of(root, selectedPrior, nonSelectedPrior));
+        store.afterThirdDeviceRead = () -> clock.set(ownerExpiry);
+        RecordingAuthority owner = new RecordingAuthority() {
+            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                super.revalidate(expected, principal);
+                Instant validUntil = expected.equals(nonSelectedPrior.edge().evidence())
+                        ? ownerExpiry : expected.expiresAt();
+                return GraphRelationResolution.verified(expected, validUntil);
+            }
+        };
+
+        GraphDeviceWitnessOutcome outcome = read(store, owner, scope,
+                root.edge().evidence().occurrence(), grant(scope), clock, System::nanoTime);
+
+        assertThat(outcome.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(outcome.reason()).isEqualTo(GraphReadReason.RETENTION_EXPIRED);
+        assertThat(outcome.witness()).isEmpty();
+        assertThat(owner.revalidations).hasValue(6);
+        assertThat(store.rootReads).hasValue(3);
+        assertThat(store.deviceReads).hasValue(3);
+    }
+
+    @Test
+    void persistedRowValidityExpiryDuringFinalSnapshotPreventsWitnessReturn() {
+        GraphIdentityScope scope = scope("epoch-a");
+        Instant rowExpiry = READ_AT.plusSeconds(10);
+        Instant evidenceExpiry = READ_AT.plus(Duration.ofDays(1));
+        GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME,
+                evidenceExpiry, rowExpiry);
+        GraphStoredEdge prior = stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60),
+                evidenceExpiry, rowExpiry);
+        MutableClock clock = new MutableClock(READ_AT);
+        FakeStore store = new FakeStore(List.of(root, prior));
+        store.afterThirdDeviceRead = () -> clock.set(rowExpiry);
+
+        GraphDeviceWitnessOutcome outcome = read(store, new RecordingAuthority(), scope,
+                root.edge().evidence().occurrence(), grant(scope), clock, System::nanoTime);
+
+        assertThat(outcome.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(outcome.reason()).isEqualTo(GraphReadReason.RETENTION_EXPIRED);
+        assertThat(outcome.witness()).isEmpty();
+        assertThat(store.rootReads).hasValue(3);
+        assertThat(store.deviceReads).hasValue(3);
+    }
+
+    @Test
+    void ownerValidityBoundaryIsExpiredButOneMillisecondBeforeStillVerifies() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
+        GraphStoredEdge prior = stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60));
+        Instant ownerExpiry = READ_AT.plusSeconds(10);
+        List<GraphDeviceWitnessOutcome> outcomes = new ArrayList<>();
+        for (Instant finalTime : List.of(ownerExpiry.minusMillis(1), ownerExpiry)) {
+            MutableClock clock = new MutableClock(READ_AT);
+            FakeStore store = new FakeStore(List.of(root, prior));
+            store.afterThirdDeviceRead = () -> clock.set(finalTime);
+            RecordingAuthority owner = new RecordingAuthority() {
+                @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                    super.revalidate(expected, principal);
+                    return GraphRelationResolution.verified(expected, ownerExpiry);
+                }
+            };
+            outcomes.add(read(store, owner, scope, root.edge().evidence().occurrence(), grant(scope),
+                    clock, System::nanoTime));
+        }
+
+        assertThat(outcomes.getFirst().state()).isEqualTo(GraphProjectionState.VERIFIED_BOUNDED);
+        assertThat(outcomes.getFirst().witness()).isPresent();
+        assertThat(outcomes.getLast().state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(outcomes.getLast().reason()).isEqualTo(GraphReadReason.RETENTION_EXPIRED);
+        assertThat(outcomes.getLast().witness()).isEmpty();
+    }
+
+    @Test
+    void expiredNonSelectedRootOnAnotherHubStopsBeforeFirstReverseLookup() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge firstRoot = stored(scope, "root-B", "device-D1", 7, ROOT_TIME);
+        GraphStoredEdge secondRoot = stored(scope, "root-B", "device-D2", 7, ROOT_TIME);
+        GraphStoredEdge firstCheckedRoot = List.of(firstRoot, secondRoot).stream()
+                .min(Comparator.comparing(row -> row.edge().canonicalId())).orElseThrow();
+        GraphStoredEdge otherRoot = firstCheckedRoot.equals(firstRoot) ? secondRoot : firstRoot;
+        String otherDevice = otherRoot.equals(firstRoot) ? "device-D1" : "device-D2";
+        GraphStoredEdge prior = stored(scope, "prior-A", otherDevice, 7, ROOT_TIME.minusSeconds(60));
+        Instant firstOwnerExpiry = READ_AT.plusMillis(1);
+        MutableClock clock = new MutableClock(READ_AT);
+        FakeStore store = new FakeStore(List.of(firstRoot, secondRoot, prior));
+        AtomicInteger checks = new AtomicInteger();
+        RecordingAuthority owner = new RecordingAuthority() {
+            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                int check = checks.incrementAndGet();
+                super.revalidate(expected, principal);
+                if (check == 2) { clock.set(firstOwnerExpiry); }
+                return GraphRelationResolution.verified(expected,
+                        check == 1 ? firstOwnerExpiry : expected.expiresAt());
+            }
+        };
+
+        GraphDeviceWitnessOutcome outcome = read(store, owner, scope,
+                firstRoot.edge().evidence().occurrence(), grant(scope), clock, System::nanoTime);
+
+        assertThat(outcome.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(outcome.reason()).isEqualTo(GraphReadReason.RETENTION_EXPIRED);
+        assertThat(outcome.witness()).isEmpty();
+        assertThat(store.rootReads).hasValue(1);
+        assertThat(store.deviceReads).hasValue(0);
+        assertThat(owner.revalidations).hasValue(2);
+    }
+
+    @Test
+    void expiredNonSelectedRootDuringSecondOwnerPassStopsBeforeNextReverseSnapshot() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge firstRoot = stored(scope, "root-B", "device-D1", 7, ROOT_TIME);
+        GraphStoredEdge secondRoot = stored(scope, "root-B", "device-D2", 7, ROOT_TIME);
+        GraphStoredEdge shortRoot = List.of(firstRoot, secondRoot).stream()
+                .min(Comparator.comparing(row -> row.edge().canonicalId())).orElseThrow();
+        GraphStoredEdge selectedRoot = shortRoot.equals(firstRoot) ? secondRoot : firstRoot;
+        String selectedDevice = selectedRoot.equals(firstRoot) ? "device-D1" : "device-D2";
+        GraphStoredEdge prior = stored(scope, "prior-A", selectedDevice, 7, ROOT_TIME.minusSeconds(60));
+        Instant ownerExpiry = READ_AT.plusMillis(1);
+        MutableClock clock = new MutableClock(READ_AT);
+        FakeStore store = new FakeStore(List.of(firstRoot, secondRoot, prior));
+        AtomicInteger checks = new AtomicInteger();
+        RecordingAuthority owner = new RecordingAuthority() {
+            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                int check = checks.incrementAndGet();
+                super.revalidate(expected, principal);
+                if (check == 5) { clock.set(ownerExpiry); }
+                return GraphRelationResolution.verified(expected,
+                        expected.equals(shortRoot.edge().evidence()) ? ownerExpiry : expected.expiresAt());
+            }
+        };
+
+        GraphDeviceWitnessOutcome outcome = read(store, owner, scope,
+                firstRoot.edge().evidence().occurrence(), grant(scope), clock, System::nanoTime);
+
+        assertThat(outcome.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(outcome.reason()).isEqualTo(GraphReadReason.RETENTION_EXPIRED);
+        assertThat(outcome.witness()).isEmpty();
+        assertThat(owner.revalidations).hasValue(6);
+        assertThat(store.rootReads).hasValue(3);
+        assertThat(store.deviceReads).hasValue(2);
+    }
+
+    @Test
+    void rootValidityIsCheckedBetweenRootSnapshotAndTheNextReverseLookup() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
+        GraphStoredEdge prior = stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60));
+        Instant ownerExpiry = READ_AT.plusMillis(1);
+        MutableClock clock = new MutableClock(READ_AT);
+        FakeStore store = new FakeStore(List.of(root, prior));
+        store.afterSecondRootRead = () -> clock.set(ownerExpiry);
+        RecordingAuthority owner = new RecordingAuthority() {
+            @Override public GraphRelationResolution revalidate(GraphEvidenceRef expected, String principal) {
+                super.revalidate(expected, principal);
+                Instant validUntil = expected.equals(root.edge().evidence())
+                        ? ownerExpiry : expected.expiresAt();
+                return GraphRelationResolution.verified(expected, validUntil);
+            }
+        };
+
+        GraphDeviceWitnessOutcome outcome = read(store, owner, scope,
+                root.edge().evidence().occurrence(), grant(scope), clock, System::nanoTime);
+
+        assertThat(outcome.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(outcome.reason()).isEqualTo(GraphReadReason.RETENTION_EXPIRED);
+        assertThat(outcome.witness()).isEmpty();
+        assertThat(owner.revalidations).hasValue(2);
+        assertThat(store.rootReads).hasValue(2);
+        assertThat(store.deviceReads).hasValue(1);
+    }
+
+    @Test
+    void stableWitnessCommitmentIgnoresReadClockAndChangesWithTheSelectedPair() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
+        GraphStoredEdge prior = stored(scope, "prior-A", "device-D", 7, ROOT_TIME.minusSeconds(60));
+        MutableClock clock = new MutableClock(READ_AT);
+        GraphDeviceWitnessOutcome first = read(new FakeStore(List.of(root, prior)), new RecordingAuthority(),
+                scope, root.edge().evidence().occurrence(), grant(scope), clock, System::nanoTime);
+        clock.set(READ_AT.plusMillis(1));
+        GraphDeviceWitnessOutcome later = read(new FakeStore(List.of(root, prior)), new RecordingAuthority(),
+                scope, root.edge().evidence().occurrence(), grant(scope), clock, System::nanoTime);
+        GraphStoredEdge differentPrior = stored(scope, "different-prior", "device-D", 7,
+                ROOT_TIME.minusSeconds(60));
+        GraphDeviceWitnessOutcome changedPair = read(new FakeStore(List.of(root, differentPrior)),
+                new RecordingAuthority(), scope, root.edge().evidence().occurrence(), grant(scope),
+                clock, System::nanoTime);
+        GraphStoredEdge differentHubRoot = stored(scope, "root-B", "device-D2", 8, ROOT_TIME);
+        GraphStoredEdge differentHubPrior = stored(scope, "prior-A", "device-D2", 8,
+                ROOT_TIME.minusSeconds(60));
+        GraphDeviceWitnessOutcome changedHubAndKey = read(new FakeStore(List.of(differentHubRoot, differentHubPrior)),
+                new RecordingAuthority(), scope, differentHubRoot.edge().evidence().occurrence(), grant(scope),
+                clock, System::nanoTime);
+
+        assertThat(first.witness().orElseThrow().diagnosticReadAt()).isNotEqualTo(later.witness().orElseThrow().diagnosticReadAt());
+        assertThat(first.witness().orElseThrow().stableWitnessCommitment())
+                .isEqualTo(later.witness().orElseThrow().stableWitnessCommitment())
+                .matches("[0-9a-f]{64}");
+        assertThat(first.witness().orElseThrow().stableWitnessCommitment())
+                .isNotEqualTo(changedPair.witness().orElseThrow().stableWitnessCommitment());
+        assertThat(first.witness().orElseThrow().stableWitnessCommitment())
+                .isNotEqualTo(changedHubAndKey.witness().orElseThrow().stableWitnessCommitment());
+        assertThat(first.toString()).doesNotContain(first.witness().orElseThrow().stableWitnessCommitment());
+    }
+
+    @Test
+    void serverEnforcedMongoReadDeadlineRemainsTypedWhenLocalTickerHasNotExpired() {
+        GraphIdentityScope scope = scope("epoch-a");
+        GraphStoredEdge root = stored(scope, "root-B", "device-D", 7, ROOT_TIME);
+        FakeStore store = new FakeStore(List.of(root));
+        store.rootReadFailure = new MongoException(50, "server execution time limit exceeded");
+
+        GraphDeviceWitnessOutcome outcome = read(store, new RecordingAuthority(), scope,
+                root.edge().evidence().occurrence(), grant(scope), Clock.fixed(READ_AT, ZoneOffset.UTC), () -> 0L);
+
+        assertThat(outcome.state()).isEqualTo(GraphProjectionState.UNAVAILABLE);
+        assertThat(outcome.reason()).isEqualTo(GraphReadReason.DEADLINE_EXCEEDED);
+        assertThat(outcome.witness()).isEmpty();
+        assertThat(store.rootReads).hasValue(1);
+        assertThat(store.deviceReads).hasValue(0);
     }
 
     @Test
@@ -843,6 +1077,12 @@ class GraphProjectionReaderTwoHopTest {
 
     private static GraphStoredEdge stored(GraphIdentityScope scope, String occurrence, String device,
                                           int keyVersion, Instant eventTime, Instant expiresAt) {
+        return stored(scope, occurrence, device, keyVersion, eventTime, expiresAt, expiresAt);
+    }
+
+    private static GraphStoredEdge stored(GraphIdentityScope scope, String occurrence, String device,
+                                          int keyVersion, Instant eventTime, Instant evidenceExpiresAt,
+                                          Instant validUntil) {
         GraphOccurrenceRef occurrenceRef = new GraphOccurrenceRef(scope, token("occurrence:" + occurrence), eventTime);
         GraphScoredOccurrenceRef score = new GraphScoredOccurrenceRef(token("score:" + occurrence),
                 eventTime.plusMillis(1), token("fingerprint:" + occurrence), GraphScoredOccurrenceRef.INITIAL_RUN);
@@ -851,11 +1091,11 @@ class GraphProjectionReaderTwoHopTest {
                 token("assertion:" + occurrence + ":" + device + ":" + keyVersion),
                 token("coverage:" + occurrence), token("policy:" + occurrence),
                 score, token("snapshot:" + occurrence), eventTime.minusSeconds(60), eventTime, 1,
-                expiresAt);
+                evidenceExpiresAt);
         GraphEdgeFact edge = new GraphEdgeFact(GraphProjectionVersion.CURRENT,
                 GraphEdgeType.OCCURRENCE_ASSOCIATED_WITH_DEVICE, GraphNodeRef.occurrence(occurrenceRef),
                 GraphNodeRef.device(scope, evidence.associatedIdentityToken(), keyVersion), evidence);
-        return new GraphStoredEdge(edge, GraphEdgeLifecycle.ACTIVE, eventTime.plusSeconds(1), expiresAt);
+        return new GraphStoredEdge(edge, GraphEdgeLifecycle.ACTIVE, eventTime.plusSeconds(1), validUntil);
     }
 
     private static GraphIdentityScope scope(String epoch) {
@@ -868,6 +1108,20 @@ class GraphProjectionReaderTwoHopTest {
         List<GraphStoredEdge> result = new ArrayList<>(left);
         result.addAll(right);
         return result;
+    }
+
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> now;
+
+        private MutableClock(Instant initial) { now = new AtomicReference<>(initial); }
+        private void set(Instant value) { now.set(value); }
+
+        @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(java.time.ZoneId zone) {
+            if (!ZoneOffset.UTC.equals(zone)) { throw new IllegalArgumentException("GRAPH_TEST_CLOCK_ZONE_INVALID"); }
+            return this;
+        }
+        @Override public Instant instant() { return now.get(); }
     }
 
     private static class RecordingAuthority implements GraphRelationAuthority {
@@ -900,7 +1154,11 @@ class GraphProjectionReaderTwoHopTest {
         final List<Duration> deviceBudgets = new ArrayList<>();
         final List<Integer> rootPageSizes = new ArrayList<>();
         final List<Integer> devicePageSizes = new ArrayList<>();
+        MongoException rootReadFailure;
+        Runnable afterSecondRootRead;
         Runnable afterFirstDeviceRead;
+        Runnable afterSecondDeviceRead;
+        Runnable afterThirdDeviceRead;
         boolean reverseDeviceResults;
 
         FakeStore(List<GraphStoredEdge> rows) { this.rows = new ArrayList<>(rows); }
@@ -912,14 +1170,17 @@ class GraphProjectionReaderTwoHopTest {
                                                                        GraphOccurrenceRef occurrence,
                                                                        Instant asOf, int limit, int maxPageSize,
                                                                        Duration maxTime) {
-            rootReads.incrementAndGet();
+            int call = rootReads.incrementAndGet();
             rootBudgets.add(maxTime);
             rootPageSizes.add(maxPageSize);
-            return rows.stream().filter(row -> row.edge().evidence().occurrence().equals(occurrence)
+            if (rootReadFailure != null) { throw rootReadFailure; }
+            List<GraphStoredEdge> result = rows.stream().filter(row -> row.edge().evidence().occurrence().equals(occurrence)
                             && row.edge().evidence().scope().equals(scope)
                             && row.lifecycle() == GraphEdgeLifecycle.ACTIVE && !row.admittedAt().isAfter(asOf)
                             && row.validUntil().isAfter(asOf))
                     .sorted(Comparator.comparing(row -> row.edge().canonicalId())).limit(limit).toList();
+            if (call == 2 && afterSecondRootRead != null) { afterSecondRootRead.run(); }
+            return result;
         }
 
         @Override public List<GraphStoredEdge> findDeviceOccurrenceNeighbors(GraphIdentityScope scope,
@@ -946,6 +1207,8 @@ class GraphProjectionReaderTwoHopTest {
                             .thenComparing(row -> row.edge().evidence().occurrence().occurrenceToken()))
                     .limit(limit).toList();
             if (call == 1 && afterFirstDeviceRead != null) { afterFirstDeviceRead.run(); }
+            if (call == 2 && afterSecondDeviceRead != null) { afterSecondDeviceRead.run(); }
+            if (call == 3 && afterThirdDeviceRead != null) { afterThirdDeviceRead.run(); }
             if (!reverseDeviceResults) { return result; }
             List<GraphStoredEdge> reversed = new ArrayList<>(result);
             java.util.Collections.reverse(reversed);

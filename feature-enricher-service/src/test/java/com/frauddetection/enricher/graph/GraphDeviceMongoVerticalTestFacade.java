@@ -266,7 +266,8 @@ public final class GraphDeviceMongoVerticalTestFacade {
             GraphPrivateReadGrantVerifier graphGrantVerifier = (grant, principal, scope, now) ->
                     grant.matches(principal, scope, now)
                             ? GraphPolicyDecision.AUTHORIZED : GraphPolicyDecision.DENIED;
-            Clock readClock = Clock.fixed(readAt, ZoneOffset.UTC);
+            AtomicReference<Instant> readClockNow = new AtomicReference<>(readAt);
+            Clock readClock = new MutableTestClock(readClockNow);
             GraphProjectionReader restartedReader = new GraphProjectionReader(restartedReaderStore, restartedAuthority,
                     graphGrantVerifier, readLimits, new GraphReadCursorCodec(new byte[32]), readClock);
             List<GraphReadOutcome> reads = new ArrayList<>(persisted.size());
@@ -302,7 +303,7 @@ public final class GraphDeviceMongoVerticalTestFacade {
                 if (liveSessionCallback != null) {
                     LiveTwoHopReadSession session = new LiveTwoHopReadSession(restartedReader, requestingPrincipal,
                             graphGrant, evidence.scope(), rootOccurrence, ownerRevalidations, admitSignedConflict,
-                            graphCommands, ownerProbe);
+                            graphCommands, ownerProbe, readClockNow);
                     liveSessionCallback.accept(session);
                     session.admitSignedConflictIfNeeded();
                 } else {
@@ -571,7 +572,7 @@ public final class GraphDeviceMongoVerticalTestFacade {
     public record TwoHopRead(String state, String reason, Instant rootTime, Instant priorTime,
                              int pseudonymKeyVersion, Instant graphAssociationAdmittedAt,
                              Instant diagnosticReadAt, GraphOccurrenceRef rootOccurrence,
-                             GraphOccurrenceRef priorOccurrence) {
+                             GraphOccurrenceRef priorOccurrence, String stableWitnessCommitment) {
         static TwoHopRead from(GraphDeviceWitnessOutcome outcome) {
             var witness = outcome.witness().orElse(null);
             return new TwoHopRead(outcome.state().name(), outcome.reason().name(),
@@ -580,7 +581,12 @@ public final class GraphDeviceMongoVerticalTestFacade {
                     witness == null ? 0 : witness.pseudonymKeyVersion(),
                     witness == null ? null : witness.graphAssociationAdmittedAt(),
                     witness == null ? null : witness.diagnosticReadAt(),
-                    witness == null ? null : witness.root(), witness == null ? null : witness.prior());
+                    witness == null ? null : witness.root(), witness == null ? null : witness.prior(),
+                    witness == null ? null : witness.stableWitnessCommitment());
+        }
+
+        @Override public String toString() {
+            return "TwoHopRead[" + state + "," + reason + ",witness=redacted]";
         }
     }
 
@@ -615,13 +621,14 @@ public final class GraphDeviceMongoVerticalTestFacade {
         private final Runnable signedConflictAdmission;
         private final GraphCommandProbe graphCommands;
         private final OwnerReadProbe ownerProbe;
+        private final AtomicReference<Instant> readClockNow;
         private final AtomicBoolean conflictAdmitted = new AtomicBoolean();
 
         private LiveTwoHopReadSession(GraphProjectionReader reader, String principal,
                                       GraphPrivateReadGrant grant, GraphIdentityScope scope,
                                       GraphOccurrenceRef rootOccurrence, AtomicInteger ownerRevalidations,
                                       Runnable signedConflictAdmission, GraphCommandProbe graphCommands,
-                                      OwnerReadProbe ownerProbe) {
+                                      OwnerReadProbe ownerProbe, AtomicReference<Instant> readClockNow) {
             this.reader = reader;
             this.principal = principal;
             this.grant = grant;
@@ -631,6 +638,7 @@ public final class GraphDeviceMongoVerticalTestFacade {
             this.signedConflictAdmission = signedConflictAdmission;
             this.graphCommands = graphCommands;
             this.ownerProbe = ownerProbe;
+            this.readClockNow = readClockNow;
         }
 
         public TwoHopRead readCurrent() { return readAs(principal); }
@@ -646,6 +654,14 @@ public final class GraphDeviceMongoVerticalTestFacade {
         }
 
         public GraphOccurrenceRef rootOccurrence() { return rootOccurrence; }
+
+        public void advanceReaderClockBy(Duration amount) {
+            if (amount == null || amount.isNegative() || amount.isZero()
+                    || amount.toNanos() % Duration.ofMillis(1).toNanos() != 0) {
+                throw new IllegalArgumentException("GRAPH_TEST_CLOCK_ADVANCE_INVALID");
+            }
+            readClockNow.updateAndGet(current -> current.plus(amount));
+        }
 
         public int ownerRevalidationCount() { return ownerRevalidations.get(); }
 
@@ -679,6 +695,19 @@ public final class GraphDeviceMongoVerticalTestFacade {
         private void admitSignedConflictIfNeeded() {
             if (!conflictAdmitted.get()) { admitSignedConflict(); }
         }
+    }
+
+    private static final class MutableTestClock extends Clock {
+        private final AtomicReference<Instant> now;
+
+        private MutableTestClock(AtomicReference<Instant> now) { this.now = now; }
+
+        @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(java.time.ZoneId zone) {
+            if (!ZoneOffset.UTC.equals(zone)) { throw new IllegalArgumentException("GRAPH_TEST_CLOCK_ZONE_INVALID"); }
+            return this;
+        }
+        @Override public Instant instant() { return now.get(); }
     }
 
     private static final class OwnerReadProbe {

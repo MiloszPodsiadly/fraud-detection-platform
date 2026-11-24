@@ -85,7 +85,7 @@ class GraphRiskSignalEngineSignedDenseMongoE2ETest {
                     }
                     if (current.status() == GraphRiskEvidenceRead.Status.VERIFIED_POSITIVE
                             && (!previous.binding().equals(current.binding())
-                            || !previous.witnesses().equals(current.witnesses()))) {
+                            || !previous.sameBoundWitnessAtNonRegressingReadTime(current))) {
                         return GraphRiskEvidenceRead.denied();
                     }
                     return current;
@@ -274,7 +274,8 @@ class GraphRiskSignalEngineSignedDenseMongoE2ETest {
             }
             return GraphRiskEvidenceRead.verifiedPositive(new GraphRiskEvidenceRead.WitnessDescription(
                     current.rootTime(), current.priorTime(), current.graphAssociationAdmittedAt(),
-                    current.diagnosticReadAt()), context, exactOccurrenceIdentity(root));
+                    current.diagnosticReadAt(), current.stableWitnessCommitment()), context,
+                    exactOccurrenceIdentity(root));
         }
         return switch (current.state()) {
             case "CONFLICT" -> GraphRiskEvidenceRead.conflict();
