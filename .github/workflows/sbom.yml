@@ -36,32 +36,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '21.0.13.1+2'
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26.13.1'
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: '3.12.16'
+          pip-version: '26.3'
           cache: pip
           cache-dependency-path: ml-inference-service/requirements.txt
 
       - name: Generate Maven resolved SBOM
         run: |
           mkdir -p target/sbom
+          find . -name pom.xml -not -path './.git/*' -print0 \
+            | while IFS= read -r -d '' pom; do mkdir -p "$(dirname "$pom")/target"; done
+          mvn -B -DskipTests \
+            org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
+            -DoutputType=text \
+            -DoutputFile=target/maven-dependency-tree.txt
           mvn -B -DskipTests \
             -Dproject.build.outputTimestamp=0 \
             org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
@@ -77,7 +86,7 @@ jobs:
       - name: Generate npm resolved SBOM
         working-directory: analyst-console-ui
         run: |
-          npx --yes @cyclonedx/cyclonedx-npm@6.0.0 \
+          npx --yes @cyclonedx/cyclonedx-npm@7.0.1 \
             --package-lock-only \
             --output-reproducible \
             --spec-version 1.6 \
@@ -88,9 +97,8 @@ jobs:
       - name: Generate Python resolved SBOM
         run: |
           python -m venv .venv-sbom-ml
-          .venv-sbom-ml/bin/python -m pip install --upgrade pip
-          .venv-sbom-ml/bin/python -m pip install -r ml-inference-service/requirements.txt
-          python -m pip install cyclonedx-bom==7.3.1
+          .venv-sbom-ml/bin/python -m pip install --require-hashes --only-binary=:all: -r ml-inference-service/requirements.txt
+          python -m pip install cyclonedx-bom==7.6.0
           cyclonedx-py environment \
             --output-reproducible \
             --sv 1.6 \
@@ -99,11 +107,18 @@ jobs:
             .venv-sbom-ml/bin/python
 
       - name: Validate SBOM artifacts
-        run: node scripts/ci/validate-sbom-artifacts.mjs target/sbom/*.cdx.json
+        env:
+          TESTED_GIT_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$TESTED_GIT_SHA"
+          node scripts/ci/validate-sbom-artifacts.mjs target/sbom/*.cdx.json
 
       - name: Upload resolved SBOM artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: resolved-cyclonedx-sbom-${{ github.sha }}
-          path: target/sbom/*.json
+          path: |
+            target/sbom/*.json
+            **/target/maven-dependency-tree.txt
+          if-no-files-found: error
           retention-days: 30

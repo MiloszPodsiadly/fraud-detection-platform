@@ -15,7 +15,7 @@ preflight_artifact_root="$workspace/preflight-artifacts"
 malformed_sentinel_root="$workspace/malformed-sentinel-artifacts"
 resolved_config="$workspace/resolved.json"
 key_loader_probe_file="$workspace/key-loader-missing-source-probes.yml"
-probe_image="alpine:3.21"
+probe_image="alpine:3.21.10@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab"
 
 main_compose() {
   ARTIFACT_ROOT="$artifact_root" docker compose --project-name "$project" -f "$compose_file" "$@"
@@ -61,7 +61,7 @@ docker image inspect "$probe_image" >/dev/null
 cat >"$compose_file" <<'YAML'
 services:
   reader:
-    image: alpine:3.21
+    image: alpine:3.21.10@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab
     command:
       - /bin/sh
       - -ec
@@ -83,7 +83,7 @@ YAML
 cat >"$create_path_compose_file" <<'YAML'
 services:
   reader:
-    image: alpine:3.21
+    image: alpine:3.21.10@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab
     command: ["/bin/sh", "-ec", "test -d /run/model-shadow-performance"]
     volumes:
       - type: bind

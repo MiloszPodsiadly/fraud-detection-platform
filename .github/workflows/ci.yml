@@ -22,12 +22,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node for CI selector validation
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Validate CI test selectors
         run: node scripts/ci/verify-ci-test-selectors.mjs
@@ -36,11 +36,13 @@ jobs:
         run: node --test scripts/ci/verify-ci-test-selectors.test.mjs
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Use canonical ready shadow model artifact for backend tests
         run: cp ml-inference-service/app/model_artifact.json /tmp/model_artifact.json
@@ -125,7 +127,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Record exact tested revision
         run: |
@@ -135,16 +137,18 @@ jobs:
           echo "Institutional reliability revision: $TESTED_GIT_SHA"
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -160,7 +164,7 @@ jobs:
 
       - name: Upload institutional reliability reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: institutional-reliability-${{ env.TESTED_GIT_SHA }}
           if-no-files-found: error
@@ -173,19 +177,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -198,7 +204,7 @@ jobs:
 
       - name: Upload FDP-42 test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fdp42-fraud-case-management-test-reports
           if-no-files-found: error
@@ -217,19 +223,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -245,7 +253,7 @@ jobs:
 
       - name: Upload FDP-45 test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fdp45-fraud-case-work-queue-read-model-test-reports
           if-no-files-found: error
@@ -260,15 +268,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.16"
+          pip-version: "26.3"
 
       - name: Install ML dependencies
-        run: pip install -r ml-inference-service/requirements.txt
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all: -r ml-inference-service/requirements.txt
 
       - name: Generate local identity fixtures for ML tests
         run: bash scripts/bootstrap-local-fixtures.sh
@@ -294,12 +304,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
@@ -317,6 +327,77 @@ jobs:
       - name: Build UI
         run: npm run build
 
+  frontend-dependency-audit:
+    name: Frontend npm Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: analyst-console-ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26.13.1"
+
+      - name: Audit production and development dependencies
+        run: |
+          mkdir -p ../target/security
+          npm audit --audit-level=high --json > ../target/security/npm-audit.json
+
+      - name: Upload npm audit report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-audit-${{ github.sha }}
+          path: target/security/npm-audit.json
+          if-no-files-found: error
+          retention-days: 30
+
+  python-dependency-audit:
+    name: Python pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Audit hash-locked Python dependencies
+        id: pip-audit
+        uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
+        with:
+          inputs: ml-inference-service/requirements.txt
+          require-hashes: true
+          no-deps: true
+
+      - name: Save pip-audit result
+        if: always()
+        env:
+          PIP_AUDIT_REPORT: ${{ steps.pip-audit.outputs.internal-be-careful-output }}
+        run: |
+          mkdir -p target/security
+          if [ -z "$PIP_AUDIT_REPORT" ]; then
+            printf '%s\n' 'pip-audit did not provide a report.' > target/security/pip-audit.md
+            exit 1
+          fi
+          printf '%s' "$PIP_AUDIT_REPORT" | base64 --decode > target/security/pip-audit.md
+          test -s target/security/pip-audit.md
+
+      - name: Upload pip-audit result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pip-audit-${{ github.sha }}
+          path: target/security/pip-audit.md
+          if-no-files-found: error
+          retention-days: 30
+
   fdp28-proof:
     name: FDP-28 Docker Integration Proof
     runs-on: ubuntu-latest
@@ -324,14 +405,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -346,14 +429,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -363,7 +448,7 @@ jobs:
 
       - name: Upload FDP-35 test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fdp35-production-readiness-test-reports
           if-no-files-found: ignore
@@ -381,19 +466,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
@@ -437,19 +524,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
@@ -494,19 +583,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
@@ -561,7 +652,7 @@ jobs:
 
       - name: Upload security route boundary reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: security-route-boundary-reports
           if-no-files-found: ignore
@@ -577,12 +668,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Verify FDP-54 shared scope helpers
         run: node scripts/check-scope-guard-helpers-smoke.mjs
@@ -603,14 +694,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
@@ -689,7 +780,7 @@ jobs:
 
       - name: Upload frontend architecture gate reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: analyst-console-frontend-architecture-gate-reports
           if-no-files-found: ignore
@@ -707,19 +798,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -735,7 +828,7 @@ jobs:
 
       - name: Upload FDP-36 real chaos reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fdp36-real-chaos-test-reports
           if-no-files-found: ignore
@@ -755,26 +848,52 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Verify Docker is available for production-image chaos
         run: docker version
 
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
       - name: Build alert-service production-like image
+        id: build-fdp37-image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deployment/Dockerfile.backend
+          push: false
+          load: true
+          pull: true
+          no-cache: true
+          tags: fdp37-alert-service:${{ github.sha }}
+          build-args: |
+            MODULE_NAME=alert-service
+
+      - name: Scan FDP-37 production-like image and save SBOM evidence
+        uses: ./.github/actions/scan-built-image
+        with:
+          image-ref: fdp37-alert-service:${{ github.sha }}
+          build-digest: ${{ steps.build-fdp37-image.outputs.digest }}
+          artifact-name: fdp37-alert-service-image-security
+          output-directory: alert-service/target/fdp37-image-security
+
+      - name: Record production-like image identity
         run: |
-          docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .
           IMAGE_ID=$(docker image inspect fdp37-alert-service:${GITHUB_SHA} --format '{{.Id}}')
           IMAGE_DIGEST_OR_ID=$(docker image inspect fdp37-alert-service:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
           echo "FDP37_ALERT_SERVICE_IMAGE=fdp37-alert-service:${GITHUB_SHA}" >> "$GITHUB_ENV"
@@ -817,7 +936,7 @@ jobs:
 
       - name: Upload FDP-37 production image chaos artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fdp37-production-image-chaos-reports
           if-no-files-found: error
@@ -830,14 +949,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
@@ -849,7 +970,7 @@ jobs:
 
       - name: Upload regulated mutation regression reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: regulated-mutation-regression-test-reports
           if-no-files-found: ignore
@@ -867,26 +988,50 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Verify Docker is available for FDP-38 fixture chaos
         run: docker version
 
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
       - name: Build FDP-38 alert-service test-fixture image
+        id: build-fdp38-fixture
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deployment/Dockerfile.alert-service-fdp38-fixture
+          push: false
+          load: true
+          pull: true
+          no-cache: true
+          tags: fdp38-alert-service-test-fixture:${{ github.sha }}
+
+      - name: Scan FDP-38 fixture image and save SBOM evidence
+        uses: ./.github/actions/scan-built-image
+        with:
+          image-ref: fdp38-alert-service-test-fixture:${{ github.sha }}
+          build-digest: ${{ steps.build-fdp38-fixture.outputs.digest }}
+          artifact-name: fdp38-alert-service-fixture-image-security
+          output-directory: alert-service/target/fdp38-image-security
+
+      - name: Record FDP-38 fixture image identity
         run: |
-          docker build -f deployment/Dockerfile.alert-service-fdp38-fixture -t fdp38-alert-service-test-fixture:${GITHUB_SHA} .
           IMAGE_ID=$(docker image inspect fdp38-alert-service-test-fixture:${GITHUB_SHA} --format '{{.Id}}')
           IMAGE_DIGEST_OR_ID=$(docker image inspect fdp38-alert-service-test-fixture:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
           echo "FDP38_ALERT_SERVICE_FIXTURE_IMAGE=fdp38-alert-service-test-fixture:${GITHUB_SHA}" >> "$GITHUB_ENV"
@@ -908,7 +1053,7 @@ jobs:
 
       - name: Upload FDP-38 live runtime checkpoint artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fdp38-live-runtime-checkpoint-chaos-reports
           if-no-files-found: error
@@ -935,29 +1080,55 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Verify Docker is available for FDP-39 release governance
         run: docker version
 
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
       - name: Build and export release image filesystem
+        id: build-fdp39-release-image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deployment/Dockerfile.backend
+          push: false
+          load: true
+          pull: true
+          no-cache: true
+          tags: fdp39-alert-service:${{ github.sha }}
+          build-args: |
+            MODULE_NAME=alert-service
+
+      - name: Scan FDP-39 release image and save SBOM evidence
+        uses: ./.github/actions/scan-built-image
+        with:
+          image-ref: fdp39-alert-service:${{ github.sha }}
+          build-digest: ${{ steps.build-fdp39-release-image.outputs.digest }}
+          artifact-name: fdp39-release-image-security
+          output-directory: alert-service/target/fdp39-governance/image-security/release
+
+      - name: Export release image filesystem
         run: |
           set -euo pipefail
-          docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp39-alert-service:${GITHUB_SHA} .
           IMAGE_ID=$(docker image inspect fdp39-alert-service:${GITHUB_SHA} --format '{{.Id}}')
           IMAGE_DIGEST_OR_ID=$(docker image inspect fdp39-alert-service:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
           test -n "$IMAGE_ID"
@@ -980,9 +1151,28 @@ jobs:
           echo "FDP39_RELEASE_IMAGE_DIGEST=${IMAGE_DIGEST_OR_ID}" >> "$GITHUB_ENV"
 
       - name: Build fixture image only for non-release provenance
+        id: build-fdp39-fixture-image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deployment/Dockerfile.alert-service-fdp38-fixture
+          push: false
+          load: true
+          pull: true
+          no-cache: true
+          tags: fdp38-alert-service-test-fixture:${{ github.sha }}
+
+      - name: Scan FDP-39 fixture image and save SBOM evidence
+        uses: ./.github/actions/scan-built-image
+        with:
+          image-ref: fdp38-alert-service-test-fixture:${{ github.sha }}
+          build-digest: ${{ steps.build-fdp39-fixture-image.outputs.digest }}
+          artifact-name: fdp39-fixture-image-security
+          output-directory: alert-service/target/fdp39-governance/image-security/fixture
+
+      - name: Record FDP-39 fixture image identity
         run: |
           set -euo pipefail
-          docker build -f deployment/Dockerfile.alert-service-fdp38-fixture -t fdp38-alert-service-test-fixture:${GITHUB_SHA} .
           IMAGE_ID=$(docker image inspect fdp38-alert-service-test-fixture:${GITHUB_SHA} --format '{{.Id}}')
           IMAGE_DIGEST_OR_ID=$(docker image inspect fdp38-alert-service-test-fixture:${GITHUB_SHA} --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')
           test -n "$IMAGE_ID"
@@ -1015,7 +1205,7 @@ jobs:
 
       - name: Upload FDP-39 release governance artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fdp39-release-governance-reports
           if-no-files-found: error
@@ -1045,21 +1235,23 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.13.1+2"
           cache: maven
+      - name: Record patched Java runtime version
+        run: java -version
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       - name: Run FDP-40 release controls tests
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/fdp_40_release_manifest_template.yaml" "-Dfdp40.attestation=../docs/release/fdp_40_attestation_readiness_template.json" "-Dfdp40.fdp39-provenance=../docs/release/fdp_40_fdp39_provenance_reference.json" "-Dfdp40.required-checks-matrix=../docs/release/fdp_40_required_checks_matrix.json" "-Dtest=ReleaseManifestValidationTest,SignedProvenanceReadinessTest,ReleaseEvidenceVerificationTest,ReleaseEvidenceVerificationNegativeTest,RegistryPromotionPolicyTest,RegistryImmutabilityReadinessTest,RequiredChecksMatrixTest,EnvironmentProtectionGateTest,DeploymentEnvironmentReadinessTest,BranchProtectionReadinessTest,ExternalPlatformControlsMatrixTest,EnablementPrTemplateTest,SingleReleaseOwnerGovernanceTest,UnsupportedClaimsMatrixTest,ReleaseControlNoOverclaimDocumentationTest,ReleaseControlRuntimeIsolationTest,ReleaseControlFinalProofPackTest,SbomReadinessTest,CosignVerificationReadinessTest,ResidualPlatformGapsTest,ReleaseControlScriptExecutionReadinessTest,ReleaseControlLocalPathHygieneTest" test
@@ -1082,7 +1274,7 @@ jobs:
 
       - name: Upload FDP-40 release controls artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fdp40-release-controls-reports
           if-no-files-found: error
@@ -1109,10 +1301,12 @@ jobs:
       - fdp39-release-governance
       - analyst-console-frontend-architecture-gate
       - regulated-mutation-regression
+      - frontend-dependency-audit
+      - python-dependency-audit
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Generate local identity fixtures for Compose overlays
         run: bash scripts/bootstrap-local-fixtures.sh
