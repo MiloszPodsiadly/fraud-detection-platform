@@ -161,7 +161,7 @@ class SourceLineagePipelineIntegrationTest {
         var os = (com.sun.management.OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
         var allocationBean = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
         System.out.printf("BUSINESS_IDENTITY_STARTUP_ENV jdk=%s maxHeapBytes=%d hostTotalMemoryBytes=%d "
-                        + "hostFreeMemoryBytes=%d mongoImage=mongo:7.0%n",
+                        + "hostFreeMemoryBytes=%d mongoImage=mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1%n",
                 System.getProperty("java.version"), Runtime.getRuntime().maxMemory(),
                 os.getTotalMemorySize(), os.getFreeMemorySize());
 

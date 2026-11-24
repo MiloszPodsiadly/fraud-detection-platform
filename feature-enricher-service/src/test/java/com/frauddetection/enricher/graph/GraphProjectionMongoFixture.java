@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Ephemeral authenticated replica set dedicated to Graph schema/RBAC integration tests. */
 final class GraphProjectionMongoFixture implements AutoCloseable {
-    private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0"))
+    private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1"))
             .withExposedPorts(27017).withStartupTimeout(Duration.ofSeconds(60))
             .withCommand("bash", "-c", "openssl rand -base64 756 > /tmp/graph-key; chmod 400 /tmp/graph-key; "
                     + "exec mongod --replSet graph-rs --bind_ip_all --keyFile /tmp/graph-key --setParameter enableTestCommands=1");

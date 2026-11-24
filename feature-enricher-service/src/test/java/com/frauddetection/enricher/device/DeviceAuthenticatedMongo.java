@@ -29,7 +29,7 @@ import java.util.Set;
 final class DeviceAuthenticatedMongo implements AutoCloseable {
     static final Duration DEFAULT_CLIENT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration CLEANUP_CLIENT_TIMEOUT = Duration.ofSeconds(30);
-    private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0"))
+    private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1"))
             .withExposedPorts(27017).withStartupTimeout(Duration.ofSeconds(60))
             .withCommand("bash", "-c", "openssl rand -base64 756 > /tmp/lineage-key; chmod 400 /tmp/lineage-key; "
                     + "exec mongod --replSet lineage-rs --bind_ip_all --keyFile /tmp/lineage-key --setParameter enableTestCommands=1");

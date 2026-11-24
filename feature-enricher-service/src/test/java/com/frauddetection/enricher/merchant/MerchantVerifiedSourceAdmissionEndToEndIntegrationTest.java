@@ -79,7 +79,7 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     private static final Limits LIMITS = new Limits(Duration.ofHours(1), Duration.ofDays(2), Duration.ofDays(4),
             Duration.ofDays(3), Duration.ofMinutes(2), 100, 100, 100, 1_000);
     private static final TestMongo MONGO = new TestMongo();
-    private static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
+    private static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0@sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069"));
 
     private final KeyPair sourceKey = key();
     private final KeyPair observationKey = key();
@@ -1318,7 +1318,7 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     }
 
     private static final class TestMongo implements AutoCloseable {
-        private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0"))
+        private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1"))
                 .withExposedPorts(27017).withStartupTimeout(Duration.ofSeconds(60))
                 .withCommand("bash", "-c", "openssl rand -base64 756 > /tmp/lineage-key; chmod 400 /tmp/lineage-key; "
                         + "exec mongod --replSet merchant-rs --bind_ip_all --keyFile /tmp/lineage-key --setParameter enableTestCommands=1");

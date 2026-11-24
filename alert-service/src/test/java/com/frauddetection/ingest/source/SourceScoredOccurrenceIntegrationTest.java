@@ -95,7 +95,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class SourceScoredOccurrenceIntegrationTest {
     private static final AuthenticatedSourceMongo MONGO = new AuthenticatedSourceMongo();
-    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
+    private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0@sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069");
     private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();
     private static final String ENCRYPTION_KEY = Base64.getEncoder().encodeToString(new byte[32]);
     private static final SourceOriginProofs ORIGIN_PROOFS = new SourceOriginProofs(new SourceOriginProperties(true,
@@ -180,7 +180,7 @@ class SourceScoredOccurrenceIntegrationTest {
     }
 
     @Test void productionRedisFeatureStorePreservesExactLineageAndExistingDuplicateSuppression() throws Exception {
-        try (var redis = new GenericContainer<>(org.testcontainers.utility.DockerImageName.parse("redis:7.2-alpine")).withExposedPorts(6379)) {
+        try (var redis = new GenericContainer<>(org.testcontainers.utility.DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335")).withExposedPorts(6379)) {
             redis.start();
             var resources = DefaultClientResources.builder().ioThreadPoolSize(2).computationThreadPoolSize(2).build();
             var connections = new LettuceConnectionFactory(new RedisStandaloneConfiguration(redis.getHost(), redis.getMappedPort(6379)),
@@ -231,7 +231,7 @@ class SourceScoredOccurrenceIntegrationTest {
     }
 
     @Test void independentEnrichedRecoveryPublishesStoredSnapshotAfterProducerFailureWithoutRawRedelivery() throws Exception {
-        try (var redis = new GenericContainer<>(org.testcontainers.utility.DockerImageName.parse("redis:7.2-alpine")).withExposedPorts(6379)) {
+        try (var redis = new GenericContainer<>(org.testcontainers.utility.DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335")).withExposedPorts(6379)) {
             redis.start();
             var resources = DefaultClientResources.builder().ioThreadPoolSize(2).computationThreadPoolSize(2).build();
             var connections = new LettuceConnectionFactory(new RedisStandaloneConfiguration(redis.getHost(), redis.getMappedPort(6379)),

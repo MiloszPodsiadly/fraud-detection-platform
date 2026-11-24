@@ -65,7 +65,7 @@ class RedisMerchantHistoryBenchmarkTest {
 
     @BeforeAll
     void startRedis() throws Exception {
-        redisContainer = new GenericContainer<>(DockerImageName.parse("redis:7.2-alpine"))
+        redisContainer = new GenericContainer<>(DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335"))
                 .withExposedPorts(6379)
                 .withCreateContainerCmdModifier(command -> command.getHostConfig()
                         .withMemory(REDIS_MEMORY_LIMIT_BYTES).withMemorySwap(REDIS_MEMORY_LIMIT_BYTES));

@@ -64,7 +64,7 @@ class MongoDeviceObservationStoreIntegrationTest {
     private static final String SOURCE = "BANK";
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
 
     private MongoClient client;
     private MongoDeviceObservationStore store;
@@ -530,7 +530,7 @@ class MongoDeviceObservationStoreIntegrationTest {
         long deviceDistinctCustomers = seedRows.subList(0, 10_000).stream()
                 .map(row -> row.getString("customer")).distinct().count();
         System.out.printf(Locale.ROOT,
-                "DEVICE_RISK_LOCAL_PERF mongo_image=mongo:7.0 seed_rows=%d seed_ms=%d "
+                "DEVICE_RISK_LOCAL_PERF mongo_image=mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1 seed_rows=%d seed_ms=%d "
                         + "device_rows=%d device_distinct_customers=%d device_index=%s device_keys=%d device_docs=%d "
                         + "device_ms_p50=%.3f device_ms_p95=%.3f device_ms_p99=%.3f device_qps=%.2f "
                         + "customer_rows=%d customer_index=%s customer_keys=%d customer_docs=%d "

@@ -62,7 +62,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @Tag("UNTRUSTED_TEST_ONLY")
 class MongoMerchantObservationStoreIntegrationTest {
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
     // Keep fixtures beyond real TTL cleanup without a calendar date that eventually expires in CI.
     private static final Instant BASE = Instant.now().plus(Duration.ofDays(366)).truncatedTo(ChronoUnit.SECONDS);
     private static final Scope SCOPE = new Scope(token(1), token(2), token(3), token(4), 1);

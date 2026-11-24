@@ -1,0 +1,5 @@
+# Direct runtime dependencies. requirements.txt is the generated, hash-pinned lock.
+prometheus-client==0.26.0
+pymongo==4.20.1
+PyJWT==2.15.1
+cryptography==50.0.2

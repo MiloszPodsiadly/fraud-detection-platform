@@ -44,12 +44,12 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private static final int PERFORMANCE_WARMUPS = 2;
     private static final int PERFORMANCE_SAMPLES = 20;
     private static final Duration PERFORMANCE_FIXTURE_WRITER_TIMEOUT = Duration.ofSeconds(30);
-    static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
-    VerifiedDeviceAdmissionIntegrationTest f;
-    MongoSourceOccurrenceStore occurrenceWriter;
-    SourceOccurrenceAccess occurrenceReader;
-    SourceOccurrenceCipher occurrenceCipher;
-    MongoSourceLineage privateSource;
+    private static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0@sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069"));
+    private VerifiedDeviceAdmissionIntegrationTest f;
+    private MongoSourceOccurrenceStore occurrenceWriter;
+    private SourceOccurrenceAccess occurrenceReader;
+    private SourceOccurrenceCipher occurrenceCipher;
+    private MongoSourceLineage privateSource;
     private MongoClientHandle clients;
     private PrivateDeviceDiagnosticReader diagnostic;
     String topic;
@@ -1154,7 +1154,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                         .isLessThanOrEqualTo(8.0);
             }
             System.out.printf(Locale.ROOT,
-                    "DEVICE_PRIVATE_DIAGNOSTIC_BENCHMARK os=%s java=%s processors=%d mongo=mongo:7.0 kafka=apache/kafka:3.8.0 "
+                    "DEVICE_PRIVATE_DIAGNOSTIC_BENCHMARK os=%s java=%s processors=%d mongo=mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1 kafka=apache/kafka:3.8.0@sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069 "
                             + "fixture_writer_timeout_s=%d reader_client_timeout_s=%d "
                             + "history_members=%d concurrency=%d samples=%d p50_ms=%.3f p95_ms=%.3f p99_ms=%.3f "
                             + "min_ms=%.3f max_ms=%.3f unavailable_or_timeout=%d unavailable_or_timeout_rate=%.3f "

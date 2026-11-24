@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ModelPromotionApiRateLimiterRedisIntegrationTest {
 
     @Container
-    static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7.2-alpine"))
+    static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335"))
             .withExposedPorts(6379);
 
     private LettuceConnectionFactory connections;
