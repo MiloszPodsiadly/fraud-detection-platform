@@ -28,6 +28,72 @@ Candidate for consolidation:
 - No
 - Rationale: This is the broad backend regression baseline and should stay diagnosable.
 
+## Patched Kafka Runtime Image
+
+Job IDs:
+- `external-images / apache-kafka-runtime`
+- `external-images / temurin-kafka-runtime`
+- `external-images / node-builder`
+- `image-scan-evidence / Aggregate image scan and SBOM evidence`
+
+Purpose:
+- Build and scan the Kafka runtime used by Compose and Testcontainers.
+
+Proves:
+- Kafka 4.4.0 is unpacked from the official release archive only after its published SHA-512 matches.
+- The built image runs the fixed Temurin 25.0.5.1+2 runtime from Eclipse Adoptium.
+- The final image and its pinned Temurin base are scanned, and image evidence is tied to the workflow revision.
+- The npm-patched Node builder stage is scanned separately from the final Nginx image.
+- The aggregate gate requires every backend, service, and external-image artifact, successful source jobs, a HIGH/CRITICAL-clean Trivy report, and a CycloneDX SBOM bound to the scanned image digest and platform.
+- Pinned registry references are resolved to the `linux/amd64` platform manifest, and that manifest's config digest must match the image loaded by Docker for scanning.
+- Compose points broker data at the single named `kafka-data` volume. The custom image declares no Docker volumes, so Compose and Testcontainers do not get hidden anonymous Kafka mounts; Testcontainers use their disposable container layer.
+
+Does not prove:
+- Kafka runtime behavior, existing-data migration, KRaft downgrade safety, or backup restoration.
+- Production authentication, availability, or disaster recovery.
+
+Primary proof files:
+- `deployment/Dockerfile.kafka`
+- `deployment/docker-compose.yml`
+- `.github/actions/scan-built-image/action.yml`
+- `.github/workflows/docker-compose-ci.yml`
+- `scripts/ci/check-image-scan-coverage.mjs`
+- `scripts/ci/inspect-pinned-image-platform.mjs`
+- `scripts/ci/validate-image-scan-evidence.mjs`
+
+Required for merge:
+- Yes
+
+## Redis ACL Runtime Equivalence
+
+Job IDs:
+- `Backend Maven Build`
+- `external-images / redis-runtime`
+
+Purpose:
+- Exercise the production Redis ACL policy against the pinned Redis 8.12 image used by Compose and Testcontainers.
+
+Proves:
+- The default Redis user is disabled and invalid credentials fail authentication.
+- Feature-enricher and alert-service users can access only their configured key namespaces and required commands.
+- Cross-namespace reads/writes, global administration/enumeration, and scripts crossing key ownership are rejected.
+- Test-only cleanup uses a separate constrained fixture user; application credentials do not receive cleanup privileges.
+
+Does not prove:
+- Production Redis availability, backup restoration, or upgrade of existing Redis persistence files.
+- That the required runtime tests passed for revisions other than the recorded workflow SHA.
+
+Primary proof files:
+- `deployment/redis-entrypoint.sh`
+- `deployment/docker-compose.yml`
+- `common-test-support/src/main/java/com/frauddetection/common/testsupport/container/RedisTestSupport.java`
+- `alert-service/src/test/java/com/frauddetection/alert/security/redis/RedisAclIntegrationTest.java`
+- `feature-enricher-service/src/test/java/com/frauddetection/enricher/persistence/RedisFeatureStoreIntegrationTest.java`
+- `.github/workflows/docker-compose-ci.yml`
+
+Required for merge:
+- Yes
+
 ## Signed Graph to scorer E2E
 
 Job ID:
@@ -174,6 +240,71 @@ Candidate for consolidation:
 - No
 - Rationale: Different language/runtime and different failure mode.
 
+## Resolved CycloneDX SBOMs
+
+Job ID:
+- `resolved-sbom`
+
+Purpose:
+- Publish the complete resolved Maven, npm, and Python dependency inventories for the tested revision.
+
+Proves:
+- Exactly one CycloneDX 1.6 artifact exists for each expected ecosystem, with populated components, valid package URLs, unique component references, and a SHA-256 recorded over the original file bytes.
+- The manifest records the tested Git SHA and tracked Maven module POMs; the Python environment includes the hash-locked runtime requirements plus the pinned pip and setuptools installed in the service venv.
+- Maven, npm, and Python generators validate their CycloneDX output; the Python generator wheel is pinned and SHA-256 checked before installation.
+
+Does not prove:
+- Final container image contents, OS packages, or container image identity; those are covered by the image scan evidence jobs.
+
+Required for merge:
+- Yes
+
+Primary proof files:
+- `.github/workflows/sbom.yml`
+- `scripts/ci/validate-sbom-artifacts.mjs`
+- `scripts/ci/install-pinned-cyclonedx-bom.sh`
+- `deployment/python-build-tools-requirements.txt`
+- `resolved-cyclonedx-sbom-<GITHUB_SHA>` workflow artifact
+
+Related FDP branches:
+- FDP-157
+
+Candidate for consolidation:
+- No
+- Rationale: This is the required dependency-level inventory gate and complements final image SBOMs.
+
+## Python pip-audit
+
+Job ID:
+- `python-dependency-audit`
+
+Purpose:
+- Audit the complete pinned Python dependency graph for known vulnerabilities and preserve machine-readable results.
+
+Proves:
+- The hash-locked `ml-inference-service/requirements.txt` package set was audited by the verified `pip-audit` 2.10.1 CLI.
+- A clean scan has valid JSON covering every pinned package; detected vulnerabilities and scanner/report failures fail the job.
+- The scanner is installed in an isolated temporary virtual environment and does not modify runtime requirements.
+
+Does not prove:
+- Python runtime image or OS package safety, source-code correctness, or model artifact integrity.
+
+Execution:
+- Installs the official PyPI wheel after verifying its published SHA-256, then runs JSON output with `--require-hashes`, `--no-deps`, `--disable-pip`, and `--strict`.
+
+Required for merge:
+- Yes
+
+Primary proof files:
+- `ml-inference-service/requirements.txt`
+- `scripts/ci/install-pinned-pip-audit.mjs`
+- `scripts/ci/run-pip-audit.mjs`
+- `scripts/ci/run-pip-audit.test.mjs`
+- `target/security/pip-audit.json` uploaded as `pip-audit-<GITHUB_SHA>`
+
+Failure meaning:
+- A vulnerability was found, a pinned package was not covered, the scanner did not execute successfully, or its JSON evidence was missing or invalid.
+
 ## Frontend Build
 
 Purpose:
@@ -205,6 +336,32 @@ Related FDP branches:
 Candidate for consolidation:
 - No
 - Rationale: It is the general frontend baseline; branch-specific proof remains explicit in the architecture gate.
+
+## Frontend npm Audit
+
+Job ID:
+- `frontend-dependency-audit`
+
+Purpose:
+- Audit the Analyst Console production and development dependency graph for high or critical npm advisories.
+
+Proves:
+- `npm audit --audit-level=high` evaluated the dependency graph represented by the checked-in npm lockfile.
+- The machine-readable npm audit response is retained even when the policy command fails.
+
+Does not prove:
+- Frontend runtime behavior, backend dependencies, container image packages, or vulnerabilities below the configured high threshold.
+
+Required for merge:
+- Yes
+
+Primary proof files:
+- `analyst-console-ui/package-lock.json`
+- `.github/workflows/ci.yml`
+- `target/security/npm-audit.json` uploaded as `npm-audit-<GITHUB_SHA>`
+
+Failure meaning:
+- The audit command found a high or critical advisory, could not complete, or did not produce its report.
 
 ## FDP-46 Fraud Case Work Queue UI
 
@@ -719,6 +876,45 @@ Candidate for consolidation:
 - No
 - Rationale: Release governance has compliance meaning and should stay separate.
 
+## Aggregate FDP-37/38/39 image scan evidence
+
+Job ID:
+- `fdp-image-scan-evidence`
+
+Purpose:
+- Require complete scan and SBOM evidence for production-like, test-fixture, and release images used by the FDP-37, FDP-38, and FDP-39 CI jobs.
+
+Proves:
+- The three image-producing jobs completed successfully and all four expected artifacts for the tested Git SHA were uploaded.
+- The scanned image reference, Buildx manifest digest, local image config digest, and `linux/amd64` platform agree with the workflow inventory.
+- Registry-backed images include the source index or manifest identity and the selected platform manifest digest, whose config digest must match the locally scanned image.
+- Each artifact contains a Trivy JSON report for the expected image reference whose reported image config ID matches Docker inspection, with no HIGH or CRITICAL finding, plus a populated CycloneDX image SBOM bound to that identity.
+- Image SBOMs are generated with Syft `v1.57.2`, the current signed upstream release selected for this branch.
+
+Does not prove:
+- Vulnerability absence below the configured HIGH/CRITICAL policy, registry signature verification, provenance attestation, or production deployment identity.
+
+Required for merge:
+- Yes
+
+Primary proof files:
+- `.github/workflows/ci.yml`
+- `.github/actions/scan-built-image/action.yml`
+- `scripts/ci/check-image-scan-coverage.mjs`
+- `scripts/ci/check-image-scan-coverage.test.mjs`
+- `scripts/ci/inspect-pinned-image-platform.mjs`
+- `scripts/ci/validate-image-scan-evidence.mjs`
+- `image-scan-validation-<GITHUB_SHA>` or `fdp-image-scan-validation-<GITHUB_SHA>` workflow artifact
+
+Related FDP branches:
+- FDP-37
+- FDP-38
+- FDP-39
+
+Candidate for consolidation:
+- No
+- Rationale: This is the explicit fail-closed evidence gate for distinct images built by the three existing required CI proofs.
+
 ## FDP-40 Release Controls
 
 Purpose:
@@ -780,13 +976,17 @@ Supplementary Docker Compose workflow proof:
 - `Demo Fixture Guard Tests` proves generic `docker` and unmarked `test` profiles reject committed demo-secret patterns while explicitly marked fixture tests remain possible.
 - `Repository High/Critical Vulnerability Gate` blocks merge on fixed, known `HIGH` or `CRITICAL` repository filesystem vulnerabilities.
 - `Repository Vulnerability SARIF Upload` records `LOW`, `MEDIUM`, `HIGH` and `CRITICAL` filesystem vulnerability visibility in Code Scanning without making `LOW` or `MEDIUM` findings merge-blocking by itself; it is not production image provenance.
-- Remaining supply-chain follow-ups are digest pinning, SBOM generation, SLSA/provenance evidence, signed images and automated dependency update policy.
+- The Docker Compose CI workflow has a separate aggregate image scan and SBOM gate covering its backend, service, and infrastructure image matrices. The `Aggregate FDP-37/38/39 image scan evidence` CI job covers the production-like, test-fixture, and release images.
+- Remaining supply-chain follow-ups include SLSA/provenance attestations, signed images and automated dependency update policy.
 - The dependency remediation moves the backend to Spring Boot `3.5.14`, a public supported line used to pick up the fixed Spring Security generation required by the critical vulnerability scan; the normal test and runtime evidence remains required for compatibility.
 - These supplementary jobs do not prove production IAM, external secret management, production deployment hardening, or optional AI model runtime behavior.
 
 Supplementary proof files:
 - `.github/workflows/docker-compose-ci.yml`
 - `scripts/check-compose-security-config.mjs`
+- `scripts/ci/check-image-scan-coverage.mjs`
+- `scripts/ci/inspect-pinned-image-platform.mjs`
+- `scripts/ci/validate-image-scan-evidence.mjs`
 - `scripts/ci/compose-runtime-smoke.sh`
 - `deployment/docker-compose.ai.yml`
 

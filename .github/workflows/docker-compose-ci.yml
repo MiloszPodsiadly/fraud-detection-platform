@@ -257,6 +257,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_PARALLEL: '1'
+          TRIVY_OFFLINE_SCAN: 'true'
         with:
           scan-type: fs
           scan-ref: .
@@ -266,6 +267,9 @@ jobs:
           format: table
           timeout: 10m
           exit-code: '1'
+
+      - name: Prove secret-only scan works while Maven resolution is unavailable
+        run: node scripts/ci/verify-trivy-secret-only.mjs
 
   repository-configuration-gate:
     name: Docker and Compose Misconfiguration Gate
@@ -308,9 +312,11 @@ jobs:
 
       - name: Set up patched Java
         uses: ./.github/actions/setup-patched-java
+        with:
+          cache: maven
 
       - name: Resolve Maven dependencies and build plugins for Trivy
-        run: mvn -B org.apache.maven.plugins:maven-dependency-plugin:3.11.0:go-offline
+        run: node scripts/ci/resolve-maven-for-trivy.mjs
 
       - name: Block high or critical repository vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -358,9 +364,11 @@ jobs:
 
       - name: Set up patched Java
         uses: ./.github/actions/setup-patched-java
+        with:
+          cache: maven
 
       - name: Resolve Maven dependencies and build plugins for Trivy
-        run: mvn -B org.apache.maven.plugins:maven-dependency-plugin:3.11.0:go-offline
+        run: node scripts/ci/resolve-maven-for-trivy.mjs
 
       - name: Scan repository filesystem for vulnerability visibility
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -432,6 +440,10 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
 
       - name: Build backend module image
         id: build-image
@@ -452,6 +464,7 @@ jobs:
         with:
           image-ref: fdp-local/${{ matrix.module }}:${{ github.sha }}
           build-digest: ${{ steps.build-image.outputs.digest }}
+          build-metadata: ${{ steps.build-image.outputs.metadata }}
           artifact-name: backend-image-${{ matrix.module }}-security
           output-directory: target/image-security/${{ matrix.module }}
 
@@ -472,6 +485,10 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
 
       - name: Build service image
         id: build-image
@@ -490,6 +507,7 @@ jobs:
         with:
           image-ref: fdp-local/${{ matrix.name }}:${{ github.sha }}
           build-digest: ${{ steps.build-image.outputs.digest }}
+          build-metadata: ${{ steps.build-image.outputs.metadata }}
           artifact-name: service-image-${{ matrix.name }}-security
           output-directory: target/image-security/${{ matrix.name }}
 
@@ -503,27 +521,30 @@ jobs:
       matrix:
         include:
           - name: dockerfile-syntax
-            image: docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+            image: docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
+          - name: buildkit-builder
+            image: moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
           - name: maven-builder
             image: maven:3.10.2-eclipse-temurin-21-noble@sha256:c8d5fcc6bbda32e415cd6a2f4d091c52f768e12594cfdb396dd2712c4b609369
           - name: temurin-runtime
             image: eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
           - name: python-runtime
-            image: python:3.12.16-slim-trixie@sha256:a0e2dd78cc679ddfffea960fe45ecfcff9ac2f68d67917a0edfcde5c2100151b
+            image: python:3.12.16-slim-bookworm@sha256:82836454a795d9d75549a9e157fd08dbac6c383292cf89e99f4248a97ce6b2ff
           - name: node-builder
-            image: node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
+            image: fdp-local/node-builder:26.13.1-npm12.2.3
+            dockerfile: deployment/Dockerfile.frontend
+            target: node-builder
           - name: nginx-runtime
             image: nginx:1.30.8-alpine3.24@sha256:6437a63b5c529f0e06162b3f593c0154cff6fa2ea0f94fd7c27928cb399e022d
-          - name: apache-kafka-compose
-            image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
-          - name: apache-kafka-testcontainers
-            image: apache/kafka:3.8.0@sha256:c89f315cff967322c5d2021434b32271393cb193aa7ec1d43e97341924e57069
+          - name: apache-kafka-runtime
+            image: apache/kafka:4.4.0-temurin-25.0.5.1_2
+            dockerfile: deployment/Dockerfile.kafka
+          - name: temurin-kafka-runtime
+            image: eclipse-temurin:25.0.5.1_2-jre-alpine-3.24@sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89
           - name: mongodb
             image: mongo:7.0.48@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1
           - name: redis-runtime
-            image: redis:8.12.0-alpine@sha256:5af80107c1eeecb484a2269b80a26d12bfa6521787da4663bd9f19f60a163483
-          - name: redis-testcontainers
-            image: redis:7.2-alpine@sha256:2f66de68111e64c3927859f158f8e666066dae2b97d9f82770a6f37a5aa1c335
+            image: redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289
           - name: prometheus
             image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
           - name: grafana
@@ -540,7 +561,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Buildx for registry manifest inspection
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+
+      - name: Build locally maintained infrastructure image for the CI platform
+        if: matrix.dockerfile != ''
+        shell: bash
+        env:
+          IMAGE_REF: ${{ matrix.image }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          TARGET: ${{ matrix.target || '' }}
+        run: |
+          set -euo pipefail
+          build_args=(--pull --platform linux/amd64 --file "$DOCKERFILE")
+          if [[ -n "$TARGET" ]]; then build_args+=(--target "$TARGET"); fi
+          docker build "${build_args[@]}" --tag "$IMAGE_REF" .
+
       - name: Pull exact image for the CI platform
+        if: matrix.dockerfile == ''
         shell: bash
         env:
           IMAGE_REF: ${{ matrix.image }}
@@ -552,3 +594,45 @@ jobs:
           image-ref: ${{ matrix.image }}
           artifact-name: external-image-${{ matrix.name }}-security
           output-directory: target/image-security/external/${{ matrix.name }}
+
+  image-scan-evidence:
+    name: Aggregate image scan and SBOM evidence
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - backend-images
+      - service-images
+      - external-images
+    env:
+      TESTED_GIT_SHA: ${{ github.sha }}
+      IMAGE_SCAN_JOB_RESULTS: >-
+        {"backend":"${{ needs.backend-images.result }}","service":"${{ needs.service-images.result }}","external":"${{ needs.external-images.result }}"}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Exercise image inventory and evidence rejection cases
+        run: node --test scripts/ci/check-image-scan-coverage.test.mjs scripts/ci/validate-image-scan-evidence.test.mjs
+
+      - name: Derive and validate expected image inventory
+        run: node scripts/ci/check-image-scan-coverage.mjs --write-inventory target/image-security/expected-inventory.json
+
+      - name: Download all image security artifacts for this revision
+        if: always()
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: '*-security-${{ github.sha }}'
+          path: target/image-security/downloads
+
+      - name: Validate complete image scans and SBOMs
+        if: always()
+        run: node scripts/ci/validate-image-scan-evidence.mjs target/image-security/expected-inventory.json target/image-security/downloads
+
+      - name: Upload image scan evidence validation summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-scan-validation-${{ github.sha }}
+          path: target/image-security/validated-image-scan-summary.json
+          if-no-files-found: ignore
+          retention-days: 30

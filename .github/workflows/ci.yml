@@ -40,6 +40,12 @@ jobs:
         with:
           cache: maven
 
+      - name: Verify Docker is available for Testcontainers
+        run: docker version
+
+      - name: Build patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
+
       - name: Use canonical ready shadow model artifact for backend tests
         run: cp ml-inference-service/app/model_artifact.json /tmp/model_artifact.json
 
@@ -144,6 +150,9 @@ jobs:
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
+
+      - name: Build patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
 
       - name: Run institutional reliability suite
         env:
@@ -297,6 +306,9 @@ jobs:
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
+      - name: Install verified patched npm
+        run: bash ../scripts/ci/install-pinned-npm.sh
+
       - name: Install dependencies securely
         run: |
           test "$(npm config get ignore-scripts)" = "true"
@@ -329,6 +341,9 @@ jobs:
         with:
           node-version: "26.13.1"
 
+      - name: Install verified patched npm
+        run: bash ../scripts/ci/install-pinned-npm.sh
+
       - name: Audit production and development dependencies
         run: |
           mkdir -p ../target/security
@@ -346,40 +361,40 @@ jobs:
   python-dependency-audit:
     name: Python pip-audit
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Audit hash-locked Python dependencies
-        id: pip-audit
-        uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
+      - name: Set up Python for isolated audit tooling
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          inputs: ml-inference-service/requirements.txt
-          require-hashes: true
-          no-deps: true
+          python-version: "3.12.16"
 
-      - name: Save pip-audit result
-        if: always()
+      - name: Set up Node for audit evidence validation
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26.13.1"
+
+      - name: Install verified pip-audit CLI in an isolated environment
         env:
-          PIP_AUDIT_REPORT: ${{ steps.pip-audit.outputs.internal-be-careful-output }}
-        run: |
-          mkdir -p target/security
-          if [ -z "$PIP_AUDIT_REPORT" ]; then
-            printf '%s\n' 'pip-audit did not provide a report.' > target/security/pip-audit.md
-            exit 1
-          fi
-          printf '%s' "$PIP_AUDIT_REPORT" | base64 --decode > target/security/pip-audit.md
-          test -s target/security/pip-audit.md
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: node scripts/ci/install-pinned-pip-audit.mjs
 
-      - name: Upload pip-audit result
+      - name: Add isolated pip-audit CLI to PATH
+        run: printf '%s\n' "$RUNNER_TEMP/pip-audit-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Audit every hash-locked Python package and validate JSON evidence
+        run: node scripts/ci/run-pip-audit.mjs
+
+      - name: Upload available pip-audit evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pip-audit-${{ github.sha }}
-          path: target/security/pip-audit.md
-          if-no-files-found: error
+          path: target/security/pip-audit*
+          if-no-files-found: warn
           retention-days: 30
 
   fdp28-proof:
@@ -398,6 +413,9 @@ jobs:
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
+
+      - name: Build patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
 
       - name: Run FDP-28 proof suite with Testcontainers
         run: mvn -B -pl alert-service -am -Dgroups=failure-injection,invariant-proof,integration test
@@ -418,6 +436,9 @@ jobs:
 
       - name: Verify Docker is available for Testcontainers
         run: docker version
+
+      - name: Build patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
 
       - name: Run FDP-35 proof suite
         run: mvn -B -pl alert-service -am -Dgroups=production-readiness,e2e,recovery-proof,integration test
@@ -455,6 +476,9 @@ jobs:
           node-version: "26.13.1"
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
+
+      - name: Install verified patched npm
+        run: bash scripts/ci/install-pinned-npm.sh
 
       - name: Ensure FDP-47 tests are not skipped
         run: node scripts/ci/guard-test-activation.mjs --suite fdp47
@@ -510,6 +534,9 @@ jobs:
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
 
+      - name: Install verified patched npm
+        run: bash scripts/ci/install-pinned-npm.sh
+
       - name: Ensure FDP-48 tests are not skipped
         run: node scripts/ci/guard-test-activation.mjs --suite fdp48
 
@@ -564,6 +591,9 @@ jobs:
           node-version: "26.13.1"
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
+
+      - name: Install verified patched npm
+        run: bash scripts/ci/install-pinned-npm.sh
 
       # Post-BFF route/auth boundaries remain required for merge.
       - name: Ensure security route boundary tests are not skipped
@@ -668,6 +698,9 @@ jobs:
           node-version: "26.13.1"
           cache: npm
           cache-dependency-path: analyst-console-ui/package-lock.json
+
+      - name: Install verified patched npm
+        run: bash scripts/ci/install-pinned-npm.sh
 
       - name: Install frontend dependencies securely
         working-directory: analyst-console-ui
@@ -777,6 +810,9 @@ jobs:
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
+      - name: Build patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
+
       - name: Run FDP-36 real alert-service kill suite
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dgroups=real-chaos,docker-chaos,service-chaos,integration" "-Dtest=RegulatedMutationRealAlertServiceChaosIT,RegulatedMutationRealAlertServiceEvidenceIntegrityIT,RegulatedMutationLiveInFlightKillIT" test
 
@@ -825,6 +861,10 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
 
       - name: Build alert-service production-like image
         id: build-fdp37-image
@@ -845,6 +885,7 @@ jobs:
         with:
           image-ref: fdp37-alert-service:${{ github.sha }}
           build-digest: ${{ steps.build-fdp37-image.outputs.digest }}
+          build-metadata: ${{ steps.build-fdp37-image.outputs.metadata }}
           artifact-name: fdp37-alert-service-image-security
           output-directory: alert-service/target/fdp37-image-security
 
@@ -856,6 +897,9 @@ jobs:
           echo "FDP37_ALERT_SERVICE_IMAGE_ID=${IMAGE_ID}" >> "$GITHUB_ENV"
           echo "FDP37_ALERT_SERVICE_IMAGE_DIGEST=${IMAGE_DIGEST_OR_ID}" >> "$GITHUB_ENV"
           echo "Built FDP-37 image fdp37-alert-service:${GITHUB_SHA} with image id ${IMAGE_ID} and digest/id ${IMAGE_DIGEST_OR_ID}"
+
+      - name: Build patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
 
       - name: Run FDP-37 production image chaos suite
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp37.alert-service.image=${FDP37_ALERT_SERVICE_IMAGE}" "-Dfdp37.alert-service.image-id=${FDP37_ALERT_SERVICE_IMAGE_ID}" "-Dfdp37.alert-service.image-digest=${FDP37_ALERT_SERVICE_IMAGE_DIGEST}" "-Dgroups=fdp37,production-image-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationProductionImageChaosIT,RegulatedMutationProductionImageEvidenceIntegrityIT,RegulatedMutationProductionImageConfigParityIT,RegulatedMutationProductionImageRollbackIT,RegulatedMutationProductionImageRequiredTransactionChaosIT" test
@@ -915,6 +959,9 @@ jobs:
       - name: Verify Docker is available for Testcontainers
         run: docker version
 
+      - name: Build patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
+
       - name: Run regulated mutation regression suite
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
@@ -957,6 +1004,10 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
 
       - name: Build FDP-38 alert-service test-fixture image
         id: build-fdp38-fixture
@@ -975,6 +1026,7 @@ jobs:
         with:
           image-ref: fdp38-alert-service-test-fixture:${{ github.sha }}
           build-digest: ${{ steps.build-fdp38-fixture.outputs.digest }}
+          build-metadata: ${{ steps.build-fdp38-fixture.outputs.metadata }}
           artifact-name: fdp38-alert-service-fixture-image-security
           output-directory: alert-service/target/fdp38-image-security
 
@@ -991,6 +1043,9 @@ jobs:
             *fdp38-alert-service-test-fixture*) ;;
             *) echo "FDP-38 fixture image name must contain fdp38-alert-service-test-fixture"; exit 1 ;;
           esac
+
+      - name: Build patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
 
       - name: Run FDP-38 live runtime checkpoint suite
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp38.live-runtime-checkpoint.enabled=true" "-Dfdp38.alert-service.fixture-image=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE}" "-Dfdp38.alert-service.fixture-image-id=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_ID}" "-Dfdp38.alert-service.fixture-image-digest=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_DIGEST}" "-Dgroups=fdp38,live-runtime-checkpoint-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationLiveCheckpointBeforeEvidencePreparationIT,RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT,RegulatedMutationLiveCheckpointBeforeEvidenceGatedFinalizeIT" test
@@ -1047,6 +1102,10 @@ jobs:
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
 
       - name: Build and export release image filesystem
         id: build-fdp39-release-image
@@ -1067,6 +1126,7 @@ jobs:
         with:
           image-ref: fdp39-alert-service:${{ github.sha }}
           build-digest: ${{ steps.build-fdp39-release-image.outputs.digest }}
+          build-metadata: ${{ steps.build-fdp39-release-image.outputs.metadata }}
           artifact-name: fdp39-release-image-security
           output-directory: alert-service/target/fdp39-governance/image-security/release
 
@@ -1111,6 +1171,7 @@ jobs:
         with:
           image-ref: fdp38-alert-service-test-fixture:${{ github.sha }}
           build-digest: ${{ steps.build-fdp39-fixture-image.outputs.digest }}
+          build-metadata: ${{ steps.build-fdp39-fixture-image.outputs.metadata }}
           artifact-name: fdp39-fixture-image-security
           output-directory: alert-service/target/fdp39-governance/image-security/fixture
 
@@ -1157,6 +1218,53 @@ jobs:
             alert-service/target/surefire-reports/
             alert-service/target/fdp39-governance/fdp39-*.json
             alert-service/target/fdp39-governance/fdp39-*.md
+
+  fdp-image-scan-evidence:
+    name: Aggregate FDP-37/38/39 image scan evidence
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - fdp37-production-image-chaos
+      - fdp38-live-runtime-checkpoint-chaos
+      - fdp39-release-governance
+    env:
+      TESTED_GIT_SHA: ${{ github.sha }}
+      IMAGE_SCAN_JOB_RESULTS: >-
+        {"fdp37":"${{ needs.fdp37-production-image-chaos.result }}","fdp38":"${{ needs.fdp38-live-runtime-checkpoint-chaos.result }}","fdp39":"${{ needs.fdp39-release-governance.result }}"}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26.13.1"
+
+      - name: Exercise image inventory and evidence rejection cases
+        run: node --test scripts/ci/check-image-scan-coverage.test.mjs scripts/ci/validate-image-scan-evidence.test.mjs
+
+      - name: Derive expected FDP image scan inventory
+        run: node scripts/ci/check-image-scan-coverage.mjs --write-ci-inventory target/image-security/expected-inventory.json
+
+      - name: Download FDP image scan artifacts for this revision
+        if: always()
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: '*-security-${{ github.sha }}'
+          path: target/image-security/downloads
+
+      - name: Validate complete FDP image scans and SBOMs
+        if: always()
+        run: node scripts/ci/validate-image-scan-evidence.mjs target/image-security/expected-inventory.json target/image-security/downloads
+
+      - name: Upload FDP image scan evidence validation summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fdp-image-scan-validation-${{ github.sha }}
+          path: target/image-security/validated-image-scan-summary.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   fdp40-release-controls:
     name: FDP-40 Release Controls
