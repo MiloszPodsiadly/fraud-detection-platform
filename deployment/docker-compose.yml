@@ -10,6 +10,16 @@ x-service-defaults: &service-defaults
   networks:
     - backend
 
+x-observability-hardening: &observability-hardening
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+
 x-java-healthcheck: &java-healthcheck
   test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness >/dev/null || exit 1"]
   interval: 15s
@@ -20,7 +30,7 @@ x-java-healthcheck: &java-healthcheck
 services:
   kafka:
     <<: *service-defaults
-    image: apache/kafka:4.3.1
+    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -41,7 +51,7 @@ services:
       start_period: 20s
 
   kafka-topics-init:
-    image: apache/kafka:4.3.1
+    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
     depends_on:
       kafka:
         condition: service_healthy
@@ -61,25 +71,59 @@ services:
   # This topology is not a production availability or recovery design.
   mongodb:
     <<: *service-defaults
-    image: mongo:7.0
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    image: mongo:7.0.48@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1
+    entrypoint: ["/bin/bash", "/opt/mongodb-entrypoint.sh"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:?Set MONGODB_ROOT_USERNAME in deployment/.env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:?Set MONGODB_ROOT_PASSWORD in deployment/.env}
+      MONGO_INITDB_DATABASE: admin
+      MONGODB_GOVERNANCE_PASSWORD: ${MONGODB_GOVERNANCE_PASSWORD:?Set MONGODB_GOVERNANCE_PASSWORD in deployment/.env}
+      MONGODB_TRUST_AUTHORITY_PASSWORD: ${MONGODB_TRUST_AUTHORITY_PASSWORD:?Set MONGODB_TRUST_AUTHORITY_PASSWORD in deployment/.env}
+      MONGODB_ALERTS_PASSWORD: ${MONGODB_ALERTS_PASSWORD:?Set MONGODB_ALERTS_PASSWORD in deployment/.env}
+      MONGODB_POLICY_PUBLISHER_PASSWORD: ${MONGODB_POLICY_PUBLISHER_PASSWORD:?Set MONGODB_POLICY_PUBLISHER_PASSWORD in deployment/.env}
     volumes:
       - mongodb-data:/data/db
+      - ./mongodb-entrypoint.sh:/opt/mongodb-entrypoint.sh:ro
+      - ./mongo-init-users.js:/docker-entrypoint-initdb.d/10-create-app-users.js:ro
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval \"try { if (rs.status().ok !== 1) quit(1) } catch (e) { if (rs.initiate({_id:'rs0',members:[{_id:0,host:'mongodb:27017'}]}).ok !== 1) quit(1) }\""]
+      test: ["CMD-SHELL", "mongosh --quiet --host 127.0.0.1 --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"try { if (rs.status().ok !== 1) quit(1) } catch (e) { if (rs.initiate({_id:'rs0',members:[{_id:0,host:'mongodb:27017'}]}).ok !== 1) quit(1) }\""]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 20s
 
+  # Run once against a currently-running pre-auth local Mongo volume before recreating mongodb with auth enabled.
+  mongodb-auth-migrate:
+    profiles: [mongodb-auth-migrate]
+    image: mongo:7.0.48@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1
+    restart: "no"
+    command: ["mongosh", "--host", "mongodb", "--quiet", "--file", "/docker-entrypoint-initdb.d/10-create-app-users.js"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:?Set MONGODB_ROOT_USERNAME in deployment/.env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:?Set MONGODB_ROOT_PASSWORD in deployment/.env}
+      MONGODB_GOVERNANCE_PASSWORD: ${MONGODB_GOVERNANCE_PASSWORD:?Set MONGODB_GOVERNANCE_PASSWORD in deployment/.env}
+      MONGODB_TRUST_AUTHORITY_PASSWORD: ${MONGODB_TRUST_AUTHORITY_PASSWORD:?Set MONGODB_TRUST_AUTHORITY_PASSWORD in deployment/.env}
+      MONGODB_ALERTS_PASSWORD: ${MONGODB_ALERTS_PASSWORD:?Set MONGODB_ALERTS_PASSWORD in deployment/.env}
+      MONGODB_POLICY_PUBLISHER_PASSWORD: ${MONGODB_POLICY_PUBLISHER_PASSWORD:?Set MONGODB_POLICY_PUBLISHER_PASSWORD in deployment/.env}
+      MONGODB_AUTH_MIGRATION: "true"
+    volumes:
+      - ./mongo-init-users.js:/docker-entrypoint-initdb.d/10-create-app-users.js:ro
+    networks:
+      - backend
+
   # Standalone local Redis. Redis Cluster is unsupported by the model-promotion quota Lua script.
   redis:
     <<: *service-defaults
-    image: redis:8.10-alpine
+    image: redis:8.12.0-alpine@sha256:5af80107c1eeecb484a2269b80a26d12bfa6521787da4663bd9f19f60a163483
+    command: ["/bin/sh", "/opt/redis-entrypoint.sh"]
+    environment:
+      REDIS_FEATURE_ENRICHER_PASSWORD: ${REDIS_FEATURE_ENRICHER_PASSWORD:?Set REDIS_FEATURE_ENRICHER_PASSWORD in deployment/.env}
+      REDIS_ALERT_PASSWORD: ${REDIS_ALERT_PASSWORD:?Set REDIS_ALERT_PASSWORD in deployment/.env}
     volumes:
       - redis-data:/data
+      - ./redis-entrypoint.sh:/opt/redis-entrypoint.sh:ro
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_ALERT_PASSWORD}\" redis-cli --user alert-service ping | grep -q PONG"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -94,7 +138,7 @@ services:
       mongodb:
         condition: service_healthy
     environment:
-      MONGODB_URI: mongodb://mongodb:27017/fraud_governance
+      MONGODB_URI: mongodb://governance_app:${MONGODB_GOVERNANCE_PASSWORD:?Set MONGODB_GOVERNANCE_PASSWORD in deployment/.env}@mongodb:27017/fraud_governance?authSource=fraud_governance&replicaSet=rs0
       GOVERNANCE_SNAPSHOT_COLLECTION: ml_governance_snapshots
       GOVERNANCE_SNAPSHOT_RETENTION_LIMIT: "500"
       GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS: "50"
@@ -120,8 +164,8 @@ services:
       SPRING_PROFILES_ACTIVE: docker,docker-local
       TRUST_AUTHORITY_NAME: ${TRUST_AUTHORITY_NAME:-local-trust-authority}
       TRUST_AUTHORITY_ACTIVE_KEY_ID: ${TRUST_AUTHORITY_ACTIVE_KEY_ID:-local-ed25519-key-1}
-      MONGODB_URI: mongodb://mongodb:27017/fraud_trust_authority?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
-      SPRING_MONGODB_URI: mongodb://mongodb:27017/fraud_trust_authority?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      MONGODB_URI: mongodb://trust_authority_app:${MONGODB_TRUST_AUTHORITY_PASSWORD:?Set MONGODB_TRUST_AUTHORITY_PASSWORD in deployment/.env}@mongodb:27017/fraud_trust_authority?authSource=fraud_trust_authority&replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      SPRING_MONGODB_URI: mongodb://trust_authority_app:${MONGODB_TRUST_AUTHORITY_PASSWORD:?Set MONGODB_TRUST_AUTHORITY_PASSWORD in deployment/.env}@mongodb:27017/fraud_trust_authority?authSource=fraud_trust_authority&replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       TRUST_AUTHORITY_ACTIVE_PRIVATE_KEY_PATH: /tmp/audit-trust-authority/ed25519-private.key
       TRUST_AUTHORITY_ACTIVE_PUBLIC_KEY_PATH: /tmp/audit-trust-authority/ed25519-public.key
       TRUST_AUTHORITY_AUDIT_PATH: /tmp/audit-trust-authority/trust-authority-audit.jsonl
@@ -131,7 +175,7 @@ services:
   audit-trust-key-loader:
     profiles:
       - audit-trust-loader
-    image: eclipse-temurin:21-jre
+    image: eclipse-temurin:21.0.13.1_2-jre@sha256:b57b0a974dc5ba8b24009a97aeb9ffd178e172727736279e5de73605f40c6813
     restart: "no"
     network_mode: none
     entrypoint:
@@ -161,8 +205,8 @@ services:
         target: /run/audit-trust-keys
 
   prometheus:
-    <<: *service-defaults
-    image: prom/prometheus:v3.15.1
+    <<: [*service-defaults, *observability-hardening]
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=2d
@@ -173,8 +217,8 @@ services:
       - prometheus-data:/prometheus
 
   grafana:
-    <<: *service-defaults
-    image: grafana/grafana:13.2.4
+    <<: [*service-defaults, *observability-hardening]
+    image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
     depends_on:
       prometheus:
         condition: service_started
@@ -253,6 +297,8 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_USERNAME: feature-enricher
+      REDIS_PASSWORD: ${REDIS_FEATURE_ENRICHER_PASSWORD:?Set REDIS_FEATURE_ENRICHER_PASSWORD in deployment/.env}
     healthcheck: *java-healthcheck
 
   fraud-scoring-service:
@@ -307,10 +353,12 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED: ${ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED:-false}
       ENGINE_INTELLIGENCE_REDRIVE_ENABLED: ${ENGINE_INTELLIGENCE_REDRIVE_ENABLED:-false}
-      MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
-      SPRING_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      MONGODB_URI: mongodb://alert_app:${MONGODB_ALERTS_PASSWORD:?Set MONGODB_ALERTS_PASSWORD in deployment/.env}@mongodb:27017/fraud_alerts?authSource=fraud_alerts&replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      SPRING_MONGODB_URI: mongodb://alert_app:${MONGODB_ALERTS_PASSWORD:?Set MONGODB_ALERTS_PASSWORD in deployment/.env}@mongodb:27017/fraud_alerts?authSource=fraud_alerts&replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_USERNAME: alert-service
+      REDIS_PASSWORD: ${REDIS_ALERT_PASSWORD:?Set REDIS_ALERT_PASSWORD in deployment/.env}
       # Plain "docker" profile requires Redis; in-memory needs an allowlisted single-node profile and bank fail-closed=false.
       MODEL_PROMOTION_API_RATE_LIMITER_MODE: ${MODEL_PROMOTION_API_RATE_LIMITER_MODE:-redis}
       OUTBOX_PUBLISHER_ENABLED: ${OUTBOX_PUBLISHER_ENABLED:-true}
