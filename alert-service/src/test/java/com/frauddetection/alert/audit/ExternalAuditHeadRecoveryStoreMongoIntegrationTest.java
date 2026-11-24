@@ -28,7 +28,7 @@ class ExternalAuditHeadRecoveryStoreMongoIntegrationTest {
     private static final Instant DETECTED_AT = Instant.parse("2026-10-12T08:00:00Z");
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
 
     private MongoClient mongoClient;
     private MongoTemplate mongoTemplate;

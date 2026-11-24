@@ -40,7 +40,7 @@ class MongoDeviceObservationPendingMetricsBenchmarkTest {
     @Test
     @EnabledIfSystemProperty(named = "fraud.device-risk.performance", matches = "true")
     void comparesPendingMetricsQueryPlansAcrossSyntheticSourceBacklogs() {
-        MongoDBContainer mongo = new MongoDBContainer("mongo:7.0");
+        MongoDBContainer mongo = new MongoDBContainer("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
         mongo.start();
         try (MongoClient client = MongoClients.create(mongo.getReplicaSetUrl())) {
             String databaseName = "device_pending_metrics_" + UUID.randomUUID().toString().replace("-", "");
@@ -101,7 +101,7 @@ class MongoDeviceObservationPendingMetricsBenchmarkTest {
                 assertThat(firstIndexName(lookupStageStats)).contains("candidate_status_staged_at");
                 assertThat(metric(lookupStageStats, "collectionScans")).isZero();
                 System.out.printf(Locale.ROOT,
-                        "LOCAL_ONLY_PENDING_METRICS mongo=mongo:7.0 sources=%d pending_per_source=%d "
+                        "LOCAL_ONLY_PENDING_METRICS mongo=mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1 sources=%d pending_per_source=%d "
                                 + "staged=%d candidate_scan_index=%s candidate_scan_keys=%d candidate_scan_docs=%d "
                                 + "candidate_scan_ms_p50=%.3f candidate_scan_ms_p95=%.3f candidate_scan_ms_p99=%.3f "
                                 + "optimized_ms_p50=%.3f optimized_ms_p95=%.3f optimized_ms_p99=%.3f "

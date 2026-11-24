@@ -72,7 +72,7 @@ import static org.mockito.Mockito.when;
 
 class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
-    private static final MongoDBContainer MONGO = new MongoDBContainer(DockerImageName.parse("mongo:7.0"));
+    private static final MongoDBContainer MONGO = new MongoDBContainer(DockerImageName.parse("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1"));
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
     private static final String ISSUER = "institutional-policy-issuer";
     private static final String KEY_ID = "policy-key-1";
