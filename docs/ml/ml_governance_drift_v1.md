@@ -98,7 +98,7 @@ FDP-7.1 persists aggregate governance snapshots in the existing platform MongoDB
 Default configuration:
 
 ```text
-MONGODB_URI=mongodb://mongodb:27017/fraud_governance
+MONGODB_URI=mongodb://governance_app:${MONGODB_GOVERNANCE_PASSWORD}@mongodb:27017/fraud_governance?authSource=fraud_governance&replicaSet=rs0
 GOVERNANCE_SNAPSHOT_COLLECTION=ml_governance_snapshots
 GOVERNANCE_SNAPSHOT_RETENTION_LIMIT=500
 GOVERNANCE_SNAPSHOT_INTERVAL_REQUESTS=50
@@ -715,7 +715,7 @@ For `UNKNOWN`:
 
 For history `UNAVAILABLE`:
 
-1. Confirm `MONGODB_URI` and local MongoDB container state.
+1. Confirm `MONGODB_URI` includes the governance application account and `authSource=fraud_governance`, and check local MongoDB container state.
 2. Check `fraud_ml_governance_snapshot_persistence_failures_total`.
 3. Verify scoring still works; MongoDB persistence is not on the scoring correctness path.
 4. Restore MongoDB availability to resume persisted history.

@@ -23,6 +23,8 @@ return `CROSSSLOT`. Do not route production governance traffic through that topo
 exhaustion; it fails closed as `503`.
 
 The committed [`deployment/.env.example`](../../deployment/.env.example) selects Redis for the local Compose stack.
-Its `alert-service` uses the plain `docker` profile, which does not authorize in-memory quotas. Change to an explicit
+Redis ACL disables the default account and gives `alert-service` access only to `model-promotion:api-rate:v1:*`; the
+feature-enricher account is limited to `feature:*`. Both accounts receive read, write, connection, and scripting
+command categories because the current atomic Lua scripts require them. Its `alert-service` uses the plain `docker` profile, which does not authorize in-memory quotas. Change to an explicit
 allowlisted single-node profile before selecting in-memory, and keep `app.audit.bank-mode.fail-closed=false`. The
 application configuration defaults to Redis and does not provide an in-memory fallback.
