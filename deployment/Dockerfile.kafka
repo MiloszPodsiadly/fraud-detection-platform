@@ -11,7 +11,11 @@ USER root
 
 RUN apk add --no-cache coreutils wget \
     && wget -O /tmp/kafka.tgz https://downloads.apache.org/kafka/4.4.0/kafka_2.13-4.4.0.tgz \
-    && echo 'f5ceba8a265ab6bb2d68362b1f6859a95e15d60ef92ba83b43fdf065b557dc18e98d6383c15b9977320e25b3a2c8b6f11decb17b0fa6c0f163423793a0eb95cb  /tmp/kafka.tgz' | sha512sum -c -
+    && echo 'f5ceba8a265ab6bb2d68362b1f6859a95e15d60ef92ba83b43fdf065b557dc18e98d6383c15b9977320e25b3a2c8b6f11decb17b0fa6c0f163423793a0eb95cb  /tmp/kafka.tgz' | sha512sum -c - \
+    && wget -O /tmp/lz4-java-1.14.1.jar https://repo.maven.apache.org/maven2/at/yawk/lz4/lz4-java/1.14.1/lz4-java-1.14.1.jar \
+    && echo '02d1ceb848d510fce228f66febee3254978df7d70d53da472a98eb3b5cf9caaf  /tmp/lz4-java-1.14.1.jar' | sha256sum -c - \
+    && wget -O /tmp/snappy-java-1.1.10.12.jar https://repo.maven.apache.org/maven2/org/xerial/snappy/snappy-java/1.1.10.12/snappy-java-1.1.10.12.jar \
+    && echo '1c03ce77b3f2e926c25a952612e372404d80bc88c6c8052bede964804fabd732  /tmp/snappy-java-1.1.10.12.jar' | sha256sum -c -
 
 FROM eclipse-temurin:25.0.5.1_2-jre-alpine-3.24@sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89 AS runtime
 
@@ -26,9 +30,16 @@ RUN apk add --no-cache bash gcompat \
 
 # Mount the checked archive during extraction so the tarball never enters the final image.
 RUN --mount=type=bind,from=kafka-artifact,source=/tmp/kafka.tgz,target=/tmp/kafka.tgz,ro \
+    --mount=type=bind,from=kafka-artifact,source=/tmp/lz4-java-1.14.1.jar,target=/tmp/lz4-java-1.14.1.jar,ro \
+    --mount=type=bind,from=kafka-artifact,source=/tmp/snappy-java-1.1.10.12.jar,target=/tmp/snappy-java-1.1.10.12.jar,ro \
     tar -xzf /tmp/kafka.tgz --strip-components=1 -C /opt/kafka \
     && chown -R appuser:appuser /opt/kafka \
     && test -f /opt/kafka/libs/kafka_2.13-4.4.0.jar \
+    && test -f /opt/kafka/libs/lz4-java-1.8.0.jar \
+    && test -f /opt/kafka/libs/snappy-java-1.1.10.5.jar \
+    && rm /opt/kafka/libs/lz4-java-1.8.0.jar /opt/kafka/libs/snappy-java-1.1.10.5.jar \
+    && install -o appuser -g appuser -m 0644 /tmp/lz4-java-1.14.1.jar /opt/kafka/libs/lz4-java-1.14.1.jar \
+    && install -o appuser -g appuser -m 0644 /tmp/snappy-java-1.1.10.12.jar /opt/kafka/libs/snappy-java-1.1.10.12.jar \
     && test -x /opt/kafka/bin/kafka-server-start.sh
 
 # The JSA archives from the official image are tied to its vulnerable Temurin 25.0.4.1.

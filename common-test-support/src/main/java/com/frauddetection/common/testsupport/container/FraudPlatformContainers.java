@@ -14,6 +14,7 @@ public final class FraudPlatformContainers {
     private static final DockerImageName MONGODB_IMAGE = DockerImageName.parse("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
 
     private static final KafkaContainer KAFKA_CONTAINER = new KafkaContainer(KAFKA_IMAGE)
+            .withImagePullPolicy(KafkaImageReference.localOnlyPullPolicy())
             .withNetwork(NETWORK)
             .withNetworkAliases("kafka")
             .withListener("kafka:19092");

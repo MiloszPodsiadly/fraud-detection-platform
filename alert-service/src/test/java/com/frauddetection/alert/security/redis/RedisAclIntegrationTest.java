@@ -12,11 +12,19 @@ import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.Container;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.containers.BindMode;
+import org.testcontainers.utility.DockerImageName;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -139,6 +147,103 @@ class RedisAclIntegrationTest {
         feature.afterPropertiesSet();
         assertThat(feature.opsForValue().get(FEATURE_KEY)).isEqualTo("feature-script-value");
         assertThat(feature.execute(SET_SCRIPT, List.of("feature:acl-regression:after-reconnect"), "ok")).isEqualTo(1L);
+    }
+
+    @Test
+    void productionEntrypointIgnoresTestAdminEnvironmentAndRunsRedisAsItsImageUser() throws Exception {
+        GenericContainer<?> runtime = RedisTestSupport.newRuntimeContainerWithTestAdminEnvironment();
+        runtime.start();
+        try {
+            Container.ExecResult identity = runtime.execInContainer("sh", "-c",
+                    "redis_uid=$(id -u redis); redis_gid=$(id -g redis); " +
+                            "set -- $(awk '/^Uid:/ {uid=$2} /^Gid:/ {gid=$2} END {print uid, gid}' /proc/1/status); " +
+                            "test \"$1\" = \"$redis_uid\" && test \"$2\" = \"$redis_gid\" && test \"$1\" -ne 0");
+            assertThat(identity.getExitCode()).as(identity.getStderr()).isZero();
+
+            Container.ExecResult aclPermissions = runtime.execInContainer("sh", "-c",
+                    "acl_file=$(awk '$0 == \"--aclfile\" {getline; print; exit}' /proc/1/cmdline); " +
+                            "test -n \"$acl_file\" && " +
+                            "test \"$(stat -c '%U:%G:%a' \"$acl_file\")\" = redis:redis:400 && " +
+                            "test \"$(stat -c '%U:%G:%a' \"$(dirname \"$acl_file\")\")\" = redis:redis:700");
+            assertThat(aclPermissions.getExitCode()).as(aclPermissions.getStderr()).isZero();
+
+            LettuceConnectionFactory testAdminConnection = RedisTestSupport.newConnectionFactory(
+                    runtime, RedisTestSupport.testAdminUsername(), RedisTestSupport.testAdminPassword());
+            try {
+                StringRedisTemplate testAdminClient = new StringRedisTemplate(testAdminConnection);
+                testAdminClient.afterPropertiesSet();
+                assertThatThrownBy(() -> testAdminClient.opsForValue().get("feature:runtime-admin-check"))
+                        .isInstanceOf(RuntimeException.class);
+            } finally {
+                testAdminConnection.destroy();
+            }
+        } finally {
+            runtime.stop();
+        }
+    }
+
+    @Test
+    void applicationDataAndTtlSurviveRecreationWithAclOnTheSameSyntheticDataDirectory() throws Exception {
+        Path dataDirectory = Files.createTempDirectory("fdp157-redis-upgrade-");
+        GenericContainer<?> legacy = new GenericContainer<>(DockerImageName.parse(RedisTestSupport.IMAGE))
+                .withExposedPorts(6379)
+                .withFileSystemBind(dataDirectory.toString(), "/data", BindMode.READ_WRITE)
+                .withCreateContainerCmdModifier(command -> {
+                    command.withUser("0");
+                    command.withEntrypoint("/bin/sh");
+                })
+                .withCommand("-c", "chown redis:redis /data && exec /usr/local/bin/docker-entrypoint.sh redis-server --dir /data --dbfilename dump.rdb");
+        GenericContainer<?> runtime = null;
+        LettuceConnectionFactory runtimeConnections = null;
+        try {
+            legacy.start();
+            Container.ExecResult write = legacy.execInContainer("redis-cli", "SET", "feature:persisted:upgrade", "retained-value", "EX", "3600");
+            assertThat(write.getExitCode()).as(write.getStderr()).isZero();
+            Container.ExecResult save = legacy.execInContainer("redis-cli", "SAVE");
+            assertThat(save.getExitCode()).as(save.getStderr()).isZero();
+            legacy.stop();
+
+            runtime = RedisTestSupport.newRuntimeContainerWithTestAdminEnvironment()
+                    .withFileSystemBind(dataDirectory.toString(), "/data", BindMode.READ_WRITE);
+            runtime.start();
+            Container.ExecResult dataPermissions = runtime.execInContainer("sh", "-c",
+                    "test -w /data && test \"$(stat -c '%U:%G' /data)\" = redis:redis");
+            assertThat(dataPermissions.getExitCode()).as(dataPermissions.getStderr()).isZero();
+            runtimeConnections = RedisTestSupport.newConnectionFactory(runtime,
+                    RedisTestSupport.featureUsername(), RedisTestSupport.featurePassword());
+            StringRedisTemplate runtimeClient = new StringRedisTemplate(runtimeConnections);
+            runtimeClient.afterPropertiesSet();
+            assertThat(runtimeClient.opsForValue().get("feature:persisted:upgrade")).isEqualTo("retained-value");
+            Long remainingTtl = runtimeClient.getExpire("feature:persisted:upgrade");
+            assertThat(remainingTtl).isPositive().isLessThanOrEqualTo(3600L);
+            runtimeConnections.destroy();
+            runtimeConnections = null;
+            runtime.stop();
+
+            runtime = RedisTestSupport.newRuntimeContainerWithTestAdminEnvironment()
+                    .withFileSystemBind(dataDirectory.toString(), "/data", BindMode.READ_WRITE);
+            runtime.start();
+            runtimeConnections = RedisTestSupport.newConnectionFactory(runtime,
+                    RedisTestSupport.featureUsername(), RedisTestSupport.featurePassword());
+            StringRedisTemplate restartedClient = new StringRedisTemplate(runtimeConnections);
+            restartedClient.afterPropertiesSet();
+            assertThat(restartedClient.opsForValue().get("feature:persisted:upgrade")).isEqualTo("retained-value");
+            Long restartedTtl = restartedClient.getExpire("feature:persisted:upgrade");
+            assertThat(restartedTtl).isPositive().isLessThanOrEqualTo(3600L);
+        } finally {
+            if (runtimeConnections != null) runtimeConnections.destroy();
+            if (runtime != null && runtime.isRunning()) runtime.stop();
+            if (legacy.isRunning()) legacy.stop();
+            deleteSyntheticDataDirectory(dataDirectory);
+        }
+    }
+
+    private static void deleteSyntheticDataDirectory(Path directory) throws IOException {
+        try (Stream<Path> paths = Files.walk(directory)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(path);
+            }
+        }
     }
 
     private static LettuceConnectionFactory connectionFactory(String username, String password) {

@@ -98,7 +98,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class SourceScoredOccurrenceIntegrationTest {
     private static final AuthenticatedSourceMongo MONGO = new AuthenticatedSourceMongo();
-    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName());
+    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName())
+            .withImagePullPolicy(KafkaImageReference.localOnlyPullPolicy());
     private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();
     private static final String ENCRYPTION_KEY = Base64.getEncoder().encodeToString(new byte[32]);
     private static final SourceOriginProofs ORIGIN_PROOFS = new SourceOriginProofs(new SourceOriginProperties(true,

@@ -39,7 +39,7 @@
         <snappy-java.version>1.1.10.12</snappy-java.version>
         <testcontainers.version>2.0.5</testcontainers.version>
         <testcontainers.ryuk.image>testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0</testcontainers.ryuk.image>
-        <testcontainers.tinyimage.image>alpine:3.21.10@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab</testcontainers.tinyimage.image>
+        <testcontainers.tinyimage.image>alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf</testcontainers.tinyimage.image>
         <assertj.version>3.27.7</assertj.version>
         <mockito.version>5.24.0</mockito.version>
         <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>

@@ -30,11 +30,13 @@ x-java-healthcheck: &java-healthcheck
 services:
   kafka:
     <<: *service-defaults
-    image: apache/kafka:4.4.0-temurin-25.0.5.1_2
+    image: fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2
+    pull_policy: build
     build:
       context: ..
       dockerfile: deployment/Dockerfile.kafka
     environment:
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
@@ -47,6 +49,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    # Fresh KRaft storage; it does not import the previous 4.3.1 container-layer logs.
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
@@ -57,7 +60,8 @@ services:
       start_period: 20s
 
   kafka-topics-init:
-    image: apache/kafka:4.4.0-temurin-25.0.5.1_2
+    image: fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2
+    pull_policy: never
     depends_on:
       kafka:
         condition: service_healthy
@@ -128,6 +132,7 @@ services:
     volumes:
       - redis-data:/data
       - ./redis-entrypoint.sh:/opt/redis-entrypoint.sh:ro
+      - ./redis-acl-users.sh:/opt/redis-acl-users.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_ALERT_PASSWORD}\" redis-cli --user alert-service ping | grep -q PONG"]
       interval: 15s
@@ -224,7 +229,7 @@ services:
 
   grafana:
     <<: [*service-defaults, *observability-hardening]
-    image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
+    image: grafana/grafana:13.3.2@sha256:81556409ba48b2b922e0adb69a2511337d8ba7578f11962eefa6149a2d815101
     depends_on:
       prometheus:
         condition: service_started
@@ -412,6 +417,9 @@ services:
         MODULE_NAME: model-promotion-policy-publisher
     user: "10001:10001"
     command:
+      - /usr/local/bin/exec-with-verified-temurin-java
+      - -jar
+      - /app/app.jar
       - worker
     depends_on:
       mongodb:

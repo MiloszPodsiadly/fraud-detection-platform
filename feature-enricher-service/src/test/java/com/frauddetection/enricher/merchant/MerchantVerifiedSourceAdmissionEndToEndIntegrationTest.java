@@ -80,7 +80,8 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     private static final Limits LIMITS = new Limits(Duration.ofHours(1), Duration.ofDays(2), Duration.ofDays(4),
             Duration.ofDays(3), Duration.ofMinutes(2), 100, 100, 100, 1_000);
     private static final TestMongo MONGO = new TestMongo();
-    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName());
+    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName())
+            .withImagePullPolicy(KafkaImageReference.localOnlyPullPolicy());
 
     private final KeyPair sourceKey = key();
     private final KeyPair observationKey = key();

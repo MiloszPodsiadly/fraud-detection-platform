@@ -44,7 +44,8 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private static final int PERFORMANCE_WARMUPS = 2;
     private static final int PERFORMANCE_SAMPLES = 20;
     private static final Duration PERFORMANCE_FIXTURE_WRITER_TIMEOUT = Duration.ofSeconds(30);
-    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName());
+    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName())
+            .withImagePullPolicy(KafkaImageReference.localOnlyPullPolicy());
     private VerifiedDeviceAdmissionIntegrationTest f;
     private MongoSourceOccurrenceStore occurrenceWriter;
     private SourceOccurrenceAccess occurrenceReader;
@@ -57,6 +58,10 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private KafkaProducer<String, byte[]> scoredProducer;
     private KafkaConsumer<String, byte[]> scoredConsumer;
     private final Map<String, ScoredRecord> consumedScoredEvents = new HashMap<>();
+
+    VerifiedDeviceAdmissionIntegrationTest fixture() { return f; }
+    SourceOccurrenceAccess occurrenceReader() { return occurrenceReader; }
+    MongoSourceLineage privateSource() { return privateSource; }
 
     @BeforeAll static void start() throws Exception {
         VerifiedDeviceAdmissionIntegrationTest.MONGO.start();

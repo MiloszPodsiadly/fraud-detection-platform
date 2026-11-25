@@ -1,5 +1,7 @@
 package com.frauddetection.alert.governance.modelpromotion;
 
+import com.github.dockerjava.api.command.CreateContainerCmd;
+import com.github.dockerjava.api.model.Bind;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoCredential;
 import com.mongodb.MongoException;
@@ -11,14 +13,24 @@ import org.bson.Document;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MongoDBContainer;
+import org.testcontainers.containers.Network;
+import org.testcontainers.containers.startupcheck.OneShotStartupCheckStrategy;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
+import org.testcontainers.containers.wait.strategy.Wait;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Updates.inc;
@@ -62,31 +74,59 @@ class MongoPolicyPublisherAuthorizationIntegrationTest {
     }
 
     @Test
-    void explicitMigrationCreatesUsersAndNarrowsLegacyPublisherWithoutChangingExistingRecords() throws Exception {
-        GenericContainer<?> legacy = new GenericContainer<>(DockerImageName.parse(IMAGE))
-                .withExposedPorts(27017)
-                .withCommand("mongod", "--replSet", "auth-upgrade-rs", "--bind_ip_all");
-        legacy.start();
+    void migrationPreservesOneVolumeAcrossPreAuthMigrationSecuredRestartAndRejectsWrongRootPassword() throws Exception {
+        String volumeName = createMigrationTestVolume();
+        Network network = null;
+        GenericContainer<?> legacy = null;
+        GenericContainer<?> secured = null;
         try {
-            runLegacyMongosh(legacy, "rs.initiate({_id:'auth-upgrade-rs',members:[{_id:0,host:'localhost:27017'}]});"
+            network = Network.newNetwork();
+            legacy = new GenericContainer<>(DockerImageName.parse(IMAGE))
+                    .withNetwork(network)
+                    .withNetworkAliases("mongodb")
+                    .withCreateContainerCmdModifier(command -> addNamedVolumeMount(command, volumeName))
+                    .withCommand("mongod", "--replSet", "rs0", "--bind_ip_all")
+                    .waitingFor(Wait.forListeningPort());
+            legacy.start();
+            runLegacyMongosh(legacy, "rs.initiate({_id:'rs0',members:[{_id:0,host:'mongodb:27017'}]});"
                     + "let n=0; while(!db.hello().isWritablePrimary && n++<150){sleep(100)};"
                     + "if(!db.hello().isWritablePrimary) throw Error('replica set did not become primary');"
+                    + "db.getSiblingDB('admin').createUser({user:'test_root',pwd:'PartialLegacyRootPassword_0123456789abcdef',roles:[{role:'readWriteAnyDatabase',db:'admin'}]});"
                     + "let alerts=db.getSiblingDB('fraud_alerts');"
+                    + "alerts.createCollection('alerts',{validator:{$jsonSchema:{bsonType:'object',required:['status'],properties:{status:{bsonType:'string'}}}}});"
                     + "alerts.createUser({user:'policy_publisher_app',pwd:'legacy-publisher-password-0123456789',roles:[{role:'readWrite',db:'fraud_alerts'}]});"
                     + "alerts.getCollection('alerts').insertOne({_id:'legacy-record',status:'OPEN'});"
+                    + "alerts.getCollection('model_policy_publication_jobs').insertOne({_id:'legacy-job',state:'CLAIMED'});"
                     + "alerts.getCollection('alerts').createIndex({status:1},{name:'legacy_status_idx'});");
-            legacy.copyFileToContainer(MountableFile.forHostPath(bootstrapScript()), "/tmp/mongo-init-users.js");
-            runLegacyBootstrap(legacy);
-            runLegacyBootstrap(legacy);
-            runLegacyMongosh(legacy, "let alerts=db.getSiblingDB('fraud_alerts');"
-                    + "let root=db.getSiblingDB('admin').getUser('test_root');"
-                    + "let publisher=alerts.getUser('policy_publisher_app');"
-                    + "if(!root || !root.roles.some(r=>r.role==='root' && r.db==='admin')) throw Error('root bootstrap user missing');"
-                    + "if(!publisher || publisher.roles.length!==1 || publisher.roles[0].role!=='policy_publisher_runtime') throw Error('publisher role was not narrowed');"
-                    + "if(alerts.getCollection('alerts').findOne({_id:'legacy-record'}).status!=='OPEN') throw Error('existing record changed');"
-                    + "if(!alerts.getCollection('alerts').getIndexes().some(i=>i.name==='legacy_status_idx')) throw Error('existing index changed');");
-        } finally {
+            runMigrationService(network, ROOT_PASSWORD);
+            runMigrationService(network, ROOT_PASSWORD);
+
             legacy.stop();
+            secured = securedMongo(network, volumeName);
+            secured.start();
+            runMigrationService(network, ROOT_PASSWORD);
+            runPublisherTransaction(secured);
+            assertSecuredMongoPreservesMigrationState(secured);
+            assertMigrationRejectsWrongRootPassword(network, secured);
+            secured.stop();
+
+            secured = securedMongo(network, volumeName);
+            secured.start();
+            assertSecuredMongoPreservesMigrationState(secured);
+        } finally {
+            try {
+                if (secured != null && secured.isRunning()) secured.stop();
+            } finally {
+                try {
+                    if (legacy != null && legacy.isRunning()) legacy.stop();
+                } finally {
+                    try {
+                        if (network != null) network.close();
+                    } finally {
+                        removeMigrationTestVolume(volumeName);
+                    }
+                }
+            }
         }
     }
 
@@ -204,19 +244,152 @@ class MongoPolicyPublisherAuthorizationIntegrationTest {
         }
     }
 
-    private static void runLegacyBootstrap(GenericContainer<?> legacy) throws Exception {
-        String command = "MONGO_INITDB_ROOT_USERNAME='" + ROOT_USER + "' "
-                + "MONGO_INITDB_ROOT_PASSWORD='" + ROOT_PASSWORD + "' "
-                + "MONGODB_GOVERNANCE_PASSWORD='" + GOVERNANCE_PASSWORD + "' "
-                + "MONGODB_TRUST_AUTHORITY_PASSWORD='" + TRUST_PASSWORD + "' "
-                + "MONGODB_ALERTS_PASSWORD='" + ALERTS_PASSWORD + "' "
-                + "MONGODB_POLICY_PUBLISHER_PASSWORD='" + PUBLISHER_PASSWORD + "' "
-                + "MONGODB_AUTH_MIGRATION=true mongosh --quiet --eval 'load(\"/tmp/mongo-init-users.js\")'";
-        var result = legacy.execInContainer("bash", "-lc", command);
+    private static void assertMigrationRejectsWrongRootPassword(Network network, GenericContainer<?> secured) throws Exception {
+        assertThatThrownBy(() -> runMigrationService(network, "WrongMongoRootPassword_0123456789abcdef"))
+                .as("auth migration must reject invalid existing root credentials")
+                .isInstanceOf(RuntimeException.class);
+        runRootMongosh(secured, "let alerts=db.getSiblingDB('fraud_alerts');"
+                + "if(alerts.getCollection('alerts').findOne({_id:'legacy-record'}).status!=='OPEN') throw Error('wrong-password migration changed existing data');");
+    }
+
+    private static void runMigrationService(Network network, String rootPassword) throws Exception {
+        try (GenericContainer<?> migration = new GenericContainer<>(DockerImageName.parse(IMAGE))
+                .withNetwork(network)
+                .withCopyFileToContainer(MountableFile.forHostPath(bootstrapScript()),
+                        "/docker-entrypoint-initdb.d/10-create-app-users.js")
+                .withEnv("MONGO_INITDB_ROOT_USERNAME", ROOT_USER)
+                .withEnv("MONGO_INITDB_ROOT_PASSWORD", rootPassword)
+                .withEnv("MONGODB_GOVERNANCE_PASSWORD", GOVERNANCE_PASSWORD)
+                .withEnv("MONGODB_TRUST_AUTHORITY_PASSWORD", TRUST_PASSWORD)
+                .withEnv("MONGODB_ALERTS_PASSWORD", ALERTS_PASSWORD)
+                .withEnv("MONGODB_POLICY_PUBLISHER_PASSWORD", PUBLISHER_PASSWORD)
+                .withEnv("MONGODB_AUTH_MIGRATION", "true")
+                .withCommand("mongosh", "--host", "mongodb", "--quiet", "--file",
+                        "/docker-entrypoint-initdb.d/10-create-app-users.js")
+                .withStartupCheckStrategy(new OneShotStartupCheckStrategy().withTimeout(Duration.ofSeconds(90)))) {
+            migration.start();
+        }
+    }
+
+    private static void runRootMongosh(GenericContainer<?> mongo, String javascript) throws Exception {
+        var result = mongo.execInContainer("mongosh", "--host", "mongodb", "--username", ROOT_USER,
+                "--password", ROOT_PASSWORD, "--authenticationDatabase", "admin", "--quiet", "--eval", javascript);
         if (result.getExitCode() != 0) {
-            throw new IllegalStateException("Legacy Mongo migration failed (exit " + result.getExitCode() + "): "
+            throw new IllegalStateException("Authenticated Mongo verification failed (exit " + result.getExitCode() + "): "
                     + result.getStderr());
         }
+    }
+
+    private static GenericContainer<?> securedMongo(Network network, String volumeName) throws Exception {
+        return new GenericContainer<>(DockerImageName.parse(IMAGE))
+                .withNetwork(network)
+                .withNetworkAliases("mongodb")
+                .withFileSystemBind(mongodbEntrypointScript().toString(), "/opt/mongodb-entrypoint.sh", BindMode.READ_ONLY)
+                .withFileSystemBind(bootstrapScript().toString(), "/docker-entrypoint-initdb.d/10-create-app-users.js", BindMode.READ_ONLY)
+                .withCreateContainerCmdModifier(command -> {
+                    command.withEntrypoint("/bin/bash", "/opt/mongodb-entrypoint.sh");
+                    addNamedVolumeMount(command, volumeName);
+                })
+                .withEnv("MONGO_INITDB_ROOT_USERNAME", ROOT_USER)
+                .withEnv("MONGO_INITDB_ROOT_PASSWORD", ROOT_PASSWORD)
+                .withEnv("MONGODB_GOVERNANCE_PASSWORD", GOVERNANCE_PASSWORD)
+                .withEnv("MONGODB_TRUST_AUTHORITY_PASSWORD", TRUST_PASSWORD)
+                .withEnv("MONGODB_ALERTS_PASSWORD", ALERTS_PASSWORD)
+                .withEnv("MONGODB_POLICY_PUBLISHER_PASSWORD", PUBLISHER_PASSWORD)
+                .withExposedPorts(27017)
+                .waitingFor(Wait.forListeningPort());
+    }
+
+    private static void addNamedVolumeMount(CreateContainerCmd command, String volumeName) {
+        var hostConfig = command.getHostConfig();
+        var binds = new ArrayList<>(Arrays.asList(hostConfig.getBinds()));
+        binds.add(Bind.parse(volumeName + ":/data/db:rw"));
+        hostConfig.withBinds(binds);
+    }
+
+    private static void assertSecuredMongoPreservesMigrationState(GenericContainer<?> mongo) throws Exception {
+        runRootMongosh(mongo, "let admin=db.getSiblingDB('admin');"
+                + "let alerts=db.getSiblingDB('fraud_alerts');"
+                + "let root=admin.getUser('test_root');"
+                + "let publisher=alerts.getUser('policy_publisher_app');"
+                + "if(!root || !root.roles.some(r=>r.role==='root' && r.db==='admin')) throw Error('root user missing after volume recreation');"
+                + "if(!publisher || publisher.roles.length!==1 || publisher.roles[0].role!=='policy_publisher_runtime') throw Error('publisher role was not narrowed');"
+                + "if(!db.getSiblingDB('fraud_governance').getUser('governance_app')) throw Error('governance account missing');"
+                + "if(!db.getSiblingDB('fraud_trust_authority').getUser('trust_authority_app')) throw Error('trust authority account missing');"
+                + "if(!alerts.getUser('alert_app')) throw Error('alert service account missing');"
+                + "if(alerts.getCollection('alerts').findOne({_id:'legacy-record'}).status!=='OPEN') throw Error('existing record changed');"
+                + "if(alerts.getCollection('alerts').countDocuments()!==1) throw Error('existing alert count changed');"
+                + "if(alerts.getCollection('model_policy_publication_jobs').findOne({_id:'legacy-job'}).state!=='PUBLISHED') throw Error('transactional publication did not persist');"
+                + "if(alerts.getCollection('model_policy_publication_jobs').countDocuments()!==1) throw Error('existing job count changed');"
+                + "let index=alerts.getCollection('alerts').getIndexes().find(i=>i.name==='legacy_status_idx');"
+                + "if(!index || index.key.status!==1 || Object.keys(index.key).length!==1) throw Error('existing index definition changed');"
+                + "let info=alerts.getCollectionInfos({name:'alerts'})[0];"
+                + "if(info.options.validator.$jsonSchema.bsonType!=='object' || info.options.validator.$jsonSchema.required.length!==1 || info.options.validator.$jsonSchema.required[0]!=='status' || info.options.validator.$jsonSchema.properties.status.bsonType!=='string') throw Error('existing validator changed');"
+                + "if(db.hello().setName!=='rs0') throw Error('replica set config did not survive volume recreation');"
+                + "let roleInfo=alerts.runCommand({rolesInfo:{role:'policy_publisher_runtime',db:'fraud_alerts'},showPrivileges:true}).roles;"
+                + "if(!roleInfo || roleInfo.length!==1 || roleInfo[0].privileges.length!==4 || roleInfo[0].inheritedRoles.length!==0) throw Error('publisher role is not restricted to four collections');"
+                + "let collections=roleInfo[0].privileges.map(p=>p.resource.collection).sort();"
+                + "if(JSON.stringify(collections)!==JSON.stringify(['model_policy_publication_jobs','model_promotion_policies','model_promotion_policy_approval_evidence','model_promotion_policy_publication_fences'].sort())) throw Error('publisher role collection scope changed');"
+                + "if(!alerts.getCollection('model_promotion_policies').findOne({_id:'migration-policy'})) throw Error('publisher transaction policy missing');"
+                + "if(!alerts.getCollection('model_promotion_policy_approval_evidence').findOne({_id:'migration-evidence'})) throw Error('publisher transaction evidence missing');"
+                + "if(!alerts.getCollection('model_promotion_policy_publication_fences').findOne({_id:'migration-scope'})) throw Error('publisher transaction fence missing');");
+        var anonymous = mongo.execInContainer("mongosh", "--host", "mongodb", "--quiet", "--eval",
+                "db.getSiblingDB('fraud_alerts').getCollection('alerts').findOne()");
+        assertThat(anonymous.getExitCode()).as("secured Mongo must reject anonymous access").isNotZero();
+        var invalid = mongo.execInContainer("mongosh", "--host", "mongodb", "--username", "policy_publisher_app",
+                "--password", "WrongPublisherPassword_0123456789abcdef", "--authenticationDatabase", "fraud_alerts",
+                "--quiet", "--eval", "db.getSiblingDB('fraud_alerts').getCollection('model_promotion_policies').findOne()");
+        assertThat(invalid.getExitCode()).as("secured Mongo must reject invalid application credentials").isNotZero();
+    }
+
+    private static void runPublisherTransaction(GenericContainer<?> mongo) throws Exception {
+        var result = mongo.execInContainer("mongosh", "--host", "mongodb", "--username", "policy_publisher_app",
+                "--password", PUBLISHER_PASSWORD, "--authenticationDatabase", "fraud_alerts", "--quiet", "--eval",
+                "let session=db.getMongo().startSession();"
+                        + "let alerts=session.getDatabase('fraud_alerts');"
+                        + "session.startTransaction();"
+                        + "try {"
+                        + "alerts.getCollection('model_policy_publication_jobs').updateOne({_id:'legacy-job'},{$set:{state:'PUBLISHED'}});"
+                        + "alerts.getCollection('model_promotion_policy_publication_fences').updateOne({_id:'migration-scope'},{$inc:{generation:1}},{upsert:true});"
+                        + "alerts.getCollection('model_promotion_policies').insertOne({_id:'migration-policy'});"
+                        + "alerts.getCollection('model_promotion_policy_approval_evidence').insertOne({_id:'migration-evidence'});"
+                        + "session.commitTransaction();"
+                        + "} catch(error) { session.abortTransaction(); throw error; } finally { session.endSession(); }");
+        if (result.getExitCode() != 0) {
+            throw new IllegalStateException("Publisher transaction failed on migrated volume (exit " + result.getExitCode() + "): "
+                    + result.getStderr());
+        }
+    }
+
+    private static String createMigrationTestVolume() throws Exception {
+        String name = "fdp157-mongo-auth-upgrade-" + UUID.randomUUID().toString().replace("-", "");
+        var result = docker("volume", "create", name);
+        if (result.exitCode() != 0 || !result.output().trim().equals(name)) {
+            throw new IllegalStateException("Could not create isolated Mongo migration test volume: " + result.output());
+        }
+        return name;
+    }
+
+    private static void removeMigrationTestVolume(String name) throws Exception {
+        if (name == null || !name.matches("fdp157-mongo-auth-upgrade-[0-9a-f]{32}")) {
+            throw new IllegalArgumentException("Refusing to remove a volume not created by this Mongo migration test");
+        }
+        var result = docker("volume", "rm", name);
+        if (result.exitCode() != 0) {
+            throw new IllegalStateException("Could not remove isolated Mongo migration test volume: " + result.output());
+        }
+    }
+
+    private static DockerResult docker(String... arguments) throws IOException, InterruptedException {
+        var command = new java.util.ArrayList<String>();
+        command.add("docker");
+        command.addAll(List.of(arguments));
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        return new DockerResult(process.waitFor(), output);
+    }
+
+    private record DockerResult(int exitCode, String output) {
     }
 
     private static Path bootstrapScript() throws Exception {
@@ -225,6 +398,14 @@ class MongoPolicyPublisherAuthorizationIntegrationTest {
             if (Files.isRegularFile(candidate)) return candidate;
         }
         throw new IllegalStateException("Cannot locate deployment/mongo-init-users.js from the test working directory");
+    }
+
+    private static Path mongodbEntrypointScript() throws Exception {
+        for (Path directory = Path.of("").toAbsolutePath(); directory != null; directory = directory.getParent()) {
+            Path candidate = directory.resolve("deployment/mongodb-entrypoint.sh");
+            if (Files.isRegularFile(candidate)) return candidate;
+        }
+        throw new IllegalStateException("Cannot locate deployment/mongodb-entrypoint.sh from the test working directory");
     }
 
     private static MongoClient rootClient() {

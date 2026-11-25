@@ -162,6 +162,9 @@ services:
       MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION: "1"
       MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION: "1"
     command:
+      - /usr/local/bin/exec-with-verified-temurin-java
+      - -jar
+      - /app/app.jar
       - worker
       - --approval-trust
       - /run/policy-publication/trusted-approvals.json

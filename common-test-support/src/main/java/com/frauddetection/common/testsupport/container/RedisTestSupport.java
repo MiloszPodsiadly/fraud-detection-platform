@@ -15,7 +15,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 
-/** Runtime-equivalent Redis fixture with the Compose ACL and separate test-only admin credentials. */
+/** Runtime-equivalent Redis fixture with a separately supplied test-only admin ACL. */
 public final class RedisTestSupport {
 
     public static final String IMAGE = "redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289";
@@ -33,10 +33,21 @@ public final class RedisTestSupport {
     public static GenericContainer<?> newContainer() {
         return new GenericContainer<>(DockerImageName.parse(IMAGE))
                 .withExposedPorts(6379)
-                .withCopyFileToContainer(MountableFile.forHostPath(findEntrypoint().toString()), "/opt/redis-entrypoint.sh")
+                .withCopyFileToContainer(MountableFile.forHostPath(findDeploymentFile("redis-acl-users.sh").toString()), "/opt/redis-acl-users.sh")
+                .withCopyFileToContainer(MountableFile.forHostPath(findDeploymentFile("redis-test-entrypoint.sh").toString()), "/opt/redis-test-entrypoint.sh")
                 .withEnv("REDIS_FEATURE_ENRICHER_PASSWORD", FEATURE_PASSWORD)
                 .withEnv("REDIS_ALERT_PASSWORD", ALERT_PASSWORD)
-                .withEnv("REDIS_TEST_MODE", "true")
+                .withEnv("REDIS_TEST_ADMIN_PASSWORD", TEST_ADMIN_PASSWORD)
+                .withCommand("/bin/sh", "/opt/redis-test-entrypoint.sh");
+    }
+
+    public static GenericContainer<?> newRuntimeContainerWithTestAdminEnvironment() {
+        return new GenericContainer<>(DockerImageName.parse(IMAGE))
+                .withExposedPorts(6379)
+                .withCopyFileToContainer(MountableFile.forHostPath(findDeploymentFile("redis-acl-users.sh").toString()), "/opt/redis-acl-users.sh")
+                .withCopyFileToContainer(MountableFile.forHostPath(findDeploymentFile("redis-entrypoint.sh").toString()), "/opt/redis-entrypoint.sh")
+                .withEnv("REDIS_FEATURE_ENRICHER_PASSWORD", FEATURE_PASSWORD)
+                .withEnv("REDIS_ALERT_PASSWORD", ALERT_PASSWORD)
                 .withEnv("REDIS_TEST_ADMIN_PASSWORD", TEST_ADMIN_PASSWORD)
                 .withCommand("/bin/sh", "/opt/redis-entrypoint.sh");
     }
@@ -152,15 +163,15 @@ public final class RedisTestSupport {
         return UUID.randomUUID().toString().replace("-", "");
     }
 
-    private static Path findEntrypoint() {
+    private static Path findDeploymentFile(String filename) {
         Path directory = Path.of("").toAbsolutePath();
         while (directory != null) {
-            Path candidate = directory.resolve("deployment").resolve("redis-entrypoint.sh");
+            Path candidate = directory.resolve("deployment").resolve(filename);
             if (Files.isRegularFile(candidate)) {
                 return candidate;
             }
             directory = directory.getParent();
         }
-        throw new IllegalStateException("Cannot locate deployment/redis-entrypoint.sh from the test working directory.");
+        throw new IllegalStateException("Cannot locate deployment/" + filename + " from the test working directory.");
     }
 }
