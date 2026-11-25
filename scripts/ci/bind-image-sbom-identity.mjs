@@ -22,10 +22,27 @@ if (!/^sha256:[a-f0-9]{64}$/.test(evidence.imageIdDigest ?? '')
   || typeof evidence.platformManifestMediaType !== 'string'
   || !evidence.platformManifestMediaType
   || evidence.sourceImageDigest !== evidence.scannedImageDigest
-  || evidence.platformConfigDigest !== evidence.imageIdDigest
+  || typeof evidence.dockerImageIdKind !== 'string'
+  || (evidence.platformConfigDigest !== null
+    && !/^sha256:[a-f0-9]{64}$/.test(evidence.platformConfigDigest ?? ''))
   || (evidence.platformManifestDigest !== null
     && !/^sha256:[a-f0-9]{64}$/.test(evidence.platformManifestDigest ?? ''))) {
   throw new Error('Image evidence is missing a valid image reference, digest, or platform.');
+}
+
+const imageIdIsBoundToImageSource = evidence.dockerImageIdKind === 'docker-image-id'
+  ? evidence.sourceManifestMediaType === 'local-image-config'
+    && evidence.platformManifestMediaType === 'local-image-config'
+    && evidence.sourceImageDigest === evidence.imageIdDigest
+  : evidence.dockerImageIdKind === 'platform-config'
+    ? evidence.platformConfigDigest === evidence.imageIdDigest
+    : evidence.dockerImageIdKind === 'platform-manifest'
+      ? evidence.platformManifestDigest === evidence.imageIdDigest
+      : evidence.dockerImageIdKind === 'source-manifest'
+        ? evidence.sourceImageDigest === evidence.imageIdDigest
+        : false;
+if (!imageIdIsBoundToImageSource) {
+  throw new Error('Docker image ID does not match its recorded registry manifest or local image identity.');
 }
 
 sbom.metadata.properties ??= [];

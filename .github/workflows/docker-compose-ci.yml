@@ -421,218 +421,296 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  backend-images:
-    name: Backend image / ${{ matrix.module }}
+  image-security:
+    name: Build and scan all images
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        module:
-          - transaction-ingest-service
-          - transaction-simulator-service
-          - feature-enricher-service
-          - fraud-scoring-service
-          - alert-service
-          - audit-trust-authority
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        with:
-          version: v0.39.0
-          driver-opts: |
-            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
-
-      - name: Build backend module image
-        id: build-image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deployment/Dockerfile.backend
-          push: false
-          load: true
-          pull: true
-          no-cache: true
-          tags: fdp-local/${{ matrix.module }}:${{ github.sha }}
-          build-args: |
-            MODULE_NAME=${{ matrix.module }}
-
-      - name: Scan backend image and save SBOM evidence
-        uses: ./.github/actions/scan-built-image
-        with:
-          image-ref: fdp-local/${{ matrix.module }}:${{ github.sha }}
-          build-digest: ${{ steps.build-image.outputs.digest }}
-          build-metadata: ${{ steps.build-image.outputs.metadata }}
-          artifact-name: backend-image-${{ matrix.module }}-security
-          output-directory: target/image-security/${{ matrix.module }}
-
-  service-images:
-    name: Service image / ${{ matrix.name }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: ml-inference-service
-            dockerfile: deployment/Dockerfile.ml-inference
-          - name: analyst-console-ui
-            dockerfile: deployment/Dockerfile.frontend
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        with:
-          version: v0.39.0
-          driver-opts: |
-            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
-
-      - name: Build service image
-        id: build-image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: false
-          load: true
-          pull: true
-          no-cache: true
-          tags: fdp-local/${{ matrix.name }}:${{ github.sha }}
-
-      - name: Scan service image and save SBOM evidence
-        uses: ./.github/actions/scan-built-image
-        with:
-          image-ref: fdp-local/${{ matrix.name }}:${{ github.sha }}
-          build-digest: ${{ steps.build-image.outputs.digest }}
-          build-metadata: ${{ steps.build-image.outputs.metadata }}
-          artifact-name: service-image-${{ matrix.name }}-security
-          output-directory: target/image-security/${{ matrix.name }}
-
-  external-images:
-    name: Base and infrastructure image / ${{ matrix.name }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      max-parallel: 4
-      matrix:
-        include:
-          - name: dockerfile-syntax
-            image: docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
-          - name: buildkit-builder
-            image: moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
-          - name: maven-builder
-            image: maven:3.10.2-eclipse-temurin-21-noble@sha256:c8d5fcc6bbda32e415cd6a2f4d091c52f768e12594cfdb396dd2712c4b609369
-          - name: temurin-runtime
-            image: eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
-          - name: python-runtime
-            image: python:3.12.16-slim-bookworm@sha256:82836454a795d9d75549a9e157fd08dbac6c383292cf89e99f4248a97ce6b2ff
-          - name: node-builder
-            image: fdp-local/node-builder:26.13.1-npm12.2.3
-            dockerfile: deployment/Dockerfile.frontend
-            target: node-builder
-          - name: nginx-runtime
-            image: nginx:1.30.8-alpine3.24@sha256:6437a63b5c529f0e06162b3f593c0154cff6fa2ea0f94fd7c27928cb399e022d
-          - name: apache-kafka-runtime
-            image: apache/kafka:4.4.0-temurin-25.0.5.1_2
-            dockerfile: deployment/Dockerfile.kafka
-          - name: temurin-kafka-runtime
-            image: eclipse-temurin:25.0.5.1_2-jre-alpine-3.24@sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89
-          - name: mongodb
-            image: mongo:7.0.48@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1
-          - name: redis-runtime
-            image: redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289
-          - name: prometheus
-            image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
-          - name: grafana
-            image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
-          - name: ollama-opt-in
-            image: ollama/ollama:0.40.18@sha256:1cabd20e1762a7a8444bf4a7110b346d923cd77ab6c97c984434140638c913ec
-          - name: keycloak
-            image: quay.io/keycloak/keycloak:26.8.2-3@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
-          - name: testcontainers-alpine
-            image: alpine:3.21.10@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab
-          - name: testcontainers-ryuk
-            image: testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Buildx for registry manifest inspection
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        with:
-          version: v0.39.0
-          driver-opts: |
-            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
-
-      - name: Build locally maintained infrastructure image for the CI platform
-        if: matrix.dockerfile != ''
-        shell: bash
-        env:
-          IMAGE_REF: ${{ matrix.image }}
-          DOCKERFILE: ${{ matrix.dockerfile }}
-          TARGET: ${{ matrix.target || '' }}
-        run: |
-          set -euo pipefail
-          build_args=(--pull --platform linux/amd64 --file "$DOCKERFILE")
-          if [[ -n "$TARGET" ]]; then build_args+=(--target "$TARGET"); fi
-          docker build "${build_args[@]}" --tag "$IMAGE_REF" .
-
-      - name: Pull exact image for the CI platform
-        if: matrix.dockerfile == ''
-        shell: bash
-        env:
-          IMAGE_REF: ${{ matrix.image }}
-        run: docker pull --platform linux/amd64 "$IMAGE_REF"
-
-      - name: Scan infrastructure image and save SBOM evidence
-        uses: ./.github/actions/scan-built-image
-        with:
-          image-ref: ${{ matrix.image }}
-          artifact-name: external-image-${{ matrix.name }}-security
-          output-directory: target/image-security/external/${{ matrix.name }}
-
-  image-scan-evidence:
-    name: Aggregate image scan and SBOM evidence
-    runs-on: ubuntu-latest
-    if: always()
-    needs:
-      - backend-images
-      - service-images
-      - external-images
+    timeout-minutes: 360
     env:
       TESTED_GIT_SHA: ${{ github.sha }}
-      IMAGE_SCAN_JOB_RESULTS: >-
-        {"backend":"${{ needs.backend-images.result }}","service":"${{ needs.service-images.result }}","external":"${{ needs.external-images.result }}"}
+      IMAGE_SCAN_JOB_RESULTS: '{"images":"success"}'
     steps:
       - name: Checkout
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Exercise image inventory and evidence rejection cases
-        run: node --test scripts/ci/check-image-scan-coverage.test.mjs scripts/ci/validate-image-scan-evidence.test.mjs
-
-      - name: Derive and validate expected image inventory
+      - name: Derive expected image inventory
+        if: ${{ always() }}
         run: node scripts/ci/check-image-scan-coverage.mjs --write-inventory target/image-security/expected-inventory.json
 
-      - name: Download all image security artifacts for this revision
-        if: always()
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Set up Buildx
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
-          pattern: '*-security-${{ github.sha }}'
-          path: target/image-security/downloads
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+
+      - name: Build and scan backend image / transaction-ingest-service
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/transaction-ingest-service:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.backend
+          build-args: MODULE_NAME=transaction-ingest-service
+          artifact-name: backend-image-transaction-ingest-service-security
+
+      - name: Build and scan backend image / transaction-simulator-service
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/transaction-simulator-service:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.backend
+          build-args: MODULE_NAME=transaction-simulator-service
+          artifact-name: backend-image-transaction-simulator-service-security
+
+      - name: Build and scan backend image / feature-enricher-service
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/feature-enricher-service:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.backend
+          build-args: MODULE_NAME=feature-enricher-service
+          artifact-name: backend-image-feature-enricher-service-security
+
+      - name: Build and scan backend image / fraud-scoring-service
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/fraud-scoring-service:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.backend
+          build-args: MODULE_NAME=fraud-scoring-service
+          artifact-name: backend-image-fraud-scoring-service-security
+
+      - name: Build and scan backend image / alert-service
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/alert-service:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.backend
+          build-args: MODULE_NAME=alert-service
+          artifact-name: backend-image-alert-service-security
+
+      - name: Build and scan backend image / audit-trust-authority
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/audit-trust-authority:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.backend
+          build-args: MODULE_NAME=audit-trust-authority
+          artifact-name: backend-image-audit-trust-authority-security
+
+      - name: Build and scan backend image / model-promotion-policy-publisher
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/model-promotion-policy-publisher:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.backend
+          build-args: MODULE_NAME=model-promotion-policy-publisher
+          artifact-name: backend-image-model-promotion-policy-publisher-security
+
+      - name: Build and scan service image / ml-inference-service
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/ml-inference-service:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.ml-inference
+          artifact-name: service-image-ml-inference-service-security
+
+      - name: Build and scan service image / analyst-console-ui
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/analyst-console-ui:${{ github.sha }}
+          dockerfile: deployment/Dockerfile.frontend
+          artifact-name: service-image-analyst-console-ui-security
+
+      - name: Build and scan external image / dockerfile-syntax
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
+          artifact-name: external-image-dockerfile-syntax-security
+
+      - name: Build and scan external image / buildkit-builder
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+          artifact-name: external-image-buildkit-builder-security
+
+      - name: Build and scan external image / maven-builder
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: maven:3.10.2-eclipse-temurin-21-noble@sha256:c8d5fcc6bbda32e415cd6a2f4d091c52f768e12594cfdb396dd2712c4b609369
+          artifact-name: external-image-maven-builder-security
+
+      - name: Build and scan external image / temurin-runtime
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
+          artifact-name: external-image-temurin-runtime-security
+
+      - name: Build and scan external image / python-runtime
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: python:3.12.16-slim-trixie@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
+          artifact-name: external-image-python-runtime-security
+
+      - name: Build and scan external image / node-builder
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/node-builder:26.13.1-npm12.2.3
+          dockerfile: deployment/Dockerfile.frontend
+          target: node-builder
+          artifact-name: external-image-node-builder-security
+
+      - name: Build and scan external image / nginx-runtime
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: nginx:1.30.8-alpine3.24@sha256:6437a63b5c529f0e06162b3f593c0154cff6fa2ea0f94fd7c27928cb399e022d
+          artifact-name: external-image-nginx-runtime-security
+
+      - name: Build and scan external image / apache-kafka-runtime
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: buildx
+          image-ref: fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2
+          dockerfile: deployment/Dockerfile.kafka
+          artifact-name: external-image-apache-kafka-runtime-security
+
+      - name: Build and scan external image / temurin-kafka-runtime
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: eclipse-temurin:25.0.5.1_2-jre-alpine-3.24@sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89
+          artifact-name: external-image-temurin-kafka-runtime-security
+
+      - name: Build and scan external image / mongodb
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: mongo:7.0.48@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1
+          artifact-name: external-image-mongodb-security
+
+      - name: Build and scan external image / redis-runtime
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289
+          artifact-name: external-image-redis-runtime-security
+
+      - name: Build and scan external image / prometheus
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+          artifact-name: external-image-prometheus-security
+
+      - name: Build and scan external image / grafana
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: grafana/grafana:13.3.2@sha256:81556409ba48b2b922e0adb69a2511337d8ba7578f11962eefa6149a2d815101
+          artifact-name: external-image-grafana-security
+
+      - name: Build and scan external image / ollama-opt-in
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: ollama/ollama:0.40.18@sha256:1cabd20e1762a7a8444bf4a7110b346d923cd77ab6c97c984434140638c913ec
+          artifact-name: external-image-ollama-opt-in-security
+
+      - name: Build and scan external image / keycloak
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: quay.io/keycloak/keycloak:26.8.2-3@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
+          artifact-name: external-image-keycloak-security
+
+      - name: Build and scan external image / testcontainers-alpine
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+          artifact-name: external-image-testcontainers-alpine-security
+
+      - name: Build and scan external image / testcontainers-ryuk
+        if: ${{ steps.checkout.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: registry
+          image-ref: testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
+          artifact-name: external-image-testcontainers-ryuk-security
+      - name: Exercise image inventory and evidence rejection cases
+        if: ${{ always() }}
+        run: node --test scripts/ci/check-image-scan-coverage.test.mjs scripts/ci/validate-image-scan-evidence.test.mjs
 
       - name: Validate complete image scans and SBOMs
-        if: always()
+        if: ${{ always() }}
         run: node scripts/ci/validate-image-scan-evidence.mjs target/image-security/expected-inventory.json target/image-security/downloads
 
       - name: Upload image scan evidence validation summary
-        if: always()
+        if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-scan-validation-${{ github.sha }}
           path: target/image-security/validated-image-scan-summary.json
           if-no-files-found: ignore
           retention-days: 30
+

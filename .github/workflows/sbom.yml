@@ -4,8 +4,14 @@ on:
   pull_request:
     paths:
       - .github/workflows/sbom.yml
+      - .github/actions/setup-patched-java/action.yml
+      - scripts/ci/java-runtime-policy.properties
+      - scripts/ci/verify-java-runtime.mjs
+      - scripts/ci/verify-temurin-java-runtime.sh
       - scripts/ci/install-pinned-npm.sh
       - scripts/ci/install-pinned-cyclonedx-bom.sh
+      - scripts/ci/npm-sbom-tools/package.json
+      - scripts/ci/npm-sbom-tools/package-lock.json
       - scripts/ci/validate-sbom-artifacts.mjs
       - deployment/Dockerfile.ml-inference
       - deployment/python-build-tools-requirements.txt
@@ -19,8 +25,14 @@ on:
       - master
     paths:
       - .github/workflows/sbom.yml
+      - .github/actions/setup-patched-java/action.yml
+      - scripts/ci/java-runtime-policy.properties
+      - scripts/ci/verify-java-runtime.mjs
+      - scripts/ci/verify-temurin-java-runtime.sh
       - scripts/ci/install-pinned-npm.sh
       - scripts/ci/install-pinned-cyclonedx-bom.sh
+      - scripts/ci/npm-sbom-tools/package.json
+      - scripts/ci/npm-sbom-tools/package-lock.json
       - scripts/ci/validate-sbom-artifacts.mjs
       - deployment/Dockerfile.ml-inference
       - deployment/python-build-tools-requirements.txt
@@ -56,10 +68,16 @@ jobs:
         with:
           node-version: '26.13.1'
           cache: npm
-          cache-dependency-path: analyst-console-ui/package-lock.json
+          cache-dependency-path: |
+            analyst-console-ui/package-lock.json
+            scripts/ci/npm-sbom-tools/package-lock.json
 
       - name: Install verified patched npm
         run: bash scripts/ci/install-pinned-npm.sh
+
+      - name: Install locked npm SBOM generator and schema validator
+        working-directory: scripts/ci/npm-sbom-tools
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -72,12 +90,16 @@ jobs:
       - name: Generate Maven resolved SBOM
         run: |
           mkdir -p target/sbom
-          find . -name pom.xml -not -path './.git/*' -print0 \
-            | while IFS= read -r -d '' pom; do mkdir -p "$(dirname "$pom")/target"; done
-          mvn -B -DskipTests \
-            org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
-            -DoutputType=text \
-            -DoutputFile=target/maven-dependency-tree.txt
+          mvn -B -DskipTests install
+          while IFS= read -r -d '' pom; do
+            module_dir="$(dirname "$pom")"
+            mkdir -p "$module_dir/target"
+            output_file="$GITHUB_WORKSPACE/${module_dir#./}/target/maven-dependency-tree.json"
+            mvn -B -DskipTests -f "$pom" \
+              org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
+              -DoutputType=json \
+              "-DoutputFile=$output_file"
+          done < <(find . -name pom.xml -not -path './.git/*' -print0)
           mvn -B -DskipTests \
             -Dproject.build.outputTimestamp=0 \
             org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
@@ -93,7 +115,7 @@ jobs:
       - name: Generate npm resolved SBOM
         working-directory: analyst-console-ui
         run: |
-          npx --yes @cyclonedx/cyclonedx-npm@7.0.1 \
+          ../scripts/ci/npm-sbom-tools/node_modules/.bin/cyclonedx-npm \
             --package-lock-only \
             --output-reproducible \
             --spec-version 1.6 \
@@ -129,6 +151,6 @@ jobs:
           name: resolved-cyclonedx-sbom-${{ github.sha }}
           path: |
             target/sbom/*.json
-            **/target/maven-dependency-tree.txt
+            **/target/maven-dependency-tree.json
           if-no-files-found: error
           retention-days: 30

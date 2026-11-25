@@ -1,17 +1,63 @@
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, realpathSync } from "node:fs";
+import { accessSync, constants, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const APPROVED_RUNTIME = Object.freeze({
-  vendor: "Eclipse Adoptium",
-  version: [21, 0, 13, 1],
-  versionText: "21.0.13.1",
-  build: 2,
-  runtimePrefix: "21.0.13.1+2",
-  linuxX64JdkSha256: "bb8a93f9ae6e7a693b2b721e85dbeff26ae1a77447985a8d7afcdd9c7cf6222e",
-  releaseUrl: "https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.13.1%2B2"
-});
+const policyPath = fileURLToPath(new URL("./java-runtime-policy.properties", import.meta.url));
+
+function loadRuntimePolicy(file = policyPath) {
+  const values = new Map();
+  for (const [index, line] of readFileSync(file, "utf8").split(/\r?\n/).entries()) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator < 1) throw new Error(`Invalid Java runtime policy line ${index + 1}.`);
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim();
+    if (!value || values.has(key)) throw new Error(`Invalid or duplicate Java runtime policy key: ${key}`);
+    values.set(key, value);
+  }
+  const requiredKeys = [
+    "application.vendor",
+    "application.feature",
+    "application.version",
+    "application.build",
+    "application.runtime.versions",
+    "application.vm.versions",
+    "application.vendor.versions",
+    "jdk.linux.x64.sha256",
+    "jdk.release.url",
+  ];
+  for (const key of requiredKeys) if (!values.has(key)) throw new Error(`Java runtime policy is missing ${key}.`);
+  const versionText = values.get("application.version");
+  const build = Number(values.get("application.build"));
+  if (!Number.isSafeInteger(build) || build < 1) throw new Error("Java runtime policy build must be a positive integer.");
+  const version = versionText.split(".").map(Number);
+  if (version.length !== 4 || version.some((part) => !Number.isSafeInteger(part) || part < 0)) {
+    throw new Error(`Java runtime policy has an invalid four-part version: ${versionText}`);
+  }
+  const digest = values.get("jdk.linux.x64.sha256");
+  if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error("Java runtime policy JDK SHA-256 is malformed.");
+  const feature = values.get("application.feature");
+  if (!/^\d+$/.test(feature) || Number(feature) !== version[0]) {
+    throw new Error("Java runtime policy feature version does not match its version.");
+  }
+  return Object.freeze({
+    vendor: values.get("application.vendor"),
+    feature,
+    version,
+    versionText,
+    build,
+    runtimePrefix: `${versionText}+${build}`,
+    runtimeVersions: values.get("application.runtime.versions").split(","),
+    vmVersions: values.get("application.vm.versions").split(","),
+    vendorVersions: values.get("application.vendor.versions").split(","),
+    linuxX64JdkSha256: digest,
+    releaseUrl: values.get("jdk.release.url"),
+  });
+}
+
+export const APPROVED_RUNTIME = loadRuntimePolicy();
 
 export function parseJavaVersion(value) {
   const match = String(value ?? "").trim().match(/^(\d+(?:\.\d+){0,3})(?:\+(\d+))?(?:-([A-Za-z0-9.-]+))?$/);
@@ -55,7 +101,8 @@ export function validateRuntimeProperties(properties, policy = APPROVED_RUNTIME)
     "java.version",
     "java.runtime.version",
     "java.vm.version",
-    "java.specification.version"
+    "java.specification.version",
+    "java.vendor.version"
   ];
   const missing = required.filter((key) => !properties[key]);
   if (missing.length) throw new Error(`Missing Java runtime metadata: ${missing.join(", ")}`);
@@ -63,25 +110,22 @@ export function validateRuntimeProperties(properties, policy = APPROVED_RUNTIME)
   if (properties["java.vendor"] !== policy.vendor || properties["java.vm.vendor"] !== policy.vendor) {
     throw new Error(`Unapproved Java vendor: ${properties["java.vendor"]}/${properties["java.vm.vendor"]}`);
   }
-  if (properties["java.specification.version"] !== "21") {
+  if (properties["java.specification.version"] !== policy.feature) {
     throw new Error(`Expected Java feature 21; got ${properties["java.specification.version"]}`);
   }
 
   const version = parseJavaVersion(properties["java.version"]);
-  if (!sameVersion(version.components, policy.version)
-      || (version.build !== null && version.build !== policy.build)) {
+  if (!sameVersion(version.components, policy.version) || properties["java.version"] !== policy.versionText) {
     throw new Error(`Unapproved Java version ${properties["java.version"]}; expected ${policy.runtimePrefix}`);
   }
 
-  for (const key of ["java.runtime.version", "java.vm.version"]) {
-    const parsed = parseJavaVersion(properties[key]);
-    if (!sameVersion(parsed.components, policy.version) || parsed.build !== policy.build) {
-      throw new Error(`Unapproved ${key} ${properties[key]}; expected ${policy.runtimePrefix}`);
-    }
+  if (!policy.runtimeVersions.includes(properties["java.runtime.version"])) {
+    throw new Error(`Unapproved java.runtime.version ${properties["java.runtime.version"]}; expected ${policy.runtimeVersions.join(" or ")}`);
   }
-
-  if (properties["java.vendor.version"]
-      && !properties["java.vendor.version"].startsWith(`Temurin-${policy.runtimePrefix}`)) {
+  if (!policy.vmVersions.includes(properties["java.vm.version"])) {
+    throw new Error(`Unapproved java.vm.version ${properties["java.vm.version"]}; expected ${policy.vmVersions.join(" or ")}`);
+  }
+  if (!policy.vendorVersions.includes(properties["java.vendor.version"])) {
     throw new Error(`Unapproved Temurin vendor build: ${properties["java.vendor.version"]}`);
   }
 
@@ -138,6 +182,12 @@ export function validateJavaHome(properties, javaHome, javaExecutable) {
 }
 
 function main() {
+  if (process.argv[2] === "--write-setup-output") {
+    const outputPath = process.argv[3];
+    if (!outputPath || process.argv.length !== 4) throw new Error("Usage: verify-java-runtime.mjs --write-setup-output <github-output-file>");
+    writeFileSync(outputPath, `version=${APPROVED_RUNTIME.runtimePrefix}\n`, { flag: "a" });
+    return;
+  }
   const javaExecutable = findJavaOnPath();
   const probe = spawnSync(javaExecutable, ["-XshowSettings:properties", "-version"], { encoding: "utf8" });
   if (probe.error) throw new Error(`Failed to inspect Java runtime: ${probe.error.message}`);

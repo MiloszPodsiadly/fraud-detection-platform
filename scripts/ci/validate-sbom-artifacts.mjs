@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 
 const files = process.argv.slice(2);
@@ -127,6 +127,90 @@ const mavenModulePoms = execFileSync('git', ['ls-files', '--', 'pom.xml', '**/po
     return { path: file.replaceAll('\\', '/'), artifactId };
   });
 manifest.mavenModulePoms = mavenModulePoms.sort((left, right) => left.path.localeCompare(right.path));
+
+function mavenCoordinate(groupId, artifactId, version, type = 'jar', classifier = '') {
+  if (![groupId, artifactId, version, type].every((value) => typeof value === 'string' && value.length > 0)) {
+    throw new Error('Maven dependency inventory contains an incomplete coordinate.');
+  }
+  return JSON.stringify([groupId, artifactId, version, type, classifier || '']);
+}
+
+function mavenCoordinateFromPurl(purl, source) {
+  const match = /^pkg:maven\/([^/]+)\/([^@/?#]+)@([^?#]+)(?:\?([^#]*))?(?:#.*)?$/.exec(purl);
+  if (!match) throw new Error(`${source} has an invalid Maven package URL: ${purl}`);
+  const qualifiers = new URLSearchParams(match[4] ?? '');
+  return mavenCoordinate(
+    decodeURIComponent(match[1]),
+    decodeURIComponent(match[2]),
+    decodeURIComponent(match[3]),
+    qualifiers.get('type') ?? 'jar',
+    qualifiers.get('classifier') ?? '',
+  );
+}
+
+const expectedMavenDependencies = new Set();
+const reactorModuleCoordinates = new Set();
+manifest.mavenDependencyTrees = [];
+for (const module of manifest.mavenModulePoms) {
+  const treePath = resolve(dirname(resolve(module.path)), 'target/maven-dependency-tree.json');
+  if (!existsSync(treePath)) {
+    throw new Error(`Resolved Maven dependency tree is missing for ${module.path}: ${relative(workspace, treePath)}.`);
+  }
+  const rawTree = readFileSync(treePath);
+  const tree = JSON.parse(rawTree.toString('utf8').replace(/^\uFEFF/, ''));
+  if (!tree || typeof tree !== 'object'
+    || (tree.children !== undefined && !Array.isArray(tree.children))) {
+    throw new Error(`Resolved Maven dependency tree for ${module.path} has an invalid root.`);
+  }
+  if (tree.artifactId !== module.artifactId) {
+    throw new Error(`Resolved Maven dependency tree root for ${module.path} does not match its POM artifactId.`);
+  }
+  reactorModuleCoordinates.add(mavenCoordinate(tree.groupId, tree.artifactId, tree.version, tree.type ?? 'jar', tree.classifier ?? ''));
+
+  let dependencyOccurrenceCount = 0;
+  function collectResolvedDependencies(parent) {
+    for (const dependency of parent.children ?? []) {
+      if (!dependency || typeof dependency !== 'object'
+        || (dependency.children !== undefined && !Array.isArray(dependency.children))) {
+        throw new Error(`Resolved Maven dependency tree for ${module.path} contains an invalid dependency node.`);
+      }
+      expectedMavenDependencies.add(mavenCoordinate(
+        dependency.groupId,
+        dependency.artifactId,
+        dependency.version,
+        dependency.type ?? 'jar',
+        dependency.classifier ?? '',
+      ));
+      dependencyOccurrenceCount += 1;
+      collectResolvedDependencies(dependency);
+    }
+  }
+  collectResolvedDependencies(tree);
+  manifest.mavenDependencyTrees.push({
+    path: relative(workspace, treePath).replaceAll('\\', '/'),
+    sha256: createHash('sha256').update(rawTree).digest('hex'),
+    bytes: rawTree.byteLength,
+    root: {
+      groupId: tree.groupId,
+      artifactId: tree.artifactId,
+      version: tree.version,
+      type: tree.type ?? 'jar',
+      classifier: tree.classifier ?? '',
+    },
+    dependencyOccurrenceCount,
+  });
+}
+
+const mavenSbom = manifest.files.find((file) => file.ecosystem === 'maven');
+const actualMavenComponents = new Set(mavenSbom.componentPackageUrls.map((purl) => mavenCoordinateFromPurl(purl, mavenSbom.path)));
+const missingMavenComponents = [...expectedMavenDependencies].filter((coordinate) => !actualMavenComponents.has(coordinate));
+const unaccountedMavenComponents = [...actualMavenComponents].filter((coordinate) =>
+  !expectedMavenDependencies.has(coordinate) && !reactorModuleCoordinates.has(coordinate));
+if (missingMavenComponents.length > 0 || unaccountedMavenComponents.length > 0) {
+  throw new Error(`Maven SBOM and resolved reactor dependency trees disagree: ${missingMavenComponents.length} missing dependencies, ${unaccountedMavenComponents.length} unaccounted components.`);
+}
+manifest.mavenResolvedDependencyCoordinateCount = expectedMavenDependencies.size;
+manifest.mavenReactorModuleCoordinateCount = reactorModuleCoordinates.size;
 
 const manifestPath = resolve('target/sbom/sbom-manifest.json');
 mkdirSync(dirname(manifestPath), { recursive: true });

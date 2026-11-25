@@ -122,32 +122,40 @@ for (const expected of inventory.expectedArtifacts) {
   failUnless(evidence.imagePlatform === expected.expectedPlatform, `${expected.artifactName}: scanned platform does not match the required platform.`);
   failUnless(digestPattern.test(evidence.imageIdDigest ?? ''), `${expected.artifactName}: image config/image ID digest is invalid.`);
   failUnless(digestPattern.test(evidence.scannedImageDigest ?? ''), `${expected.artifactName}: immutable scanned image digest is invalid.`);
+  failUnless(evidence.platformConfigDigest === null || digestPattern.test(evidence.platformConfigDigest ?? ''),
+    `${expected.artifactName}: selected platform config digest is invalid.`);
+  failUnless(['platform-config', 'platform-manifest', 'source-manifest', 'docker-image-id'].includes(evidence.dockerImageIdKind),
+    `${expected.artifactName}: Docker image ID kind is missing or unsupported.`);
   failUnless(Array.isArray(evidence.repoDigests), `${expected.artifactName}: repository digest evidence is missing.`);
   failUnless(evidence.sourceImageDigest === evidence.scannedImageDigest,
     `${expected.artifactName}: scanned digest does not identify the selected source image.`);
-  failUnless(evidence.platformConfigDigest === evidence.imageIdDigest,
-    `${expected.artifactName}: selected platform manifest config does not match the inspected local image ID.`);
 
   if (expected.source === 'buildx-loaded-image') {
-    failUnless(evidence.scannedImageIdentitySource === 'buildx-manifest-verified-against-image-id',
-      `${expected.artifactName}: Buildx identity was not linked to the loaded image.`);
-    failUnless(evidence.buildxDigest === evidence.scannedImageDigest,
-      `${expected.artifactName}: Buildx manifest digest does not match the scanned digest.`);
-    failUnless(evidence.buildxConfigDigest === evidence.imageIdDigest,
-      `${expected.artifactName}: Buildx config digest does not match the loaded image ID.`);
-    failUnless(evidence.sourceManifestMediaType === 'buildx-output-manifest'
-      && evidence.platformManifestMediaType === 'buildx-output-manifest'
-      && evidence.platformManifestDigest === evidence.buildxDigest,
-    `${expected.artifactName}: Buildx platform-manifest evidence is incomplete or mismatched.`);
+    failUnless(evidence.scannedImageIdentitySource === 'buildx-loaded-image-id'
+      && evidence.dockerImageIdKind === 'docker-image-id'
+      && evidence.scannedImageDigest === evidence.imageIdDigest
+      && evidence.sourceImageDigest === evidence.imageIdDigest,
+    `${expected.artifactName}: Buildx-loaded local image ID is not the identity Trivy analyzed.`);
+    failUnless(evidence.sourceManifestMediaType === 'local-image-config'
+      && evidence.platformManifestMediaType === 'local-image-config'
+      && evidence.platformManifestDigest === null
+      && evidence.platformConfigDigest === evidence.buildxConfigDigest,
+    `${expected.artifactName}: local Buildx metadata is not separated from the loaded Docker image ID.`);
+    failUnless(evidence.buildxDigest === null || digestPattern.test(evidence.buildxDigest),
+      `${expected.artifactName}: Buildx output manifest digest is malformed.`);
+    failUnless(evidence.buildxConfigDigest === null || digestPattern.test(evidence.buildxConfigDigest),
+      `${expected.artifactName}: Buildx output config digest is malformed.`);
   } else if (expected.source === 'locally-built') {
     failUnless(evidence.scannedImageIdentitySource === 'docker-image-id',
       `${expected.artifactName}: locally built image identity does not come from the Docker image ID.`);
-    failUnless(evidence.scannedImageDigest === evidence.imageIdDigest,
-      `${expected.artifactName}: locally built image digest does not match its Docker image ID.`);
+    failUnless(evidence.dockerImageIdKind === 'docker-image-id'
+      && evidence.scannedImageDigest === evidence.imageIdDigest,
+    `${expected.artifactName}: locally built image digest does not match its Docker image ID.`);
     failUnless(evidence.sourceImageDigest === evidence.imageIdDigest
       && evidence.sourceManifestMediaType === 'local-image-config'
       && evidence.platformManifestDigest === null
-      && evidence.platformManifestMediaType === 'local-image-config',
+      && evidence.platformManifestMediaType === 'local-image-config'
+      && evidence.platformConfigDigest === null,
     `${expected.artifactName}: local image config identity evidence is incomplete.`);
   } else if (expected.source === 'registry-pinned') {
     const pinnedDigest = expectedRef.match(/@(?<digest>sha256:[a-f0-9]{64})$/)?.groups?.digest;
@@ -180,6 +188,15 @@ for (const expected of inventory.expectedArtifacts) {
       && digestPattern.test(evidence.platformManifestDigest ?? '')
       && platformManifestMatchesSource,
     `${expected.artifactName}: pinned registry image does not record its OCI index/manifest and selected platform manifest consistently.`);
+    const imageIdMatchesRecordedIdentity = evidence.dockerImageIdKind === 'platform-config'
+      ? evidence.platformConfigDigest === evidence.imageIdDigest
+      : evidence.dockerImageIdKind === 'platform-manifest'
+        ? evidence.platformManifestDigest === evidence.imageIdDigest
+        : evidence.dockerImageIdKind === 'source-manifest'
+          ? evidence.sourceImageDigest === evidence.imageIdDigest
+          : false;
+    failUnless(imageIdMatchesRecordedIdentity,
+      `${expected.artifactName}: Docker image ID does not match an independently inspected registry identity.`);
   }
 
   failUnless(result.testedGitSha === expectedSha && result.imageRef === expectedRef,
@@ -187,6 +204,7 @@ for (const expected of inventory.expectedArtifacts) {
   failUnless(result.imagePlatform === expected.expectedPlatform,
     `${expected.artifactName}: scan result platform does not match the expected platform.`);
   failUnless(result.imageIdDigest === evidence.imageIdDigest
+    && result.dockerImageIdKind === evidence.dockerImageIdKind
     && result.scannedImageDigest === evidence.scannedImageDigest
     && result.scannedImageIdentitySource === evidence.scannedImageIdentitySource,
   `${expected.artifactName}: scan result identity differs from image evidence.`);

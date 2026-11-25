@@ -88,7 +88,7 @@ export function runAudit({
   diagnosticPath = defaultDiagnosticPath,
   cwd = repositoryRoot,
   spawn = spawnSync
-}) {
+} = {}) {
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   fs.rmSync(reportPath, { force: true });
   fs.rmSync(diagnosticPath, { force: true });

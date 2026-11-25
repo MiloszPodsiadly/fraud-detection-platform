@@ -72,7 +72,7 @@ function runCoverage(mutate = () => () => {}) {
   }
 }
 
-test('accepts the complete repository image inventory and required scan matrices', () => {
+test('accepts the complete repository image inventory in one image security job', () => {
   const result = runCoverage();
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
@@ -87,15 +87,15 @@ test('rejects a floating image reference introduced in a Docker build stage', ()
   assert.match(result.stderr, /not pinned|floating/i);
 });
 
-test('rejects a source image missing from the external image scan matrix', () => {
+test('rejects a source image missing from the image security job', () => {
   const result = runCoverage((root) => {
     const workflowPath = join(root, '.github', 'workflows', 'docker-compose-ci.yml');
     const workflow = readFileSync(workflowPath, 'utf8');
     const withoutMongoScan = workflow.replace(
-      /^[ \t]*- name: mongodb\r?\n[ \t]*image: mongo:7\.0\.48@sha256:[a-f0-9]{64}\r?\n/m,
+      /^[ \t]*image-ref: mongo:7\.0\.48@sha256:[a-f0-9]{64}\r?\n/m,
       '',
     );
-    assert.notEqual(withoutMongoScan, workflow, 'expected to locate the MongoDB scan entry');
+    assert.notEqual(withoutMongoScan, workflow, 'expected to locate the MongoDB scan input');
     writeFileSync(workflowPath, withoutMongoScan, 'utf8');
     return () => writeFileSync(workflowPath, workflow, 'utf8');
   });
@@ -108,8 +108,8 @@ test('rejects a Docker build action that produces an image outside the scan inve
     const actionPath = join(root, '.github', 'actions', 'build-kafka-test-image', 'action.yml');
     const action = readFileSync(actionPath, 'utf8');
     const changedAction = action.replace(
-      'apache/kafka:4.4.0-temurin-25.0.5.1_2',
-      'apache/kafka:4.4.0-unreviewed',
+      'fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2',
+      'fdp-local/kafka:4.4.0-unreviewed',
     );
     assert.notEqual(changedAction, action, 'expected to locate the Kafka build tag');
     writeFileSync(actionPath, changedAction, 'utf8');
@@ -117,6 +117,35 @@ test('rejects a Docker build action that produces an image outside the scan inve
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /not pinned|missing from external image scan matrix/i);
+});
+
+test('rejects a Kafka image that no longer checksum-pins the patched compression libraries', () => {
+  const result = runCoverage((root) => {
+    const dockerfilePath = join(root, 'deployment', 'Dockerfile.kafka');
+    const dockerfile = readFileSync(dockerfilePath, 'utf8');
+    const withoutSnappyPin = dockerfile.replace(
+      "echo '1c03ce77b3f2e926c25a952612e372404d80bc88c6c8052bede964804fabd732  /tmp/snappy-java-1.1.10.12.jar' | sha256sum -c -",
+      "echo 'unverified  /tmp/snappy-java-1.1.10.12.jar' | sha256sum -c -",
+    );
+    assert.notEqual(withoutSnappyPin, dockerfile, 'expected to locate the Snappy SHA-256 verification');
+    writeFileSync(dockerfilePath, withoutSnappyPin, 'utf8');
+    return () => writeFileSync(dockerfilePath, dockerfile, 'utf8');
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /checksum-pinned 1\.1\.10\.12/i);
+});
+
+test('rejects an image security job that omits the policy publisher image', () => {
+  const result = runCoverage((root) => {
+    const workflowPath = join(root, '.github', 'workflows', 'docker-compose-ci.yml');
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const withoutPublisher = workflow.replace(/^ {10}artifact-name: backend-image-model-promotion-policy-publisher-security\r?\n/m, '');
+    assert.notEqual(withoutPublisher, workflow, 'expected to locate the publisher scan artifact');
+    writeFileSync(workflowPath, withoutPublisher, 'utf8');
+    return () => writeFileSync(workflowPath, workflow, 'utf8');
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing required application image model-promotion-policy-publisher/i);
 });
 
 test('rejects unresolved variables in Compose image references', () => {

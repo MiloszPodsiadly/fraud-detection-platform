@@ -8,11 +8,16 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Read approved Java version from policy
+      id: approved-java
+      shell: bash
+      run: node scripts/ci/verify-java-runtime.mjs --write-setup-output "$GITHUB_OUTPUT"
+
     - name: Install signed Eclipse Temurin JDK
       uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
       with:
         distribution: temurin
-        java-version: '21.0.13.1+2'
+        java-version: ${{ steps.approved-java.outputs.version }}
         verify-signature: true
         problem-matcher: true
         cache: ${{ inputs.cache }}

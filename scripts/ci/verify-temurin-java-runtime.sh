@@ -1,6 +1,28 @@
 #!/bin/sh
 set -eu
 
+policy_file=${JAVA_RUNTIME_POLICY_FILE:-/usr/local/share/fdp/java-runtime-policy.properties}
+if [ ! -r "$policy_file" ]; then
+  echo "Java runtime policy failed: approved runtime policy file is unavailable" >&2
+  exit 1
+fi
+
+policy_value() {
+  awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$policy_file"
+}
+
+policy_vendor=$(policy_value application.vendor)
+policy_feature=$(policy_value application.feature)
+policy_version=$(policy_value application.version)
+policy_runtime_versions=$(policy_value application.runtime.versions)
+policy_vm_versions=$(policy_value application.vm.versions)
+policy_vendor_versions=$(policy_value application.vendor.versions)
+if [ -z "$policy_vendor" ] || [ -z "$policy_feature" ] || [ -z "$policy_version" ] \
+  || [ -z "$policy_runtime_versions" ] || [ -z "$policy_vm_versions" ] || [ -z "$policy_vendor_versions" ]; then
+  echo "Java runtime policy failed: approved runtime policy is incomplete" >&2
+  exit 1
+fi
+
 java_home=$JAVA_HOME
 if [ -z "$java_home" ] || [ ! -x "$java_home/bin/java" ]; then
   echo "Java runtime policy failed: JAVA_HOME/bin/java is unavailable" >&2
@@ -39,24 +61,20 @@ feature=$(property java.specification.version)
 version=$(property java.version)
 runtime=$(property java.runtime.version)
 vm_version=$(property java.vm.version)
+vendor_version=$(property java.vendor.version)
 reported_home=$(property java.home)
 
-if [ "$vendor" != "Eclipse Adoptium" ] || [ "$vm_vendor" != "Eclipse Adoptium" ]; then
-  echo "Java runtime policy failed: expected Eclipse Adoptium, got $vendor / $vm_vendor" >&2
+if [ "$vendor" != "$policy_vendor" ] || [ "$vm_vendor" != "$policy_vendor" ]; then
+  echo "Java runtime policy failed: expected $policy_vendor, got $vendor / $vm_vendor" >&2
   exit 1
 fi
-if [ "$feature" != "21" ] || [ "$version" != "21.0.13.1" ]; then
-  echo "Java runtime policy failed: expected Java 21.0.13.1, got $feature / $version" >&2
+if [ "$feature" != "$policy_feature" ] || [ "$version" != "$policy_version" ]; then
+  echo "Java runtime policy failed: expected Java $policy_version, got $feature / $version" >&2
   exit 1
 fi
-case "$runtime" in
-  21.0.13.1+2|21.0.13.1+2-LTS) ;;
-  *) echo "Java runtime policy failed: unapproved runtime build $runtime" >&2; exit 1 ;;
-esac
-case "$vm_version" in
-  21.0.13.1+2|21.0.13.1+2-LTS) ;;
-  *) echo "Java runtime policy failed: unapproved VM build $vm_version" >&2; exit 1 ;;
-esac
+case ",$policy_runtime_versions," in *",$runtime,"*) ;; *) echo "Java runtime policy failed: unapproved runtime build $runtime" >&2; exit 1 ;; esac
+case ",$policy_vm_versions," in *",$vm_version,"*) ;; *) echo "Java runtime policy failed: unapproved VM build $vm_version" >&2; exit 1 ;; esac
+case ",$policy_vendor_versions," in *",$vendor_version,"*) ;; *) echo "Java runtime policy failed: unapproved vendor build $vendor_version" >&2; exit 1 ;; esac
 if [ -z "$reported_home" ] || [ "$(canonical "$reported_home")" != "$(canonical "$java_home")" ]; then
   echo "Java runtime policy failed: java.home does not match JAVA_HOME" >&2
   exit 1

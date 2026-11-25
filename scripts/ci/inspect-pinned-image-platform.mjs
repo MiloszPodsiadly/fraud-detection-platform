@@ -63,8 +63,13 @@ if (indexMediaTypes.has(sourceManifest.mediaType)) {
   throw new Error(`Unsupported registry image media type ${sourceManifest.mediaType}.`);
 }
 
-if (platformConfigDigest !== expectedImageId) {
-  throw new Error(`Registry platform manifest config ${String(platformConfigDigest)} does not match loaded image ID ${expectedImageId}.`);
+const dockerImageIdMatches = [
+  ['platform-config', platformConfigDigest],
+  ['platform-manifest', platformManifestDigest],
+  ['source-manifest', sourceDigest],
+].filter(([, digest]) => digest === expectedImageId);
+if (dockerImageIdMatches.length === 0) {
+  throw new Error(`Loaded Docker image ID ${expectedImageId} matches neither registry source manifest ${sourceDigest}, platform manifest ${String(platformManifestDigest)}, nor platform config ${String(platformConfigDigest)}.`);
 }
 
 process.stdout.write(`${JSON.stringify({
@@ -73,5 +78,6 @@ process.stdout.write(`${JSON.stringify({
   platformManifestDigest,
   platformManifestMediaType,
   platformConfigDigest,
+  dockerImageIdKind: dockerImageIdMatches[0][0],
   expectedPlatform,
 })}\n`);

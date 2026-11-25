@@ -33,14 +33,15 @@ function baselineFixture() {
       testedGitSha,
       imageRef: `fdp-local/alert-service:${testedGitSha}`,
       imagePlatform: 'linux/amd64',
-      scannedImageDigest: manifestDigest,
-      scannedImageIdentitySource: 'buildx-manifest-verified-against-image-id',
+      scannedImageDigest: imageIdDigest,
+      scannedImageIdentitySource: 'buildx-loaded-image-id',
       imageIdDigest,
+      dockerImageIdKind: 'docker-image-id',
       repoDigests: [],
-      sourceImageDigest: manifestDigest,
-      sourceManifestMediaType: 'buildx-output-manifest',
-      platformManifestDigest: manifestDigest,
-      platformManifestMediaType: 'buildx-output-manifest',
+      sourceImageDigest: imageIdDigest,
+      sourceManifestMediaType: 'local-image-config',
+      platformManifestDigest: null,
+      platformManifestMediaType: 'local-image-config',
       platformConfigDigest: imageIdDigest,
       buildxDigest: manifestDigest,
       buildxConfigDigest: imageIdDigest,
@@ -50,13 +51,14 @@ function baselineFixture() {
       imageRef: `fdp-local/alert-service:${testedGitSha}`,
       imagePlatform: 'linux/amd64',
       imageIdDigest,
-      scannedImageDigest: manifestDigest,
-      scannedImageIdentitySource: 'buildx-manifest-verified-against-image-id',
+      dockerImageIdKind: 'docker-image-id',
+      scannedImageDigest: imageIdDigest,
+      scannedImageIdentitySource: 'buildx-loaded-image-id',
       repoDigests: [],
-      sourceImageDigest: manifestDigest,
-      sourceManifestMediaType: 'buildx-output-manifest',
-      platformManifestDigest: manifestDigest,
-      platformManifestMediaType: 'buildx-output-manifest',
+      sourceImageDigest: imageIdDigest,
+      sourceManifestMediaType: 'local-image-config',
+      platformManifestDigest: null,
+      platformManifestMediaType: 'local-image-config',
       platformConfigDigest: imageIdDigest,
       buildxDigest: manifestDigest,
       buildxConfigDigest: imageIdDigest,
@@ -77,11 +79,10 @@ function baselineFixture() {
         properties: [
           { name: 'fraud-detection-platform:image-ref', value: `fdp-local/alert-service:${testedGitSha}` },
           { name: 'fraud-detection-platform:image-id', value: imageIdDigest },
-          { name: 'fraud-detection-platform:scanned-digest', value: manifestDigest },
+          { name: 'fraud-detection-platform:scanned-digest', value: imageIdDigest },
           { name: 'fraud-detection-platform:image-platform', value: 'linux/amd64' },
           { name: 'fraud-detection-platform:tested-git-sha', value: testedGitSha },
-          { name: 'fraud-detection-platform:source-manifest-media-type', value: 'buildx-output-manifest' },
-          { name: 'fraud-detection-platform:platform-manifest-digest', value: manifestDigest },
+          { name: 'fraud-detection-platform:source-manifest-media-type', value: 'local-image-config' },
         ],
       },
       components: [{ name: 'alpine-baselayout', type: 'library', version: '3.6.5', 'bom-ref': 'pkg:apk/alpine-baselayout@3.6.5' }],
@@ -130,6 +131,7 @@ function useRegistryImage(fixture, sourceIsIndex = true) {
   Object.assign(fixture.evidence, {
     imageRef,
     imageIdDigest,
+    dockerImageIdKind: 'platform-config',
     scannedImageDigest: manifestDigest,
     scannedImageIdentitySource: 'immutable-image-reference',
     repoDigests: [repoDigest],
@@ -144,6 +146,7 @@ function useRegistryImage(fixture, sourceIsIndex = true) {
   Object.assign(fixture.result, {
     imageRef,
     imageIdDigest,
+    dockerImageIdKind: 'platform-config',
     scannedImageDigest: manifestDigest,
     scannedImageIdentitySource: 'immutable-image-reference',
     repoDigests: [repoDigest],
@@ -172,7 +175,7 @@ test('accepts complete successful image scan and identity-bound SBOM evidence', 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
-test('accepts a pinned OCI index when its selected platform manifest matches the image config', () => {
+test('accepts a pinned OCI index when the loaded image ID matches its selected platform config', () => {
   const result = runValidator((fixture) => useRegistryImage(fixture, true));
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
@@ -206,7 +209,7 @@ test('rejects invalid Trivy JSON', () => {
   assert.match(result.stderr, /invalid JSON/i);
 });
 
-test('rejects a Trivy report for a different image config digest', () => {
+test('rejects a Trivy report for a different local image ID', () => {
   const result = runValidator((fixture) => { fixture.trivy.Metadata.ImageID = manifestDigest; });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Trivy report does not identify the image config digest/i);

@@ -4,12 +4,28 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const digestPattern = /^[^\s@]+(?:\/[^\s@]+)*@sha256:[a-f0-9]{64}$/;
-const localKafkaImage = "apache/kafka:4.4.0-temurin-25.0.5.1_2";
+const localKafkaImage = "fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2";
 const localNodeBuilderImage = "fdp-local/node-builder:26.13.1-npm12.2.3";
 const nodeBuilderBaseImage = "node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5";
 const kafkaDockerAssetsImage = "apache/kafka:4.4.0@sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f";
 const buildkitBuilderImage = "moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c";
 const kafkaDistributionSha512 = "f5ceba8a265ab6bb2d68362b1f6859a95e15d60ef92ba83b43fdf065b557dc18e98d6383c15b9977320e25b3a2c8b6f11decb17b0fa6c0f163423793a0eb95cb";
+const kafkaCompressionJars = [
+  {
+    name: "lz4-java",
+    version: "1.14.1",
+    url: "https://repo.maven.apache.org/maven2/at/yawk/lz4/lz4-java/1.14.1/lz4-java-1.14.1.jar",
+    sha256: "02d1ceb848d510fce228f66febee3254978df7d70d53da472a98eb3b5cf9caaf",
+    replaced: "lz4-java-1.8.0.jar",
+  },
+  {
+    name: "snappy-java",
+    version: "1.1.10.12",
+    url: "https://repo.maven.apache.org/maven2/org/xerial/snappy/snappy-java/1.1.10.12/snappy-java-1.1.10.12.jar",
+    sha256: "1c03ce77b3f2e926c25a952612e372404d80bc88c6c8052bede964804fabd732",
+    replaced: "snappy-java-1.1.10.5.jar",
+  },
+];
 const sourceImages = new Map();
 const failures = [];
 const unresolvedImageReferences = [];
@@ -175,53 +191,77 @@ const ciWorkflow = fs.readFileSync(ciWorkflowPath, "utf8");
 const buildkitReferences = [workflow, ciWorkflow].flatMap((source) =>
   [...source.matchAll(/^\s+image=(moby\/buildkit:\S+)/gm)].map((match) => match[1])
 );
-if (buildkitReferences.length !== 6 || buildkitReferences.some((image) => image !== buildkitBuilderImage)) {
+const buildxSetupCount = [workflow, ciWorkflow].reduce((count, source) =>
+  count + [...source.matchAll(/^\s+uses:\s*docker\/setup-buildx-action@/gm)].length, 0);
+if (buildxSetupCount === 0 || buildkitReferences.length !== buildxSetupCount
+  || buildkitReferences.some((image) => image !== buildkitBuilderImage)) {
   throw new Error("Every Docker Buildx workflow must use the same pinned BuildKit v0.35.1 image");
 }
 addReference(workflowPath, buildkitBuilderImage);
 function jobSection(source, jobName) {
-  const header = `\n  ${jobName}:\n`;
+  const header = "\n  " + jobName + ":\n";
   const start = source.indexOf(header);
-  if (start < 0) throw new Error(`Required workflow job is missing: ${jobName}`);
+  if (start < 0) throw new Error("Required workflow job is missing: " + jobName);
   const bodyStart = start + header.length;
   const remainder = source.slice(bodyStart);
   const nextJob = remainder.search(/\n  [a-z0-9_-]+:\n/);
   return remainder.slice(0, nextJob < 0 ? undefined : nextJob);
 }
 
-function parseIncludeEntries(jobText, jobName) {
-  const includeStart = jobText.indexOf("        include:\n");
-  if (includeStart < 0) throw new Error(`${jobName} scan matrix has no include entries`);
-  const stepsStart = jobText.indexOf("\n    steps:", includeStart);
-  if (stepsStart < 0) throw new Error(`${jobName} scan matrix is missing its steps section`);
-  const block = jobText.slice(includeStart + "        include:\n".length, stepsStart);
+function parseImageScanEntries(jobText) {
+  const lines = jobText.split(/\r?\n/);
   const entries = [];
-  let current = null;
-  for (const line of block.split(/\r?\n/)) {
-    const start = line.match(/^\s+- name:\s*(\S+)\s*$/);
-    if (start) {
-      if (current) entries.push(current);
-      current = { name: start[1] };
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index].trim() !== "uses: ./.github/actions/build-and-scan-image") continue;
+    const fields = {};
+    let insideWith = false;
+    for (let fieldIndex = index + 1; fieldIndex < lines.length; fieldIndex += 1) {
+      const line = lines[fieldIndex];
+      if (/^      - /.test(line)) break;
+      if (line.trim() === "with:") {
+        insideWith = true;
+        continue;
+      }
+      if (!insideWith) continue;
+      const field = line.match(/^ {10}([a-z-]+):\s*(.*?)\s*$/);
+      if (field) fields[field[1]] = field[2];
+    }
+    if (!fields.source || !fields["image-ref"] || !fields["artifact-name"]) {
+      failures.push("image-security contains a build-and-scan step with missing source, image-ref, or artifact-name input");
       continue;
     }
-    const field = line.match(/^\s+(image|dockerfile|target):\s*(\S+)\s*$/);
-    if (field && current) current[field[1]] = field[2];
+    entries.push(fields);
   }
-  if (current) entries.push(current);
-  if (!entries.length || entries.some((entry) => !entry.name || !entry.image)) {
-    throw new Error(`${jobName} scan matrix contains an incomplete entry`);
-  }
+  if (entries.length === 0) failures.push("image-security has no build-and-scan image steps");
   return entries;
 }
 
-const externalImageJob = jobSection(workflow, "external-images");
-const externalEntries = parseIncludeEntries(externalImageJob, "external-images");
-const backendJob = jobSection(workflow, "backend-images");
-const backendModuleBlock = backendJob.match(/^ {8}module:\s*\n((?:^ {10}- \S+\s*\n?)+)/m)?.[1];
-if (!backendModuleBlock) throw new Error("backend-images scan matrix has no backend module list");
-const backendModules = [...backendModuleBlock.matchAll(/^ {10}- (\S+)\s*$/gm)].map((match) => match[1]);
-const serviceEntries = parseIncludeEntries(jobSection(workflow, "service-images"), "service-images");
-
+const imageJob = jobSection(workflow, "image-security");
+const imageEntries = parseImageScanEntries(imageJob);
+const imageScanActionCount = [...workflow.matchAll(/^\s+uses:\s*\.\/\.github\/actions\/build-and-scan-image\s*$/gm)].length;
+if (imageScanActionCount !== imageEntries.length) {
+  failures.push("All docker-compose-ci image builds and scans must be steps in the single image-security job");
+}
+for (const retiredJob of ["backend-images", "service-images", "external-images", "image-scan-evidence"]) {
+  if (new RegExp("^  " + retiredJob + ":\\s*$", "m").test(workflow)) {
+    failures.push("docker-compose-ci.yml must keep image scan work consolidated in image-security; found " + retiredJob);
+  }
+}
+const requiredBackendModules = new Set([
+  "transaction-ingest-service",
+  "transaction-simulator-service",
+  "feature-enricher-service",
+  "fraud-scoring-service",
+  "alert-service",
+  "audit-trust-authority",
+  "model-promotion-policy-publisher",
+]);
+const requiredServiceImages = new Set(["ml-inference-service", "analyst-console-ui"]);
+const serviceDockerfiles = new Map([
+  ["ml-inference-service", "deployment/Dockerfile.ml-inference"],
+  ["analyst-console-ui", "deployment/Dockerfile.frontend"],
+]);
+const githubShaExpression = String.fromCharCode(36) + "{{ github.sha }}";
 const scannedImages = new Set();
 const expectedArtifacts = [];
 const sha = process.env.TESTED_GIT_SHA ?? process.env.GITHUB_SHA ?? "";
@@ -231,65 +271,129 @@ if ((process.argv.includes("--write-inventory") || process.argv.includes("--writ
 }
 if (process.argv.includes("--write-inventory") || process.argv.includes("--write-ci-inventory")) {
   const checkoutSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  if (checkoutSha !== sha) throw new Error(`Checked out revision ${checkoutSha} does not match inventory SHA ${sha}.`);
-}
-
-const externalNames = new Set();
-for (const entry of externalEntries) {
-  if (externalNames.has(entry.name)) failures.push(`external-images has a duplicate logical image name: ${entry.name}`);
-  externalNames.add(entry.name);
-  if (entry.image === localKafkaImage) {
-    if (entry.name !== "apache-kafka-runtime" || entry.dockerfile !== "deployment/Dockerfile.kafka" || entry.target) {
-      failures.push("Apache Kafka custom image must be built from its dedicated Dockerfile and scanned as a loaded image");
-    }
-    scannedImages.add(entry.image);
-  } else if (entry.image === localNodeBuilderImage) {
-    if (entry.name !== "node-builder" || entry.dockerfile !== "deployment/Dockerfile.frontend" || entry.target !== "node-builder") {
-      failures.push("Node builder scan must build the pinned node-builder target from deployment/Dockerfile.frontend");
-    }
-    scannedImages.add(entry.image);
-  } else if (!digestPattern.test(entry.image)) {
-    failures.push(`external-images matrix contains an unpinned image: ${entry.image}`);
-  } else {
-    scannedImages.add(entry.image.slice(entry.image.indexOf("@") + 1));
-  }
-  expectedArtifacts.push({
-    artifactName: `external-image-${entry.name}-security-${sha}`,
-    logicalName: entry.name,
-    imageRef: entry.image,
-    expectedPlatform: "linux/amd64",
-    source: entry.dockerfile ? "locally-built" : "registry-pinned",
-  });
+  if (checkoutSha !== sha) throw new Error("Checked out revision " + checkoutSha + " does not match inventory SHA " + sha + ".");
 }
 
 const backendNames = new Set();
-for (const moduleName of backendModules) {
-  if (backendNames.has(moduleName)) failures.push(`backend-images has a duplicate module: ${moduleName}`);
-  backendNames.add(moduleName);
-  expectedArtifacts.push({
-    artifactName: `backend-image-${moduleName}-security-${sha}`,
-    logicalName: moduleName,
-    imageRef: `fdp-local/${moduleName}:${sha}`,
-    expectedPlatform: "linux/amd64",
-    source: "buildx-loaded-image",
-  });
-}
-
 const serviceNames = new Set();
-for (const entry of serviceEntries) {
-  if (serviceNames.has(entry.name)) failures.push(`service-images has a duplicate service: ${entry.name}`);
-  serviceNames.add(entry.name);
+const externalNames = new Set();
+const seenArtifactNames = new Set();
+for (const entry of imageEntries) {
+  const artifactName = entry["artifact-name"];
+  const imageRef = entry["image-ref"];
+  const backendMatch = artifactName.match(/^backend-image-(.+)-security$/);
+  const serviceMatch = artifactName.match(/^service-image-(.+)-security$/);
+  const externalMatch = artifactName.match(/^external-image-(.+)-security$/);
+  const matches = [backendMatch, serviceMatch, externalMatch].filter(Boolean);
+  if (matches.length !== 1) {
+    failures.push("image-security has an invalid scan artifact name: " + artifactName);
+    continue;
+  }
+  const group = backendMatch ? "backend" : serviceMatch ? "service" : "external";
+  const logicalName = matches[0][1];
+  if (seenArtifactNames.has(artifactName)) failures.push("image-security contains a duplicate scan artifact: " + artifactName);
+  seenArtifactNames.add(artifactName);
+
+  let expectedSource;
+  if (group === "backend") {
+    if (backendNames.has(logicalName)) failures.push("image-security has a duplicate backend image: " + logicalName);
+    backendNames.add(logicalName);
+    const expectedImage = "fdp-local/" + logicalName + ":" + githubShaExpression;
+    if (!requiredBackendModules.has(logicalName)) failures.push("image-security contains an unexpected backend application image " + logicalName);
+    if (entry.source !== "buildx" || imageRef !== expectedImage
+      || entry.dockerfile !== "deployment/Dockerfile.backend"
+      || entry["build-args"] !== "MODULE_NAME=" + logicalName || entry.target) {
+      failures.push("Backend image " + logicalName + " must use the pinned Buildx Dockerfile and module build argument.");
+    }
+    expectedSource = "buildx-loaded-image";
+  } else if (group === "service") {
+    if (serviceNames.has(logicalName)) failures.push("image-security has a duplicate service image: " + logicalName);
+    serviceNames.add(logicalName);
+    const expectedImage = "fdp-local/" + logicalName + ":" + githubShaExpression;
+    if (!requiredServiceImages.has(logicalName)) failures.push("image-security contains an unexpected service image " + logicalName);
+    if (entry.source !== "buildx" || imageRef !== expectedImage
+      || entry.dockerfile !== serviceDockerfiles.get(logicalName)
+      || entry["build-args"] || entry.target) {
+      failures.push("Service image " + logicalName + " must use its reviewed Buildx Dockerfile.");
+    }
+    expectedSource = "buildx-loaded-image";
+  } else {
+    if (externalNames.has(logicalName)) failures.push("image-security has a duplicate external logical image name: " + logicalName);
+    externalNames.add(logicalName);
+    if (imageRef === localKafkaImage) {
+      if (logicalName !== "apache-kafka-runtime" || entry.source !== "buildx"
+        || entry.dockerfile !== "deployment/Dockerfile.kafka" || entry.target || entry["build-args"]) {
+        failures.push("Apache Kafka custom image must be built from its dedicated Dockerfile and scanned as a Buildx-loaded image.");
+      }
+      scannedImages.add(imageRef);
+      expectedSource = "buildx-loaded-image";
+    } else if (imageRef === localNodeBuilderImage) {
+      if (logicalName !== "node-builder" || entry.source !== "buildx"
+        || entry.dockerfile !== "deployment/Dockerfile.frontend" || entry.target !== "node-builder" || entry["build-args"]) {
+        failures.push("Node builder scan must build the node-builder target from deployment/Dockerfile.frontend.");
+      }
+      scannedImages.add(imageRef);
+      expectedSource = "buildx-loaded-image";
+    } else {
+      if (entry.source !== "registry" || !digestPattern.test(imageRef)
+        || entry.dockerfile || entry.target || entry["build-args"]) {
+        failures.push("External registry image " + logicalName + " must be pulled by immutable digest without build inputs.");
+      }
+      if (digestPattern.test(imageRef)) scannedImages.add(imageRef.slice(imageRef.indexOf("@") + 1));
+      expectedSource = "registry-pinned";
+    }
+  }
+
   expectedArtifacts.push({
-    artifactName: `service-image-${entry.name}-security-${sha}`,
-    logicalName: entry.name,
-    imageRef: `fdp-local/${entry.name}:${sha}`,
+    artifactName: artifactName + "-" + sha,
+    logicalName,
+    imageRef,
     expectedPlatform: "linux/amd64",
-    source: "buildx-loaded-image",
+    source: expectedSource,
   });
 }
-
+for (const moduleName of requiredBackendModules) {
+  if (!backendNames.has(moduleName)) failures.push("image-security is missing required application image " + moduleName);
+}
+for (const moduleName of backendNames) {
+  if (!requiredBackendModules.has(moduleName)) failures.push("image-security contains an unexpected application image " + moduleName);
+}
+for (const serviceName of requiredServiceImages) {
+  if (!serviceNames.has(serviceName)) failures.push("image-security is missing required application image " + serviceName);
+}
+for (const serviceName of serviceNames) {
+  if (!requiredServiceImages.has(serviceName)) failures.push("image-security contains an unexpected service image " + serviceName);
+}
 const kafkaDockerfilePath = "deployment/Dockerfile.kafka";
 const kafkaDockerfileLines = fs.readFileSync(kafkaDockerfilePath, "utf8").split(/\r?\n/);
+const kafkaComposePath = "deployment/docker-compose.yml";
+const kafkaCompose = fs.readFileSync(kafkaComposePath, "utf8");
+const composeKafkaImages = [...kafkaCompose.matchAll(/^\s+image:\s+(fdp-local\/kafka:\S+)\s*$/gm)]
+  .map((match) => match[1]);
+const composeClusterIds = [...kafkaCompose.matchAll(/^\s+CLUSTER_ID:\s*(\S+)\s*$/gm)].map((match) => match[1]);
+const composeKafkaLogDirectories = [...kafkaCompose.matchAll(/^\s+KAFKA_LOG_DIRS:\s*(\S+)\s*$/gm)]
+  .map((match) => match[1]);
+const composeKafkaVolumeMounts = [...kafkaCompose.matchAll(/^\s+- kafka-data:(\S+)\s*$/gm)]
+  .map((match) => match[1]);
+const brokerComposeBlock = kafkaCompose.match(/^  kafka:\r?\n([\s\S]*?)(?=^  [a-z0-9_-]+:\r?\n|^volumes:\r?\n)/m)?.[1] ?? "";
+const topicInitializerComposeBlock = kafkaCompose.match(/^  kafka-topics-init:\r?\n([\s\S]*?)(?=^  [a-z0-9_-]+:\r?\n|^volumes:\r?\n)/m)?.[1] ?? "";
+const topLevelComposeVolumes = kafkaCompose.match(/^volumes:\s*\n([\s\S]*)$/m)?.[1] ?? "";
+if (composeKafkaImages.length !== 2 || composeKafkaImages.some((image) => image !== localKafkaImage)) {
+  failures.push(`${kafkaComposePath}: broker and topic initializer must use the same reviewed local Kafka image`);
+}
+if (!/^    pull_policy:\s*build\s*$/m.test(brokerComposeBlock)
+  || !/^    pull_policy:\s*never\s*$/m.test(topicInitializerComposeBlock)) {
+  failures.push(`${kafkaComposePath}: Kafka broker must build locally and topic initialization must never pull a substitute image`);
+}
+if (composeClusterIds.length !== 1 || composeClusterIds[0] !== "4L6g3nShT-eMCtK--X86sw") {
+  failures.push(`${kafkaComposePath}: Kafka must define one stable KRaft cluster ID`);
+}
+if (composeKafkaLogDirectories.length !== 1 || composeKafkaLogDirectories[0] !== "/var/lib/kafka/data"
+  || composeKafkaVolumeMounts.length !== 1 || composeKafkaVolumeMounts[0] !== "/var/lib/kafka/data"
+  || !brokerComposeBlock.includes("- kafka-data:/var/lib/kafka/data")
+  || !/^  kafka-data:\s*$/m.test(topLevelComposeVolumes)) {
+  failures.push(`${kafkaComposePath}: Kafka log and KRaft metadata must share the single declared kafka-data volume`);
+}
 const kafkaSourceDeclaration = `FROM ${kafkaDockerAssetsImage} AS kafka-docker-assets`;
 const kafkaSourceIndexes = kafkaDockerfileLines.flatMap((line, index) =>
   line.trim() === kafkaSourceDeclaration ? [index] : []
@@ -317,6 +421,16 @@ if (
   || !kafkaDockerfile.includes(`echo '${kafkaDistributionSha512}  /tmp/kafka.tgz' | sha512sum -c -`)
 ) {
   failures.push(`${kafkaDockerfilePath}: expected the exact official Kafka 4.4.0 release artifact and SHA-512 checksum`);
+}
+for (const dependency of kafkaCompressionJars) {
+  const jarPath = `/tmp/${dependency.name}-${dependency.version}.jar`;
+  if (!kafkaDockerfile.includes(`wget -O ${jarPath} ${dependency.url}`)
+    || !kafkaDockerfile.includes(`echo '${dependency.sha256}  ${jarPath}' | sha256sum -c -`)
+    || !kafkaDockerfile.includes(`install -o appuser -g appuser -m 0644 ${jarPath} /opt/kafka/libs/${dependency.name}-${dependency.version}.jar`)
+    || !kafkaDockerfile.includes(`test -f /opt/kafka/libs/${dependency.replaced}`)
+    || !kafkaDockerfile.includes(`rm /opt/kafka/libs/${kafkaCompressionJars[0].replaced} /opt/kafka/libs/${kafkaCompressionJars[1].replaced}`)) {
+    failures.push(`${kafkaDockerfilePath}: ${dependency.name} must replace the reviewed vulnerable Kafka JAR with the checksum-pinned ${dependency.version} artifact`);
+  }
 }
 
 const kafkaAssetCopies = kafkaDockerfileLines.filter((line) => line.startsWith("COPY --from=kafka-docker-assets "));
@@ -484,7 +598,7 @@ for (const [argument, mode] of [[inventoryArgument, "compose"], [ciInventoryArgu
   writeFileSync(inventoryPath, `${JSON.stringify({
     schemaVersion: 1,
     testedGitSha: sha,
-    requiredScanJobs: mode === "ci" ? ["fdp37", "fdp38", "fdp39"] : ["backend", "service", "external"],
+    requiredScanJobs: mode === "ci" ? ["fdp37", "fdp38", "fdp39"] : ["images"],
     expectedArtifacts: mode === "ci" ? ciImageArtifacts : expectedArtifacts,
     dynamicImageUses: resolvedDynamicImages,
     sourceImageReferences: [...sourceImages].map(([imageRef, origins]) => ({ imageRef, origins: [...new Set(origins)].sort() })),
