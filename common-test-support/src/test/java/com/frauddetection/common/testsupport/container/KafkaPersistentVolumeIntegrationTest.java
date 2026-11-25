@@ -169,7 +169,9 @@ class KafkaPersistentVolumeIntegrationTest {
                                          boolean expectTransactionStateTopic) throws Exception {
         try (Admin admin = AdminClient.create(adminProperties(kafka))) {
             assertThat(admin.describeCluster().clusterId().get(30, TimeUnit.SECONDS)).isEqualTo(CLUSTER_ID);
-            var description = admin.describeTopics(List.of(topic)).all().get(30, TimeUnit.SECONDS).get(topic);
+            var descriptions = admin.describeTopics(List.of(topic)).topicNameValues();
+            assertThat(descriptions).containsKey(topic);
+            var description = descriptions.get(topic).get(30, TimeUnit.SECONDS);
             assertThat(description.partitions()).hasSize(expectedPartitions);
             var topics = admin.listTopics().names().get(30, TimeUnit.SECONDS);
             assertThat(topics).contains(topic);

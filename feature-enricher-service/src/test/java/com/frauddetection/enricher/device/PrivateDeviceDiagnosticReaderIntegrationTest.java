@@ -61,6 +61,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
 
     VerifiedDeviceAdmissionIntegrationTest fixture() { return f; }
     SourceOccurrenceAccess occurrenceReader() { return occurrenceReader; }
+    SourceOccurrenceCipher occurrenceCipher() { return occurrenceCipher; }
     MongoSourceLineage privateSource() { return privateSource; }
 
     @BeforeAll static void start() throws Exception {

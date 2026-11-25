@@ -62,7 +62,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Record exact tested revision
         run: |
@@ -72,10 +72,8 @@ jobs:
           echo "Signed Graph E2E revision: $TESTED_GIT_SHA"
 
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: ./.github/actions/setup-patched-java
         with:
-          distribution: temurin
-          java-version: "21"
           cache: maven
 
       - name: Verify Docker is available for signed owner fixtures

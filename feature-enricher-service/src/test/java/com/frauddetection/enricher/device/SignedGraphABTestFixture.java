@@ -134,7 +134,7 @@ public final class SignedGraphABTestFixture {
                 graphOwnerClients.add(sourceClient);
                 graphOwnerClients.add(deviceClient);
                 var occurrences = MongoSourceOccurrenceStore.readOnly(sourceClient, f.database, sourcePrincipal,
-                        f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK, sourceDevice.occurrenceCipher,
+                        f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK, sourceDevice.occurrenceCipher(),
                         new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE,
                                 "transaction-ingest"));
                 var lineage = new MongoSourceLineage(sourceClient, f.database, sourcePrincipal,

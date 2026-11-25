@@ -13,7 +13,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Container;
-import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.utility.DockerImageName;
@@ -40,7 +39,7 @@ class RedisAclIntegrationTest {
     private static final DefaultRedisScript<Long> GLOBAL_DELETE_SCRIPT = new DefaultRedisScript<>(
             "redis.call('FLUSHALL'); return 1", Long.class);
 
-    @Container
+    @org.testcontainers.junit.jupiter.Container
     static final GenericContainer<?> REDIS = RedisTestSupport.newContainer();
 
     private static StringRedisTemplate feature;
@@ -268,6 +267,6 @@ class RedisAclIntegrationTest {
     }
 
     private static void assertDenied(Runnable operation) {
-        assertThatThrownBy(operation).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(operation::run).isInstanceOf(RuntimeException.class);
     }
 }

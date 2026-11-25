@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,29 @@ const fixed = {
 const shellValidator = fileURLToPath(new URL("./verify-temurin-java-runtime.sh", import.meta.url));
 const runtimePolicy = fileURLToPath(new URL("./java-runtime-policy.properties", import.meta.url));
 
+function findPosixShell() {
+  if (process.platform !== "win32") {
+    return { executable: "sh", pathDirectory: undefined, toPosixPath: (value) => value };
+  }
+
+  const gitBin = join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "usr", "bin");
+  const shellExecutable = join(gitBin, "sh.exe");
+  const cygpathExecutable = join(gitBin, "cygpath.exe");
+  if (!existsSync(shellExecutable) || !existsSync(cygpathExecutable)) return null;
+
+  return {
+    executable: shellExecutable,
+    pathDirectory: gitBin,
+    toPosixPath(value) {
+      const result = spawnSync(cygpathExecutable, ["-u", value], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`Git Bash could not translate path ${value}: ${result.stderr}`);
+      return result.stdout.trim();
+    }
+  };
+}
+
+const posixShell = findPosixShell();
+
 test("accepts the approved patched Temurin 21 build", () => {
   assert.equal(validateRuntimeProperties(fixed).runtimeVersion, fixed["java.runtime.version"]);
 });
@@ -44,7 +67,9 @@ test("rejects a wrong feature version and a different JVM vendor", () => {
 
 test("rejects malformed, unrecognized, and incomplete runtime metadata", () => {
   assert.throws(() => parseJavaVersion("21.latest+2"), /Malformed Java version/);
-  assert.throws(() => validateRuntimeProperties({ ...fixed, "java.vm.version": "unknown" }), /Malformed Java version/);
+  assert.throws(() => validateRuntimeProperties({ ...fixed, "java.version": "21.0.13.1+2" }), /Unapproved Java version/);
+  assert.throws(() => validateRuntimeProperties({ ...fixed, "java.vm.version": "21.0.13.1+1-LTS" }), /Unapproved java\.vm\.version/);
+  assert.throws(() => validateRuntimeProperties({ ...fixed, "java.vm.version": "unknown" }), /Unapproved java\.vm\.version/);
   assert.throws(() => validateRuntimeProperties({ ...fixed, "java.runtime.version": undefined }), /Missing Java runtime metadata/);
   const { "java.vm.vendor": omitted, ...withoutVmVendor } = fixed;
   void omitted;
@@ -69,7 +94,7 @@ test("parses Java property output without confusing unrelated lines", () => {
 });
 
 test("Node and POSIX shell validators apply the same approved runtime cases", {
-  skip: process.platform === "win32",
+  skip: posixShell === null,
 }, () => {
   const root = mkdtempSync(join(tmpdir(), "java-runtime-policy-"));
   const javaHome = join(root, "jdk");
@@ -90,20 +115,21 @@ test("Node and POSIX shell validators apply the same approved runtime cases", {
     ];
 
     for (const [label, properties, accepted] of cases) {
-      const propertiesOutput = Object.entries(properties)
+      const shellJavaHome = posixShell.toPosixPath(javaHome);
+      const propertiesOutput = Object.entries({ ...properties, "java.home": shellJavaHome })
         .filter(([, value]) => value !== undefined)
         .map(([key, value]) => `    ${key} = ${value}`)
         .join("\n");
       if (accepted) assert.doesNotThrow(() => validateRuntimeProperties(properties), label);
       else assert.throws(() => validateRuntimeProperties(properties), undefined, label);
 
-      const shellResult = spawnSync("sh", [shellValidator], {
+      const shellResult = spawnSync(posixShell.executable, [posixShell.toPosixPath(shellValidator)], {
         encoding: "utf8",
         env: {
           ...process.env,
-          PATH: `${binDirectory}${delimiter}${process.env.PATH ?? ""}`,
-          JAVA_HOME: javaHome,
-          JAVA_RUNTIME_POLICY_FILE: runtimePolicy,
+          PATH: [binDirectory, posixShell.pathDirectory, process.env.PATH].filter(Boolean).join(delimiter),
+          JAVA_HOME: shellJavaHome,
+          JAVA_RUNTIME_POLICY_FILE: posixShell.toPosixPath(runtimePolicy),
           JAVA_POLICY_FIXTURE: propertiesOutput,
         },
       });
