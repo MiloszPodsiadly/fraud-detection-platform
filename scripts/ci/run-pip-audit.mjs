@@ -44,29 +44,71 @@ export function validateAuditReport(contents, lockedPackages) {
   } catch {
     throw new Error("pip-audit did not produce valid JSON");
   }
-  if (!Array.isArray(report) || report.length === 0) {
-    throw new Error("pip-audit JSON must be a non-empty dependency array");
+  if (!report || typeof report !== "object" || Array.isArray(report)) {
+    throw new Error("pip-audit JSON must be a top-level report object");
+  }
+  if (!Array.isArray(report.dependencies) || report.dependencies.length === 0) {
+    throw new Error("pip-audit JSON must contain a non-empty dependencies array");
+  }
+  if (!Array.isArray(report.fixes)) {
+    throw new Error("pip-audit JSON must contain the fixes array from the pinned CLI format");
   }
 
   const expected = new Map(lockedPackages.map((item) => [normalizePackageName(item.name), item.version]));
   const actual = new Map();
   let vulnerabilityCount = 0;
-  for (const dependency of report) {
-    if (!dependency || typeof dependency.name !== "string" || typeof dependency.version !== "string"
-      || !Array.isArray(dependency.vulns)) {
+  for (const dependency of report.dependencies) {
+    if (!dependency || typeof dependency !== "object" || Array.isArray(dependency)
+      || typeof dependency.name !== "string" || dependency.name.length === 0) {
       throw new Error("pip-audit JSON contains a malformed dependency entry");
+    }
+    if (Object.hasOwn(dependency, "skip_reason")) {
+      throw new Error(`pip-audit skipped locked package ${dependency.name}`);
+    }
+    if (typeof dependency.version !== "string" || dependency.version.length === 0
+      || !Array.isArray(dependency.vulns)) {
+      throw new Error(`pip-audit JSON contains a malformed or incomplete dependency entry for ${dependency.name}`);
     }
     const name = normalizePackageName(dependency.name);
     if (actual.has(name)) throw new Error(`pip-audit JSON repeats package ${dependency.name}`);
     actual.set(name, dependency.version);
     for (const vulnerability of dependency.vulns) {
-      if (!vulnerability || typeof vulnerability.id !== "string" || vulnerability.id.length === 0) {
+      if (!vulnerability || typeof vulnerability !== "object" || Array.isArray(vulnerability)
+        || typeof vulnerability.id !== "string" || vulnerability.id.length === 0
+        || !Array.isArray(vulnerability.fix_versions)
+        || vulnerability.fix_versions.some((version) => typeof version !== "string" || version.length === 0)
+        || (vulnerability.aliases !== undefined
+          && (!Array.isArray(vulnerability.aliases) || vulnerability.aliases.some((alias) => typeof alias !== "string")))
+        || (vulnerability.description !== undefined && typeof vulnerability.description !== "string")) {
         throw new Error(`pip-audit JSON contains a malformed vulnerability for ${dependency.name}`);
       }
       vulnerabilityCount += 1;
     }
   }
 
+  for (const fix of report.fixes) {
+    if (!fix || typeof fix !== "object" || Array.isArray(fix)
+      || typeof fix.name !== "string" || fix.name.length === 0) {
+      throw new Error("pip-audit JSON contains a malformed fix entry");
+    }
+    const expectedVersion = expected.get(normalizePackageName(fix.name));
+    if (!expectedVersion) throw new Error(`pip-audit JSON contains a fix for an unlocked package (${fix.name})`);
+    if (Object.hasOwn(fix, "skip_reason")) {
+      if (typeof fix.version !== "string" || fix.version.length === 0
+        || fix.version !== expectedVersion
+        || typeof fix.skip_reason !== "string" || fix.skip_reason.length === 0) {
+        throw new Error(`pip-audit JSON contains a malformed skipped fix for ${fix.name}`);
+      }
+    } else if (typeof fix.old_version !== "string" || fix.old_version.length === 0
+      || fix.old_version !== expectedVersion
+      || typeof fix.new_version !== "string" || fix.new_version.length === 0) {
+      throw new Error(`pip-audit JSON contains a malformed resolved fix for ${fix.name}`);
+    }
+  }
+
+  for (const name of actual.keys()) {
+    if (!expected.has(name)) throw new Error(`pip-audit evidence contains an unlocked package (${name})`);
+  }
   if (actual.size !== expected.size) {
     throw new Error(`pip-audit covered ${actual.size} packages; the lock pins ${expected.size}`);
   }
@@ -74,9 +116,6 @@ export function validateAuditReport(contents, lockedPackages) {
     if (actual.get(name) !== version) {
       throw new Error(`pip-audit evidence is missing or mismatches a pinned package (${name})`);
     }
-  }
-  for (const name of actual.keys()) {
-    if (!expected.has(name)) throw new Error(`pip-audit evidence contains an unlocked package (${name})`);
   }
   return { packageCount: actual.size, vulnerabilityCount };
 }

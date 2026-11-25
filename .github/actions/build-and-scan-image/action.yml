@@ -22,6 +22,10 @@ inputs:
   artifact-name:
     description: Unique evidence artifact name without the revision suffix.
     required: true
+  cache-scope:
+    description: Unique GitHub Actions BuildKit cache scope for this image.
+    required: false
+    default: image-build
   expected-platform:
     description: Required platform of the image.
     required: false
@@ -40,7 +44,8 @@ runs:
         push: false
         load: true
         pull: true
-        no-cache: true
+        cache-from: type=gha,scope=${{ inputs.cache-scope }}
+        cache-to: type=gha,scope=${{ inputs.cache-scope }},mode=max,ignore-error=true
         tags: ${{ inputs.image-ref }}
         build-args: ${{ inputs.build-args }}
 

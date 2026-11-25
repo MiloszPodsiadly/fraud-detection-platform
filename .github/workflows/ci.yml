@@ -1239,7 +1239,7 @@ jobs:
           node-version: "26.13.1"
 
       - name: Exercise image inventory and evidence rejection cases
-        run: node --test scripts/ci/check-image-scan-coverage.test.mjs scripts/ci/validate-image-scan-evidence.test.mjs
+        run: node --test scripts/ci/check-image-scan-coverage.test.mjs scripts/ci/validate-image-scan-evidence.test.mjs scripts/ci/verify-buildx-image-metadata.test.mjs
 
       - name: Derive expected FDP image scan inventory
         run: node scripts/ci/check-image-scan-coverage.mjs --write-ci-inventory target/image-security/expected-inventory.json

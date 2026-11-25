@@ -31,10 +31,11 @@ Candidate for consolidation:
 ## Patched Kafka Runtime Image
 
 Job IDs:
-- `external-images / apache-kafka-runtime`
-- `external-images / temurin-kafka-runtime`
-- `external-images / node-builder`
-- `image-scan-evidence / Aggregate image scan and SBOM evidence`
+- `docker-compose-ci.yml::image-inventory`
+- `docker-compose-ci.yml::infrastructure-images[apache-kafka-runtime]`
+- `docker-compose-ci.yml::infrastructure-images[temurin-kafka-runtime]`
+- `docker-compose-ci.yml::service-images[node-builder]`
+- `docker-compose-ci.yml::image-scan-evidence`
 
 Purpose:
 - Build and scan the Kafka runtime used by Compose and Testcontainers.
@@ -43,9 +44,9 @@ Proves:
 - Kafka 4.4.0 is unpacked from the official release archive only after its published SHA-512 matches.
 - The built image runs the fixed Temurin 25.0.5.1+2 runtime from Eclipse Adoptium.
 - The final image and its pinned Temurin base are scanned, and image evidence is tied to the workflow revision.
-- The npm-patched Node builder stage is scanned separately from the final Nginx image.
-- The aggregate gate requires every backend, service, and external-image artifact, successful source jobs, a HIGH/CRITICAL-clean Trivy report, and a CycloneDX SBOM bound to the scanned image digest and platform.
-- Pinned registry references are resolved to the `linux/amd64` platform manifest, and that manifest's config digest must match the image loaded by Docker for scanning.
+- The npm-patched Node builder stage is scanned separately from the final Nginx image; its matrix entry is part of the service image group.
+- The checked-in image inventory drives bounded backend, service, and infrastructure matrices. The aggregate gate requires every matrix job and every expected image artifact to succeed, with a HIGH/CRITICAL-clean Trivy report and a CycloneDX SBOM bound to the scanned image ID.
+- Buildx manifest and config digests are recorded independently. Pinned registry references are resolved from hashed raw manifest bytes to the `linux/amd64` platform manifest, whose config digest must match the image loaded by Docker for scanning.
 - Compose points broker data at the single named `kafka-data` volume. The custom image declares no Docker volumes, so Compose and Testcontainers do not get hidden anonymous Kafka mounts; Testcontainers use their disposable container layer.
 
 Does not prove:
@@ -67,8 +68,8 @@ Required for merge:
 ## Redis ACL Runtime Equivalence
 
 Job IDs:
-- `Backend Maven Build`
-- `external-images / redis-runtime`
+- `ci.yml::backend`
+- `docker-compose-ci.yml::infrastructure-images[redis-runtime]`
 
 Purpose:
 - Exercise the production Redis ACL policy against the pinned Redis 8.12 image used by Compose and Testcontainers.
@@ -243,7 +244,7 @@ Candidate for consolidation:
 ## Resolved CycloneDX SBOMs
 
 Job ID:
-- `resolved-sbom`
+- `sbom.yml::resolved-sbom`
 
 Purpose:
 - Publish the complete resolved Maven, npm, and Python dependency inventories for the tested revision.
@@ -276,7 +277,7 @@ Candidate for consolidation:
 ## Python pip-audit
 
 Job ID:
-- `python-dependency-audit`
+- `ci.yml::python-dependency-audit`
 
 Purpose:
 - Audit the complete pinned Python dependency graph for known vulnerabilities and preserve machine-readable results.

@@ -72,9 +72,38 @@ function runCoverage(mutate = () => () => {}) {
   }
 }
 
-test('accepts the complete repository image inventory in one image security job', () => {
+test('accepts the complete repository inventory across bounded image matrices', () => {
   const result = runCoverage();
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test('rejects unbounded image matrix parallelism', () => {
+  const result = runCoverage((root) => {
+    const workflowPath = join(root, '.github', 'workflows', 'docker-compose-ci.yml');
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const changedWorkflow = workflow.replace('max-parallel: 4', 'max-parallel: 99');
+    assert.notEqual(changedWorkflow, workflow, 'expected to locate the infrastructure matrix limit');
+    writeFileSync(workflowPath, changedWorkflow, 'utf8');
+    return () => writeFileSync(workflowPath, workflow, 'utf8');
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /bounded to 4/i);
+});
+
+test('rejects a scan matrix that hides a failed image step', () => {
+  const result = runCoverage((root) => {
+    const workflowPath = join(root, '.github', 'workflows', 'docker-compose-ci.yml');
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const changedWorkflow = workflow.replace(
+      '        uses: ./.github/actions/build-and-scan-image\n        with:',
+      '        continue-on-error: true\n        uses: ./.github/actions/build-and-scan-image\n        with:',
+    );
+    assert.notEqual(changedWorkflow, workflow, 'expected to locate a matrix scan action');
+    writeFileSync(workflowPath, changedWorkflow, 'utf8');
+    return () => writeFileSync(workflowPath, workflow, 'utf8');
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /image build and scan failures must fail/i);
 });
 
 test('rejects a floating image reference introduced in a Docker build stage', () => {
@@ -87,17 +116,14 @@ test('rejects a floating image reference introduced in a Docker build stage', ()
   assert.match(result.stderr, /not pinned|floating/i);
 });
 
-test('rejects a source image missing from the image security job', () => {
+test('rejects a source image omitted from the declarative image inventory', () => {
   const result = runCoverage((root) => {
-    const workflowPath = join(root, '.github', 'workflows', 'docker-compose-ci.yml');
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const withoutMongoScan = workflow.replace(
-      /^[ \t]*image-ref: mongo:7\.0\.48@sha256:[a-f0-9]{64}\r?\n/m,
-      '',
-    );
-    assert.notEqual(withoutMongoScan, workflow, 'expected to locate the MongoDB scan input');
-    writeFileSync(workflowPath, withoutMongoScan, 'utf8');
-    return () => writeFileSync(workflowPath, workflow, 'utf8');
+    const inventoryPath = join(root, 'scripts', 'ci', 'image-security-inventory.json');
+    const original = readFileSync(inventoryPath, 'utf8');
+    const inventory = JSON.parse(original);
+    inventory.groups.infrastructure = inventory.groups.infrastructure.filter((entry) => entry.logicalName !== 'mongodb');
+    writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`, 'utf8');
+    return () => writeFileSync(inventoryPath, original, 'utf8');
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /missing from external image scan matrix/i);
@@ -108,7 +134,7 @@ test('rejects a Docker build action that produces an image outside the scan inve
     const actionPath = join(root, '.github', 'actions', 'build-kafka-test-image', 'action.yml');
     const action = readFileSync(actionPath, 'utf8');
     const changedAction = action.replace(
-      'fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2',
+      'fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3',
       'fdp-local/kafka:4.4.0-unreviewed',
     );
     assert.notEqual(changedAction, action, 'expected to locate the Kafka build tag');
@@ -135,14 +161,14 @@ test('rejects a Kafka image that no longer checksum-pins the patched compression
   assert.match(result.stderr, /checksum-pinned 1\.1\.10\.12/i);
 });
 
-test('rejects an image security job that omits the policy publisher image', () => {
+test('rejects a declarative inventory that omits the policy publisher image', () => {
   const result = runCoverage((root) => {
-    const workflowPath = join(root, '.github', 'workflows', 'docker-compose-ci.yml');
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const withoutPublisher = workflow.replace(/^ {10}artifact-name: backend-image-model-promotion-policy-publisher-security\r?\n/m, '');
-    assert.notEqual(withoutPublisher, workflow, 'expected to locate the publisher scan artifact');
-    writeFileSync(workflowPath, withoutPublisher, 'utf8');
-    return () => writeFileSync(workflowPath, workflow, 'utf8');
+    const inventoryPath = join(root, 'scripts', 'ci', 'image-security-inventory.json');
+    const original = readFileSync(inventoryPath, 'utf8');
+    const inventory = JSON.parse(original);
+    inventory.groups.backend = inventory.groups.backend.filter((entry) => entry.logicalName !== 'model-promotion-policy-publisher');
+    writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`, 'utf8');
+    return () => writeFileSync(inventoryPath, original, 'utf8');
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /missing required application image model-promotion-policy-publisher/i);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 const [inventoryPathArgument, artifactsPathArgument] = process.argv.slice(2);
@@ -12,7 +13,15 @@ const artifactsPath = resolve(artifactsPathArgument);
 const failures = [];
 const shaPattern = /^[a-f0-9]{40}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
-const allowedSources = new Set(['buildx-loaded-image', 'locally-built', 'registry-pinned']);
+const allowedSources = new Set(['buildx-loaded-image', 'registry-pinned']);
+const manifestMediaTypes = new Set([
+  'application/vnd.oci.image.manifest.v1+json',
+  'application/vnd.docker.distribution.manifest.v2+json',
+]);
+const indexMediaTypes = new Set([
+  'application/vnd.oci.image.index.v1+json',
+  'application/vnd.docker.distribution.manifest.list.v2+json',
+]);
 
 function readJson(file, description) {
   try {
@@ -23,8 +32,65 @@ function readJson(file, description) {
   }
 }
 
+function hashFile(file) {
+  return createHash('sha256').update(readFileSync(file)).digest('hex');
+}
+
 function failUnless(condition, message) {
   if (!condition) failures.push(message);
+}
+
+function isDigest(value) {
+  return typeof value === 'string' && digestPattern.test(value);
+}
+
+function decodeManifest(encoded, description, expectedDigest) {
+  if (typeof encoded !== 'string' || encoded.length === 0) {
+    failures.push(`${description} raw manifest bytes are missing.`);
+    return null;
+  }
+  let bytes;
+  try {
+    bytes = Buffer.from(encoded, 'base64');
+  } catch {
+    failures.push(`${description} raw manifest bytes are not valid base64.`);
+    return null;
+  }
+  if (bytes.toString('base64') !== encoded) {
+    failures.push(`${description} raw manifest bytes are not canonical base64.`);
+    return null;
+  }
+  const actualDigest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+  failUnless(actualDigest === expectedDigest, `${description} raw manifest hash does not match its recorded digest.`);
+  try {
+    return JSON.parse(bytes.toString('utf8'));
+  } catch (error) {
+    failures.push(`${description} raw manifest is invalid JSON: ${error.message}`);
+    return null;
+  }
+}
+
+function verifyCycloneDx(sbom, description) {
+  failUnless(sbom.bomFormat === 'CycloneDX'
+    && typeof sbom.specVersion === 'string'
+    && /^1\.[0-9]+$/.test(sbom.specVersion)
+    && Number.isInteger(sbom.version)
+    && sbom.version > 0
+    && Array.isArray(sbom.components)
+    && sbom.components.length > 0
+    && sbom.metadata && typeof sbom.metadata === 'object',
+  `${description}: image SBOM is not a populated CycloneDX JSON document.`);
+  for (const component of Array.isArray(sbom.components) ? sbom.components : []) {
+    failUnless(component && typeof component.name === 'string' && component.name.length > 0
+      && typeof component.type === 'string' && component.type.length > 0,
+    `${description}: image SBOM has a component without a name or CycloneDX type.`);
+  }
+  const bomRefs = new Set();
+  for (const component of Array.isArray(sbom.components) ? sbom.components : []) {
+    if (typeof component?.['bom-ref'] !== 'string') continue;
+    if (bomRefs.has(component['bom-ref'])) failures.push(`${description}: image SBOM contains a duplicate bom-ref.`);
+    bomRefs.add(component['bom-ref']);
+  }
 }
 
 const inventory = readJson(inventoryPath, 'Expected image inventory');
@@ -94,8 +160,7 @@ try {
 } catch (error) {
   failures.push(`Downloaded image evidence directory is missing or unreadable: ${error.message}`);
 }
-const expectedSorted = [...expectedNames].sort();
-for (const name of expectedSorted) {
+for (const name of [...expectedNames].sort()) {
   if (!actualDirectories.includes(name)) failures.push(`Required image evidence artifact is missing: ${name}`);
 }
 for (const name of actualDirectories) {
@@ -106,120 +171,146 @@ const summaries = [];
 for (const expected of inventory.expectedArtifacts) {
   if (!expected || typeof expected.artifactName !== 'string') continue;
   const artifactDirectory = join(artifactsPath, expected.artifactName);
-  if (!actualDirectories.includes(expected.artifactName)) continue;
-  if (!statSync(artifactDirectory).isDirectory()) continue;
-  if (typeof expected.imageRef !== 'string' || !expected.imageRef) continue;
-
-  const evidence = readJson(join(artifactDirectory, 'image-security-evidence.json'), `${expected.artifactName}/image-security-evidence.json`);
-  const result = readJson(join(artifactDirectory, 'image-scan-result.json'), `${expected.artifactName}/image-scan-result.json`);
-  const trivy = readJson(join(artifactDirectory, 'trivy-image.json'), `${expected.artifactName}/trivy-image.json`);
-  const sbom = readJson(join(artifactDirectory, 'image.cdx.json'), `${expected.artifactName}/image.cdx.json`);
-  if (!evidence || !result || !trivy || !sbom) continue;
+  if (!actualDirectories.includes(expected.artifactName) || !statSync(artifactDirectory).isDirectory()) continue;
+  const evidencePath = join(artifactDirectory, 'image-security-evidence.json');
+  const resultPath = join(artifactDirectory, 'image-scan-result.json');
+  const trivyPath = join(artifactDirectory, 'trivy-image.json');
+  const rawSbomPath = join(artifactDirectory, 'image.cdx.raw.json');
+  const boundSbomPath = join(artifactDirectory, 'image.cdx.json');
+  const evidence = readJson(evidencePath, `${expected.artifactName}/image-security-evidence.json`);
+  const result = readJson(resultPath, `${expected.artifactName}/image-scan-result.json`);
+  const trivy = readJson(trivyPath, `${expected.artifactName}/trivy-image.json`);
+  const rawSbom = readJson(rawSbomPath, `${expected.artifactName}/image.cdx.raw.json`);
+  const boundSbom = readJson(boundSbomPath, `${expected.artifactName}/image.cdx.json`);
+  const buildxMetadata = expected.source === 'buildx-loaded-image'
+    ? readJson(join(artifactDirectory, 'buildx-metadata.json'), `${expected.artifactName}/buildx-metadata.json`)
+    : null;
+  const registryIdentity = expected.source === 'registry-pinned'
+    ? readJson(join(artifactDirectory, 'registry-image-identity.json'), `${expected.artifactName}/registry-image-identity.json`)
+    : null;
+  if (!evidence || !result || !trivy || !rawSbom || !boundSbom
+    || (expected.source === 'buildx-loaded-image' && !buildxMetadata)
+    || (expected.source === 'registry-pinned' && !registryIdentity)) continue;
 
   const expectedRef = expected.imageRef.replaceAll('${{ github.sha }}', expectedSha);
+  const imageId = evidence.imageIdDigest;
+  failUnless(evidence.schemaVersion === 2, `${expected.artifactName}: unsupported image evidence schema.`);
   failUnless(evidence.testedGitSha === expectedSha, `${expected.artifactName}: scanned evidence belongs to a different Git SHA.`);
   failUnless(evidence.imageRef === expectedRef, `${expected.artifactName}: scanned image reference does not match the derived inventory.`);
   failUnless(evidence.imagePlatform === expected.expectedPlatform, `${expected.artifactName}: scanned platform does not match the required platform.`);
-  failUnless(digestPattern.test(evidence.imageIdDigest ?? ''), `${expected.artifactName}: image config/image ID digest is invalid.`);
-  failUnless(digestPattern.test(evidence.scannedImageDigest ?? ''), `${expected.artifactName}: immutable scanned image digest is invalid.`);
-  failUnless(evidence.platformConfigDigest === null || digestPattern.test(evidence.platformConfigDigest ?? ''),
-    `${expected.artifactName}: selected platform config digest is invalid.`);
-  failUnless(['platform-config', 'platform-manifest', 'source-manifest', 'docker-image-id'].includes(evidence.dockerImageIdKind),
-    `${expected.artifactName}: Docker image ID kind is missing or unsupported.`);
+  failUnless(isDigest(imageId), `${expected.artifactName}: Docker image ID/config digest is invalid.`);
+  failUnless(evidence.scannedImageDigest === imageId && evidence.scannedImageIdentitySource === 'docker-image-id',
+    `${expected.artifactName}: scanners are not bound to the immutable Docker image ID.`);
   failUnless(Array.isArray(evidence.repoDigests), `${expected.artifactName}: repository digest evidence is missing.`);
-  failUnless(evidence.sourceImageDigest === evidence.scannedImageDigest,
-    `${expected.artifactName}: scanned digest does not identify the selected source image.`);
 
   if (expected.source === 'buildx-loaded-image') {
-    failUnless(evidence.scannedImageIdentitySource === 'buildx-loaded-image-id'
-      && evidence.dockerImageIdKind === 'docker-image-id'
-      && evidence.scannedImageDigest === evidence.imageIdDigest
-      && evidence.sourceImageDigest === evidence.imageIdDigest,
-    `${expected.artifactName}: Buildx-loaded local image ID is not the identity Trivy analyzed.`);
-    failUnless(evidence.sourceManifestMediaType === 'local-image-config'
-      && evidence.platformManifestMediaType === 'local-image-config'
-      && evidence.platformManifestDigest === null
-      && evidence.platformConfigDigest === evidence.buildxConfigDigest,
-    `${expected.artifactName}: local Buildx metadata is not separated from the loaded Docker image ID.`);
-    failUnless(evidence.buildxDigest === null || digestPattern.test(evidence.buildxDigest),
-      `${expected.artifactName}: Buildx output manifest digest is malformed.`);
-    failUnless(evidence.buildxConfigDigest === null || digestPattern.test(evidence.buildxConfigDigest),
-      `${expected.artifactName}: Buildx output config digest is malformed.`);
-  } else if (expected.source === 'locally-built') {
-    failUnless(evidence.scannedImageIdentitySource === 'docker-image-id',
-      `${expected.artifactName}: locally built image identity does not come from the Docker image ID.`);
+    const descriptor = buildxMetadata['containerimage.descriptor'];
+    const buildxManifestDigest = buildxMetadata['containerimage.digest'];
+    const buildxConfigDigest = buildxMetadata['containerimage.config.digest'];
+    const descriptorMediaType = descriptor?.mediaType;
+    const descriptorConfig = descriptor?.annotations?.['config.digest'];
+    failUnless(isDigest(buildxManifestDigest) && isDigest(buildxConfigDigest),
+      `${expected.artifactName}: Buildx output metadata is missing a valid manifest or config digest.`);
+    failUnless(descriptor && descriptor.digest === buildxManifestDigest
+      && descriptorConfig === buildxConfigDigest && manifestMediaTypes.has(descriptorMediaType),
+    `${expected.artifactName}: Buildx descriptor does not bind its output manifest and config.`);
+    failUnless(evidence.buildxActionDigest === buildxManifestDigest
+      && evidence.buildxDigest === buildxManifestDigest
+      && evidence.buildxConfigDigest === buildxConfigDigest,
+    `${expected.artifactName}: Buildx action output differs from the preserved exporter metadata.`);
+    failUnless(buildxConfigDigest === imageId && evidence.platformConfigDigest === imageId,
+      `${expected.artifactName}: loaded Docker image ID does not match Buildx's config digest.`);
     failUnless(evidence.dockerImageIdKind === 'docker-image-id'
-      && evidence.scannedImageDigest === evidence.imageIdDigest,
-    `${expected.artifactName}: locally built image digest does not match its Docker image ID.`);
-    failUnless(evidence.sourceImageDigest === evidence.imageIdDigest
-      && evidence.sourceManifestMediaType === 'local-image-config'
-      && evidence.platformManifestDigest === null
-      && evidence.platformManifestMediaType === 'local-image-config'
-      && evidence.platformConfigDigest === null,
-    `${expected.artifactName}: local image config identity evidence is incomplete.`);
+      && evidence.sourceImageDigest === buildxManifestDigest
+      && evidence.sourceManifestMediaType === descriptorMediaType
+      && evidence.sourceManifestContentDigest === buildxManifestDigest
+      && evidence.platformManifestDigest === buildxManifestDigest
+      && evidence.platformManifestMediaType === descriptorMediaType
+      && evidence.platformManifestContentDigest === buildxManifestDigest,
+    `${expected.artifactName}: Buildx manifest/config identity evidence is inconsistent.`);
   } else if (expected.source === 'registry-pinned') {
     const pinnedDigest = expectedRef.match(/@(?<digest>sha256:[a-f0-9]{64})$/)?.groups?.digest;
-    const indexMediaTypes = new Set([
-      'application/vnd.oci.image.index.v1+json',
-      'application/vnd.docker.distribution.manifest.list.v2+json',
-    ]);
-    const manifestMediaTypes = new Set([
-      'application/vnd.oci.image.manifest.v1+json',
-      'application/vnd.docker.distribution.manifest.v2+json',
-    ]);
+    const registryRepository = expectedRef.slice(0, expectedRef.lastIndexOf('@'));
     failUnless(Boolean(pinnedDigest), `${expected.artifactName}: registry image reference is not pinned by digest.`);
-    failUnless(evidence.scannedImageIdentitySource === 'immutable-image-reference',
-      `${expected.artifactName}: registry image identity was not recorded from its immutable reference.`);
-    failUnless(evidence.scannedImageDigest === pinnedDigest,
-      `${expected.artifactName}: scanned digest does not match the pinned registry reference.`);
-    failUnless(Array.isArray(evidence.repoDigests)
-      && evidence.repoDigests.some((repoDigest) => typeof repoDigest === 'string'
-        && (repoDigest.endsWith(`@${pinnedDigest}`) || repoDigest.endsWith(`@${evidence.platformManifestDigest}`))),
-    `${expected.artifactName}: Docker RepoDigests do not match the pinned index or selected platform manifest.`);
-    const sourceIsIndex = indexMediaTypes.has(evidence.sourceManifestMediaType);
-    const sourceIsManifest = manifestMediaTypes.has(evidence.sourceManifestMediaType);
-    const platformManifestMatchesSource = sourceIsIndex
-      ? evidence.platformManifestMediaType !== evidence.sourceManifestMediaType
-        && evidence.platformManifestDigest !== pinnedDigest
-      : evidence.platformManifestDigest === pinnedDigest
-        && evidence.platformManifestMediaType === evidence.sourceManifestMediaType;
-    failUnless((sourceIsIndex || sourceIsManifest)
-      && manifestMediaTypes.has(evidence.platformManifestMediaType)
-      && digestPattern.test(evidence.platformManifestDigest ?? '')
-      && platformManifestMatchesSource,
-    `${expected.artifactName}: pinned registry image does not record its OCI index/manifest and selected platform manifest consistently.`);
-    const imageIdMatchesRecordedIdentity = evidence.dockerImageIdKind === 'platform-config'
-      ? evidence.platformConfigDigest === evidence.imageIdDigest
-      : evidence.dockerImageIdKind === 'platform-manifest'
-        ? evidence.platformManifestDigest === evidence.imageIdDigest
-        : evidence.dockerImageIdKind === 'source-manifest'
-          ? evidence.sourceImageDigest === evidence.imageIdDigest
-          : false;
-    failUnless(imageIdMatchesRecordedIdentity,
-      `${expected.artifactName}: Docker image ID does not match an independently inspected registry identity.`);
+    failUnless(registryIdentity.repository === registryRepository
+      && registryIdentity.expectedPlatform === expected.expectedPlatform,
+    `${expected.artifactName}: registry identity was inspected for another repository or platform.`);
+    const sourceManifest = decodeManifest(registryIdentity.sourceManifestRawBase64,
+      `${expected.artifactName}/source`, pinnedDigest);
+    const platformManifest = decodeManifest(registryIdentity.platformManifestRawBase64,
+      `${expected.artifactName}/platform`, registryIdentity.platformManifestDigest);
+    const sourceIsIndex = indexMediaTypes.has(registryIdentity.sourceManifestMediaType);
+    const sourceIsManifest = manifestMediaTypes.has(registryIdentity.sourceManifestMediaType);
+    if (sourceIsIndex && sourceManifest) {
+      const [expectedOs, expectedArchitecture] = expected.expectedPlatform.split('/');
+      const matching = Array.isArray(sourceManifest.manifests) ? sourceManifest.manifests.filter((entry) =>
+        entry?.platform?.os === expectedOs && entry?.platform?.architecture === expectedArchitecture) : [];
+      failUnless(matching.length === 1 && matching[0].digest === registryIdentity.platformManifestDigest,
+        `${expected.artifactName}: registry index does not identify exactly one expected platform manifest.`);
+    } else if (sourceIsManifest) {
+      failUnless(registryIdentity.platformManifestDigest === pinnedDigest
+        && registryIdentity.platformManifestRawBase64 === registryIdentity.sourceManifestRawBase64,
+      `${expected.artifactName}: direct platform manifest identity differs from the pinned registry manifest.`);
+    } else {
+      failures.push(`${expected.artifactName}: registry source uses an unsupported OCI manifest media type.`);
+    }
+    failUnless(platformManifest && manifestMediaTypes.has(platformManifest.mediaType)
+      && platformManifest.config?.digest === imageId
+      && registryIdentity.platformConfigDigest === imageId,
+    `${expected.artifactName}: loaded Docker image ID does not match the independently hashed platform config.`);
+    failUnless(registryIdentity.sourceImageDigest === pinnedDigest
+      && registryIdentity.sourceManifestContentDigest === pinnedDigest
+      && registryIdentity.platformManifestContentDigest === registryIdentity.platformManifestDigest
+      && registryIdentity.platformManifestMediaType === platformManifest?.mediaType
+      && registryIdentity.dockerImageIdKind === 'platform-config',
+    `${expected.artifactName}: registry manifest provenance is inconsistent with its raw content.`);
+    failUnless(evidence.buildxDigest === null && evidence.buildxConfigDigest === null
+      && evidence.dockerImageIdKind === 'platform-config'
+      && evidence.sourceImageDigest === pinnedDigest
+      && evidence.sourceManifestMediaType === registryIdentity.sourceManifestMediaType
+      && evidence.sourceManifestContentDigest === pinnedDigest
+      && evidence.platformManifestDigest === registryIdentity.platformManifestDigest
+      && evidence.platformManifestMediaType === registryIdentity.platformManifestMediaType
+      && evidence.platformManifestContentDigest === registryIdentity.platformManifestContentDigest
+      && evidence.platformConfigDigest === imageId,
+    `${expected.artifactName}: evidence does not preserve the pinned registry/index/platform/config relationship.`);
+    failUnless(evidence.repoDigests.some((repoDigest) => typeof repoDigest === 'string'
+      && (repoDigest.endsWith(`@${pinnedDigest}`)
+        || repoDigest.endsWith(`@${registryIdentity.platformManifestDigest}`))),
+    `${expected.artifactName}: Docker RepoDigests do not reference the pinned source or selected platform manifest.`);
+  }
+
+  const identityFields = [
+    'testedGitSha', 'imageRef', 'imagePlatform', 'imageIdDigest', 'dockerImageIdKind',
+    'scannedImageDigest', 'scannedImageIdentitySource', 'repoDigests', 'sourceImageDigest',
+    'sourceManifestMediaType', 'sourceManifestContentDigest', 'platformManifestDigest',
+    'platformManifestMediaType', 'platformManifestContentDigest', 'platformConfigDigest',
+    'buildxDigest', 'buildxActionDigest', 'buildxConfigDigest',
+  ];
+  for (const field of identityFields) {
+    failUnless(JSON.stringify(result[field]) === JSON.stringify(evidence[field]),
+      `${expected.artifactName}: scan result identity field ${field} differs from captured image evidence.`);
+  }
+  failUnless(result.scannerInputImageId === imageId,
+    `${expected.artifactName}: recorded scanner input is not the immutable Docker image ID.`);
+
+  const expectedHashes = {
+    evidence: hashFile(evidencePath),
+    trivy: hashFile(trivyPath),
+    sbomRaw: hashFile(rawSbomPath),
+    sbomBound: hashFile(boundSbomPath),
+    buildxMetadata: expected.source === 'buildx-loaded-image' ? hashFile(join(artifactDirectory, 'buildx-metadata.json')) : null,
+    registryIdentity: expected.source === 'registry-pinned' ? hashFile(join(artifactDirectory, 'registry-image-identity.json')) : null,
+  };
+  for (const [name, digest] of Object.entries(expectedHashes)) {
+    failUnless(result.artifactSha256?.[name] === digest,
+      `${expected.artifactName}: SHA-256 evidence for ${name} is missing or incorrect.`);
   }
 
   failUnless(result.testedGitSha === expectedSha && result.imageRef === expectedRef,
     `${expected.artifactName}: scan result does not match the expected revision and image reference.`);
   failUnless(result.imagePlatform === expected.expectedPlatform,
     `${expected.artifactName}: scan result platform does not match the expected platform.`);
-  failUnless(result.imageIdDigest === evidence.imageIdDigest
-    && result.dockerImageIdKind === evidence.dockerImageIdKind
-    && result.scannedImageDigest === evidence.scannedImageDigest
-    && result.scannedImageIdentitySource === evidence.scannedImageIdentitySource,
-  `${expected.artifactName}: scan result identity differs from image evidence.`);
-  failUnless(result.buildxDigest === evidence.buildxDigest
-    && result.buildxConfigDigest === evidence.buildxConfigDigest,
-  `${expected.artifactName}: scan result omits or changes Buildx digest evidence.`);
-  failUnless(result.sourceImageDigest === evidence.sourceImageDigest
-    && result.sourceManifestMediaType === evidence.sourceManifestMediaType
-    && result.platformManifestDigest === evidence.platformManifestDigest
-    && result.platformManifestMediaType === evidence.platformManifestMediaType
-    && result.platformConfigDigest === evidence.platformConfigDigest,
-  `${expected.artifactName}: scan result platform-manifest identity differs from image inspection evidence.`);
-  failUnless(JSON.stringify(result.repoDigests) === JSON.stringify(evidence.repoDigests),
-    `${expected.artifactName}: scan result repository digest evidence differs from the image inspection evidence.`);
-
   failUnless(result.scanner?.name === 'trivy'
     && result.scanner.version === 'v0.76.2'
     && result.scanner.outcome === 'success'
@@ -233,15 +324,15 @@ for (const expected of inventory.expectedArtifacts) {
   `${expected.artifactName}: CycloneDX generation or image identity binding did not complete successfully.`);
 
   failUnless(trivy.SchemaVersion === 2 && typeof trivy.ArtifactName === 'string'
-    && trivy.ArtifactName.length > 0 && Array.isArray(trivy.Results),
+    && Array.isArray(trivy.Results),
   `${expected.artifactName}: Trivy JSON does not have the expected report structure.`);
-  failUnless(trivy.ArtifactName === expectedRef,
-    `${expected.artifactName}: Trivy report scanned a different image reference.`);
-  failUnless(trivy.Metadata && typeof trivy.Metadata === 'object'
-    && trivy.Metadata.ImageID === evidence.imageIdDigest,
-  `${expected.artifactName}: Trivy report does not identify the image config digest recorded by Docker inspection.`);
-  for (const scanResult of (Array.isArray(trivy.Results) ? trivy.Results : [])) {
-    if (!scanResult || typeof scanResult !== 'object' || (scanResult.Vulnerabilities !== undefined && !Array.isArray(scanResult.Vulnerabilities))) {
+  failUnless(trivy.ArtifactName === imageId,
+    `${expected.artifactName}: Trivy report does not identify the immutable Docker image ID it scanned.`);
+  failUnless(trivy.Metadata && typeof trivy.Metadata === 'object' && trivy.Metadata.ImageID === imageId,
+    `${expected.artifactName}: Trivy report does not identify the captured Docker image config digest.`);
+  for (const scanResult of Array.isArray(trivy.Results) ? trivy.Results : []) {
+    if (!scanResult || typeof scanResult !== 'object'
+      || (scanResult.Vulnerabilities !== undefined && !Array.isArray(scanResult.Vulnerabilities))) {
       failures.push(`${expected.artifactName}: Trivy JSON contains an invalid scan result entry.`);
       continue;
     }
@@ -252,42 +343,39 @@ for (const expected of inventory.expectedArtifacts) {
     }
   }
 
-  failUnless(sbom.bomFormat === 'CycloneDX'
-    && typeof sbom.specVersion === 'string'
-    && /^1\.[0-9]+$/.test(sbom.specVersion)
-    && Number.isInteger(sbom.version)
-    && sbom.version > 0
-    && Array.isArray(sbom.components)
-    && sbom.components.length > 0
-    && sbom.metadata && typeof sbom.metadata === 'object',
-  `${expected.artifactName}: image SBOM is not a populated CycloneDX JSON document.`);
-  const sbomProperties = Array.isArray(sbom.metadata?.properties) ? sbom.metadata.properties : [];
+  verifyCycloneDx(rawSbom, `${expected.artifactName} raw`);
+  verifyCycloneDx(boundSbom, `${expected.artifactName} bound`);
   const requiredProperties = new Map([
     ['fraud-detection-platform:image-ref', expectedRef],
-    ['fraud-detection-platform:image-id', evidence.imageIdDigest],
-    ['fraud-detection-platform:scanned-digest', evidence.scannedImageDigest],
+    ['fraud-detection-platform:image-id', imageId],
+    ['fraud-detection-platform:scanned-digest', imageId],
+    ['fraud-detection-platform:scanner-input-image-id', imageId],
     ['fraud-detection-platform:image-platform', expected.expectedPlatform],
     ['fraud-detection-platform:tested-git-sha', expectedSha],
+    ['fraud-detection-platform:source-image-digest', evidence.sourceImageDigest],
     ['fraud-detection-platform:source-manifest-media-type', evidence.sourceManifestMediaType],
+    ['fraud-detection-platform:source-manifest-content-digest', evidence.sourceManifestContentDigest],
+    ['fraud-detection-platform:platform-manifest-digest', evidence.platformManifestDigest],
+    ['fraud-detection-platform:platform-manifest-content-digest', evidence.platformManifestContentDigest],
+    ['fraud-detection-platform:platform-config-digest', evidence.platformConfigDigest],
   ]);
-  if (evidence.platformManifestDigest) {
-    requiredProperties.set('fraud-detection-platform:platform-manifest-digest', evidence.platformManifestDigest);
-  }
+  const rawProperties = Array.isArray(rawSbom.metadata?.properties) ? rawSbom.metadata.properties : [];
+  const boundProperties = Array.isArray(boundSbom.metadata?.properties) ? boundSbom.metadata.properties : [];
+  const derivedPropertyNames = new Set(requiredProperties.keys());
+  failUnless(!rawProperties.some((property) => typeof property?.name === 'string'
+    && property.name.startsWith('fraud-detection-platform:')),
+  `${expected.artifactName}: raw SBOM already contains derived identity properties.`);
   for (const [propertyName, propertyValue] of requiredProperties) {
-    const matches = sbomProperties.filter((property) => property?.name === propertyName);
+    const matches = boundProperties.filter((property) => property?.name === propertyName);
     failUnless(matches.length === 1 && matches[0].value === propertyValue,
       `${expected.artifactName}: SBOM identity binding ${propertyName} is missing, duplicated, or mismatched.`);
   }
-  const bomRefs = new Set();
-  for (const component of (Array.isArray(sbom.components) ? sbom.components : [])) {
-    failUnless(component && typeof component.name === 'string' && component.name.length > 0
-      && typeof component.type === 'string' && component.type.length > 0,
-    `${expected.artifactName}: image SBOM has a component without a name or CycloneDX type.`);
-    if (typeof component?.['bom-ref'] === 'string') {
-      if (bomRefs.has(component['bom-ref'])) failures.push(`${expected.artifactName}: image SBOM contains a duplicate bom-ref.`);
-      bomRefs.add(component['bom-ref']);
-    }
-  }
+  const unboundRaw = structuredClone(rawSbom);
+  const unboundBound = structuredClone(boundSbom);
+  unboundRaw.metadata.properties ??= [];
+  unboundBound.metadata.properties = boundProperties.filter((property) => !derivedPropertyNames.has(property?.name));
+  failUnless(JSON.stringify(unboundRaw) === JSON.stringify(unboundBound),
+    `${expected.artifactName}: identity binding changed raw Syft SBOM evidence outside the derived identity properties.`);
 
   summaries.push({
     artifactName: expected.artifactName,
@@ -298,7 +386,7 @@ for (const expected of inventory.expectedArtifacts) {
     testedGitSha: evidence.testedGitSha,
     trivyOutcome: result.scanner?.outcome ?? null,
     sbomOutcome: result.sbom?.outcome ?? null,
-    sbomComponentCount: Array.isArray(sbom.components) ? sbom.components.length : 0,
+    sbomComponentCount: Array.isArray(boundSbom.components) ? boundSbom.components.length : 0,
   });
 }
 
@@ -306,9 +394,9 @@ failUnless(summaries.length === inventory.expectedArtifacts.length,
   'Not every expected image artifact produced a complete evidence summary.');
 
 const summaryPath = join(dirname(inventoryPath), 'validated-image-scan-summary.json');
-mkdirSync(dirname(summaryPath), { recursive: true });
+mkdirSync(dirname(inventoryPath), { recursive: true });
 writeFileSync(summaryPath, `${JSON.stringify({
-  schemaVersion: 1,
+  schemaVersion: 2,
   outcome: failures.length === 0 ? 'success' : 'failure',
   testedGitSha: expectedSha,
   requiredScanJobs: jobResults,

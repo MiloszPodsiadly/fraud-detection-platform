@@ -1,5 +1,9 @@
 name: Scan built image and generate SBOM evidence
 description: Scan a local image, create a CycloneDX SBOM, and upload the evidence.
+outputs:
+  image-id-digest:
+    description: Content-addressed Docker image config ID used as the immutable scanner input.
+    value: ${{ steps.image-evidence.outputs.image-id-digest }}
 inputs:
   image-ref:
     description: Image reference loaded into the Docker daemon.
@@ -46,63 +50,69 @@ runs:
         [[ "$image_platform" =~ ^[a-z0-9]+/[a-z0-9_]+$ ]]
         test "$image_platform" = "$EXPECTED_PLATFORM"
         repo_digests="$(docker image inspect "$IMAGE_REF" --format '{{range .RepoDigests}}{{println .}}{{end}}')"
+        mkdir -p "$OUTPUT_DIRECTORY"
         scanned_identity_source=""
+        buildx_action_digest=""
+        buildx_manifest_digest=""
         buildx_config_digest=""
         source_image_digest=""
         source_manifest_media_type=""
+        source_manifest_content_digest=""
         platform_manifest_digest=""
         platform_manifest_media_type=""
+        platform_manifest_content_digest=""
         platform_config_digest=""
         docker_image_id_kind=""
         if [[ -n "$BUILD_METADATA_JSON" ]]; then
-          metadata_digests="$(node -e 'const m=JSON.parse(process.env.BUILD_METADATA_JSON); const output=m["containerimage.digest"] ?? process.env.BUILD_DIGEST ?? ""; const config=m["containerimage.config.digest"] ?? ""; if (m["containerimage.digest"] && process.env.BUILD_DIGEST && m["containerimage.digest"] !== process.env.BUILD_DIGEST) throw new Error("Buildx digest output disagrees with metadata"); if (output && !/^sha256:[a-f0-9]{64}$/.test(output)) throw new Error("Buildx output digest is malformed"); if (config && !/^sha256:[a-f0-9]{64}$/.test(config)) throw new Error("Buildx config digest is malformed"); process.stdout.write(`${output}\n${config}\n`);')"
+          metadata_digests="$(BUILD_METADATA_JSON="$BUILD_METADATA_JSON" BUILD_DIGEST="$BUILD_DIGEST" IMAGE_ID_DIGEST="$image_id_digest" node scripts/ci/verify-buildx-image-metadata.mjs)"
           buildx_manifest_digest="$(printf '%s\n' "$metadata_digests" | sed -n '1p')"
           buildx_config_digest="$(printf '%s\n' "$metadata_digests" | sed -n '2p')"
-          if [[ -n "$buildx_manifest_digest" && -n "$BUILD_DIGEST" ]]; then [[ "$buildx_manifest_digest" = "$BUILD_DIGEST" ]]; fi
-          if [[ -n "$buildx_config_digest" ]]; then [[ "$buildx_config_digest" =~ ^sha256:[a-f0-9]{64}$ ]]; fi
-          scanned_image_digest="$image_id_digest"
-          scanned_identity_source="buildx-loaded-image-id"
-          source_image_digest="$image_id_digest"
-          source_manifest_media_type="local-image-config"
-          platform_manifest_media_type="local-image-config"
-          platform_config_digest="$buildx_config_digest"
-          docker_image_id_kind="docker-image-id"
-        elif [[ "$IMAGE_REF" == *@sha256:* ]]; then
-          registry_identity="$(node scripts/ci/inspect-pinned-image-platform.mjs "$IMAGE_REF" "$EXPECTED_PLATFORM" "$image_id_digest")"
-          identity_fields="$(IDENTITY_JSON="$registry_identity" node -e 'const i=JSON.parse(process.env.IDENTITY_JSON); process.stdout.write([i.sourceImageDigest,i.sourceManifestMediaType,i.platformManifestDigest,i.platformManifestMediaType,i.platformConfigDigest,i.dockerImageIdKind].join("\n"));')"
-          source_image_digest="$(printf '%s\n' "$identity_fields" | sed -n '1p')"
-          source_manifest_media_type="$(printf '%s\n' "$identity_fields" | sed -n '2p')"
-          platform_manifest_digest="$(printf '%s\n' "$identity_fields" | sed -n '3p')"
-          platform_manifest_media_type="$(printf '%s\n' "$identity_fields" | sed -n '4p')"
-          platform_config_digest="$(printf '%s\n' "$identity_fields" | sed -n '5p')"
-          docker_image_id_kind="$(printf '%s\n' "$identity_fields" | sed -n '6p')"
-          [[ "$source_image_digest" = "${IMAGE_REF##*@}" ]]
-          scanned_image_digest="$source_image_digest"
-          scanned_identity_source="immutable-image-reference"
-        elif [[ "$IMAGE_REF" == "fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2" || "$IMAGE_REF" == "fdp-local/node-builder:26.13.1-npm12.2.3" ]]; then
+          source_manifest_media_type="$(printf '%s\n' "$metadata_digests" | sed -n '3p')"
+          buildx_action_digest="$BUILD_DIGEST"
+          test "$image_id_digest" = "$buildx_config_digest"
           scanned_image_digest="$image_id_digest"
           scanned_identity_source="docker-image-id"
+          source_image_digest="$buildx_manifest_digest"
+          source_manifest_content_digest="$buildx_manifest_digest"
+          platform_manifest_digest="$buildx_manifest_digest"
+          platform_manifest_media_type="$source_manifest_media_type"
+          platform_manifest_content_digest="$buildx_manifest_digest"
+          platform_config_digest="$buildx_config_digest"
           docker_image_id_kind="docker-image-id"
-          source_image_digest="$image_id_digest"
-          source_manifest_media_type="local-image-config"
-          platform_manifest_media_type="local-image-config"
-          platform_config_digest="$image_id_digest"
+          printf '%s\n' "$BUILD_METADATA_JSON" > "$OUTPUT_DIRECTORY/buildx-metadata.json"
+        elif [[ "$IMAGE_REF" == *@sha256:* ]]; then
+          registry_identity="$(node scripts/ci/inspect-pinned-image-platform.mjs "$IMAGE_REF" "$EXPECTED_PLATFORM" "$image_id_digest")"
+          printf '%s\n' "$registry_identity" > "$OUTPUT_DIRECTORY/registry-image-identity.json"
+          identity_fields="$(IDENTITY_JSON="$registry_identity" node -e 'const i=JSON.parse(process.env.IDENTITY_JSON); process.stdout.write([i.sourceImageDigest,i.sourceManifestMediaType,i.sourceManifestContentDigest,i.platformManifestDigest,i.platformManifestMediaType,i.platformManifestContentDigest,i.platformConfigDigest,i.dockerImageIdKind].join("\n"));')"
+          source_image_digest="$(printf '%s\n' "$identity_fields" | sed -n '1p')"
+          source_manifest_media_type="$(printf '%s\n' "$identity_fields" | sed -n '2p')"
+          source_manifest_content_digest="$(printf '%s\n' "$identity_fields" | sed -n '3p')"
+          platform_manifest_digest="$(printf '%s\n' "$identity_fields" | sed -n '4p')"
+          platform_manifest_media_type="$(printf '%s\n' "$identity_fields" | sed -n '5p')"
+          platform_manifest_content_digest="$(printf '%s\n' "$identity_fields" | sed -n '6p')"
+          platform_config_digest="$(printf '%s\n' "$identity_fields" | sed -n '7p')"
+          docker_image_id_kind="$(printf '%s\n' "$identity_fields" | sed -n '8p')"
+          [[ "$source_image_digest" = "${IMAGE_REF##*@}" ]]
+          scanned_image_digest="$image_id_digest"
+          scanned_identity_source="docker-image-id"
+          test "$platform_config_digest" = "$image_id_digest"
+          test "$docker_image_id_kind" = "platform-config"
         else
-          echo "No immutable image digest is available for $IMAGE_REF" >&2
+          echo "Unsupported or unverified image identity for $IMAGE_REF" >&2
           exit 1
         fi
         [[ "$scanned_image_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-        mkdir -p "$OUTPUT_DIRECTORY"
-        export TESTED_GIT_SHA="$actual_git_sha" IMAGE_ID_DIGEST="$image_id_digest" IMAGE_PLATFORM="$image_platform" SCANNED_IMAGE_DIGEST="$scanned_image_digest" REPO_DIGESTS="$repo_digests" BUILDX_DIGEST="$buildx_manifest_digest" BUILDX_CONFIG_DIGEST="$buildx_config_digest" SOURCE_IMAGE_DIGEST="$source_image_digest" SOURCE_MANIFEST_MEDIA_TYPE="$source_manifest_media_type" PLATFORM_MANIFEST_DIGEST="$platform_manifest_digest" PLATFORM_MANIFEST_MEDIA_TYPE="$platform_manifest_media_type" PLATFORM_CONFIG_DIGEST="$platform_config_digest" DOCKER_IMAGE_ID_KIND="$docker_image_id_kind"
+        export TESTED_GIT_SHA="$actual_git_sha" IMAGE_ID_DIGEST="$image_id_digest" IMAGE_PLATFORM="$image_platform" SCANNED_IMAGE_DIGEST="$scanned_image_digest" REPO_DIGESTS="$repo_digests" BUILDX_ACTION_DIGEST="$buildx_action_digest" BUILDX_DIGEST="$buildx_manifest_digest" BUILDX_CONFIG_DIGEST="$buildx_config_digest" SOURCE_IMAGE_DIGEST="$source_image_digest" SOURCE_MANIFEST_MEDIA_TYPE="$source_manifest_media_type" SOURCE_MANIFEST_CONTENT_DIGEST="$source_manifest_content_digest" PLATFORM_MANIFEST_DIGEST="$platform_manifest_digest" PLATFORM_MANIFEST_MEDIA_TYPE="$platform_manifest_media_type" PLATFORM_MANIFEST_CONTENT_DIGEST="$platform_manifest_content_digest" PLATFORM_CONFIG_DIGEST="$platform_config_digest" DOCKER_IMAGE_ID_KIND="$docker_image_id_kind"
         export SCANNED_IDENTITY_SOURCE="$scanned_identity_source"
-        node -e 'const fs=require("node:fs"); const p=process.env.OUTPUT_DIRECTORY + "/image-security-evidence.json"; fs.writeFileSync(p, JSON.stringify({testedGitSha:process.env.TESTED_GIT_SHA,imageRef:process.env.IMAGE_REF,imagePlatform:process.env.IMAGE_PLATFORM,scannedImageDigest:process.env.SCANNED_IMAGE_DIGEST,scannedImageIdentitySource:process.env.SCANNED_IDENTITY_SOURCE,imageIdDigest:process.env.IMAGE_ID_DIGEST,dockerImageIdKind:process.env.DOCKER_IMAGE_ID_KIND,repoDigests:process.env.REPO_DIGESTS.split("\n").filter(Boolean),sourceImageDigest:process.env.SOURCE_IMAGE_DIGEST,sourceManifestMediaType:process.env.SOURCE_MANIFEST_MEDIA_TYPE,platformManifestDigest:process.env.PLATFORM_MANIFEST_DIGEST || null,platformManifestMediaType:process.env.PLATFORM_MANIFEST_MEDIA_TYPE,platformConfigDigest:process.env.PLATFORM_CONFIG_DIGEST || null,buildxDigest:process.env.BUILDX_DIGEST || null,buildxConfigDigest:process.env.BUILDX_CONFIG_DIGEST || null}, null, 2) + "\n");'
+        printf 'image-id-digest=%s\n' "$image_id_digest" >> "$GITHUB_OUTPUT"
+        node -e 'const fs=require("node:fs"); const p=process.env.OUTPUT_DIRECTORY + "/image-security-evidence.json"; const nullable=(value)=>value || null; fs.writeFileSync(p, JSON.stringify({schemaVersion:2,testedGitSha:process.env.TESTED_GIT_SHA,imageRef:process.env.IMAGE_REF,imagePlatform:process.env.IMAGE_PLATFORM,scannedImageDigest:process.env.SCANNED_IMAGE_DIGEST,scannedImageIdentitySource:process.env.SCANNED_IDENTITY_SOURCE,imageIdDigest:process.env.IMAGE_ID_DIGEST,dockerImageIdKind:process.env.DOCKER_IMAGE_ID_KIND,repoDigests:process.env.REPO_DIGESTS.split("\n").filter(Boolean),sourceImageDigest:nullable(process.env.SOURCE_IMAGE_DIGEST),sourceManifestMediaType:nullable(process.env.SOURCE_MANIFEST_MEDIA_TYPE),sourceManifestContentDigest:nullable(process.env.SOURCE_MANIFEST_CONTENT_DIGEST),platformManifestDigest:nullable(process.env.PLATFORM_MANIFEST_DIGEST),platformManifestMediaType:nullable(process.env.PLATFORM_MANIFEST_MEDIA_TYPE),platformManifestContentDigest:nullable(process.env.PLATFORM_MANIFEST_CONTENT_DIGEST),platformConfigDigest:nullable(process.env.PLATFORM_CONFIG_DIGEST),buildxActionDigest:nullable(process.env.BUILDX_ACTION_DIGEST),buildxDigest:nullable(process.env.BUILDX_DIGEST),buildxConfigDigest:nullable(process.env.BUILDX_CONFIG_DIGEST)}, null, 2) + "\n");'
 
     - name: Scan image for high and critical vulnerabilities
       id: trivy-scan
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
         scan-type: image
-        image-ref: ${{ inputs.image-ref }}
+        image-ref: ${{ steps.image-evidence.outputs.image-id-digest }}
         version: v0.76.2
         cache: false
         scanners: vuln
@@ -118,9 +128,9 @@ runs:
       id: image-sbom
       uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
       with:
-        image: ${{ inputs.image-ref }}
+        image: docker:${{ steps.image-evidence.outputs.image-id-digest }}
         format: cyclonedx-json
-        output-file: ${{ inputs.output-directory }}/image.cdx.json
+        output-file: ${{ inputs.output-directory }}/image.cdx.raw.json
         syft-version: v1.57.2
         upload-artifact: false
         upload-release-assets: false
@@ -131,8 +141,9 @@ runs:
       shell: bash
       env:
         EVIDENCE_PATH: ${{ inputs.output-directory }}/image-security-evidence.json
-        SBOM_PATH: ${{ inputs.output-directory }}/image.cdx.json
-      run: node scripts/ci/bind-image-sbom-identity.mjs "$SBOM_PATH" "$EVIDENCE_PATH"
+        SBOM_RAW_PATH: ${{ inputs.output-directory }}/image.cdx.raw.json
+        SBOM_BOUND_PATH: ${{ inputs.output-directory }}/image.cdx.json
+      run: node scripts/ci/bind-image-sbom-identity.mjs "$SBOM_RAW_PATH" "$EVIDENCE_PATH" "$SBOM_BOUND_PATH"
 
     - name: Verify the scanned image reference still resolves to the captured image ID
       if: always() && steps.image-evidence.outcome == 'success'
@@ -158,7 +169,7 @@ runs:
         SCANNER_VERSION: v0.76.2
         SBOM_GENERATOR_VERSION: v1.57.2
       run: |
-        node -e 'const fs=require("node:fs"); const evidence=JSON.parse(fs.readFileSync(process.env.OUTPUT_DIRECTORY + "/image-security-evidence.json", "utf8")); const result={testedGitSha:evidence.testedGitSha,imageRef:evidence.imageRef,imagePlatform:evidence.imagePlatform,imageIdDigest:evidence.imageIdDigest,dockerImageIdKind:evidence.dockerImageIdKind,scannedImageDigest:evidence.scannedImageDigest,scannedImageIdentitySource:evidence.scannedImageIdentitySource,repoDigests:evidence.repoDigests,sourceImageDigest:evidence.sourceImageDigest,sourceManifestMediaType:evidence.sourceManifestMediaType,platformManifestDigest:evidence.platformManifestDigest,platformManifestMediaType:evidence.platformManifestMediaType,platformConfigDigest:evidence.platformConfigDigest,buildxDigest:evidence.buildxDigest,buildxConfigDigest:evidence.buildxConfigDigest,scanner:{name:"trivy",version:process.env.SCANNER_VERSION,outcome:process.env.TRIVY_OUTCOME,policy:"HIGH,CRITICAL"},sbom:{format:"CycloneDX JSON",generator:"syft",version:process.env.SBOM_GENERATOR_VERSION,outcome:process.env.SBOM_OUTCOME,bindingOutcome:process.env.SBOM_BINDING_OUTCOME}}; fs.writeFileSync(process.env.OUTPUT_DIRECTORY + "/image-scan-result.json", JSON.stringify(result,null,2)+"\n");'
+        node scripts/ci/write-image-scan-result.mjs
 
     - name: Upload image security evidence
       if: always()

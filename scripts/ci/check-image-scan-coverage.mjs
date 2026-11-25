@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const digestPattern = /^[^\s@]+(?:\/[^\s@]+)*@sha256:[a-f0-9]{64}$/;
-const localKafkaImage = "fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2";
+const localKafkaImage = "fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3";
 const localNodeBuilderImage = "fdp-local/node-builder:26.13.1-npm12.2.3";
 const nodeBuilderBaseImage = "node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5";
 const kafkaDockerAssetsImage = "apache/kafka:4.4.0@sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f";
@@ -16,29 +16,32 @@ const kafkaCompressionJars = [
     version: "1.14.1",
     url: "https://repo.maven.apache.org/maven2/at/yawk/lz4/lz4-java/1.14.1/lz4-java-1.14.1.jar",
     sha256: "02d1ceb848d510fce228f66febee3254978df7d70d53da472a98eb3b5cf9caaf",
-    replaced: "lz4-java-1.8.0.jar",
+    replaced: "lz4-java-1.11.2.jar",
   },
   {
     name: "snappy-java",
     version: "1.1.10.12",
     url: "https://repo.maven.apache.org/maven2/org/xerial/snappy/snappy-java/1.1.10.12/snappy-java-1.1.10.12.jar",
     sha256: "1c03ce77b3f2e926c25a952612e372404d80bc88c6c8052bede964804fabd732",
-    replaced: "snappy-java-1.1.10.5.jar",
+    replaced: "snappy-java-1.1.10.7.jar",
   },
 ];
 const sourceImages = new Map();
 const failures = [];
 const unresolvedImageReferences = [];
+const sharedJavaImageConstants = new Set();
 
 function addReference(file, ref) {
+  const normalizedFile = file.split(path.sep).join("/");
   const normalized = ref.trim().replace(/^['"]|['"]$/g, "").replace(/^docker:\/\//, "");
   if (!normalized || normalized === "scratch") return;
+  if (normalizedFile === ".github/workflows/docker-compose-ci.yml" && normalized === "${{") return;
   if (normalized.includes("$") || normalized.includes("${")) {
-    unresolvedImageReferences.push({ file, ref: normalized });
+    unresolvedImageReferences.push({ file: normalizedFile, ref: normalized });
     return;
   }
   const origins = sourceImages.get(normalized) ?? [];
-  origins.push(file);
+  origins.push(normalizedFile);
   sourceImages.set(normalized, origins);
 }
 
@@ -59,9 +62,10 @@ function walkJavaFiles(directory, visit) {
 
 function collectJavaImageConstants(file, content) {
   const imageConstants = new Map();
-  const pattern = /\b(?:static\s+)?(?:final\s+)?String\s+([A-Za-z_$][\w$]*(?:_IMAGE|IMAGE|IMAGE_REF))\s*=\s*"([^"]+)"/g;
+  const pattern = /\b(?:(?:public|protected|private)\s+)?(?:static\s+)?(?:final\s+)?String\s+([A-Za-z_$][\w$]*_IMAGE|IMAGE|IMAGE_REF)\s*=\s*"([^"]+)"/g;
   for (const match of content.matchAll(pattern)) {
     imageConstants.set(match[1], match[2]);
+    sharedJavaImageConstants.add(`${path.basename(file, ".java")}.${match[1]}`);
     addReference(file, match[2]);
   }
   return new Set(imageConstants.keys());
@@ -103,19 +107,26 @@ walkFiles(".", (file) => {
 
 const dynamicContainerReferences = [];
 
+walkJavaFiles(path.join("common-test-support", "src", "main", "java"), (file) => {
+  collectJavaImageConstants(file, fs.readFileSync(file, "utf8"));
+});
+
 for (const moduleName of fs.readdirSync(".", { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
   .map((entry) => entry.name)) {
   walkJavaFiles(path.join(moduleName, "src", "test", "java"), (file) => {
+    if (/ArchitectureTest\.java$/i.test(path.basename(file))
+      || path.basename(file) === "KafkaImageReferenceTest.java") return;
     const content = fs.readFileSync(file, "utf8");
     const literalImageConstants = collectJavaImageConstants(file, content);
     collectMatches(file, content, [
-      /DockerImageName\.parse\(\s*"([^"]+)"/g,
-      /new\s+(?:GenericContainer|MongoDBContainer|KafkaContainer)\s*(?:<[^>]*>)?\s*\(\s*"([^"]+)"/g,
+      /DockerImageName\.parse\(\s*(?<!\\)"([^"\\]+)"/g,
+      /new\s+(?:GenericContainer|MongoDBContainer|KafkaContainer)\s*(?:<[^>]*>)?\s*\(\s*(?<!\\)"([^"\\]+)"/g,
     ]);
     for (const match of content.matchAll(/DockerImageName\.parse\(\s*([^)]*)\)/g)) {
       const argument = match[1].trim();
-      if (!argument.startsWith('"') && !argument.startsWith("'") && !literalImageConstants.has(argument)) {
+      if (!argument.startsWith('"') && !argument.startsWith("'")
+        && !literalImageConstants.has(argument) && !sharedJavaImageConstants.has(argument)) {
         dynamicContainerReferences.push({ file, argument });
       }
     }
@@ -126,12 +137,13 @@ walkJavaFiles(path.join("common-test-support", "src", "main", "java"), (file) =>
   const content = fs.readFileSync(file, "utf8");
   const literalImageConstants = collectJavaImageConstants(file, content);
   collectMatches(file, content, [
-    /DockerImageName\.parse\(\s*"([^"]+)"/g,
-    /new\s+(?:GenericContainer|MongoDBContainer|KafkaContainer)\s*(?:<[^>]*>)?\s*\(\s*"([^"]+)"/g,
+    /DockerImageName\.parse\(\s*(?<!\\)"([^"\\]+)"/g,
+    /new\s+(?:GenericContainer|MongoDBContainer|KafkaContainer)\s*(?:<[^>]*>)?\s*\(\s*(?<!\\)"([^"\\]+)"/g,
   ]);
   for (const match of content.matchAll(/DockerImageName\.parse\(\s*([^)]*)\)/g)) {
     const argument = match[1].trim();
-    if (!argument.startsWith('"') && !argument.startsWith("'") && !literalImageConstants.has(argument)) {
+    if (!argument.startsWith('"') && !argument.startsWith("'")
+      && !literalImageConstants.has(argument) && !sharedJavaImageConstants.has(argument)) {
       dynamicContainerReferences.push({ file, argument });
     }
   }
@@ -174,9 +186,20 @@ walkFiles(".github", (file) => {
   const content = fs.readFileSync(file, "utf8");
   const scanActionPath = ".github/actions/scan-built-image/action.yml";
   const normalizedFile = file.split(path.sep).join("/");
-  const source = normalizedFile === scanActionPath
-    ? content.replace(/^\s+image:\s+\$\{\{\s*inputs\.image-ref\s*\}\}\s*$/gm, "")
-    : content;
+  let source = content;
+  if (normalizedFile === scanActionPath) {
+    source = source
+      .replace(/^[ \t]+image:[ \t]+\$\{\{[ \t]*inputs\.image-ref[ \t]*\}\}[ \t]*\r?$/gm, "")
+      .replace(/^[ \t]+image:[ \t]+docker:\$\{\{[ \t]*steps\.image-evidence\.outputs\.image-id-digest[ \t]*\}\}[ \t]*\r?$/gm, "");
+  }
+  if (normalizedFile === ".github/workflows/docker-compose-ci.yml") {
+    source = source.split(/\r?\n/)
+      .filter((line) => !/^[ \t]*image:[ \t]*\$\{\{[ \t]*fromJSON\(needs\.image-inventory\.outputs\.(?:backend|services|infrastructure)\)/.test(line))
+      .join("\n");
+  }
+  source = source.split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("image: ${{ fromJSON(needs.image-inventory.outputs."))
+    .join("\n");
   collectMatches(file, source, [
     /^\s+image:\s+(\S+)/gm,
     /^\s+container:\s+(\S+)/gm,
@@ -208,44 +231,107 @@ function jobSection(source, jobName) {
   return remainder.slice(0, nextJob < 0 ? undefined : nextJob);
 }
 
-function parseImageScanEntries(jobText) {
-  const lines = jobText.split(/\r?\n/);
-  const entries = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    if (lines[index].trim() !== "uses: ./.github/actions/build-and-scan-image") continue;
-    const fields = {};
-    let insideWith = false;
-    for (let fieldIndex = index + 1; fieldIndex < lines.length; fieldIndex += 1) {
-      const line = lines[fieldIndex];
-      if (/^      - /.test(line)) break;
-      if (line.trim() === "with:") {
-        insideWith = true;
-        continue;
-      }
-      if (!insideWith) continue;
-      const field = line.match(/^ {10}([a-z-]+):\s*(.*?)\s*$/);
-      if (field) fields[field[1]] = field[2];
-    }
-    if (!fields.source || !fields["image-ref"] || !fields["artifact-name"]) {
-      failures.push("image-security contains a build-and-scan step with missing source, image-ref, or artifact-name input");
+const githubShaExpression = String.fromCharCode(36) + "{{ github.sha }}";
+const scanInventoryPath = "scripts/ci/image-security-inventory.json";
+let scanInventory;
+try {
+  scanInventory = JSON.parse(fs.readFileSync(scanInventoryPath, "utf8"));
+} catch (error) {
+  throw new Error(`${scanInventoryPath} is missing or invalid JSON: ${error.message}`);
+}
+const scanGroups = [
+  { key: "backend", job: "backend-images", parallelism: 3 },
+  { key: "services", job: "service-images", parallelism: 2 },
+  { key: "infrastructure", job: "infrastructure-images", parallelism: 4 },
+];
+const dynamicMatrixImageReferences = [...workflow.matchAll(/^[ \t]*image:[ \t]*(\$\{\{[^\r\n]*\}\})[ \t]*\r?$/gm)]
+  .map((match) => match[1]);
+const expectedMatrixImageReferences = scanGroups.map(({ key }) =>
+  `${String.fromCharCode(36)}{{ fromJSON(needs.image-inventory.outputs.${key}) }}`);
+if (dynamicMatrixImageReferences.length !== expectedMatrixImageReferences.length
+  || expectedMatrixImageReferences.some((reference) => !dynamicMatrixImageReferences.includes(reference))) {
+  failures.push("docker-compose-ci.yml may only use the three reviewed inventory-derived image matrix references");
+}
+if (scanInventory.schemaVersion !== 1 || !scanInventory.groups || typeof scanInventory.groups !== "object") {
+  failures.push(`${scanInventoryPath}: unsupported inventory schema or missing groups`);
+}
+const inventoryKafka = scanInventory.recipes?.kafka;
+const inventoryNodeBuilder = scanInventory.recipes?.nodeBuilder;
+const sameCompressionPins = JSON.stringify(inventoryKafka?.compressionJars) === JSON.stringify(kafkaCompressionJars);
+if (scanInventory.recipes?.buildkitBuilderImage !== buildkitBuilderImage) {
+  failures.push(`${scanInventoryPath}: BuildKit builder pin differs from the workflow's reviewed digest`);
+}
+if (inventoryKafka?.version !== "4.4.0"
+  || inventoryKafka?.distributionUrl !== "https://downloads.apache.org/kafka/4.4.0/kafka_2.13-4.4.0.tgz"
+  || inventoryKafka?.distributionSha512 !== kafkaDistributionSha512
+  || inventoryKafka?.dockerAssetsImage !== kafkaDockerAssetsImage
+  || !sameCompressionPins) {
+  failures.push(`${scanInventoryPath}: Kafka recipe pins differ from the reviewed official release and patched compression artifacts`);
+}
+if (inventoryNodeBuilder?.baseImage !== nodeBuilderBaseImage
+  || inventoryNodeBuilder?.npmVersion !== "12.2.3"
+  || inventoryNodeBuilder?.npmTarballSha256 !== "fa0711dd513fa1386bbad3962a292cb813461cb57dedf07d6eb7efe76dffe897"
+  || JSON.stringify(inventoryNodeBuilder?.fixedPackages) !== JSON.stringify({ "brace-expansion": "5.0.12", undici: "6.29.1" })) {
+  failures.push(`${scanInventoryPath}: Node builder recipe pins differ from the reviewed patched runtime`);
+}
+const expectedJobs = scanGroups.map(({ job }) => job);
+if (JSON.stringify(scanInventory.requiredScanJobs) !== JSON.stringify(expectedJobs)) {
+  failures.push(`${scanInventoryPath}: requiredScanJobs must list the bounded backend, service, and infrastructure matrix jobs in order`);
+}
+const imageEntries = [];
+for (const { key, job, parallelism } of scanGroups) {
+  const entries = scanInventory.groups?.[key];
+  if (!Array.isArray(entries) || entries.length === 0) {
+    failures.push(`${scanInventoryPath}: group ${key} must contain at least one image`);
+    continue;
+  }
+  for (const inventoryEntry of entries) {
+    if (!inventoryEntry || typeof inventoryEntry !== "object" || !inventoryEntry.logicalName
+      || !inventoryEntry.source || !inventoryEntry.artifactName) {
+      failures.push(`${scanInventoryPath}: ${key} contains an incomplete image entry`);
       continue;
     }
-    entries.push(fields);
+    const imageRef = inventoryEntry.imageRef
+      ?? (inventoryEntry.repository ? `${inventoryEntry.repository}:${githubShaExpression}` : "");
+    imageEntries.push({
+      source: inventoryEntry.source,
+      "image-ref": imageRef,
+      "artifact-name": inventoryEntry.artifactName,
+      dockerfile: inventoryEntry.dockerfile,
+      target: inventoryEntry.target,
+      "build-args": inventoryEntry.buildArgs,
+      _group: key,
+      _logicalName: inventoryEntry.logicalName,
+    });
   }
-  if (entries.length === 0) failures.push("image-security has no build-and-scan image steps");
-  return entries;
-}
 
-const imageJob = jobSection(workflow, "image-security");
-const imageEntries = parseImageScanEntries(imageJob);
-const imageScanActionCount = [...workflow.matchAll(/^\s+uses:\s*\.\/\.github\/actions\/build-and-scan-image\s*$/gm)].length;
-if (imageScanActionCount !== imageEntries.length) {
-  failures.push("All docker-compose-ci image builds and scans must be steps in the single image-security job");
-}
-for (const retiredJob of ["backend-images", "service-images", "external-images", "image-scan-evidence"]) {
-  if (new RegExp("^  " + retiredJob + ":\\s*$", "m").test(workflow)) {
-    failures.push("docker-compose-ci.yml must keep image scan work consolidated in image-security; found " + retiredJob);
+  const jobText = jobSection(workflow, job);
+  const matrixExpression = `image: ${String.fromCharCode(36)}{{ fromJSON(needs.image-inventory.outputs.${key}) }}`;
+  if (!jobText.includes(matrixExpression)) {
+    failures.push(`${job}: matrix must be generated from the checked-in ${key} image inventory`);
   }
+  if (!jobText.includes(`max-parallel: ${parallelism}`) || !jobText.includes("fail-fast: false")) {
+    failures.push(`${job}: matrix parallelism must be bounded to ${parallelism} with fail-fast disabled for complete evidence`);
+  }
+  if (!jobText.includes("timeout-minutes: 120")) failures.push(`${job}: a 120-minute timeout is required`);
+  if (!jobText.includes("uses: ./.github/actions/build-and-scan-image")) {
+    failures.push(`${job}: the matrix does not invoke the reviewed build-and-scan action`);
+  }
+  if (jobText.includes("continue-on-error:")) {
+    failures.push(`${job}: image build and scan failures must fail the matrix job`);
+  }
+}
+const imageScanActionCount = [...workflow.matchAll(/^\s+uses:\s*\.\/\.github\/actions\/build-and-scan-image\s*$/gm)].length;
+if (imageScanActionCount !== scanGroups.length) {
+  failures.push("docker-compose-ci.yml must define exactly one build-and-scan step in each bounded image matrix");
+}
+const inventoryJob = jobSection(workflow, "image-inventory");
+if (!inventoryJob.includes("--write-github-matrices") || !inventoryJob.includes("--write-inventory")) {
+  failures.push("image-inventory must validate the checked-in inventory and publish its three matrix outputs");
+}
+const evidenceJob = jobSection(workflow, "image-scan-evidence");
+if (!evidenceJob.includes("needs: [image-inventory, backend-images, service-images, infrastructure-images]")) {
+  failures.push("image-scan-evidence must aggregate all matrix results and the inventory preparation job");
 }
 const requiredBackendModules = new Set([
   "transaction-ingest-service",
@@ -261,7 +347,6 @@ const serviceDockerfiles = new Map([
   ["ml-inference-service", "deployment/Dockerfile.ml-inference"],
   ["analyst-console-ui", "deployment/Dockerfile.frontend"],
 ]);
-const githubShaExpression = String.fromCharCode(36) + "{{ github.sha }}";
 const scannedImages = new Set();
 const expectedArtifacts = [];
 const sha = process.env.TESTED_GIT_SHA ?? process.env.GITHUB_SHA ?? "";
@@ -291,6 +376,14 @@ for (const entry of imageEntries) {
   }
   const group = backendMatch ? "backend" : serviceMatch ? "service" : "external";
   const logicalName = matches[0][1];
+  if (entry._logicalName !== logicalName) {
+    failures.push(`${scanInventoryPath}: artifact ${artifactName} does not match logical image ${entry._logicalName}`);
+  }
+  if ((entry._group === "backend" && group !== "backend")
+    || (entry._group === "infrastructure" && group !== "external")
+    || (entry._group === "services" && group !== "service" && logicalName !== "node-builder")) {
+    failures.push(`${scanInventoryPath}: artifact ${artifactName} is assigned to the wrong bounded matrix group`);
+  }
   if (seenArtifactNames.has(artifactName)) failures.push("image-security contains a duplicate scan artifact: " + artifactName);
   seenArtifactNames.add(artifactName);
 
@@ -445,8 +538,8 @@ if (!kafkaDockerfile.includes("source=/etc/kafka/docker,target=/mnt/kafka-docker
 const frontendDockerfilePath = "deployment/Dockerfile.frontend";
 const frontendDockerfile = fs.readFileSync(frontendDockerfilePath, "utf8");
 const npmTarballSha256 = "fa0711dd513fa1386bbad3962a292cb813461cb57dedf07d6eb7efe76dffe897";
-const nodeBuilderEntry = externalEntries.find((entry) => entry.name === "node-builder");
-if (nodeBuilderEntry?.image !== localNodeBuilderImage
+const nodeBuilderEntry = imageEntries.find((entry) => entry["image-ref"] === localNodeBuilderImage);
+if (nodeBuilderEntry?.source !== "buildx"
   || nodeBuilderEntry?.dockerfile !== frontendDockerfilePath
   || nodeBuilderEntry?.target !== "node-builder") {
   failures.push("The frontend Node build stage must have its own required image scan entry");
@@ -585,8 +678,15 @@ if (failures.length) {
 
 const inventoryArgument = process.argv.indexOf("--write-inventory");
 const ciInventoryArgument = process.argv.indexOf("--write-ci-inventory");
+const writeGitHubMatrices = process.argv.includes("--write-github-matrices");
 if (inventoryArgument >= 0 && ciInventoryArgument >= 0) {
   throw new Error("Choose only one inventory output mode.");
+}
+if (writeGitHubMatrices && (inventoryArgument < 0 || ciInventoryArgument >= 0)) {
+  throw new Error("--write-github-matrices requires --write-inventory.");
+}
+if (writeGitHubMatrices && !process.env.GITHUB_OUTPUT) {
+  throw new Error("GITHUB_OUTPUT is required when writing matrix outputs.");
 }
 for (const [argument, mode] of [[inventoryArgument, "compose"], [ciInventoryArgument, "ci"]]) {
   if (argument < 0) continue;
@@ -598,13 +698,17 @@ for (const [argument, mode] of [[inventoryArgument, "compose"], [ciInventoryArgu
   writeFileSync(inventoryPath, `${JSON.stringify({
     schemaVersion: 1,
     testedGitSha: sha,
-    requiredScanJobs: mode === "ci" ? ["fdp37", "fdp38", "fdp39"] : ["images"],
+    requiredScanJobs: mode === "ci" ? ["fdp37", "fdp38", "fdp39"] : scanInventory.requiredScanJobs,
     expectedArtifacts: mode === "ci" ? ciImageArtifacts : expectedArtifacts,
     dynamicImageUses: resolvedDynamicImages,
     sourceImageReferences: [...sourceImages].map(([imageRef, origins]) => ({ imageRef, origins: [...new Set(origins)].sort() })),
     dockerfiles: dockerfiles.map((file) => file.split(path.sep).join("/")).sort(),
     composeFiles: composeFiles.map((file) => file.split(path.sep).join("/")).sort(),
   }, null, 2)}\n`);
+}
+if (writeGitHubMatrices) {
+  const matrixOutputs = scanGroups.map(({ key }) => `${key}=${JSON.stringify(scanInventory.groups[key])}`).join("\n");
+  fs.appendFileSync(process.env.GITHUB_OUTPUT, `${matrixOutputs}\n`, "utf8");
 }
 
 console.log(`Verified ${sourceImages.size} unique image references against ${scannedImages.size} scan matrix entries and ${expectedArtifacts.length} expected artifacts.`);

@@ -13,10 +13,11 @@ const lockContents = [
   ""
 ].join("\n");
 
-const cleanReport = [
+const cleanDependencies = [
   { name: "alpha-pkg", version: "1.2.3", vulns: [] },
   { name: "beta_pkg", version: "4.5.6", vulns: [] }
 ];
+const cleanReport = { dependencies: cleanDependencies, fixes: [] };
 
 test("the application requirements file is an explicit exact-pin graph", () => {
   const packages = parseLockedPackages(fs.readFileSync(defaultRequirementsPath, "utf8"));
@@ -43,7 +44,7 @@ test("accepts clean JSON only when every locked package was audited", () => {
 test("preserves a valid vulnerable report and propagates the policy failure", () => {
   withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
     const report = structuredClone(cleanReport);
-    report[0].vulns.push({ id: "PYSEC-TEST-001", fix_versions: ["1.2.4"] });
+    report.dependencies[0].vulns.push({ id: "PYSEC-TEST-001", fix_versions: ["1.2.4"] });
     const result = runAudit({
       requirementsPath,
       reportPath,
@@ -105,10 +106,125 @@ test("fails closed if pip-audit returns a report that omits locked packages", ()
       requirementsPath,
       reportPath,
       diagnosticPath,
-      spawn: fakeScanner({ report: [cleanReport[0]], status: 0 })
+      spawn: fakeScanner({ report: { dependencies: [cleanDependencies[0]], fixes: [] }, status: 0 })
     });
     assert.equal(result.status, 1);
     assert.match(fs.readFileSync(diagnosticPath, "utf8"), /lock pins 2/);
+  });
+});
+
+test("fails closed when a locked package has the wrong reported version", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const report = structuredClone(cleanReport);
+    report.dependencies[0].version = "1.2.4";
+    const result = runAudit({ requirementsPath, reportPath, diagnosticPath, spawn: fakeScanner({ report, status: 0 }) });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /missing or mismatches a pinned package/);
+  });
+});
+
+test("rejects duplicate package entries after normalized-name matching", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const report = { dependencies: [...cleanDependencies, { ...cleanDependencies[0], name: "alpha_pkg" }], fixes: [] };
+    const result = runAudit({ requirementsPath, reportPath, diagnosticPath, spawn: fakeScanner({ report, status: 0 }) });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /repeats package/);
+  });
+});
+
+test("rejects skipped packages instead of treating a partial audit as clean", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const report = {
+      dependencies: [{ name: "alpha-pkg", skip_reason: "not installed" }, cleanDependencies[1]],
+      fixes: []
+    };
+    const result = runAudit({ requirementsPath, reportPath, diagnosticPath, spawn: fakeScanner({ report, status: 0 }) });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /skipped locked package alpha-pkg/);
+  });
+});
+
+test("rejects a report object without the pinned CLI dependencies contract", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const result = runAudit({
+      requirementsPath,
+      reportPath,
+      diagnosticPath,
+      spawn: fakeScanner({ report: { results: cleanDependencies, fixes: [] }, status: 0 })
+    });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /non-empty dependencies array/);
+  });
+});
+
+test("rejects a report without the pinned CLI fixes contract", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const result = runAudit({
+      requirementsPath,
+      reportPath,
+      diagnosticPath,
+      spawn: fakeScanner({ report: { dependencies: cleanDependencies }, status: 0 })
+    });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /must contain the fixes array/);
+  });
+});
+
+test("rejects malformed dependency and fix entries", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const report = structuredClone(cleanReport);
+    report.dependencies[0].vulns = [{ id: "PYSEC-TEST-001" }];
+    const result = runAudit({ requirementsPath, reportPath, diagnosticPath, spawn: fakeScanner({ report, status: 0 }) });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /malformed vulnerability/);
+  });
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const report = { ...cleanReport, fixes: [{ name: "alpha-pkg", old_version: "1.2.3" }] };
+    const result = runAudit({ requirementsPath, reportPath, diagnosticPath, spawn: fakeScanner({ report, status: 0 }) });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /malformed resolved fix/);
+  });
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const report = { ...cleanReport, fixes: [{ name: "alpha-pkg", version: "9.9.9", skip_reason: "no applicable fix" }] };
+    const result = runAudit({ requirementsPath, reportPath, diagnosticPath, spawn: fakeScanner({ report, status: 0 }) });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /malformed skipped fix/);
+  });
+});
+
+test("accepts the upstream resolved-fix shape without requiring fixes for a read-only audit", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const report = {
+      dependencies: cleanDependencies,
+      fixes: [{ name: "alpha-pkg", old_version: "1.2.3", new_version: "1.2.4" }]
+    };
+    const result = runAudit({ requirementsPath, reportPath, diagnosticPath, spawn: fakeScanner({ report, status: 0 }) });
+    assert.equal(result.status, 0);
+    assert.equal(result.packageCount, 2);
+  });
+});
+
+test("fails closed on an unlocked package", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const report = { dependencies: [...cleanDependencies, { name: "extra", version: "1.0", vulns: [] }], fixes: [] };
+    const result = runAudit({ requirementsPath, reportPath, diagnosticPath, spawn: fakeScanner({ report, status: 0 }) });
+    assert.equal(result.status, 1);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /unlocked package/);
+  });
+});
+
+test("fails closed when the scanner exits with an execution error", () => {
+  withAuditFiles(({ requirementsPath, reportPath, diagnosticPath }) => {
+    const result = runAudit({
+      requirementsPath,
+      reportPath,
+      diagnosticPath,
+      spawn: (_executable, args) => args[0] === "--version"
+        ? { status: 0, stdout: "pip-audit 2.10.1\n", stderr: "" }
+        : { status: 2, stdout: "", stderr: "scanner failed" }
+    });
+    assert.equal(result.status, 2);
+    assert.match(fs.readFileSync(diagnosticPath, "utf8"), /no JSON report/);
   });
 });
 
