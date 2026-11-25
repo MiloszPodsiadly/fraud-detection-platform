@@ -35,11 +35,15 @@ RUN --mount=type=bind,from=kafka-artifact,source=/tmp/kafka.tgz,target=/tmp/kafk
     tar -xzf /tmp/kafka.tgz --strip-components=1 -C /opt/kafka \
     && chown -R appuser:appuser /opt/kafka \
     && test -f /opt/kafka/libs/kafka_2.13-4.4.0.jar \
-    && test -f /opt/kafka/libs/lz4-java-1.8.0.jar \
-    && test -f /opt/kafka/libs/snappy-java-1.1.10.5.jar \
-    && rm /opt/kafka/libs/lz4-java-1.8.0.jar /opt/kafka/libs/snappy-java-1.1.10.5.jar \
+    && test -f /opt/kafka/libs/lz4-java-1.11.2.jar \
+    && test -f /opt/kafka/libs/snappy-java-1.1.10.7.jar \
+    && rm /opt/kafka/libs/lz4-java-1.11.2.jar /opt/kafka/libs/snappy-java-1.1.10.7.jar \
     && install -o appuser -g appuser -m 0644 /tmp/lz4-java-1.14.1.jar /opt/kafka/libs/lz4-java-1.14.1.jar \
     && install -o appuser -g appuser -m 0644 /tmp/snappy-java-1.1.10.12.jar /opt/kafka/libs/snappy-java-1.1.10.12.jar \
+    && test "$(find /opt/kafka/libs -type f -name 'lz4-java-*.jar' | sed 's#^.*/##' | sort)" = 'lz4-java-1.14.1.jar' \
+    && test "$(find /opt/kafka/libs -type f -name 'snappy-java-*.jar' | sed 's#^.*/##' | sort)" = 'snappy-java-1.1.10.12.jar' \
+    && test "$(stat -c '%U:%G %a' /opt/kafka/libs/lz4-java-1.14.1.jar)" = 'appuser:appuser 644' \
+    && test "$(stat -c '%U:%G %a' /opt/kafka/libs/snappy-java-1.1.10.12.jar)" = 'appuser:appuser 644' \
     && test -x /opt/kafka/bin/kafka-server-start.sh
 
 # The JSA archives from the official image are tied to its vulnerable Temurin 25.0.4.1.

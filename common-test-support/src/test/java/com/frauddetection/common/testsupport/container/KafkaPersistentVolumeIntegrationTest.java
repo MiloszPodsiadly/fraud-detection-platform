@@ -5,6 +5,7 @@ import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.HostConfig;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.ListTopicsOptions;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -65,8 +66,8 @@ class KafkaPersistentVolumeIntegrationTest {
             Map<TopicPartition, Long> committedOffsets;
             try (KafkaContainer initial = newBroker(network, volumeName)) {
                 initial.start();
-                assertBrokerIdentityAndDataOwnership(initial, topic, true);
                 createTopicAndCommitTransaction(initial, topic, suffix);
+                assertBrokerIdentityAndDataOwnership(initial, topic, true);
                 consumeAndCommit(initial, topic, consumerGroup);
                 committedOffsets = committedOffsets(initial, consumerGroup);
                 assertThat(committedOffsets).isNotEmpty();
@@ -173,7 +174,7 @@ class KafkaPersistentVolumeIntegrationTest {
             assertThat(descriptions).containsKey(topic);
             var description = descriptions.get(topic).get(30, TimeUnit.SECONDS);
             assertThat(description.partitions()).hasSize(expectedPartitions);
-            var topics = admin.listTopics().names().get(30, TimeUnit.SECONDS);
+            var topics = admin.listTopics(new ListTopicsOptions().listInternal(true)).names().get(30, TimeUnit.SECONDS);
             assertThat(topics).contains(topic);
             if (expectTransactionStateTopic) assertThat(topics).contains("__transaction_state");
         }

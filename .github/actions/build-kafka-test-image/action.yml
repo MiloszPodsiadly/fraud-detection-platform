@@ -8,4 +8,4 @@ runs:
       run: >-
         docker build --pull --platform linux/amd64
         --file deployment/Dockerfile.kafka
-        --tag fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r2 .
+        --tag fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3 .
