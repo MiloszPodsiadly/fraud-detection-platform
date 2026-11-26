@@ -1,11 +1,57 @@
-name: Build patched Kafka test image
-description: Build the repository's pinned Kafka distribution on the patched Temurin runtime for Testcontainers.
+name: Build and verify patched Kafka test image
+description: Provision the reviewed Kafka image locally, verify its immutable Buildx identity and runtime, then preserve evidence.
+outputs:
+  image-id-digest:
+    description: Docker Engine image config digest loaded for Testcontainers.
+    value: ${{ steps.verify.outputs.image-id-digest }}
+  buildx-manifest-digest:
+    description: Buildx manifest digest for this independent image build.
+    value: ${{ steps.verify.outputs.buildx-manifest-digest }}
+  recipe-sha256:
+    description: SHA-256 of the reviewed Kafka Dockerfile used for this build.
+    value: ${{ steps.verify.outputs.recipe-sha256 }}
 runs:
   using: composite
   steps:
-    - name: Build the local Kafka image
+    - name: Load central security policy
+      id: security-policy
       shell: bash
-      run: >-
-        docker build --pull --platform linux/amd64
-        --file deployment/Dockerfile.kafka
-        --tag fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3 .
+      run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
+    - name: Set up pinned Buildx
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      with:
+        version: v0.39.0
+        driver-opts: |
+          image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+
+    - name: Build the local Kafka image with Buildx
+      id: build-kafka
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: deployment/Dockerfile.kafka
+        platforms: ${{ steps.security-policy.outputs.image_platform }}
+        push: false
+        load: true
+        pull: true
+        no-cache: true
+        provenance: false
+        tags: fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3
+
+    - name: Verify loaded Kafka identity and runtime
+      id: verify
+      shell: bash
+      env:
+        KAFKA_BUILD_DIGEST: ${{ steps.build-kafka.outputs.digest }}
+        KAFKA_BUILD_METADATA_JSON: ${{ steps.build-kafka.outputs.metadata }}
+        KAFKA_IMAGE_REF: fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3
+      run: node scripts/security/run-security-gate.mjs kafka-image-proof
+
+    - name: Upload Kafka image build identity
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: kafka-test-image-${{ github.job }}-${{ github.sha }}
+        path: target/kafka-test-image-evidence.json
+        if-no-files-found: error
+        retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

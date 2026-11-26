@@ -11,7 +11,7 @@ runs:
     - name: Read approved Java version from policy
       id: approved-java
       shell: bash
-      run: node scripts/ci/verify-java-runtime.mjs --write-setup-output "$GITHUB_OUTPUT"
+      run: node scripts/security/run-security-gate.mjs java-runtime-policy --write-setup-output "$GITHUB_OUTPUT"
 
     - name: Install signed Eclipse Temurin JDK
       uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
@@ -24,4 +24,4 @@ runs:
 
     - name: Enforce selected Java runtime, vendor, and build
       shell: bash
-      run: node scripts/ci/verify-java-runtime.mjs
+      run: node scripts/security/run-security-gate.mjs java-runtime-policy

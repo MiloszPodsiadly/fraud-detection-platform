@@ -43,7 +43,7 @@ class FeedbackDatasetPopulationMongoIntegrationTest {
     private static final String FEATURE_CONTRACT = "feature-contract-v2";
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient mongoClient;
     private MongoTemplate mongoTemplate;

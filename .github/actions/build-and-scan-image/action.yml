@@ -29,10 +29,15 @@ inputs:
   expected-platform:
     description: Required platform of the image.
     required: false
-    default: linux/amd64
+    default: ''
 runs:
   using: composite
   steps:
+    - name: Load central security policy
+      id: security-policy
+      shell: bash
+      run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
     - name: Build image with Buildx
       if: inputs.source == 'buildx'
       id: build-image
@@ -43,6 +48,7 @@ runs:
         target: ${{ inputs.target }}
         push: false
         load: true
+        provenance: false
         pull: true
         cache-from: type=gha,scope=${{ inputs.cache-scope }}
         cache-to: type=gha,scope=${{ inputs.cache-scope }},mode=max,ignore-error=true
@@ -63,6 +69,6 @@ runs:
         image-ref: ${{ inputs.image-ref }}
         build-digest: ${{ steps.build-image.outputs.digest }}
         build-metadata: ${{ steps.build-image.outputs.metadata }}
-        expected-platform: ${{ inputs.expected-platform }}
+        expected-platform: ${{ inputs.expected-platform || steps.security-policy.outputs.image_platform }}
         artifact-name: ${{ inputs.artifact-name }}
         output-directory: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}

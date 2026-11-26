@@ -2,7 +2,7 @@ name: Scan built image and generate SBOM evidence
 description: Scan a local image, create a CycloneDX SBOM, and upload the evidence.
 outputs:
   image-id-digest:
-    description: Content-addressed Docker image config ID used as the immutable scanner input.
+    description: Actual Docker Engine image ID used as the immutable scanner input.
     value: ${{ steps.image-evidence.outputs.image-id-digest }}
 inputs:
   image-ref:
@@ -19,7 +19,7 @@ inputs:
   expected-platform:
     description: Required platform of the image loaded for scanning.
     required: false
-    default: linux/amd64
+    default: ''
   artifact-name:
     description: Unique suffix for the uploaded evidence artifact.
     required: true
@@ -30,82 +30,41 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Record tested revision and scanned image digest
+    - name: Load central security policy
+      id: security-policy
+      shell: bash
+      run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
+    - name: Record tested revision and verified Docker Engine identity
       id: image-evidence
       shell: bash
       env:
         IMAGE_REF: ${{ inputs.image-ref }}
         BUILD_DIGEST: ${{ inputs.build-digest }}
         BUILD_METADATA_JSON: ${{ inputs.build-metadata }}
-        EXPECTED_PLATFORM: ${{ inputs.expected-platform }}
+        EXPECTED_PLATFORM: ${{ inputs.expected-platform || steps.security-policy.outputs.image_platform }}
         OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
         EXPECTED_GIT_SHA: ${{ github.sha }}
       run: |
         set -euo pipefail
         actual_git_sha="$(git rev-parse HEAD)"
         test "$actual_git_sha" = "$EXPECTED_GIT_SHA"
-        image_id_digest="$(docker image inspect "$IMAGE_REF" --format '{{.Id}}')"
-        [[ "$image_id_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-        image_platform="$(docker image inspect "$IMAGE_REF" --format '{{.Os}}/{{.Architecture}}')"
-        [[ "$image_platform" =~ ^[a-z0-9]+/[a-z0-9_]+$ ]]
-        test "$image_platform" = "$EXPECTED_PLATFORM"
-        repo_digests="$(docker image inspect "$IMAGE_REF" --format '{{range .RepoDigests}}{{println .}}{{end}}')"
         mkdir -p "$OUTPUT_DIRECTORY"
-        scanned_identity_source=""
-        buildx_action_digest=""
-        buildx_manifest_digest=""
-        buildx_config_digest=""
-        source_image_digest=""
-        source_manifest_media_type=""
-        source_manifest_content_digest=""
-        platform_manifest_digest=""
-        platform_manifest_media_type=""
-        platform_manifest_content_digest=""
-        platform_config_digest=""
-        docker_image_id_kind=""
+        docker image inspect "$IMAGE_REF" | node scripts/security/run-security-gate.mjs image-identity "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}" "$EXPECTED_PLATFORM"
         if [[ -n "$BUILD_METADATA_JSON" ]]; then
-          metadata_digests="$(BUILD_METADATA_JSON="$BUILD_METADATA_JSON" BUILD_DIGEST="$BUILD_DIGEST" IMAGE_ID_DIGEST="$image_id_digest" node scripts/ci/verify-buildx-image-metadata.mjs)"
-          buildx_manifest_digest="$(printf '%s\n' "$metadata_digests" | sed -n '1p')"
-          buildx_config_digest="$(printf '%s\n' "$metadata_digests" | sed -n '2p')"
-          source_manifest_media_type="$(printf '%s\n' "$metadata_digests" | sed -n '3p')"
-          buildx_action_digest="$BUILD_DIGEST"
-          test "$image_id_digest" = "$buildx_config_digest"
-          scanned_image_digest="$image_id_digest"
-          scanned_identity_source="docker-image-id"
-          source_image_digest="$buildx_manifest_digest"
-          source_manifest_content_digest="$buildx_manifest_digest"
-          platform_manifest_digest="$buildx_manifest_digest"
-          platform_manifest_media_type="$source_manifest_media_type"
-          platform_manifest_content_digest="$buildx_manifest_digest"
-          platform_config_digest="$buildx_config_digest"
-          docker_image_id_kind="docker-image-id"
-          printf '%s\n' "$BUILD_METADATA_JSON" > "$OUTPUT_DIRECTORY/buildx-metadata.json"
+          image_identity_json="$(BUILD_METADATA_JSON="$BUILD_METADATA_JSON" BUILD_DIGEST="$BUILD_DIGEST" IMAGE_INSPECT_PATH="$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}" EXPECTED_PLATFORM="$EXPECTED_PLATFORM" IMAGE_REF="$IMAGE_REF" node scripts/security/run-security-gate.mjs image-build-metadata)"
+          identity_source="buildx-loaded-image"
+          printf '%s\n' "$BUILD_METADATA_JSON" > "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.buildx_metadata_file }}"
         elif [[ "$IMAGE_REF" == *@sha256:* ]]; then
-          registry_identity="$(node scripts/ci/inspect-pinned-image-platform.mjs "$IMAGE_REF" "$EXPECTED_PLATFORM" "$image_id_digest")"
-          printf '%s\n' "$registry_identity" > "$OUTPUT_DIRECTORY/registry-image-identity.json"
-          identity_fields="$(IDENTITY_JSON="$registry_identity" node -e 'const i=JSON.parse(process.env.IDENTITY_JSON); process.stdout.write([i.sourceImageDigest,i.sourceManifestMediaType,i.sourceManifestContentDigest,i.platformManifestDigest,i.platformManifestMediaType,i.platformManifestContentDigest,i.platformConfigDigest,i.dockerImageIdKind].join("\n"));')"
-          source_image_digest="$(printf '%s\n' "$identity_fields" | sed -n '1p')"
-          source_manifest_media_type="$(printf '%s\n' "$identity_fields" | sed -n '2p')"
-          source_manifest_content_digest="$(printf '%s\n' "$identity_fields" | sed -n '3p')"
-          platform_manifest_digest="$(printf '%s\n' "$identity_fields" | sed -n '4p')"
-          platform_manifest_media_type="$(printf '%s\n' "$identity_fields" | sed -n '5p')"
-          platform_manifest_content_digest="$(printf '%s\n' "$identity_fields" | sed -n '6p')"
-          platform_config_digest="$(printf '%s\n' "$identity_fields" | sed -n '7p')"
-          docker_image_id_kind="$(printf '%s\n' "$identity_fields" | sed -n '8p')"
-          [[ "$source_image_digest" = "${IMAGE_REF##*@}" ]]
-          scanned_image_digest="$image_id_digest"
-          scanned_identity_source="docker-image-id"
-          test "$platform_config_digest" = "$image_id_digest"
-          test "$docker_image_id_kind" = "platform-config"
+          image_identity_json="$(node scripts/security/run-security-gate.mjs image-platform-identity "$IMAGE_REF" "$EXPECTED_PLATFORM" "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}")"
+          identity_source="registry-pinned"
+          printf '%s\n' "$image_identity_json" > "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.registry_identity_file }}"
         else
           echo "Unsupported or unverified image identity for $IMAGE_REF" >&2
           exit 1
         fi
-        [[ "$scanned_image_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-        export TESTED_GIT_SHA="$actual_git_sha" IMAGE_ID_DIGEST="$image_id_digest" IMAGE_PLATFORM="$image_platform" SCANNED_IMAGE_DIGEST="$scanned_image_digest" REPO_DIGESTS="$repo_digests" BUILDX_ACTION_DIGEST="$buildx_action_digest" BUILDX_DIGEST="$buildx_manifest_digest" BUILDX_CONFIG_DIGEST="$buildx_config_digest" SOURCE_IMAGE_DIGEST="$source_image_digest" SOURCE_MANIFEST_MEDIA_TYPE="$source_manifest_media_type" SOURCE_MANIFEST_CONTENT_DIGEST="$source_manifest_content_digest" PLATFORM_MANIFEST_DIGEST="$platform_manifest_digest" PLATFORM_MANIFEST_MEDIA_TYPE="$platform_manifest_media_type" PLATFORM_MANIFEST_CONTENT_DIGEST="$platform_manifest_content_digest" PLATFORM_CONFIG_DIGEST="$platform_config_digest" DOCKER_IMAGE_ID_KIND="$docker_image_id_kind"
-        export SCANNED_IDENTITY_SOURCE="$scanned_identity_source"
+        image_id_digest="$(TESTED_GIT_SHA="$actual_git_sha" IMAGE_REF="$IMAGE_REF" EXPECTED_PLATFORM="$EXPECTED_PLATFORM" IDENTITY_SOURCE="$identity_source" IMAGE_IDENTITY_JSON="$image_identity_json" BUILD_DIGEST="$BUILD_DIGEST" node scripts/security/run-security-gate.mjs image-security-evidence "$OUTPUT_DIRECTORY")"
         printf 'image-id-digest=%s\n' "$image_id_digest" >> "$GITHUB_OUTPUT"
-        node -e 'const fs=require("node:fs"); const p=process.env.OUTPUT_DIRECTORY + "/image-security-evidence.json"; const nullable=(value)=>value || null; fs.writeFileSync(p, JSON.stringify({schemaVersion:2,testedGitSha:process.env.TESTED_GIT_SHA,imageRef:process.env.IMAGE_REF,imagePlatform:process.env.IMAGE_PLATFORM,scannedImageDigest:process.env.SCANNED_IMAGE_DIGEST,scannedImageIdentitySource:process.env.SCANNED_IDENTITY_SOURCE,imageIdDigest:process.env.IMAGE_ID_DIGEST,dockerImageIdKind:process.env.DOCKER_IMAGE_ID_KIND,repoDigests:process.env.REPO_DIGESTS.split("\n").filter(Boolean),sourceImageDigest:nullable(process.env.SOURCE_IMAGE_DIGEST),sourceManifestMediaType:nullable(process.env.SOURCE_MANIFEST_MEDIA_TYPE),sourceManifestContentDigest:nullable(process.env.SOURCE_MANIFEST_CONTENT_DIGEST),platformManifestDigest:nullable(process.env.PLATFORM_MANIFEST_DIGEST),platformManifestMediaType:nullable(process.env.PLATFORM_MANIFEST_MEDIA_TYPE),platformManifestContentDigest:nullable(process.env.PLATFORM_MANIFEST_CONTENT_DIGEST),platformConfigDigest:nullable(process.env.PLATFORM_CONFIG_DIGEST),buildxActionDigest:nullable(process.env.BUILDX_ACTION_DIGEST),buildxDigest:nullable(process.env.BUILDX_DIGEST),buildxConfigDigest:nullable(process.env.BUILDX_CONFIG_DIGEST)}, null, 2) + "\n");'
 
     - name: Scan image for high and critical vulnerabilities
       id: trivy-scan
@@ -113,14 +72,14 @@ runs:
       with:
         scan-type: image
         image-ref: ${{ steps.image-evidence.outputs.image-id-digest }}
-        version: v0.76.2
+        version: ${{ steps.security-policy.outputs.trivy_version }}
         cache: false
         scanners: vuln
         vuln-type: os,library
         format: json
-        output: ${{ inputs.output-directory }}/trivy-image.json
-        severity: HIGH,CRITICAL
-        timeout: 15m
+        output: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.trivy_image_file }}
+        severity: ${{ steps.security-policy.outputs.blocking_vulnerability_severities }}
+        timeout: ${{ steps.security-policy.outputs.image_scan_timeout }}
         exit-code: '1'
 
     - name: Generate CycloneDX SBOM for the built image
@@ -130,8 +89,8 @@ runs:
       with:
         image: docker:${{ steps.image-evidence.outputs.image-id-digest }}
         format: cyclonedx-json
-        output-file: ${{ inputs.output-directory }}/image.cdx.raw.json
-        syft-version: v1.57.2
+        output-file: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.raw_image_sbom_file }}
+        syft-version: ${{ steps.security-policy.outputs.syft_version }}
         upload-artifact: false
         upload-release-assets: false
 
@@ -140,22 +99,23 @@ runs:
       id: image-sbom-binding
       shell: bash
       env:
-        EVIDENCE_PATH: ${{ inputs.output-directory }}/image-security-evidence.json
-        SBOM_RAW_PATH: ${{ inputs.output-directory }}/image.cdx.raw.json
-        SBOM_BOUND_PATH: ${{ inputs.output-directory }}/image.cdx.json
-      run: node scripts/ci/bind-image-sbom-identity.mjs "$SBOM_RAW_PATH" "$EVIDENCE_PATH" "$SBOM_BOUND_PATH"
+        EVIDENCE_PATH: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.image_evidence_file }}
+        SBOM_RAW_PATH: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.raw_image_sbom_file }}
+        SBOM_BOUND_PATH: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.bound_image_sbom_file }}
+      run: node scripts/security/run-security-gate.mjs image-sbom-binding "$SBOM_RAW_PATH" "$EVIDENCE_PATH" "$SBOM_BOUND_PATH"
 
-    - name: Verify the scanned image reference still resolves to the captured image ID
+    - name: Verify the scanned image reference still resolves to the captured Engine identity
       if: always() && steps.image-evidence.outcome == 'success'
       shell: bash
       env:
         IMAGE_REF: ${{ inputs.image-ref }}
         OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        DOCKER_INSPECT_FILE: ${{ steps.security-policy.outputs.docker_image_inspect_file }}
+        DOCKER_INSPECT_AFTER_SCAN_FILE: ${{ steps.security-policy.outputs.docker_image_inspect_after_scan_file }}
       run: |
         set -euo pipefail
-        expected_image_id="$(node -e 'const fs=require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.env.OUTPUT_DIRECTORY + "/image-security-evidence.json", "utf8")).imageIdDigest)')"
-        actual_image_id="$(docker image inspect "$IMAGE_REF" --format '{{.Id}}')"
-        test "$actual_image_id" = "$expected_image_id"
+        docker image inspect "$IMAGE_REF" | node scripts/security/run-security-gate.mjs image-identity "$OUTPUT_DIRECTORY/$DOCKER_INSPECT_AFTER_SCAN_FILE" "${{ inputs.expected-platform || steps.security-policy.outputs.image_platform }}"
+        node -e 'const fs=require("node:fs"); const a=JSON.parse(fs.readFileSync(process.env.OUTPUT_DIRECTORY + "/" + process.env.DOCKER_INSPECT_FILE, "utf8"))[0]; const b=JSON.parse(fs.readFileSync(process.env.OUTPUT_DIRECTORY + "/" + process.env.DOCKER_INSPECT_AFTER_SCAN_FILE, "utf8"))[0]; if (!a || !b || a.Id !== b.Id || a.Os !== b.Os || a.Architecture !== b.Architecture || JSON.stringify(a.Descriptor ?? null) !== JSON.stringify(b.Descriptor ?? null) || JSON.stringify(a.RepoTags ?? []) !== JSON.stringify(b.RepoTags ?? []) || JSON.stringify(a.RepoDigests ?? []) !== JSON.stringify(b.RepoDigests ?? [])) process.exit(1);'
 
     - name: Record image scan and SBOM execution outcomes
       if: always() && steps.image-evidence.outcome == 'success'
@@ -166,10 +126,8 @@ runs:
         TRIVY_OUTCOME: ${{ steps.trivy-scan.outcome }}
         SBOM_OUTCOME: ${{ steps.image-sbom.outcome }}
         SBOM_BINDING_OUTCOME: ${{ steps.image-sbom-binding.outcome }}
-        SCANNER_VERSION: v0.76.2
-        SBOM_GENERATOR_VERSION: v1.57.2
       run: |
-        node scripts/ci/write-image-scan-result.mjs
+        node scripts/security/run-security-gate.mjs image-scan-result
 
     - name: Upload image security evidence
       if: always()
@@ -178,4 +136,4 @@ runs:
         name: ${{ inputs.artifact-name }}-${{ github.sha }}
         path: ${{ inputs.output-directory }}
         if-no-files-found: error
-        retention-days: 30
+        retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

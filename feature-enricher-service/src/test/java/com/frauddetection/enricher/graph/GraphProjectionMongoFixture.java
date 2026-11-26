@@ -1,5 +1,6 @@
 package com.frauddetection.enricher.graph;
 
+import com.frauddetection.common.testsupport.container.MongoTestSupport;
 import com.github.dockerjava.api.model.HostConfig;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
@@ -9,7 +10,6 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.event.CommandListener;
 import org.bson.Document;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -18,18 +18,12 @@ import java.util.concurrent.TimeUnit;
 
 /** Ephemeral authenticated replica set dedicated to Graph schema/RBAC integration tests. */
 final class GraphProjectionMongoFixture implements AutoCloseable {
-    private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1"))
-            .withExposedPorts(27017).withStartupTimeout(Duration.ofSeconds(60))
-            .withCommand("bash", "-c", "openssl rand -base64 756 > /tmp/graph-key; chmod 400 /tmp/graph-key; "
-                    + "exec mongod --replSet graph-rs --bind_ip_all --keyFile /tmp/graph-key --setParameter enableTestCommands=1");
+    private final GenericContainer<?> server = MongoTestSupport.newAuthenticatedMongoContainer(
+            "graph-rs", "graph_root", "ephemeral-graph-root", true);
     private final List<MongoClient> clients = new ArrayList<>();
 
     void start() throws Exception {
-        server.start();
-        execute("rs.initiate({_id:'graph-rs',members:[{_id:0,host:'localhost:27017'}]})");
-        execute("let n=0; while(!db.hello().isWritablePrimary && n++<100){sleep(100)}; "
-                + "if(!db.hello().isWritablePrimary){throw Error('primary unavailable')}; "
-                + "db.getSiblingDB('admin').createUser({user:'graph_root',pwd:'ephemeral-graph-root',roles:['root']})");
+        MongoTestSupport.startAuthenticatedReplicaSet(server, "graph-rs", "graph_root", "ephemeral-graph-root");
     }
 
     MongoClient root() { return connect("graph_root", "ephemeral-graph-root", "admin"); }
@@ -85,11 +79,6 @@ final class GraphProjectionMongoFixture implements AutoCloseable {
         database.runCommand(new Document("createUser", user).append("pwd", "ephemeral-graph-only")
                 .append("roles", List.of(user)));
         return connect(user, "ephemeral-graph-only", database.getName());
-    }
-
-    private void execute(String javascript) throws Exception {
-        var result = server.execInContainer("mongosh", "--quiet", "--eval", javascript);
-        if (result.getExitCode() != 0) { throw new IllegalStateException("GRAPH_TEST_MONGO_BOOTSTRAP_FAILED"); }
     }
 
     private static Document privilege(String database, String collection, List<String> actions) {

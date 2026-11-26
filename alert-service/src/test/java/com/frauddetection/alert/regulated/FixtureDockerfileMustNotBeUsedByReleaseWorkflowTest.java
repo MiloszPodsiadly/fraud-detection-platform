@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,7 +23,7 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void fixtureDockerfileIsAbsentFromReleaseComposeScriptsAndReadme() throws Exception {
+    void fixtureDockerfileIsStructurallyIsolatedFromReleaseImageBuilds() throws Exception {
         assertFilesDoNotContain(Path.of("../deployment"), List.of(
                 "Dockerfile.alert-service-fdp38-fixture"
         ));
@@ -33,9 +34,17 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
         assertThat(Files.readString(Path.of("../README.md"))).doesNotContain(FIXTURE_DOCKERFILE);
 
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
-        String liveCheckpointJob = jobSection(ci, "fdp38-live-runtime-checkpoint-chaos");
-        assertThat(liveCheckpointJob).contains("docker build -f deployment/" + FIXTURE_DOCKERFILE);
-        assertThat(ci).contains("deployment/Dockerfile.backend");
+        Map<String, Object> workflow = CiBuildxWorkflowPolicy.parse(ci);
+        assertThat(CiBuildxWorkflowPolicy.fixtureBuildViolations(workflow)).isEmpty();
+        assertThat(CiBuildxWorkflowPolicy.buildViolations(workflow,
+                new CiBuildxWorkflowPolicy.BuildExpectation(
+                        "fdp39-release-governance",
+                        "build-fdp39-release-image",
+                        "deployment/Dockerfile.backend",
+                        "fdp39-alert-service:${{ github.sha }}",
+                        "MODULE_NAME=alert-service",
+                        true
+                ))).isEmpty();
 
         writeUsageArtifact(findOccurrences());
     }
@@ -81,11 +90,22 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
                         continue;
                     }
                     String content = Files.readString(file);
+                    if (normalized.equals(".github/workflows/ci.yml")) {
+                        Map<String, Object> workflow = CiBuildxWorkflowPolicy.parse(content);
+                        for (CiBuildxWorkflowPolicy.BuildUse use : CiBuildxWorkflowPolicy.buildUses(
+                                workflow, "deployment/" + FIXTURE_DOCKERFILE)) {
+                            boolean allowed = isAllowed(normalized, use.jobId());
+                            occurrences.add(new Occurrence(normalized, use.jobId(), allowed));
+                            assertThat(allowed)
+                                    .as("Fixture Dockerfile Buildx invocation is not structurally allowlisted: "
+                                            + normalized + "#" + use.jobId())
+                                    .isTrue();
+                        }
+                        continue;
+                    }
                     int index = content.indexOf(FIXTURE_DOCKERFILE);
                     while (index >= 0) {
-                        String jobName = normalized.equals(".github/workflows/ci.yml")
-                                ? jobNameAt(content, index)
-                                : "";
+                        String jobName = "";
                         boolean allowed = isAllowed(normalized, jobName);
                         occurrences.add(new Occurrence(normalized, jobName, allowed));
                         assertThat(allowed)
@@ -111,34 +131,6 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
                 || path.matches("docs/adr/fdp_39_.*\\.md")
                 || path.matches("docs/release/fdp_39_.*\\.(md|json)")
                 || path.startsWith("alert-service/src/test/");
-    }
-
-    private String jobSection(String ci, String jobName) {
-        int start = ci.indexOf("\n  " + jobName + ":");
-        if (start < 0) {
-            return "";
-        }
-        int end = ci.indexOf("\n  ", start + jobName.length() + 4);
-        while (end >= 0 && end + 3 < ci.length() && Character.isWhitespace(ci.charAt(end + 3))) {
-            end = ci.indexOf("\n  ", end + 1);
-        }
-        return end < 0 ? ci.substring(start) : ci.substring(start, end);
-    }
-
-    private String jobNameAt(String ci, int index) {
-        int search = index;
-        while (search >= 0) {
-            int lineStart = ci.lastIndexOf('\n', search - 1);
-            lineStart = lineStart < 0 ? 0 : lineStart + 1;
-            int lineEnd = ci.indexOf('\n', lineStart);
-            lineEnd = lineEnd < 0 ? ci.length() : lineEnd;
-            String line = ci.substring(lineStart, lineEnd);
-            if (line.startsWith("  ") && !line.startsWith("    ") && line.trim().endsWith(":")) {
-                return line.trim().replace(":", "");
-            }
-            search = lineStart - 1;
-        }
-        return "";
     }
 
     private void writeUsageArtifact(List<Occurrence> occurrences) throws IOException {

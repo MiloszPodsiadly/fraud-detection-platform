@@ -59,6 +59,7 @@ function ensurePolicyPublisherRole() {
     { resource: { db: "fraud_alerts", collection: "model_promotion_policies" }, actions: ["find", "insert", "createIndex", "listIndexes"] },
     { resource: { db: "fraud_alerts", collection: "model_promotion_policy_approval_evidence" }, actions: ["find", "insert"] },
     { resource: { db: "fraud_alerts", collection: "model_promotion_policy_publication_fences" }, actions: ["find", "insert", "update"] },
+    { resource: { db: "fraud_alerts", collection: "model_policy_trust_instance_observations" }, actions: ["find", "insert", "update"] },
   ];
   const role = { roles: [], privileges };
   if (target.getRole(policyPublisherRole)) {

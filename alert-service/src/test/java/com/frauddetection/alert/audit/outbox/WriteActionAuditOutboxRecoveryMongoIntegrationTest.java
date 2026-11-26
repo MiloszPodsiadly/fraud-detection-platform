@@ -57,7 +57,7 @@ class WriteActionAuditOutboxRecoveryMongoIntegrationTest {
             ModelPolicyAuthority.AUDIT_READ, ModelPolicyAuthority.AUDIT_RECOVER, ModelPolicyAuthority.PRODUCTION));
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient client;
     private SimpleMongoClientDatabaseFactory factory;

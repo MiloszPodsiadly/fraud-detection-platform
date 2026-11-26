@@ -58,9 +58,9 @@ Primary proof files:
 - `deployment/docker-compose.yml`
 - `.github/actions/scan-built-image/action.yml`
 - `.github/workflows/docker-compose-ci.yml`
-- `scripts/ci/check-image-scan-coverage.mjs`
-- `scripts/ci/inspect-pinned-image-platform.mjs`
-- `scripts/ci/validate-image-scan-evidence.mjs`
+- `scripts/security/run-security-gate.mjs image-inventory`
+- `scripts/security/evidence/inspect-pinned-image-platform.mjs`
+- `scripts/security/run-security-gate.mjs image-evidence`
 
 Required for merge:
 - Yes
@@ -244,7 +244,7 @@ Candidate for consolidation:
 ## Resolved CycloneDX SBOMs
 
 Job ID:
-- `sbom.yml::resolved-sbom`
+- `resolved-sbom`
 
 Purpose:
 - Publish the complete resolved Maven, npm, and Python dependency inventories for the tested revision.
@@ -262,8 +262,8 @@ Required for merge:
 
 Primary proof files:
 - `.github/workflows/sbom.yml`
-- `scripts/ci/validate-sbom-artifacts.mjs`
-- `scripts/ci/install-pinned-cyclonedx-bom.sh`
+- `scripts/security/run-security-gate.mjs sbom-validation`
+- `scripts/security/toolchain/install-pinned-cyclonedx-bom.sh`
 - `deployment/python-build-tools-requirements.txt`
 - `resolved-cyclonedx-sbom-<GITHUB_SHA>` workflow artifact
 
@@ -273,6 +273,56 @@ Related FDP branches:
 Candidate for consolidation:
 - No
 - Rationale: This is the required dependency-level inventory gate and complements final image SBOMs.
+
+## Docker Compose CI
+
+Job ID:
+- `compose-ci`
+
+Purpose:
+- Run Compose configuration, runtime, repository security, and bounded image-scan producers inside the same CI workflow run as the final security decision.
+
+Proves:
+- Compose overlays, runtime smoke paths, repository secrets/configuration/vulnerability controls, and all 26 inventory-driven image scans complete for the caller's tested revision.
+- Every image matrix result and evidence artifact is checked by the reusable workflow's aggregate image validator.
+
+Does not prove:
+- Production IAM, external secret management, image signing enforcement, or registry provenance beyond the recorded digest identity.
+
+Required for merge:
+- Yes, through `Platform Security Gate`
+
+Primary proof files:
+- `.github/workflows/ci.yml`
+- `.github/workflows/docker-compose-ci.yml`
+- `scripts/security/config/image-security-inventory.json`
+- `scripts/security/run-security-gate.mjs`
+
+## Platform Security Gate
+
+Job ID:
+- `platform-security-gate`
+
+Purpose:
+- Publish the single final security decision after all required CI producers and historical proofs finish.
+
+Proves:
+- Every required producer succeeded; missing, failed, cancelled, or skipped producer outcomes fail the gate.
+- Dependency audits, repository security reports, resolved SBOMs, 26 current image scans, four FDP-37/38/39 image proofs, and both image-evidence summaries exist for the tested SHA.
+- The `platform-security-evidence-<GITHUB_SHA>` contract records PR head/merge SHA, run identity, policy and tool versions, producer outcomes, artifact names, and SHA-256 hashes for each downloaded evidence file.
+- The job summary lists the final decision and any failed or missing evidence.
+
+Does not prove:
+- That GitHub branch protection or external platform controls have been configured to require this job.
+
+Required for merge:
+- Yes; `platform-security-gate` is the sole external required check. Its explicit dependencies keep each producer blocking.
+
+Primary proof files:
+- `.github/workflows/ci.yml`
+- `scripts/security/evidence/write-platform-security-evidence.mjs`
+- `scripts/security/config/security-policy.json`
+- `platform-security-evidence-<GITHUB_SHA>` workflow artifact
 
 ## Python pip-audit
 
@@ -298,9 +348,9 @@ Required for merge:
 
 Primary proof files:
 - `ml-inference-service/requirements.txt`
-- `scripts/ci/install-pinned-pip-audit.mjs`
-- `scripts/ci/run-pip-audit.mjs`
-- `scripts/ci/run-pip-audit.test.mjs`
+- `scripts/security/sbom/install-pinned-pip-audit.mjs` via `pip-audit-install`
+- `scripts/security/sbom/run-pip-audit.mjs` via `pip-dependency-audit`
+- `scripts/security/sbom/run-pip-audit.test.mjs`
 - `target/security/pip-audit.json` uploaded as `pip-audit-<GITHUB_SHA>`
 
 Failure meaning:
@@ -901,10 +951,10 @@ Required for merge:
 Primary proof files:
 - `.github/workflows/ci.yml`
 - `.github/actions/scan-built-image/action.yml`
-- `scripts/ci/check-image-scan-coverage.mjs`
-- `scripts/ci/check-image-scan-coverage.test.mjs`
-- `scripts/ci/inspect-pinned-image-platform.mjs`
-- `scripts/ci/validate-image-scan-evidence.mjs`
+- `scripts/security/run-security-gate.mjs image-inventory`
+- `scripts/security/evidence/check-image-scan-coverage.test.mjs`
+- `scripts/security/evidence/inspect-pinned-image-platform.mjs`
+- `scripts/security/run-security-gate.mjs image-evidence`
 - `image-scan-validation-<GITHUB_SHA>` or `fdp-image-scan-validation-<GITHUB_SHA>` workflow artifact
 
 Related FDP branches:
@@ -962,7 +1012,7 @@ Primary proof files:
 - `deployment/.env.example`
 - `Makefile`
 - `scripts/bootstrap-local-fixtures.sh`
-- `scripts/ci/assert-no-committed-private-keys.sh`
+- `scripts/security/run-security-gate.mjs committed-private-key-check`
 - `deployment/docker-compose.yml`
 - `deployment/docker-compose.dev.yml`
 - `deployment/docker-compose.oidc.yml`
@@ -977,7 +1027,8 @@ Supplementary Docker Compose workflow proof:
 - `Demo Fixture Guard Tests` proves generic `docker` and unmarked `test` profiles reject committed demo-secret patterns while explicitly marked fixture tests remain possible.
 - `Repository High/Critical Vulnerability Gate` blocks merge on fixed, known `HIGH` or `CRITICAL` repository filesystem vulnerabilities.
 - `Repository Vulnerability SARIF Upload` records `LOW`, `MEDIUM`, `HIGH` and `CRITICAL` filesystem vulnerability visibility in Code Scanning without making `LOW` or `MEDIUM` findings merge-blocking by itself; it is not production image provenance.
-- The Docker Compose CI workflow has a separate aggregate image scan and SBOM gate covering its backend, service, and infrastructure image matrices. The `Aggregate FDP-37/38/39 image scan evidence` CI job covers the production-like, test-fixture, and release images.
+- `ci.yml::compose-ci` calls the Docker Compose reusable workflow in the same run; its 26-image validator and `fdp-image-scan-evidence` validate the 26 inventory images and four FDP-37/38/39 images before `platform-security-gate` publishes one decision.
+- `.github/workflows/sbom.yml` is called as a reusable workflow by CI; it no longer creates an independent run with separate artifacts or check names.
 - Remaining supply-chain follow-ups include SLSA/provenance attestations, signed images and automated dependency update policy.
 - The dependency remediation moves the backend to Spring Boot `3.5.14`, a public supported line used to pick up the fixed Spring Security generation required by the critical vulnerability scan; the normal test and runtime evidence remains required for compatibility.
 - These supplementary jobs do not prove production IAM, external secret management, production deployment hardening, or optional AI model runtime behavior.
@@ -985,9 +1036,9 @@ Supplementary Docker Compose workflow proof:
 Supplementary proof files:
 - `.github/workflows/docker-compose-ci.yml`
 - `scripts/check-compose-security-config.mjs`
-- `scripts/ci/check-image-scan-coverage.mjs`
-- `scripts/ci/inspect-pinned-image-platform.mjs`
-- `scripts/ci/validate-image-scan-evidence.mjs`
+- `scripts/security/run-security-gate.mjs image-inventory`
+- `scripts/security/evidence/inspect-pinned-image-platform.mjs`
+- `scripts/security/run-security-gate.mjs image-evidence`
 - `scripts/ci/compose-runtime-smoke.sh`
 - `deployment/docker-compose.ai.yml`
 

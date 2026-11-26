@@ -259,7 +259,7 @@ if [[ "$variant" == "full-security-hardened" ]]; then
     echo "Read-only audit trust key volume is writable by the authority." >&2
     exit 1
   fi
-  if ! node scripts/ci/verify-audit-trust-runtime.mjs "$project"; then
+  if ! node scripts/security/run-security-gate.mjs audit-trust-runtime "$project"; then
     failed_service="audit-trust-authority"
     exit 1
   fi

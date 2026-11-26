@@ -1,54 +1,10 @@
 name: Resolved SBOM
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/sbom.yml
-      - .github/actions/setup-patched-java/action.yml
-      - scripts/ci/java-runtime-policy.properties
-      - scripts/ci/verify-java-runtime.mjs
-      - scripts/ci/verify-temurin-java-runtime.sh
-      - scripts/ci/install-pinned-npm.sh
-      - scripts/ci/install-pinned-cyclonedx-bom.sh
-      - scripts/ci/npm-sbom-tools/package.json
-      - scripts/ci/npm-sbom-tools/package-lock.json
-      - scripts/ci/validate-sbom-artifacts.mjs
-      - deployment/Dockerfile.ml-inference
-      - deployment/python-build-tools-requirements.txt
-      - pom.xml
-      - '**/pom.xml'
-      - analyst-console-ui/package.json
-      - analyst-console-ui/package-lock.json
-      - ml-inference-service/requirements.txt
-  push:
-    branches:
-      - master
-    paths:
-      - .github/workflows/sbom.yml
-      - .github/actions/setup-patched-java/action.yml
-      - scripts/ci/java-runtime-policy.properties
-      - scripts/ci/verify-java-runtime.mjs
-      - scripts/ci/verify-temurin-java-runtime.sh
-      - scripts/ci/install-pinned-npm.sh
-      - scripts/ci/install-pinned-cyclonedx-bom.sh
-      - scripts/ci/npm-sbom-tools/package.json
-      - scripts/ci/npm-sbom-tools/package-lock.json
-      - scripts/ci/validate-sbom-artifacts.mjs
-      - deployment/Dockerfile.ml-inference
-      - deployment/python-build-tools-requirements.txt
-      - pom.xml
-      - '**/pom.xml'
-      - analyst-console-ui/package.json
-      - analyst-console-ui/package-lock.json
-      - ml-inference-service/requirements.txt
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: sbom-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   resolved-sbom:
@@ -58,64 +14,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Set up patched Java
         uses: ./.github/actions/setup-patched-java
-        with:
-          cache: maven
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '26.13.1'
+          node-version: ${{ steps.security-policy.outputs.node_version }}
           cache: npm
           cache-dependency-path: |
             analyst-console-ui/package-lock.json
-            scripts/ci/npm-sbom-tools/package-lock.json
+            scripts/security/sbom/npm-sbom-tools/package-lock.json
 
       - name: Install verified patched npm
-        run: bash scripts/ci/install-pinned-npm.sh
+        run: node scripts/security/run-security-gate.mjs pinned-npm-install
 
       - name: Install locked npm SBOM generator and schema validator
-        working-directory: scripts/ci/npm-sbom-tools
+        working-directory: scripts/security/sbom/npm-sbom-tools
         run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Audit the complete locked npm SBOM toolchain
+        working-directory: scripts/security/sbom/npm-sbom-tools
+        run: node ../../../scripts/security/run-security-gate.mjs npm-sbom-audit ../../../target/sbom/npm-sbom-toolchain-audit.json
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12.16'
-          pip-version: '26.3'
+          python-version: ${{ steps.security-policy.outputs.python_version }}
+          pip-version: ${{ steps.security-policy.outputs.pip_version }}
           cache: pip
           cache-dependency-path: ml-inference-service/requirements.txt
 
       - name: Generate Maven resolved SBOM
-        run: |
-          mkdir -p target/sbom
-          mvn -B -DskipTests install
-          while IFS= read -r -d '' pom; do
-            module_dir="$(dirname "$pom")"
-            mkdir -p "$module_dir/target"
-            output_file="$GITHUB_WORKSPACE/${module_dir#./}/target/maven-dependency-tree.json"
-            mvn -B -DskipTests -f "$pom" \
-              org.apache.maven.plugins:maven-dependency-plugin:3.11.0:tree \
-              -DoutputType=json \
-              "-DoutputFile=$output_file"
-          done < <(find . -name pom.xml -not -path './.git/*' -print0)
-          mvn -B -DskipTests \
-            -Dproject.build.outputTimestamp=0 \
-            org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
-            -DschemaVersion=1.6 \
-            -DoutputFormat=json \
-            -DoutputName=maven-resolved \
-            -DoutputDirectory=target/sbom \
-            -DincludeBomSerialNumber=false \
-            -DincludeTestScope=true \
-            -DoutputReactorProjects=false
-          mv target/sbom/maven-resolved.json target/sbom/maven-resolved.cdx.json
+        run: node scripts/security/run-security-gate.mjs maven-sbom-generation
 
       - name: Generate npm resolved SBOM
         working-directory: analyst-console-ui
         run: |
-          ../scripts/ci/npm-sbom-tools/node_modules/.bin/cyclonedx-npm \
+          npm ci --ignore-scripts --no-audit --no-fund
+          ../scripts/security/sbom/npm-sbom-tools/node_modules/.bin/cyclonedx-npm \
             --package-lock-only \
             --output-reproducible \
             --spec-version 1.6 \
@@ -125,11 +66,13 @@ jobs:
             package.json
 
       - name: Generate Python resolved SBOM
+        env:
+          PYTHON: ${{ github.workspace }}/.venv-sbom-ml/bin/python
         run: |
           python -m venv .venv-sbom-ml
           .venv-sbom-ml/bin/python -m pip install --upgrade --require-hashes --no-deps -r deployment/python-build-tools-requirements.txt
           .venv-sbom-ml/bin/python -m pip install --require-hashes --only-binary=:all: -r ml-inference-service/requirements.txt
-          bash scripts/ci/install-pinned-cyclonedx-bom.sh
+          node scripts/security/run-security-gate.mjs pinned-cyclonedx-install
           cyclonedx-py environment \
             --output-reproducible \
             --validate \
@@ -141,9 +84,10 @@ jobs:
       - name: Validate SBOM artifacts
         env:
           TESTED_GIT_SHA: ${{ github.sha }}
+          SBOM_PYTHON: ${{ github.workspace }}/.venv-sbom-ml/bin/python
         run: |
           test "$(git rev-parse HEAD)" = "$TESTED_GIT_SHA"
-          node scripts/ci/validate-sbom-artifacts.mjs target/sbom/*.cdx.json
+          node scripts/security/run-security-gate.mjs sbom-validation target/sbom/*.cdx.json
 
       - name: Upload resolved SBOM artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -152,5 +96,6 @@ jobs:
           path: |
             target/sbom/*.json
             **/target/maven-dependency-tree.json
+            **/target/maven-plugin-dependencies.txt
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

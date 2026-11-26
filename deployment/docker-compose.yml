@@ -96,7 +96,7 @@ services:
       - ./mongodb-entrypoint.sh:/opt/mongodb-entrypoint.sh:ro
       - ./mongo-init-users.js:/docker-entrypoint-initdb.d/10-create-app-users.js:ro
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --host 127.0.0.1 --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"try { if (rs.status().ok !== 1) quit(1) } catch (e) { if (rs.initiate({_id:'rs0',members:[{_id:0,host:'mongodb:27017'}]}).ok !== 1) quit(1) }\""]
+      test: ["CMD-SHELL", "mongosh --quiet --host 127.0.0.1 --username \"$${MONGO_INITDB_ROOT_USERNAME}\" --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"const admin=db.getSiblingDB('admin'); const replicaSet='rs0'; let hello=admin.runCommand({hello:1}); if(!hello.ok) quit(1); if(hello.setName && hello.setName!==replicaSet) quit(1); if(!hello.setName){const initiated=admin.runCommand({replSetInitiate:{_id:replicaSet,members:[{_id:0,host:'mongodb:27017'}]}}); if(!initiated.ok && initiated.codeName!=='AlreadyInitialized') quit(1)}; const deadline=Date.now()+8000; while(Date.now()<deadline){hello=admin.runCommand({hello:1}); if(hello.ok && hello.setName===replicaSet && hello.isWritablePrimary) quit(0); sleep(200)}; quit(1)\""]
       interval: 15s
       timeout: 10s
       retries: 10

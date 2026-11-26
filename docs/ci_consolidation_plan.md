@@ -187,9 +187,13 @@ Risk:
 Decision:
 - implemented
 
-## Jobs Kept Separate
+## FDP-157 unified platform gate
 
-- Backend mutation and fraud-case proof gates stay separate because they protect backend behavior and transaction semantics.
-- The security route boundary stays separate because route ownership failures need direct security output.
-- Release governance gates stay separate because they have different ownership and evidence meaning.
-- Docker compose build stays separate because it proves buildability of compose images after upstream gates pass.
+The CI producers keep their own execution boundaries so backend, Graph, frontend, runtime, release, SBOM, and bounded image scans can run in parallel and retain focused logs. Branch protection has one required CI status: `Platform Security Gate`. It depends on every required producer and rejects missing, failed, skipped, cancelled, stale, or malformed evidence. Docker Compose CI and resolved SBOM generation run as reusable workflows inside the same CI run.
+
+For triage, start with the `Platform Security Gate` job summary and open the named producer that failed or omitted evidence. The JSON and Markdown contract artifact is named `platform-security-evidence-<GITHUB_SHA>`; its hashes refer to same-run reports and image artifacts. Retry the workflow for the same tested revision after fixing a producer. Branch-protection changes remain an external repository setting and are not applied by this workflow.
+
+The image producer matrices remain bounded at 3 backend, 2 service, and 4 infrastructure builds in parallel. Hosted-runner end-to-end duration, peak disk use, and cache effectiveness have not yet been measured for this change; report those only from an actual CI run.
+
+Decision:
+- implemented

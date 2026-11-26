@@ -75,7 +75,7 @@ class MongoMerchantObservationStoreWorkloadTest {
     @EnabledIfSystemProperty(named = OPT_IN, matches = "true")
     void boundedWorkloadReportsLatencyPlansConflictsAndResourceEnvelope() throws Exception {
         List<Integer> scales = selectedScales(System.getProperty("merchant.store.workload.scale", "1000,10000,25000"));
-        MongoDBContainer mongo = new MongoDBContainer("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
+        MongoDBContainer mongo = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
         mongo.start();
         try {
             reportEnvironment(mongo);
@@ -92,7 +92,7 @@ class MongoMerchantObservationStoreWorkloadTest {
     void hotSourceHotMerchantReportsContendedWritesReplayAndCompaction() throws Exception {
         Assumptions.assumeTrue(Boolean.getBoolean(HOT_OPT_IN), "hot-source workload is separately opt-in");
         int observations = selectedHotRows(System.getProperty("merchant.store.workload.hot.rows", "10000"));
-        MongoDBContainer mongo = new MongoDBContainer("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1");
+        MongoDBContainer mongo = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
         mongo.start();
         try {
             reportEnvironment(mongo);

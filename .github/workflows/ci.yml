@@ -79,6 +79,9 @@ jobs:
       - name: Verify Docker is available for signed owner fixtures
         run: docker version
 
+      - name: Build and verify patched Kafka image for Testcontainers
+        uses: ./.github/actions/build-kafka-test-image
+
       - name: Run the live signed Graph-to-scorer proof
         run: mvn -B -Pgraph-signed-e2e -pl fraud-scoring-service -am -Dtest=GraphRiskSignalEngineSignedMongoE2ETest,GraphRiskSignalEngineSignedDenseMongoE2ETest -Dsurefire.failIfNoSpecifiedTests=false verify
 
@@ -261,11 +264,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12.16"
-          pip-version: "26.3"
+          python-version: ${{ steps.security-policy.outputs.python_version }}
+          pip-version: ${{ steps.security-policy.outputs.pip_version }}
 
       - name: Install ML dependencies
         run: >-
@@ -305,7 +312,7 @@ jobs:
           cache-dependency-path: analyst-console-ui/package-lock.json
 
       - name: Install verified patched npm
-        run: bash ../scripts/ci/install-pinned-npm.sh
+        run: node ../scripts/security/run-security-gate.mjs pinned-npm-install
 
       - name: Install dependencies securely
         run: |
@@ -334,13 +341,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node ../scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.13.1"
+          node-version: ${{ steps.security-policy.outputs.node_version }}
 
       - name: Install verified patched npm
-        run: bash ../scripts/ci/install-pinned-npm.sh
+        run: node ../scripts/security/run-security-gate.mjs pinned-npm-install
 
       - name: Audit production and development dependencies
         run: |
@@ -365,26 +376,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Set up Python for isolated audit tooling
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12.16"
+          python-version: ${{ steps.security-policy.outputs.python_version }}
+          pip-version: ${{ steps.security-policy.outputs.pip_version }}
 
       - name: Set up Node for audit evidence validation
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.13.1"
+          node-version: ${{ steps.security-policy.outputs.node_version }}
 
       - name: Install verified pip-audit CLI in an isolated environment
         env:
           RUNNER_TEMP: ${{ runner.temp }}
-        run: node scripts/ci/install-pinned-pip-audit.mjs
+        run: node scripts/security/run-security-gate.mjs pip-audit-install
 
       - name: Add isolated pip-audit CLI to PATH
         run: printf '%s\n' "$RUNNER_TEMP/pip-audit-venv/bin" >> "$GITHUB_PATH"
 
       - name: Audit every hash-locked Python package and validate JSON evidence
-        run: node scripts/ci/run-pip-audit.mjs
+        run: node scripts/security/run-security-gate.mjs pip-dependency-audit
 
       - name: Upload available pip-audit evidence
         if: always()
@@ -476,7 +492,7 @@ jobs:
           cache-dependency-path: analyst-console-ui/package-lock.json
 
       - name: Install verified patched npm
-        run: bash scripts/ci/install-pinned-npm.sh
+        run: node scripts/security/run-security-gate.mjs pinned-npm-install
 
       - name: Ensure FDP-47 tests are not skipped
         run: node scripts/ci/guard-test-activation.mjs --suite fdp47
@@ -533,7 +549,7 @@ jobs:
           cache-dependency-path: analyst-console-ui/package-lock.json
 
       - name: Install verified patched npm
-        run: bash scripts/ci/install-pinned-npm.sh
+        run: node scripts/security/run-security-gate.mjs pinned-npm-install
 
       - name: Ensure FDP-48 tests are not skipped
         run: node scripts/ci/guard-test-activation.mjs --suite fdp48
@@ -591,7 +607,7 @@ jobs:
           cache-dependency-path: analyst-console-ui/package-lock.json
 
       - name: Install verified patched npm
-        run: bash scripts/ci/install-pinned-npm.sh
+        run: node scripts/security/run-security-gate.mjs pinned-npm-install
 
       # Post-BFF route/auth boundaries remain required for merge.
       - name: Ensure security route boundary tests are not skipped
@@ -698,7 +714,7 @@ jobs:
           cache-dependency-path: analyst-console-ui/package-lock.json
 
       - name: Install verified patched npm
-        run: bash scripts/ci/install-pinned-npm.sh
+        run: node scripts/security/run-security-gate.mjs pinned-npm-install
 
       - name: Install frontend dependencies securely
         working-directory: analyst-console-ui
@@ -872,6 +888,7 @@ jobs:
           file: deployment/Dockerfile.backend
           push: false
           load: true
+          provenance: false
           pull: true
           no-cache: true
           tags: fdp37-alert-service:${{ github.sha }}
@@ -1015,6 +1032,7 @@ jobs:
           file: deployment/Dockerfile.alert-service-fdp38-fixture
           push: false
           load: true
+          provenance: false
           pull: true
           no-cache: true
           tags: fdp38-alert-service-test-fixture:${{ github.sha }}
@@ -1113,6 +1131,7 @@ jobs:
           file: deployment/Dockerfile.backend
           push: false
           load: true
+          provenance: false
           pull: true
           no-cache: true
           tags: fdp39-alert-service:${{ github.sha }}
@@ -1160,6 +1179,7 @@ jobs:
           file: deployment/Dockerfile.alert-service-fdp38-fixture
           push: false
           load: true
+          provenance: false
           pull: true
           no-cache: true
           tags: fdp38-alert-service-test-fixture:${{ github.sha }}
@@ -1233,27 +1253,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.13.1"
+          node-version: ${{ steps.security-policy.outputs.node_version }}
 
       - name: Exercise image inventory and evidence rejection cases
-        run: node --test scripts/ci/check-image-scan-coverage.test.mjs scripts/ci/validate-image-scan-evidence.test.mjs scripts/ci/verify-buildx-image-metadata.test.mjs
+        run: node --test scripts/security/evidence/check-image-scan-coverage.test.mjs scripts/security/evidence/validate-image-scan-evidence.test.mjs scripts/security/evidence/verify-buildx-image-metadata.test.mjs scripts/security/evidence/verify-kafka-test-image.test.mjs scripts/security/evidence/write-docker-image-identity.test.mjs
+
+      - name: Exercise resolved SBOM inventory rejection cases
+        run: node --test scripts/security/sbom/maven-reactor.test.mjs scripts/security/sbom/maven-sbom-inventory.test.mjs scripts/security/sbom/sbom-component-inventory.test.mjs scripts/security/sbom/verify-npm-sbom-toolchain.test.mjs
+
+      - name: Exercise bounded scanner and secret proof rejection cases
+        run: node --test scripts/security/run-security-gate.test.mjs scripts/security/lib/run-bounded-process.test.mjs scripts/security/toolchain/verify-java-runtime.test.mjs scripts/security/scanners/resolve-maven-for-trivy.test.mjs scripts/security/scanners/trivy-vulnerability-report.test.mjs scripts/security/scanners/verify-trivy-secret-only.test.mjs scripts/security/sbom/run-pip-audit.test.mjs scripts/security/evidence/write-platform-security-evidence.test.mjs
+
+      - name: Exercise Python hash-lock and marker rejection cases
+        run: python scripts/security/sbom/verify-python-sbom-inventory.test.py
 
       - name: Derive expected FDP image scan inventory
-        run: node scripts/ci/check-image-scan-coverage.mjs --write-ci-inventory target/image-security/expected-inventory.json
+        run: node scripts/security/run-security-gate.mjs image-inventory --write-ci-inventory target/image-security/expected-inventory.json
 
       - name: Download FDP image scan artifacts for this revision
         if: always()
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: '*-security-${{ github.sha }}'
+          pattern: 'fdp*-security-${{ github.sha }}'
           path: target/image-security/downloads
 
       - name: Validate complete FDP image scans and SBOMs
         if: always()
-        run: node scripts/ci/validate-image-scan-evidence.mjs target/image-security/expected-inventory.json target/image-security/downloads
+        run: node scripts/security/run-security-gate.mjs image-evidence target/image-security/expected-inventory.json target/image-security/downloads
 
       - name: Upload FDP image scan evidence validation summary
         if: always()
@@ -1387,3 +1420,102 @@ jobs:
             -f deployment/docker-compose.trust-authority-jwt.yml \
             -f deployment/docker-compose.hardened.yml \
             build
+
+  compose-ci:
+    name: Docker Compose CI
+    uses: ./.github/workflows/docker-compose-ci.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  resolved-sbom:
+    name: Resolved CycloneDX SBOMs
+    uses: ./.github/workflows/sbom.yml
+    permissions:
+      contents: read
+
+  platform-security-gate:
+    name: Platform Security Gate
+    if: ${{ always() }}
+    needs:
+      - backend
+      - graph-signed-e2e
+      - institutional-reliability
+      - fdp42-fraud-case-management
+      - fdp45-fraud-case-work-queue-read-model
+      - ml
+      - frontend
+      - frontend-dependency-audit
+      - python-dependency-audit
+      - fdp28-proof
+      - fdp35-production-readiness
+      - fdp47-analyst-console-ux-and-summary
+      - fdp48-bff-session-request-lifecycle
+      - security-route-boundary
+      - fdp54-ci-docs-governance
+      - analyst-console-frontend-architecture-gate
+      - regulated-mutation-regression
+      - fdp36-real-chaos
+      - fdp37-production-image-chaos
+      - fdp38-live-runtime-checkpoint-chaos
+      - fdp39-release-governance
+      - fdp40-release-controls
+      - fdp-image-scan-evidence
+      - docker
+      - compose-ci
+      - resolved-sbom
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    env:
+      TESTED_GIT_SHA: ${{ github.sha }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PR_MERGE_SHA: ${{ github.event.pull_request.head.sha && github.sha || '' }}
+      PLATFORM_SECURITY_NEEDS_JSON: ${{ toJSON(needs) }}
+      PLATFORM_SECURITY_ARTIFACT_DIRECTORY: target/platform-security/artifacts
+    steps:
+      - name: Checkout the tested revision
+        if: ${{ always() }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Load central security policy
+        if: ${{ always() }}
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
+      - name: Set up the pinned Node runtime
+        if: ${{ always() }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.security-policy.outputs.node_version }}
+
+      - name: Download this run's revision-bound security artifacts
+        if: ${{ always() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: '*-${{ github.sha }}'
+          path: target/platform-security/artifacts
+          merge-multiple: false
+
+      - name: Verify all producers and publish the platform security decision
+        if: ${{ always() }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$TESTED_GIT_SHA"
+          node scripts/security/run-security-gate.mjs platform-security-evidence \
+            "$PLATFORM_SECURITY_ARTIFACT_DIRECTORY" \
+            target/platform-security/platform-security-evidence.json
+
+      - name: Upload the unified platform security evidence contract
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.security-policy.outputs.platform_gate_artifact_name }}-${{ github.sha }}
+          path: |
+            target/platform-security/platform-security-evidence.json
+            target/platform-security/platform-security-evidence.md
+          if-no-files-found: ignore
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

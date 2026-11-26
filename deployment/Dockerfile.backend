@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
 
 FROM maven:3.10.2-eclipse-temurin-21-noble@sha256:c8d5fcc6bbda32e415cd6a2f4d091c52f768e12594cfdb396dd2712c4b609369 AS build
-COPY scripts/ci/verify-temurin-java-runtime.sh /usr/local/bin/verify-temurin-java-runtime
-COPY scripts/ci/java-runtime-policy.properties /usr/local/share/fdp/java-runtime-policy.properties
+COPY scripts/security/toolchain/verify-temurin-java-runtime.sh /usr/local/bin/verify-temurin-java-runtime
+COPY scripts/security/toolchain/java-runtime-policy.properties /usr/local/share/fdp/java-runtime-policy.properties
 RUN chmod 0555 /usr/local/bin/verify-temurin-java-runtime && /usr/local/bin/verify-temurin-java-runtime
-COPY scripts/ci/exec-with-verified-temurin-java.sh /usr/local/bin/exec-with-verified-temurin-java
+COPY scripts/security/toolchain/exec-with-verified-temurin-java.sh /usr/local/bin/exec-with-verified-temurin-java
 RUN chmod 0555 /usr/local/bin/exec-with-verified-temurin-java
 
 ARG MODULE_NAME
@@ -41,10 +41,10 @@ RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -pl "${MODULE_NAME}" -am -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
-COPY scripts/ci/verify-temurin-java-runtime.sh /usr/local/bin/verify-temurin-java-runtime
-COPY scripts/ci/java-runtime-policy.properties /usr/local/share/fdp/java-runtime-policy.properties
+COPY scripts/security/toolchain/verify-temurin-java-runtime.sh /usr/local/bin/verify-temurin-java-runtime
+COPY scripts/security/toolchain/java-runtime-policy.properties /usr/local/share/fdp/java-runtime-policy.properties
 RUN chmod 0555 /usr/local/bin/verify-temurin-java-runtime && /usr/local/bin/verify-temurin-java-runtime
-COPY scripts/ci/exec-with-verified-temurin-java.sh /usr/local/bin/exec-with-verified-temurin-java
+COPY scripts/security/toolchain/exec-with-verified-temurin-java.sh /usr/local/bin/exec-with-verified-temurin-java
 RUN chmod 0555 /usr/local/bin/exec-with-verified-temurin-java
 
 ARG MODULE_NAME

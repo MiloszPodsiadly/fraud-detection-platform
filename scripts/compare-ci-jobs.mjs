@@ -162,7 +162,7 @@ function parseCrossWorkflowJobReferences(sections) {
 
 function readImageInventory() {
   try {
-    return JSON.parse(readFileSync(join(repoRoot, "scripts/ci/image-security-inventory.json"), "utf8"));
+    return JSON.parse(readFileSync(join(repoRoot, "scripts/security/config/image-security-inventory.json"), "utf8"));
   } catch {
     return {};
   }

@@ -11,6 +11,7 @@ import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.source.*;
 import com.frauddetection.common.testsupport.container.KafkaImageReference;
+import com.frauddetection.common.testsupport.container.MongoTestSupport;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.mapper.TransactionEnrichedEventMapper;
 import com.frauddetection.enricher.merchant.MerchantObservationStore.*;
@@ -41,7 +42,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.kafka.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.security.KeyPair;
@@ -1320,18 +1320,12 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
     }
 
     private static final class TestMongo implements AutoCloseable {
-        private final GenericContainer<?> server = new GenericContainer<>(DockerImageName.parse("mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1"))
-                .withExposedPorts(27017).withStartupTimeout(Duration.ofSeconds(60))
-                .withCommand("bash", "-c", "openssl rand -base64 756 > /tmp/lineage-key; chmod 400 /tmp/lineage-key; "
-                        + "exec mongod --replSet merchant-rs --bind_ip_all --keyFile /tmp/lineage-key --setParameter enableTestCommands=1");
+        private final GenericContainer<?> server = MongoTestSupport.newAuthenticatedMongoContainer(
+                "merchant-rs", "source_owner", "ephemeral-owner-only", true);
         private final List<MongoClient> clients = new ArrayList<>();
 
         void start() throws Exception {
-            server.start();
-            execute("rs.initiate({_id:'merchant-rs',members:[{_id:0,host:'localhost:27017'}]}); "
-                    + "let n=0; while(!db.hello().isWritablePrimary && n++<100){sleep(100)}; "
-                    + "if(!db.hello().isWritablePrimary){throw Error('primary unavailable')}; "
-                    + "db.getSiblingDB('admin').createUser({user:'source_owner',pwd:'ephemeral-owner-only',roles:['root']})");
+            MongoTestSupport.startAuthenticatedReplicaSet(server, "merchant-rs", "source_owner", "ephemeral-owner-only");
         }
 
         MongoClient owner() { return connect("source_owner", "ephemeral-owner-only", "admin"); }
@@ -1435,11 +1429,6 @@ class MerchantVerifiedSourceAdmissionEndToEndIntegrationTest {
         private static Document privilege(String database, String collection, List<String> actions) {
             return new Document("resource", new Document("db", database).append("collection", collection))
                     .append("actions", actions);
-        }
-
-        private void execute(String script) throws Exception {
-            var result = server.execInContainer("mongosh", "--quiet", "--eval", script);
-            if (result.getExitCode() != 0) { throw new IllegalStateException("TEST_MONGO_BOOTSTRAP_FAILED: " + result.getStderr()); }
         }
 
         @Override public void close() { clients.forEach(MongoClient::close); server.stop(); }

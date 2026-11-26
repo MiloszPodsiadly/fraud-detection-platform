@@ -89,7 +89,7 @@ exact-model-shadow-preflight: deployment/.env local-runtime-fixtures
 
 check-compose-exact-model-shadow: exact-model-shadow-preflight
 	node --test scripts/check-compose-security-config.test.mjs
-	bash scripts/ci/check-compose-bind-mount-security.sh
+	node scripts/security/run-security-gate.mjs compose-bind-mount-check
 
 check-local-startup:
 	node --test scripts/local-startup-contract.test.mjs

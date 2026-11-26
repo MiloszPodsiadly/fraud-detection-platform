@@ -1,18 +1,10 @@
 name: Docker Compose CI
 
 on:
-  pull_request:
-  push:
-    branches:
-      - master
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: docker-compose-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   compose-config:
@@ -51,7 +43,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify all base and runtime image references are pinned and scanned
-        run: node scripts/ci/check-image-scan-coverage.mjs
+        run: node scripts/security/run-security-gate.mjs image-inventory
 
       - name: Generate local identity fixtures for Compose overlays
         run: |
@@ -126,7 +118,7 @@ jobs:
         run: node --test scripts/model-promotion-trust-admin.test.mjs
 
       - name: Verify artifact preflight and Docker read-only behavior
-        run: bash scripts/ci/check-compose-bind-mount-security.sh
+        run: node scripts/security/run-security-gate.mjs compose-bind-mount-check
 
   exact-model-runtime-boundary:
     name: Exact Model / non-root artifact reader
@@ -137,7 +129,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify publisher, reader ACL, and HTTP boundary
-        run: bash scripts/ci/check-exact-model-runtime-boundary.sh
+        run: node scripts/security/run-security-gate.mjs exact-model-runtime-boundary
 
   runtime-smoke:
     name: Runtime Smoke / default dev without AI
@@ -212,6 +204,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Generate local identity fixtures for fixture guard tests
         run: bash scripts/bootstrap-local-fixtures.sh
 
@@ -230,8 +226,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12.16'
-          pip-version: '26.3'
+          python-version: ${{ steps.security-policy.outputs.python_version }}
+          pip-version: ${{ steps.security-policy.outputs.pip_version }}
           cache: pip
           cache-dependency-path: ml-inference-service/requirements.txt
 
@@ -251,8 +247,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Reject committed private key material
-        run: bash scripts/ci/assert-no-committed-private-keys.sh
+        run: node scripts/security/run-security-gate.mjs committed-private-key-check
       - name: Block repository secrets
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
@@ -261,15 +261,26 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          version: v0.76.2
+          version: ${{ steps.security-policy.outputs.trivy_version }}
           cache: false
           scanners: secret
           format: table
-          timeout: 10m
+          timeout: ${{ steps.security-policy.outputs.secret_scan_timeout }}
           exit-code: '1'
 
       - name: Prove secret-only scan works while Maven resolution is unavailable
-        run: node scripts/ci/verify-trivy-secret-only.mjs
+        env:
+          SECRET_PROOF_EVIDENCE_PATH: target/security/secret-proof-summary.json
+        run: node scripts/security/run-security-gate.mjs secret-proof
+
+      - name: Upload safe secret proof summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: repository-secret-proof-${{ github.sha }}
+          path: target/security/secret-proof-summary.json
+          if-no-files-found: ignore
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}
 
   repository-configuration-gate:
     name: Docker and Compose Misconfiguration Gate
@@ -278,6 +289,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Block high or critical Docker and Compose misconfigurations
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
@@ -285,13 +300,13 @@ jobs:
         with:
           scan-type: config
           scan-ref: .
-          version: v0.76.2
+          version: ${{ steps.security-policy.outputs.trivy_version }}
           cache: false
           scanners: misconfig
           format: json
           output: trivy-config.json
-          severity: HIGH,CRITICAL
-          timeout: 10m
+          severity: ${{ steps.security-policy.outputs.blocking_vulnerability_severities }}
+          timeout: ${{ steps.security-policy.outputs.repository_scan_timeout }}
           exit-code: '1'
 
       - name: Upload Docker and Compose misconfiguration report
@@ -301,60 +316,12 @@ jobs:
           name: repository-config-scan-${{ github.sha }}
           path: trivy-config.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}
 
   repository-vulnerability-gate:
     name: Repository High/Critical Vulnerability Gate
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up patched Java
-        uses: ./.github/actions/setup-patched-java
-        with:
-          cache: maven
-
-      - name: Resolve Maven dependencies and build plugins for Trivy
-        run: node scripts/ci/resolve-maven-for-trivy.mjs
-
-      - name: Block high or critical repository vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_PARALLEL: '1'
-        with:
-          scan-type: fs
-          scan-ref: .
-          version: v0.76.2
-          cache: false
-          vuln-type: os,library
-          scanners: vuln
-          format: table
-          severity: HIGH,CRITICAL
-          timeout: 10m
-          exit-code: '1'
-
-      - name: Block high or critical resolved Maven artifact vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_PARALLEL: '1'
-        with:
-          scan-type: fs
-          scan-ref: /home/runner/.m2/repository
-          version: v0.76.2
-          cache: false
-          vuln-type: os,library
-          scanners: vuln
-          format: table
-          severity: HIGH,CRITICAL
-          timeout: 15m
-          exit-code: '1'
-
-  repository-vulnerability-sarif:
-    name: Repository Vulnerability SARIF Upload
-    runs-on: ubuntu-latest
-    needs: repository-vulnerability-gate
-    if: always()
+    timeout-minutes: 45
     permissions:
       contents: read
       security-events: write
@@ -362,64 +329,93 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
       - name: Set up patched Java
         uses: ./.github/actions/setup-patched-java
-        with:
-          cache: maven
 
       - name: Resolve Maven dependencies and build plugins for Trivy
-        run: node scripts/ci/resolve-maven-for-trivy.mjs
+        run: node scripts/security/run-security-gate.mjs maven-prefetch
 
-      - name: Scan repository filesystem for vulnerability visibility
+      - name: Prepare vulnerability evidence directory
+        run: mkdir -p target/security/trivy
+
+      - name: Scan repository dependencies once
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_PARALLEL: '1'
+          TRIVY_OFFLINE_SCAN: 'true'
+          HOME: ${{ github.workspace }}/target/security/home
         with:
           scan-type: fs
           scan-ref: .
-          version: v0.76.2
+          version: ${{ steps.security-policy.outputs.trivy_version }}
           cache: false
           vuln-type: os,library
           scanners: vuln
-          format: sarif
-          output: trivy-fs.sarif
-          severity: LOW,MEDIUM,HIGH,CRITICAL
-          timeout: 10m
+          skip-dirs: target/security/home/.m2/repository
+          skip-files: '**/pom.xml,**/*.pom'
+          format: json
+          output: target/security/trivy/repository.json
+          severity: ${{ steps.security-policy.outputs.all_vulnerability_severities }}
+          list-all-pkgs: 'true'
+          timeout: ${{ steps.security-policy.outputs.repository_scan_timeout }}
           exit-code: '0'
 
-      - name: Scan resolved Maven artifacts for vulnerability visibility
+      - name: Scan isolated resolved Maven artifacts once
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_PARALLEL: '1'
+          TRIVY_OFFLINE_SCAN: 'true'
+          HOME: ${{ github.workspace }}/target/security/home
         with:
           scan-type: fs
-          scan-ref: /home/runner/.m2/repository
-          version: v0.76.2
+          scan-ref: target/security/home/.m2/repository
+          version: ${{ steps.security-policy.outputs.trivy_version }}
           cache: false
           vuln-type: os,library
           scanners: vuln
           format: json
-          output: trivy-maven-artifacts.json
-          severity: LOW,MEDIUM,HIGH,CRITICAL
-          timeout: 15m
+          output: target/security/trivy/resolved-maven.json
+          severity: ${{ steps.security-policy.outputs.all_vulnerability_severities }}
+          list-all-pkgs: 'true'
+          timeout: ${{ steps.security-policy.outputs.repository_scan_timeout }}
           exit-code: '0'
 
-      - name: Upload Trivy SARIF
+      - name: Evaluate one complete vulnerability report and blocking policy
         if: always()
+        run: >-
+          node scripts/security/run-security-gate.mjs vulnerability-evidence
+          --repository target/security/trivy/repository.json
+          --maven target/security/trivy/resolved-maven.json
+          --output target/security/trivy/combined.json
+          --summary target/security/trivy/summary.json
+
+      - name: Derive SARIF from the combined Trivy JSON report
+        if: always() && hashFiles('target/security/trivy/combined.json') != ''
+        run: trivy convert --format sarif --severity "${{ steps.security-policy.outputs.all_vulnerability_severities }}" --output target/security/trivy/vulnerability.sarif target/security/trivy/combined.json
+
+      - name: Upload Trivy SARIF to code scanning
+        if: always() && hashFiles('target/security/trivy/vulnerability.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
-          sarif_file: trivy-fs.sarif
+          sarif_file: target/security/trivy/vulnerability.sarif
 
-      - name: Upload repository scan result
+      - name: Upload combined vulnerability evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: repository-vulnerability-sarif-${{ github.sha }}
+          name: repository-vulnerability-evidence-${{ github.sha }}
           path: |
-            trivy-fs.sarif
-            trivy-maven-artifacts.json
+            target/security/trivy/combined.json
+            target/security/trivy/summary.json
+            target/security/trivy/repository.json
+            target/security/trivy/resolved-maven.json
+            target/security/trivy/vulnerability.sarif
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}
 
   image-inventory:
     name: Validate image inventory
@@ -433,7 +429,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate image coverage and publish matrix inputs
         id: inventory
-        run: node scripts/ci/check-image-scan-coverage.mjs --write-inventory target/image-security/expected-inventory.json --write-github-matrices
+        run: node scripts/security/run-security-gate.mjs image-inventory --write-inventory target/image-security/expected-inventory.json --write-github-matrices
 
   backend-images:
     name: Backend image / ${{ matrix.image.logicalName }}
@@ -540,20 +536,34 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Recreate expected image inventory
         if: ${{ always() }}
-        run: node scripts/ci/check-image-scan-coverage.mjs --write-inventory target/image-security/expected-inventory.json
-      - name: Download image evidence from all matrix jobs
+        run: node scripts/security/run-security-gate.mjs image-inventory --write-inventory target/image-security/expected-inventory.json
+      - name: Download backend image evidence
         if: ${{ always() }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: '*-security-${{ github.sha }}'
+          pattern: 'backend-image-*-security-${{ github.sha }}'
+          path: target/image-security/downloads
+          merge-multiple: false
+      - name: Download service image evidence
+        if: ${{ always() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: 'service-image-*-security-${{ github.sha }}'
+          path: target/image-security/downloads
+          merge-multiple: false
+      - name: Download infrastructure image evidence
+        if: ${{ always() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: 'external-image-*-security-${{ github.sha }}'
           path: target/image-security/downloads
           merge-multiple: false
       - name: Exercise image inventory and evidence rejection cases
         if: ${{ always() }}
-        run: node --test scripts/ci/check-image-scan-coverage.test.mjs scripts/ci/validate-image-scan-evidence.test.mjs scripts/ci/verify-buildx-image-metadata.test.mjs
+        run: node --test scripts/security/evidence/check-image-scan-coverage.test.mjs scripts/security/evidence/validate-image-scan-evidence.test.mjs scripts/security/evidence/verify-buildx-image-metadata.test.mjs
       - name: Validate complete image scans and SBOMs
         if: ${{ always() }}
-        run: node scripts/ci/validate-image-scan-evidence.mjs target/image-security/expected-inventory.json target/image-security/downloads
+        run: node scripts/security/run-security-gate.mjs image-evidence target/image-security/expected-inventory.json target/image-security/downloads
       - name: Upload image scan evidence validation summary
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -561,4 +571,4 @@ jobs:
           name: image-scan-validation-${{ github.sha }}
           path: target/image-security/validated-image-scan-summary.json
           if-no-files-found: ignore
-          retention-days: 30
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

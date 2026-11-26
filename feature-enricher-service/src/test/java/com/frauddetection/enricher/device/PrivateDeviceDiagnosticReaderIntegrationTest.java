@@ -1160,7 +1160,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                         .isLessThanOrEqualTo(8.0);
             }
             System.out.printf(Locale.ROOT,
-                    "DEVICE_PRIVATE_DIAGNOSTIC_BENCHMARK os=%s java=%s processors=%d mongo=mongo:7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1 kafka=%s "
+                    "DEVICE_PRIVATE_DIAGNOSTIC_BENCHMARK os=%s java=%s processors=%d mongo=%s kafka=%s "
                             + "fixture_writer_timeout_s=%d reader_client_timeout_s=%d "
                             + "history_members=%d concurrency=%d samples=%d p50_ms=%.3f p95_ms=%.3f p99_ms=%.3f "
                             + "min_ms=%.3f max_ms=%.3f unavailable_or_timeout=%d unavailable_or_timeout_rate=%.3f "
@@ -1172,6 +1172,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                             + "source_grant_revalidations_per_eval=%.1f coverage_grant_revalidations_per_eval=%.1f "
                             + "runtime_slo=NOT_MEASURED%n",
                     System.getProperty("os.name"), System.getProperty("java.version"), Runtime.getRuntime().availableProcessors(),
+                    com.frauddetection.common.testsupport.container.MongoTestSupport.MONGODB_IMAGE_REFERENCE,
                     KafkaImageReference.IMAGE,
                     PERFORMANCE_FIXTURE_WRITER_TIMEOUT.toSeconds(), DeviceAuthenticatedMongo.DEFAULT_CLIENT_TIMEOUT.toSeconds(),
                     historySize, concurrency, samples.size(), percentileMillis(samples, 50), p95Millis,
