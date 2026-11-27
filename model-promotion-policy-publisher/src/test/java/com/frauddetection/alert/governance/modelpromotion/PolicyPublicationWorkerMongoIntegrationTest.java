@@ -38,7 +38,6 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionCallback;
 import org.testcontainers.containers.MongoDBContainer;
-import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.ByteArrayOutputStream;
@@ -78,7 +77,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PolicyPublicationWorkerMongoIntegrationTest {
-    private static final MongoDBContainer MONGO = new MongoDBContainer(DockerImageName.parse("mongo:7.0"));
+    private static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
     private static final String ORIGIN = "http://localhost:4173";
     @TempDir Path temp;
     private final ObjectMapper mapper = new ObjectMapper();

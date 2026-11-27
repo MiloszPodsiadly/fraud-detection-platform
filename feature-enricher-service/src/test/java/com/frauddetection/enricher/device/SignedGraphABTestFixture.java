@@ -70,7 +70,7 @@ public final class SignedGraphABTestFixture {
         try {
             sourceDevice.setUp();
             initialized = true;
-            VerifiedDeviceAdmissionIntegrationTest f = sourceDevice.f;
+            VerifiedDeviceAdmissionIntegrationTest f = sourceDevice.fixture();
             Instant rootTime = VerifiedDeviceAdmissionIntegrationTest.NOW;
             List<VerifiedDeviceAdmissionIntegrationTest.Event> priorEvents = new ArrayList<>(priorCount);
             for (int index = 0; index < priorCount; index++) {
@@ -94,10 +94,10 @@ public final class SignedGraphABTestFixture {
 
             for (int index = 0; index < priorEvents.size(); index++) {
                 var priorScore = sourceDevice.publish(priorEvents.get(index), "initial", "graph-e2e-score-prior-" + index);
-                admission.bindScored(priorTickets.get(index), sourceDevice.occurrenceReader, priorScore.reference());
+                admission.bindScored(priorTickets.get(index), sourceDevice.occurrenceReader(), priorScore.reference());
             }
             var rootScore = sourceDevice.publish(root, "initial", "graph-e2e-score-root");
-            admission.bindScored(rootTicket, sourceDevice.occurrenceReader, rootScore.reference());
+            admission.bindScored(rootTicket, sourceDevice.occurrenceReader(), rootScore.reference());
 
             String institutionToken = f.pseudonyms.institution(f.A.institution);
             String sourceCode = DevicePseudonyms.sourceCode("BANK");
@@ -134,7 +134,7 @@ public final class SignedGraphABTestFixture {
                 graphOwnerClients.add(sourceClient);
                 graphOwnerClients.add(deviceClient);
                 var occurrences = MongoSourceOccurrenceStore.readOnly(sourceClient, f.database, sourcePrincipal,
-                        f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK, sourceDevice.occurrenceCipher,
+                        f.originVerifier, VerifiedDeviceAdmissionIntegrationTest.CLOCK, sourceDevice.occurrenceCipher(),
                         new SourceSignatureVerifier.Context(DeviceAssertionVerifier.TRANSACTION_PURPOSE,
                                 "transaction-ingest"));
                 var lineage = new MongoSourceLineage(sourceClient, f.database, sourcePrincipal,
@@ -154,10 +154,10 @@ public final class SignedGraphABTestFixture {
                 }
             };
 
-            SourceLineage priorLineage = sourceDevice.privateSource.enrichedBinding(
+            SourceLineage priorLineage = sourceDevice.privateSource().enrichedBinding(
                     SourceReceiptIdentity.identity(prior.origin().scope()), SourceEventCommitment.raw(prior.raw()),
                     SourceEventCommitment.enriched(prior.enriched()));
-            SourceLineage rootLineage = sourceDevice.privateSource.enrichedBinding(
+            SourceLineage rootLineage = sourceDevice.privateSource().enrichedBinding(
                     SourceReceiptIdentity.identity(root.origin().scope()), SourceEventCommitment.raw(root.raw()),
                     SourceEventCommitment.enriched(root.enriched()));
             if (priorLineage.state() != SourceLineage.State.VERIFIED
@@ -200,9 +200,9 @@ public final class SignedGraphABTestFixture {
 
     private static DeviceGraphRelationPort owner(PrivateDeviceDiagnosticReaderIntegrationTest sourceDevice,
                                                  MongoClient deviceClient, String principal) {
-        VerifiedDeviceAdmissionIntegrationTest f = sourceDevice.f;
+        VerifiedDeviceAdmissionIntegrationTest f = sourceDevice.fixture();
         return DeviceGraphRelationAuthority.testOnly(deviceClient, f.database, principal, f.A.epoch(),
-                sourceDevice.privateSource, f.origins, f.grants, sourceDevice.occurrenceReader,
+                sourceDevice.privateSource(), f.origins, f.grants, sourceDevice.occurrenceReader(),
                 f.pseudonyms, VerifiedDeviceAdmissionIntegrationTest.CLOCK);
     }
 
@@ -211,7 +211,7 @@ public final class SignedGraphABTestFixture {
         MongoClient enricherClient = null;
         try {
             alternate.setUp();
-            VerifiedDeviceAdmissionIntegrationTest f = alternate.f;
+            VerifiedDeviceAdmissionIntegrationTest f = alternate.fixture();
             var alternateKey = VerifiedDeviceAdmissionIntegrationTest.key();
             var trustedAlternate = f.A.trusted("source-issuer-alt", "origin-alt",
                     DeviceAssertionVerifier.TRANSACTION_PURPOSE, "transaction-ingest", alternateKey,

@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
 class ReadAccessAuditIdentityMongoIntegrationTest {
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient mongoClient;
     private MongoTemplate mongo;

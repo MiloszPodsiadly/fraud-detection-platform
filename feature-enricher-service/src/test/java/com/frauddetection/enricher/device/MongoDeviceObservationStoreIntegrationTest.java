@@ -64,7 +64,7 @@ class MongoDeviceObservationStoreIntegrationTest {
     private static final String SOURCE = "BANK";
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient client;
     private MongoDeviceObservationStore store;
@@ -530,13 +530,14 @@ class MongoDeviceObservationStoreIntegrationTest {
         long deviceDistinctCustomers = seedRows.subList(0, 10_000).stream()
                 .map(row -> row.getString("customer")).distinct().count();
         System.out.printf(Locale.ROOT,
-                "DEVICE_RISK_LOCAL_PERF mongo_image=mongo:7.0 seed_rows=%d seed_ms=%d "
+                "DEVICE_RISK_LOCAL_PERF mongo_image=%s seed_rows=%d seed_ms=%d "
                         + "device_rows=%d device_distinct_customers=%d device_index=%s device_keys=%d device_docs=%d "
                         + "device_ms_p50=%.3f device_ms_p95=%.3f device_ms_p99=%.3f device_qps=%.2f "
                         + "customer_rows=%d customer_index=%s customer_keys=%d customer_docs=%d "
                         + "customer_ms_p50=%.3f customer_ms_p95=%.3f customer_ms_p99=%.3f customer_qps=%.2f "
                         + "mongo_resident_mb_before=%d mongo_resident_mb_after=%d "
                         + "commit_ms=%d lock_conflicts=NOT_INSTRUMENTED transaction_retry_count=NOT_EXPORTED%n",
+                com.frauddetection.common.testsupport.container.MongoTestSupport.MONGODB_IMAGE_REFERENCE,
                 seedRows.size(), seedMillis, deviceStats.getInteger("nReturned"), deviceDistinctCustomers,
                 indexNameInPlan(deviceExplain), number(deviceStats, "totalKeysExamined"),
                 number(deviceStats, "totalDocsExamined"), percentileMillis(deviceQueryNanos, 50),

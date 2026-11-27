@@ -50,7 +50,7 @@ services:
 
   model-promotion-observation-key-loader:
     profiles: !reset []
-    image: eclipse-temurin:21-jre
+    image: eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
     restart: "no"
     network_mode: none
     entrypoint:
@@ -79,7 +79,7 @@ services:
 
   model-promotion-policy-key-loader:
     profiles: !reset []
-    image: eclipse-temurin:21-jre
+    image: eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
     restart: "no"
     network_mode: none
     entrypoint:
@@ -157,11 +157,14 @@ services:
       MODEL_PROMOTION_OBSERVATION_KEYS_PATH: /run/policy-publication/trusted-reporters.json
       MODEL_PROMOTION_OBSERVATION_PRIVATE_KEY_PATH: /run/policy-publication/observation.private-key.pkcs8.base64
       MODEL_PROMOTION_OBSERVATION_KEY_ID: local-publisher-observation-1
-      MODEL_PROMOTION_PUBLISH_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      MODEL_PROMOTION_PUBLISH_MONGODB_URI: mongodb://policy_publisher_app:${MONGODB_POLICY_PUBLISHER_PASSWORD:?Set MONGODB_POLICY_PUBLISHER_PASSWORD in deployment/.env}@mongodb:27017/fraud_alerts?authSource=fraud_alerts&replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       MODEL_PROMOTION_TRUST_MIN_GENERATION: "1"
       MODEL_PROMOTION_APPROVAL_TRUST_MIN_GENERATION: "1"
       MODEL_PROMOTION_ONLINE_ACTOR_TRUST_MIN_GENERATION: "1"
     command:
+      - /usr/local/bin/exec-with-verified-temurin-java
+      - -jar
+      - /app/app.jar
       - worker
       - --approval-trust
       - /run/policy-publication/trusted-approvals.json

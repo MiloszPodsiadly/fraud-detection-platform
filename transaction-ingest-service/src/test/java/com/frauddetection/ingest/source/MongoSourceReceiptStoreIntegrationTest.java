@@ -56,7 +56,7 @@ import static org.assertj.core.api.Assertions.*;
 
 @Testcontainers
 class MongoSourceReceiptStoreIntegrationTest {
-    @Container static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    @Container static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
     private static final SourceReceiptStore.Limits LIMITS_POLICY = new SourceReceiptStore.Limits(
             Duration.ofMinutes(5), Duration.ofMinutes(10), 100);
     private MongoClient client;

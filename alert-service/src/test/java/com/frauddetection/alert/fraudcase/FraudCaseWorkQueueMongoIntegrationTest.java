@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FraudCaseWorkQueueMongoIntegrationTest {
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient mongoClient;
     private MongoTemplate mongoTemplate;

@@ -41,7 +41,7 @@ class ScoredTransactionProjectionWriterMongoIntegrationTest {
     private static final Instant BASE_TIME = Instant.parse("2026-10-03T12:00:00.123456789Z");
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient mongoClient;
     private MongoTemplate mongoTemplate;

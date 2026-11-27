@@ -43,7 +43,7 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
     private static final Instant PROJECTED_AT = Instant.parse("2026-10-03T10:16:00Z");
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient mongoClient;
     private MongoTemplate mongoTemplate;

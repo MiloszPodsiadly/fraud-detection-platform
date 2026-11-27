@@ -1,0 +1,75 @@
+name: Load verified shared Kafka test image
+description: Download and verify the exact same-run Kafka OCI artifact without pulling or rebuilding it.
+outputs:
+  image-id-digest:
+    description: Docker Engine image ID produced by the shared Kafka artifact.
+    value: ${{ steps.verify.outputs.image-id-digest }}
+  buildx-manifest-digest:
+    description: Content-addressed Kafka manifest digest.
+    value: ${{ steps.verify.outputs.buildx-manifest-digest }}
+  buildx-config-digest:
+    description: Content-addressed Kafka config digest.
+    value: ${{ steps.verify.outputs.buildx-config-digest }}
+  oci-archive-sha256:
+    description: SHA-256 of the exact downloaded Kafka OCI archive.
+    value: ${{ steps.verify.outputs.oci-archive-sha256 }}
+runs:
+  using: composite
+  steps:
+    - name: Load central security policy
+      id: security-policy
+      shell: bash
+      run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
+    - name: Verify tested revision before consuming the Kafka image
+      shell: bash
+      env:
+        EXPECTED_GIT_SHA: ${{ github.sha }}
+      run: test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+
+    - name: Download this run-attempt Kafka image artifact
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: kafka-test-image-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: target/kafka-shared-image
+
+    - name: Validate and load the preserved OCI image without registry fallback
+      shell: bash
+      env:
+        OCI_ARCHIVE_PATH: target/kafka-shared-image/image.oci.tar
+        METADATA_PATH: target/kafka-shared-image/buildx-metadata.json
+        DIGEST_PATH: target/kafka-shared-image/buildx-digest.txt
+      run: |
+        set -euo pipefail
+        test -s "$OCI_ARCHIVE_PATH"
+        test -s "$METADATA_PATH"
+        test -s "$DIGEST_PATH"
+        test -s target/kafka-shared-image/producer-evidence.json
+        docker load --input "$OCI_ARCHIVE_PATH"
+
+    - name: Verify shared Kafka identity and runtime
+      id: verify
+      shell: bash
+      env:
+        KAFKA_BUILD_DIGEST: ''
+        KAFKA_BUILD_METADATA_JSON: ''
+        KAFKA_OCI_ARCHIVE_PATH: target/kafka-shared-image/image.oci.tar
+        KAFKA_PRODUCER_EVIDENCE_PATH: target/kafka-shared-image/producer-evidence.json
+        KAFKA_IMAGE_REF: fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3
+        METADATA_PATH: target/kafka-shared-image/buildx-metadata.json
+        DIGEST_PATH: target/kafka-shared-image/buildx-digest.txt
+      run: |
+        set -euo pipefail
+        export KAFKA_BUILD_METADATA_JSON="$(cat "$METADATA_PATH")"
+        export KAFKA_BUILD_DIGEST="$(cat "$DIGEST_PATH")"
+        node scripts/security/run-security-gate.mjs kafka-image-proof
+        printf 'KAFKA_PRELOADED_IMAGE=true\n' >> "$GITHUB_ENV"
+
+    - name: Upload this consumer's verified Kafka identity
+      if: always() && steps.verify.outcome == 'success'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: kafka-test-image-consumer-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        path: target/kafka-test-image-evidence.json
+        if-no-files-found: error
+        retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

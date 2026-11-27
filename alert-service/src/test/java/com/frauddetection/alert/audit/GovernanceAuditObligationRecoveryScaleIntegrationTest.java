@@ -53,7 +53,7 @@ class GovernanceAuditObligationRecoveryScaleIntegrationTest {
             ModelPolicyAuthority.AUDIT_READ, ModelPolicyAuthority.AUDIT_RECOVER, ModelPolicyAuthority.PRODUCTION));
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient client;
     private SimpleMongoClientDatabaseFactory factory;

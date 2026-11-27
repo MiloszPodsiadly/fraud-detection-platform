@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 project="exact-model-runtime-$RANDOM-$$"
 workspace="$(mktemp -d)"
 artifact_parent="$workspace/generated"

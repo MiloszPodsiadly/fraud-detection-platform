@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1935,23 +1936,37 @@ class RegulatedMutationArchitectureTest {
     void liveRuntimeCheckpointFixtureDockerfileMustNotBeUsedByReleasePaths() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
         String compose = Files.readString(Path.of("../deployment/docker-compose.yml"));
-        String liveCheckpointJob = ci.substring(
-                ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"),
-                ci.indexOf("\n  fdp39-release-governance:", ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"))
-        );
-        String releaseGovernanceJob = ci.substring(
-                ci.indexOf("fdp39-release-governance:"),
-                ci.indexOf("\n  fdp40-release-controls:", ci.indexOf("fdp39-release-governance:"))
-        );
-        String ciOutsideFixtureJobs = ci.replace(liveCheckpointJob, "").replace(releaseGovernanceJob, "");
+        Map<String, Object> workflow = CiBuildxWorkflowPolicy.parse(ci);
 
         assertThat(compose).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
-        assertThat(ciOutsideFixtureJobs).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
-        assertThat(liveCheckpointJob).contains("Dockerfile.alert-service-fdp38-fixture");
-        assertThat(releaseGovernanceJob).contains("Dockerfile.alert-service-fdp38-fixture");
-        assertThat(ci).contains(
-                "docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service"
-        );
+        assertThat(CiBuildxWorkflowPolicy.fixtureBuildViolations(workflow)).isEmpty();
+        assertThat(CiBuildxWorkflowPolicy.buildViolations(workflow,
+                new CiBuildxWorkflowPolicy.BuildExpectation(
+                        "fdp38-live-runtime-checkpoint-chaos",
+                        "build-fdp38-fixture",
+                        "deployment/Dockerfile.alert-service-fdp38-fixture",
+                        "fdp38-alert-service-test-fixture:${{ github.sha }}",
+                        null,
+                        false
+                ))).isEmpty();
+        assertThat(CiBuildxWorkflowPolicy.buildViolations(workflow,
+                new CiBuildxWorkflowPolicy.BuildExpectation(
+                        "fdp39-release-governance",
+                        "build-fdp39-release-image",
+                        "deployment/Dockerfile.backend",
+                        "fdp39-alert-service:${{ github.sha }}",
+                        "MODULE_NAME=alert-service",
+                        true
+                ))).isEmpty();
+        assertThat(CiBuildxWorkflowPolicy.buildViolations(workflow,
+                new CiBuildxWorkflowPolicy.BuildExpectation(
+                        "fdp39-release-governance",
+                        "build-fdp39-fixture-image",
+                        "deployment/Dockerfile.alert-service-fdp38-fixture",
+                        "fdp38-alert-service-test-fixture:${{ github.sha }}",
+                        null,
+                        true
+                ))).isEmpty();
     }
 
     @Test
@@ -2023,10 +2038,18 @@ class RegulatedMutationArchitectureTest {
         String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp37-artifacts.mjs"));
         String verifierHelpers = Files.readString(Path.of("../scripts/ci/artifact-verification-helpers.mjs"));
         String verifierSurface = verifier + "\n" + verifierHelpers;
+        Map<String, Object> workflow = CiBuildxWorkflowPolicy.parse(ci);
 
-        assertThat(ci).contains("fdp37-production-image-chaos:");
+        assertThat(CiBuildxWorkflowPolicy.buildViolations(workflow,
+                new CiBuildxWorkflowPolicy.BuildExpectation(
+                        "fdp37-production-image-chaos",
+                        "build-fdp37-image",
+                        "deployment/Dockerfile.backend",
+                        "fdp37-alert-service:${{ github.sha }}",
+                        "MODULE_NAME=alert-service",
+                        true
+                ))).isEmpty();
         assertThat(ci).contains("Build alert-service production-like image");
-        assertThat(ci).contains("docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service:${GITHUB_SHA} .");
         assertThat(ci).contains("FDP37_ALERT_SERVICE_IMAGE=fdp37-alert-service:${GITHUB_SHA}");
         assertThat(ci).contains("FDP37_ALERT_SERVICE_IMAGE_ID");
         assertThat(ci).contains("FDP37_ALERT_SERVICE_IMAGE_DIGEST");
@@ -2059,6 +2082,109 @@ class RegulatedMutationArchitectureTest {
         assertThat(ci).contains("regulated-mutation-regression");
         assertThat(ci).contains("fdp36-real-chaos");
         assertThat(ci).contains("fdp35-production-readiness");
+    }
+
+    @Test
+    void everyKafkaDependentCiJobUsesTheVerifiedBuildxProvisioningContract() throws Exception {
+        Map<String, Object> ci = CiBuildxWorkflowPolicy.parse(
+                Files.readString(Path.of("../.github/workflows/ci.yml")));
+        assertThat(CiBuildxWorkflowPolicy.jobsUsingAction(ci, "./.github/actions/build-kafka-test-image"))
+                .containsExactly("kafka-test-image");
+        assertThat(CiBuildxWorkflowPolicy.jobsUsingAction(ci, "./.github/actions/load-kafka-test-image"))
+                .containsExactly(
+                        "backend",
+                        "graph-signed-e2e",
+                        "institutional-reliability",
+                        "fdp28-proof",
+                        "fdp35-production-readiness",
+                        "fdp36-real-chaos",
+                        "fdp37-production-image-chaos",
+                        "regulated-mutation-regression",
+                        "fdp38-live-runtime-checkpoint-chaos"
+                );
+
+        Map<String, Object> action = CiBuildxWorkflowPolicy.parse(
+                Files.readString(Path.of("../.github/actions/build-kafka-test-image/action.yml")));
+        List<Map<String, Object>> actionSteps = CiBuildxWorkflowPolicy.steps(
+                CiBuildxWorkflowPolicy.nestedMap(action, "runs"));
+        Map<String, Object> build = actionSteps.stream()
+                .filter(step -> "build-kafka".equals(step.get("id")))
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> buildWith = CiBuildxWorkflowPolicy.nestedMap(build, "with");
+        assertThat(build.get("uses")).isEqualTo(
+                "docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc");
+        assertThat(buildWith)
+                .containsEntry("context", ".")
+                .containsEntry("file", "deployment/Dockerfile.kafka")
+                .containsEntry("platforms", "${{ steps.security-policy.outputs.image_platform }}")
+                .containsEntry("push", false)
+                .containsEntry("outputs", "type=oci,dest=target/kafka-test-image/image.oci.tar")
+                .containsEntry("pull", true)
+                .containsEntry("no-cache", true)
+                .containsEntry("provenance", false)
+                .containsEntry("tags", "fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3");
+        assertThat(actionSteps).anySatisfy(step -> {
+            assertThat(step.get("name")).isEqualTo("Set up pinned Buildx");
+            assertThat(step.get("uses")).isEqualTo(
+                    "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069");
+            assertThat(CiBuildxWorkflowPolicy.nestedMap(step, "with"))
+                    .containsEntry("version", "v0.39.0")
+                    .containsKey("driver-opts");
+        });
+        assertThat(actionSteps).anySatisfy(step -> {
+            assertThat(step.get("name")).isEqualTo("Verify loaded Kafka identity and runtime");
+            assertThat(step.get("run")).isEqualTo("node scripts/security/run-security-gate.mjs kafka-image-proof");
+        });
+        assertThat(actionSteps).anySatisfy(step -> {
+            assertThat(step.get("name")).isEqualTo("Upload the shared Kafka image artifact once per workflow run");
+            assertThat(step.get("uses")).isEqualTo(
+                    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9");
+            assertThat(CiBuildxWorkflowPolicy.nestedMap(step, "with").get("name").toString())
+                    .contains("${{ github.run_id }}")
+                    .contains("${{ github.run_attempt }}");
+        });
+
+        Map<String, Object> consumerAction = CiBuildxWorkflowPolicy.parse(
+                Files.readString(Path.of("../.github/actions/load-kafka-test-image/action.yml")));
+        List<Map<String, Object>> consumerSteps = CiBuildxWorkflowPolicy.steps(
+                CiBuildxWorkflowPolicy.nestedMap(consumerAction, "runs"));
+        assertThat(consumerSteps).anySatisfy(step -> {
+            assertThat(step.get("uses")).isEqualTo(
+                    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333");
+            assertThat(CiBuildxWorkflowPolicy.nestedMap(step, "with").get("name").toString())
+                    .contains("${{ github.run_id }}")
+                    .contains("${{ github.run_attempt }}");
+        });
+        assertThat(consumerSteps).anySatisfy(step -> {
+            assertThat(step.get("name")).isEqualTo("Validate and load the preserved OCI image without registry fallback");
+            assertThat(step.get("run").toString()).contains("docker load --input");
+        });
+
+        List<Map<String, Object>> graphSteps = CiBuildxWorkflowPolicy.steps(
+                CiBuildxWorkflowPolicy.job(ci, "graph-signed-e2e"));
+        int provisioningIndex = indexOfStep(graphSteps, "./.github/actions/load-kafka-test-image");
+        int proofIndex = indexOfStepByName(graphSteps, "Run the live signed Graph-to-scorer proof");
+        assertThat(provisioningIndex).isGreaterThanOrEqualTo(0);
+        assertThat(proofIndex).isGreaterThan(provisioningIndex);
+    }
+
+    private int indexOfStep(List<Map<String, Object>> steps, String action) {
+        for (int index = 0; index < steps.size(); index++) {
+            if (action.equals(steps.get(index).get("uses"))) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private int indexOfStepByName(List<Map<String, Object>> steps, String name) {
+        for (int index = 0; index < steps.size(); index++) {
+            if (name.equals(steps.get(index).get("name"))) {
+                return index;
+            }
+        }
+        return -1;
     }
 
     private void assertForbiddenPhraseIsContextual(String source, String phrase) {

@@ -1,0 +1,27 @@
+name: Install and enforce patched Temurin Java 21
+description: Install the approved Temurin 21 runtime and fail closed on any other JVM.
+inputs:
+  cache:
+    description: Optional build cache understood by actions/setup-java.
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Read approved Java version from policy
+      id: approved-java
+      shell: bash
+      run: node scripts/security/run-security-gate.mjs java-runtime-policy --write-setup-output "$GITHUB_OUTPUT"
+
+    - name: Install signed Eclipse Temurin JDK
+      uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+      with:
+        distribution: temurin
+        java-version: ${{ steps.approved-java.outputs.version }}
+        verify-signature: true
+        problem-matcher: true
+        cache: ${{ inputs.cache }}
+
+    - name: Enforce selected Java runtime, vendor, and build
+      shell: bash
+      run: node scripts/security/run-security-gate.mjs java-runtime-policy

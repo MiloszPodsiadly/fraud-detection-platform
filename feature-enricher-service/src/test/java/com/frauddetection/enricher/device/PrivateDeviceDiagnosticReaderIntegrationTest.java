@@ -8,6 +8,7 @@ import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissio
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.events.source.*;
+import com.frauddetection.common.testsupport.container.KafkaImageReference;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -23,7 +24,6 @@ import org.bson.conversions.Bson;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.testcontainers.kafka.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -44,12 +44,13 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private static final int PERFORMANCE_WARMUPS = 2;
     private static final int PERFORMANCE_SAMPLES = 20;
     private static final Duration PERFORMANCE_FIXTURE_WRITER_TIMEOUT = Duration.ofSeconds(30);
-    static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
-    VerifiedDeviceAdmissionIntegrationTest f;
-    MongoSourceOccurrenceStore occurrenceWriter;
-    SourceOccurrenceAccess occurrenceReader;
-    SourceOccurrenceCipher occurrenceCipher;
-    MongoSourceLineage privateSource;
+    private static final KafkaContainer KAFKA = new KafkaContainer(KafkaImageReference.dockerImageName())
+            .withImagePullPolicy(KafkaImageReference.localOnlyPullPolicy());
+    private VerifiedDeviceAdmissionIntegrationTest f;
+    private MongoSourceOccurrenceStore occurrenceWriter;
+    private SourceOccurrenceAccess occurrenceReader;
+    private SourceOccurrenceCipher occurrenceCipher;
+    private MongoSourceLineage privateSource;
     private MongoClientHandle clients;
     private PrivateDeviceDiagnosticReader diagnostic;
     String topic;
@@ -57,6 +58,11 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
     private KafkaProducer<String, byte[]> scoredProducer;
     private KafkaConsumer<String, byte[]> scoredConsumer;
     private final Map<String, ScoredRecord> consumedScoredEvents = new HashMap<>();
+
+    VerifiedDeviceAdmissionIntegrationTest fixture() { return f; }
+    SourceOccurrenceAccess occurrenceReader() { return occurrenceReader; }
+    SourceOccurrenceCipher occurrenceCipher() { return occurrenceCipher; }
+    MongoSourceLineage privateSource() { return privateSource; }
 
     @BeforeAll static void start() throws Exception {
         VerifiedDeviceAdmissionIntegrationTest.MONGO.start();
@@ -1154,7 +1160,7 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                         .isLessThanOrEqualTo(8.0);
             }
             System.out.printf(Locale.ROOT,
-                    "DEVICE_PRIVATE_DIAGNOSTIC_BENCHMARK os=%s java=%s processors=%d mongo=mongo:7.0 kafka=apache/kafka:3.8.0 "
+                    "DEVICE_PRIVATE_DIAGNOSTIC_BENCHMARK os=%s java=%s processors=%d mongo=%s kafka=%s "
                             + "fixture_writer_timeout_s=%d reader_client_timeout_s=%d "
                             + "history_members=%d concurrency=%d samples=%d p50_ms=%.3f p95_ms=%.3f p99_ms=%.3f "
                             + "min_ms=%.3f max_ms=%.3f unavailable_or_timeout=%d unavailable_or_timeout_rate=%.3f "
@@ -1166,6 +1172,8 @@ class PrivateDeviceDiagnosticReaderIntegrationTest {
                             + "source_grant_revalidations_per_eval=%.1f coverage_grant_revalidations_per_eval=%.1f "
                             + "runtime_slo=NOT_MEASURED%n",
                     System.getProperty("os.name"), System.getProperty("java.version"), Runtime.getRuntime().availableProcessors(),
+                    com.frauddetection.common.testsupport.container.MongoTestSupport.MONGODB_IMAGE_REFERENCE,
+                    KafkaImageReference.IMAGE,
                     PERFORMANCE_FIXTURE_WRITER_TIMEOUT.toSeconds(), DeviceAuthenticatedMongo.DEFAULT_CLIENT_TIMEOUT.toSeconds(),
                     historySize, concurrency, samples.size(), percentileMillis(samples, 50), p95Millis,
                     percentileMillis(samples, 99), minimumMillis(samples), maximumMillis(samples), unavailable,

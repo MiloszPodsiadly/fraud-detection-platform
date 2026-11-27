@@ -8,6 +8,7 @@ import com.frauddetection.common.events.source.SourceEventCommitment;
 import com.frauddetection.common.events.source.SourceLineage;
 import com.frauddetection.common.events.source.SourceScope;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
+import com.frauddetection.common.testsupport.container.RedisTestSupport;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
@@ -56,20 +57,21 @@ class RedisFeatureStoreIntegrationTest {
 
     private RedisFeatureStore featureStore;
     private StringRedisTemplate redisTemplate;
+    private StringRedisTemplate testAdminRedisTemplate;
     private LettuceConnectionFactory connectionFactory;
+    private LettuceConnectionFactory testAdminConnectionFactory;
 
     @BeforeAll
     void startRedis() {
         if (!FraudPlatformContainers.redis().isRunning()) {
             FraudPlatformContainers.redis().start();
         }
-        connectionFactory = new LettuceConnectionFactory(
-                FraudPlatformContainers.redis().getHost(),
-                FraudPlatformContainers.redis().getMappedPort(6379)
-        );
-        connectionFactory.afterPropertiesSet();
+        connectionFactory = RedisTestSupport.newConnectionFactory(FraudPlatformContainers.redis(),
+                FraudPlatformContainers.redisFeatureUsername(), FraudPlatformContainers.redisFeaturePassword());
         redisTemplate = new StringRedisTemplate(connectionFactory);
         redisTemplate.afterPropertiesSet();
+        testAdminRedisTemplate = RedisTestSupport.newAdminTemplate(FraudPlatformContainers.redis());
+        testAdminConnectionFactory = (LettuceConnectionFactory) testAdminRedisTemplate.getConnectionFactory();
         featureStore = new RedisFeatureStore(
                 redisTemplate,
                 new FeatureStoreProperties(
@@ -86,11 +88,12 @@ class RedisFeatureStoreIntegrationTest {
     @AfterAll
     void closeRedisConnection() {
         connectionFactory.destroy();
+        testAdminConnectionFactory.destroy();
     }
 
     @AfterEach
     void clearRedis() {
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        testAdminRedisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
     }
 
     @Test
@@ -224,7 +227,7 @@ class RedisFeatureStoreIntegrationTest {
                 .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
         assertThat(featureStore.loadSnapshot(next, namespace).lastTransactionTimestamp()).isEqualTo(CURRENT_TIMESTAMP);
 
-        Set<String> keys = redisTemplate.keys("feature:v3:attested:*");
+        Set<String> keys = testAdminRedisTemplate.keys("feature:v3:attested:*");
         assertThat(keys).hasSize(6);
         assertThat(keys.stream().map(RedisFeatureStoreIntegrationTest::redisHashTag).collect(Collectors.toSet())).hasSize(1);
         assertThat(keys.stream().map(key -> redisTemplate.getExpire(key, java.util.concurrent.TimeUnit.MILLISECONDS))
@@ -280,7 +283,7 @@ class RedisFeatureStoreIntegrationTest {
         String originalCommitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
         featureStore.recordAttestedTransaction(enriched, namespace, originalCommitment);
 
-        String processedKey = redisTemplate.keys("feature:v3:attested:*").stream()
+        String processedKey = testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
         redisTemplate.opsForHash().delete(processedKey, raw.transactionId());
         assertThatThrownBy(() -> featureStore.hasRecordedTransaction(raw, namespace))
@@ -290,10 +293,10 @@ class RedisFeatureStoreIntegrationTest {
         assertThatThrownBy(() -> featureStore.recordAttestedTransaction(enriched, namespace, replacementCommitment))
                 .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_HISTORY_REBUILD_REQUIRED");
         assertThat(redisTemplate.opsForHash().get(processedKey, raw.transactionId())).isNull();
-        assertThat(redisTemplate.opsForSet().members(redisTemplate.keys("feature:v3:attested:*").stream()
+        assertThat(redisTemplate.opsForSet().members(testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow()))
                 .containsExactly(raw.transactionId());
-        assertThat(redisTemplate.opsForZSet().zCard(redisTemplate.keys("feature:v3:attested:*").stream()
+        assertThat(redisTemplate.opsForZSet().zCard(testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow())).isEqualTo(1L);
     }
 
@@ -317,9 +320,9 @@ class RedisFeatureStoreIntegrationTest {
         featureStore.verifyAttestedTransaction(originalEnriched, namespace, originalCommitment);
         featureStore.recordAttestedTransaction(originalEnriched, namespace, originalCommitment);
 
-        String customerTransactions = redisTemplate.keys("feature:v3:attested:*").stream()
+        String customerTransactions = testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow();
-        String customerIds = redisTemplate.keys("feature:v3:attested:*").stream()
+        String customerIds = testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow();
         assertThat(redisTemplate.opsForZSet().zCard(customerTransactions)).isEqualTo(1L);
         assertThat(redisTemplate.opsForSet().members(customerIds)).containsExactlyInAnyOrder(
@@ -334,7 +337,7 @@ class RedisFeatureStoreIntegrationTest {
         String commitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
         featureStore.recordAttestedTransaction(enriched, namespace, commitment);
 
-        String customerTransactions = redisTemplate.keys("feature:v3:attested:*").stream()
+        String customerTransactions = testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow();
         String member = raw.transactionId() + "|8.00|PLN|8.00";
         assertThat(redisTemplate.opsForZSet().remove(customerTransactions, member)).isEqualTo(1L);
@@ -352,7 +355,7 @@ class RedisFeatureStoreIntegrationTest {
         String commitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
         featureStore.recordAttestedTransaction(enriched, namespace, commitment);
 
-        String identityKey = redisTemplate.keys("feature:v3:attested:*").stream()
+        String identityKey = testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow();
         assertThat(redisTemplate.opsForSet().remove(identityKey, raw.transactionId())).isEqualTo(1L);
 
@@ -369,7 +372,7 @@ class RedisFeatureStoreIntegrationTest {
         String commitment = SourceEventCommitment.attestedHistory("a".repeat(64), enriched);
         featureStore.recordAttestedTransaction(enriched, namespace, commitment);
 
-        String identityKey = redisTemplate.keys("feature:v3:attested:*").stream()
+        String identityKey = testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:transaction-ids")).findFirst().orElseThrow();
         assertThat(redisTemplate.expire(identityKey, Duration.ZERO)).isTrue();
 
@@ -476,7 +479,7 @@ class RedisFeatureStoreIntegrationTest {
             v3Release.countDown();
         }
 
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        testAdminRedisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
         var v2WriterRaw = withDevice(event("snapshot-v2-write", CURRENT_TIMESTAMP.minusSeconds(5),
                 new BigDecimal("2.00"), "PLN"), "device-v2-interleaved");
         var v2Current = withDevice(event("snapshot-v2-current", CURRENT_TIMESTAMP, BigDecimal.ONE, "PLN"),
@@ -514,7 +517,7 @@ class RedisFeatureStoreIntegrationTest {
         featureStore.recordAttestedTransaction(existingEnriched, namespace,
                 SourceEventCommitment.attestedHistory("a".repeat(64), existingEnriched));
 
-        Set<String> keys = redisTemplate.keys("feature:v3:attested:*");
+        Set<String> keys = testAdminRedisTemplate.keys("feature:v3:attested:*");
         String customerTransactionsKey = keys.stream().filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow();
         String processedKey = keys.stream().filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
         String lastKey = keys.stream().filter(key -> key.endsWith(":customer:last-transaction")).findFirst().orElseThrow();
@@ -584,7 +587,7 @@ class RedisFeatureStoreIntegrationTest {
                 BigDecimal.ONE, "PLN");
         assertThatThrownBy(() -> featureStore.loadSnapshot(regressed, namespace))
                 .isInstanceOf(FeatureEnrichmentException.class).hasMessage("FEATURE_EVENT_TIME_OUT_OF_ORDER");
-        String customerTransactionsKey = redisTemplate.keys("feature:v3:attested:*").stream()
+        String customerTransactionsKey = testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:transactions")).findFirst().orElseThrow();
         String existingMember = privateKey("customerTransactionMember", new Class<?>[]{TransactionRawEvent.class}, existing);
         assertThat(redisTemplate.opsForZSet().score(customerTransactionsKey, existingMember))
@@ -598,7 +601,7 @@ class RedisFeatureStoreIntegrationTest {
         TransactionEnrichedEvent existingEnriched = enriched(existing);
         featureStore.recordAttestedTransaction(existingEnriched, namespace,
                 SourceEventCommitment.attestedHistory("a".repeat(64), existingEnriched));
-        String processedKey = redisTemplate.keys("feature:v3:attested:*").stream()
+        String processedKey = testAdminRedisTemplate.keys("feature:v3:attested:*").stream()
                 .filter(key -> key.endsWith(":customer:processed-transactions")).findFirst().orElseThrow();
         redisTemplate.delete(processedKey);
 
@@ -666,7 +669,7 @@ class RedisFeatureStoreIntegrationTest {
     }
 
     private void assertMalformed(TransactionRawEvent current, List<String> members) {
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        testAdminRedisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
         for (int index = 0; index < members.size(); index++) {
             redisTemplate.opsForZSet().add(
                     customerTransactionsKey(),

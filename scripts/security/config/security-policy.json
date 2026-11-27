@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "tools": {
+    "node": "26.13.1",
+    "npm": "12.2.3",
+    "python": "3.12.16",
+    "pip": "26.3",
+    "pipAudit": "2.10.1",
+    "trivy": "0.76.2",
+    "syft": "1.57.2",
+    "cyclonedxBom": "9.0.0",
+    "mavenDependencyPlugin": "3.11.0",
+    "cyclonedxMavenPlugin": "2.9.3"
+  },
+  "platforms": {
+    "image": "linux/amd64"
+  },
+  "formats": {
+    "imageSbom": "CycloneDX JSON",
+    "imageSbomBomFormat": "CycloneDX",
+    "trivyImageSchemaVersion": 2,
+    "packageUrlPrefix": "pkg:"
+  },
+  "imageIdentity": {
+    "evidenceSchemaVersion": 3,
+    "allowedSources": ["buildx-loaded-image", "registry-pinned"],
+    "dockerImageIdKinds": ["config-digest", "manifest-descriptor", "source-index-descriptor"],
+    "manifestMediaTypes": [
+      "application/vnd.oci.image.manifest.v1+json",
+      "application/vnd.docker.distribution.manifest.v2+json"
+    ],
+    "indexMediaTypes": [
+      "application/vnd.oci.image.index.v1+json",
+      "application/vnd.docker.distribution.manifest.list.v2+json"
+    ],
+    "sbomPropertyPrefix": "fraud-detection-platform:"
+  },
+  "platformGate": {
+    "artifactName": "platform-security-evidence",
+    "kafkaImageConsumers": [
+      "backend",
+      "graph-signed-e2e",
+      "institutional-reliability",
+      "fdp28-proof",
+      "fdp35-production-readiness",
+      "fdp36-real-chaos",
+      "fdp37-production-image-chaos",
+      "regulated-mutation-regression",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "infrastructure-images",
+      "runtime-smoke",
+      "app-hardening-runtime-smoke",
+      "full-security-runtime-smoke"
+    ],
+    "kafkaImageConsumerArtifactPrefix": "kafka-test-image-consumer",
+    "kafkaImageRequiredStatusJobs": [
+      "kafka-test-image",
+      "backend",
+      "graph-signed-e2e",
+      "institutional-reliability",
+      "fdp28-proof",
+      "fdp35-production-readiness",
+      "fdp36-real-chaos",
+      "fdp37-production-image-chaos",
+      "regulated-mutation-regression",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "compose-ci"
+    ],
+    "requiredProducerJobs": [
+      "kafka-test-image",
+      "kafka-image-consumer-evidence",
+      "backend",
+      "graph-signed-e2e",
+      "institutional-reliability",
+      "fdp42-fraud-case-management",
+      "fdp45-fraud-case-work-queue-read-model",
+      "ml",
+      "frontend",
+      "frontend-dependency-audit",
+      "python-dependency-audit",
+      "fdp28-proof",
+      "fdp35-production-readiness",
+      "fdp47-analyst-console-ux-and-summary",
+      "fdp48-bff-session-request-lifecycle",
+      "security-route-boundary",
+      "fdp54-ci-docs-governance",
+      "analyst-console-frontend-architecture-gate",
+      "regulated-mutation-regression",
+      "fdp36-real-chaos",
+      "fdp37-production-image-chaos",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "fdp39-release-governance",
+      "fdp40-release-controls",
+      "fdp-image-scan-evidence",
+      "docker",
+      "compose-ci",
+      "resolved-sbom"
+    ],
+    "securityEvidenceJobs": [
+      "kafka-test-image",
+      "kafka-image-consumer-evidence",
+      "frontend-dependency-audit",
+      "python-dependency-audit",
+      "fdp-image-scan-evidence",
+      "compose-ci",
+      "resolved-sbom",
+      "fdp37-production-image-chaos",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "fdp39-release-governance"
+    ],
+    "functionalProofJobs": [
+      "backend",
+      "graph-signed-e2e",
+      "institutional-reliability",
+      "fdp42-fraud-case-management",
+      "fdp45-fraud-case-work-queue-read-model",
+      "ml",
+      "frontend",
+      "fdp28-proof",
+      "fdp35-production-readiness",
+      "fdp47-analyst-console-ux-and-summary",
+      "fdp48-bff-session-request-lifecycle",
+      "security-route-boundary",
+      "fdp54-ci-docs-governance",
+      "analyst-console-frontend-architecture-gate",
+      "regulated-mutation-regression",
+      "fdp36-real-chaos",
+      "fdp37-production-image-chaos",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "fdp39-release-governance",
+      "fdp40-release-controls",
+      "docker",
+      "compose-ci"
+    ],
+    "requiredArtifactBases": [
+      "npm-audit",
+      "pip-audit",
+      "repository-config-scan",
+      "repository-vulnerability-evidence",
+      "repository-secret-proof",
+      "resolved-cyclonedx-sbom",
+      "image-scan-validation",
+      "fdp-image-scan-validation",
+      "kafka-image-consumers"
+    ],
+    "historicalImageArtifacts": [
+      "fdp37-alert-service-image-security",
+      "fdp38-alert-service-fixture-image-security",
+      "fdp39-release-image-security",
+      "fdp39-fixture-image-security"
+    ],
+    "imageValidationJobs": {
+      "inventory": ["backend-images", "service-images", "infrastructure-images"],
+      "historical": ["fdp37", "fdp38", "fdp39"]
+    },
+    "requiredFiles": {
+      "npmAudit": "npm-audit.json",
+      "pythonAudit": "pip-audit.json",
+      "repositoryConfig": "trivy-config.json",
+      "secretProof": "secret-proof-summary.json",
+      "vulnerabilityCombined": "combined.json",
+      "vulnerabilitySummary": "summary.json",
+      "vulnerabilityRepositoryReport": "repository.json",
+      "vulnerabilityMavenReport": "resolved-maven.json",
+      "imageValidationSummary": "validated-image-scan-summary.json",
+      "kafkaImageConsumers": "kafka-image-consumers.json",
+      "sbomDocuments": [
+        "maven-resolved.cdx.json",
+      "sbom-manifest.json",
+        "npm-analyst-console-ui.cdx.json",
+        "python-ml-inference-service.cdx.json",
+        "npm-sbom-toolchain-audit.json"
+      ]
+    }
+  },
+  "vulnerabilityPolicy": {
+    "visibleSeverities": ["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+    "blockingSeverities": ["HIGH", "CRITICAL"],
+    "npmBlockingSeverities": ["high", "critical"],
+    "secretTimeout": "10m",
+    "repositoryTimeout": "10m",
+    "imageTimeout": "15m"
+  },
+  "processLimits": {
+    "mavenResolutionAttempts": 3,
+    "mavenResolutionTotalMs": 900000,
+    "mavenProcessMs": 300000,
+    "mavenRetryWaitMs": 300000,
+    "mavenBackoffMaxMs": 15000,
+    "secretProofTotalMs": 300000,
+    "secretVersionProcessMs": 30000,
+    "secretMavenProcessMs": 90000,
+    "secretScanProcessMs": 180000,
+    "secretScanCliTimeout": "2m"
+  },
+  "secretProof": {
+    "expectedRuleId": "aws-access-key-id",
+    "expectedSeverity": "CRITICAL",
+    "expectedFindingCount": 1,
+    "expectedTarget": "SyntheticCredentialFixture.java"
+  },
+  "artifacts": {
+    "retentionDays": 30,
+    "imageSecuritySuffix": "security",
+    "imageEvidenceFiles": {
+      "evidence": "image-security-evidence.json",
+      "dockerInspect": "docker-image-inspect.json",
+      "dockerInspectAfterScan": "docker-image-inspect-after-scan.json",
+      "scanResult": "image-scan-result.json",
+      "trivy": "trivy-image.json",
+      "rawSbom": "image.cdx.raw.json",
+      "boundSbom": "image.cdx.json",
+      "buildxMetadata": "buildx-metadata.json",
+      "registryIdentity": "registry-image-identity.json"
+    }
+  },
+  "downloadIntegrity": {
+    "npmArchiveSha512": "a2f98d4517bbe89bdca7513a88e78f43a1fd66be1730eaea81f69e18d86d46f3f75d29762e8fdaf42d4de7f8d194b2ebb2a09e9bfa268067591e96796baca7d5",
+    "cyclonedxWheelSha256": "15ccb78616831688cab1d1ddd5e0ba2e7886cd83462f63d11d1b922f43a294c0",
+    "pipAuditWheelSha256": "99ef3f600a317c1945f1e89e227ef26e1c2d618429b8bd3fa6f4f7c440c4611a",
+    "pipIndexUrl": "https://pypi.org/simple"
+  }
+}

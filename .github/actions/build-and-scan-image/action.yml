@@ -1,0 +1,93 @@
+name: Build or pull, then scan an image
+description: Build a local image or pull a digest-pinned registry image, then produce its security evidence.
+inputs:
+  source:
+    description: Image source, either buildx or registry.
+    required: true
+  image-ref:
+    description: Exact image reference to build or pull and scan.
+    required: true
+  dockerfile:
+    description: Dockerfile used when source is buildx.
+    required: false
+    default: ''
+  target:
+    description: Optional Docker build target.
+    required: false
+    default: ''
+  build-args:
+    description: Optional newline-separated Docker build arguments.
+    required: false
+    default: ''
+  artifact-name:
+    description: Unique evidence artifact name without the revision suffix.
+    required: true
+  cache-scope:
+    description: Unique GitHub Actions BuildKit cache scope for this image.
+    required: false
+    default: image-build
+  cache-from-scopes:
+    description: Optional newline-separated BuildKit cache sources; defaults to this image's cache scope.
+    required: false
+    default: ''
+  expected-platform:
+    description: Required platform of the image.
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Load central security policy
+      id: security-policy
+      shell: bash
+      run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
+    - name: Prepare image evidence directory
+      if: inputs.source == 'buildx'
+      shell: bash
+      env:
+        OUTPUT_DIRECTORY: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}
+      run: mkdir -p "$OUTPUT_DIRECTORY"
+
+    - name: Build image with Buildx and export its OCI content
+      if: inputs.source == 'buildx'
+      id: build-image
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: ${{ inputs.dockerfile }}
+        target: ${{ inputs.target }}
+        push: false
+        outputs: type=oci,dest=target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}/image.oci.tar
+        provenance: false
+        pull: true
+        cache-from: ${{ inputs.cache-from-scopes || format('type=gha,scope={0}', inputs.cache-scope) }}
+        cache-to: type=gha,scope=${{ inputs.cache-scope }},mode=max,ignore-error=true
+        tags: ${{ inputs.image-ref }}
+        build-args: ${{ inputs.build-args }}
+
+    - name: Load the exact OCI image into Docker Engine
+      if: inputs.source == 'buildx'
+      shell: bash
+      env:
+        OCI_ARCHIVE_PATH: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}/image.oci.tar
+      run: docker load --input "$OCI_ARCHIVE_PATH"
+
+    - name: Pull digest-pinned registry image
+      if: inputs.source == 'registry'
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        EXPECTED_PLATFORM: ${{ inputs.expected-platform }}
+      run: docker pull --platform "$EXPECTED_PLATFORM" "$IMAGE_REF"
+
+    - name: Scan image and record evidence
+      uses: ./.github/actions/scan-built-image
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        build-digest: ${{ steps.build-image.outputs.digest }}
+        build-metadata: ${{ steps.build-image.outputs.metadata }}
+        oci-archive-path: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}/image.oci.tar
+        expected-platform: ${{ inputs.expected-platform || steps.security-policy.outputs.image_platform }}
+        artifact-name: ${{ inputs.artifact-name }}
+        output-directory: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}

@@ -29,7 +29,7 @@ class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
     private static final Instant LATER = EARLIER.plusSeconds(1);
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient mongoClient;
     private MongoTemplate mongoTemplate;

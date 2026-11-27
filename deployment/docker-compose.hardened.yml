@@ -1,6 +1,6 @@
 # Application container hardening overlay for local verification; not a production deployment.
 # Covers Java app services, local key loaders, ML inference and analyst-console-ui.
-# Kafka, MongoDB, Redis, Prometheus, Grafana, Keycloak and optional Ollama are outside this overlay.
+# Kafka, MongoDB, Redis and Keycloak remain outside; Prometheus/Grafana restrictions are in the base Compose, Ollama in its opt-in overlay.
 x-java-hardening: &java-hardening
   read_only: true
   cap_drop:

@@ -113,7 +113,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     private static final String TRANSACTION_ID = "transaction-occurrence-1";
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private SimpleMongoClientDatabaseFactory databaseFactory;
     private MongoTemplate mongoTemplate;

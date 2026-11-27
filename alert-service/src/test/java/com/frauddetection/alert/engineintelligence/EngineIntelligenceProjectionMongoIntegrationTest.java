@@ -39,7 +39,7 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
     private static final Instant T2 = Instant.parse("2026-06-02T08:05:00Z");
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient mongoClient;
     private MongoTemplate mongoTemplate;

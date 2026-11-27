@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
 
-FROM python:3.12-slim
+FROM python:3.12.16-slim-trixie@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -9,13 +9,18 @@ ENV FRAUD_FEATURE_CONTRACT_PATH="/app/contracts/fraud-feature-contract.json"
 
 WORKDIR /app
 
+COPY deployment/python-build-tools-requirements.txt /app/python-build-tools-requirements.txt
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid 10001 --home-dir /app app \
-    && python -m venv /opt/venv
+    && /usr/local/bin/python -m pip install --upgrade --require-hashes --no-deps \
+        -r /app/python-build-tools-requirements.txt \
+    && /usr/local/bin/python -m venv /opt/venv \
+    && /opt/venv/bin/python -m pip install --upgrade --require-hashes --no-deps \
+        -r /app/python-build-tools-requirements.txt
 
 COPY ml-inference-service/requirements.txt /app/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r /app/requirements.txt
+    python -m pip install --require-hashes --only-binary=:all: -r /app/requirements.txt
 
 COPY --chown=10001:10001 common-events/src/main/resources/feature-contract/fraud-feature-contract.json /app/contracts/fraud-feature-contract.json
 COPY --chown=10001:10001 ml-inference-service/app /app/app

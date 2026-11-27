@@ -1,0 +1,167 @@
+name: Scan built image and generate SBOM evidence
+description: Scan a local image, create a CycloneDX SBOM, and upload the evidence.
+outputs:
+  image-id-digest:
+    description: Actual Docker Engine image ID used as the immutable scanner input.
+    value: ${{ steps.image-evidence.outputs.image-id-digest }}
+inputs:
+  image-ref:
+    description: Image reference loaded into the Docker daemon.
+    required: true
+  build-digest:
+    description: Digest reported by docker/build-push-action.
+    required: false
+    default: ''
+  build-metadata:
+    description: Metadata JSON reported by docker/build-push-action.
+    required: false
+    default: ''
+  oci-archive-path:
+    description: OCI archive used to derive and verify Buildx manifest and config digests.
+    required: false
+    default: ''
+  build-metadata-path:
+    description: File containing the preserved Buildx metadata JSON.
+    required: false
+    default: ''
+  build-digest-path:
+    description: File containing the preserved Buildx action digest.
+    required: false
+    default: ''
+  expected-platform:
+    description: Required platform of the image loaded for scanning.
+    required: false
+    default: ''
+  artifact-name:
+    description: Unique suffix for the uploaded evidence artifact.
+    required: true
+  output-directory:
+    description: Directory for image scan and SBOM files.
+    required: false
+    default: target/image-security
+runs:
+  using: composite
+  steps:
+    - name: Load central security policy
+      id: security-policy
+      shell: bash
+      run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
+    - name: Record tested revision and verified Docker Engine identity
+      id: image-evidence
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        BUILD_DIGEST: ${{ inputs.build-digest }}
+        BUILD_METADATA_JSON: ${{ inputs.build-metadata }}
+        BUILD_METADATA_PATH: ${{ inputs.build-metadata-path }}
+        BUILD_DIGEST_PATH: ${{ inputs.build-digest-path }}
+        OCI_ARCHIVE_PATH: ${{ inputs.oci-archive-path }}
+        EXPECTED_PLATFORM: ${{ inputs.expected-platform || steps.security-policy.outputs.image_platform }}
+        OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        EXPECTED_GIT_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        actual_git_sha="$(git rev-parse HEAD)"
+        test "$actual_git_sha" = "$EXPECTED_GIT_SHA"
+        mkdir -p "$OUTPUT_DIRECTORY"
+        docker image inspect "$IMAGE_REF" | node scripts/security/run-security-gate.mjs image-identity "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}" "$EXPECTED_PLATFORM"
+        if [[ -n "$BUILD_METADATA_PATH" ]]; then
+          BUILD_METADATA_JSON="$(cat "$BUILD_METADATA_PATH")"
+        fi
+        if [[ -n "$BUILD_DIGEST_PATH" ]]; then
+          BUILD_DIGEST="$(cat "$BUILD_DIGEST_PATH")"
+        fi
+        if [[ -n "$BUILD_METADATA_JSON" ]]; then
+          image_identity_json="$(BUILD_METADATA_JSON="$BUILD_METADATA_JSON" BUILD_DIGEST="$BUILD_DIGEST" IMAGE_INSPECT_PATH="$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}" EXPECTED_PLATFORM="$EXPECTED_PLATFORM" IMAGE_REF="$IMAGE_REF" OCI_ARCHIVE_PATH="$OCI_ARCHIVE_PATH" node scripts/security/run-security-gate.mjs image-build-metadata)"
+          identity_source="buildx-loaded-image"
+          printf '%s\n' "$BUILD_METADATA_JSON" > "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.buildx_metadata_file }}"
+        elif [[ "$IMAGE_REF" == *@sha256:* ]]; then
+          image_identity_json="$(node scripts/security/run-security-gate.mjs image-platform-identity "$IMAGE_REF" "$EXPECTED_PLATFORM" "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}")"
+          identity_source="registry-pinned"
+          printf '%s\n' "$image_identity_json" > "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.registry_identity_file }}"
+        else
+          echo "Unsupported or unverified image identity for $IMAGE_REF" >&2
+          exit 1
+        fi
+        image_id_digest="$(TESTED_GIT_SHA="$actual_git_sha" IMAGE_REF="$IMAGE_REF" EXPECTED_PLATFORM="$EXPECTED_PLATFORM" IDENTITY_SOURCE="$identity_source" IMAGE_IDENTITY_JSON="$image_identity_json" BUILD_DIGEST="$BUILD_DIGEST" node scripts/security/run-security-gate.mjs image-security-evidence "$OUTPUT_DIRECTORY")"
+        printf 'image-id-digest=%s\n' "$image_id_digest" >> "$GITHUB_OUTPUT"
+
+    - name: Remove the temporary OCI archive after identity verification
+      if: inputs.oci-archive-path != '' && steps.image-evidence.outcome == 'success'
+      shell: bash
+      env:
+        OCI_ARCHIVE_PATH: ${{ inputs.oci-archive-path }}
+      run: rm -f -- "$OCI_ARCHIVE_PATH"
+
+    - name: Scan image for high and critical vulnerabilities
+      id: trivy-scan
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        scan-type: image
+        image-ref: ${{ steps.image-evidence.outputs.image-id-digest }}
+        version: ${{ steps.security-policy.outputs.trivy_version }}
+        cache: false
+        scanners: vuln
+        vuln-type: os,library
+        format: json
+        output: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.trivy_image_file }}
+        severity: ${{ steps.security-policy.outputs.blocking_vulnerability_severities }}
+        timeout: ${{ steps.security-policy.outputs.image_scan_timeout }}
+        exit-code: '1'
+
+    - name: Generate CycloneDX SBOM for the built image
+      if: always() && steps.image-evidence.outcome == 'success'
+      id: image-sbom
+      uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      with:
+        image: docker:${{ steps.image-evidence.outputs.image-id-digest }}
+        format: cyclonedx-json
+        output-file: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.raw_image_sbom_file }}
+        syft-version: ${{ steps.security-policy.outputs.syft_version }}
+        upload-artifact: false
+        upload-release-assets: false
+
+    - name: Bind CycloneDX SBOM to the scanned image identity
+      if: always() && steps.image-sbom.outcome == 'success' && steps.image-evidence.outcome == 'success'
+      id: image-sbom-binding
+      shell: bash
+      env:
+        EVIDENCE_PATH: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.image_evidence_file }}
+        SBOM_RAW_PATH: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.raw_image_sbom_file }}
+        SBOM_BOUND_PATH: ${{ inputs.output-directory }}/${{ steps.security-policy.outputs.bound_image_sbom_file }}
+      run: node scripts/security/run-security-gate.mjs image-sbom-binding "$SBOM_RAW_PATH" "$EVIDENCE_PATH" "$SBOM_BOUND_PATH"
+
+    - name: Verify the scanned image reference still resolves to the captured Engine identity
+      if: always() && steps.image-evidence.outcome == 'success'
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        DOCKER_INSPECT_FILE: ${{ steps.security-policy.outputs.docker_image_inspect_file }}
+        DOCKER_INSPECT_AFTER_SCAN_FILE: ${{ steps.security-policy.outputs.docker_image_inspect_after_scan_file }}
+      run: |
+        set -euo pipefail
+        docker image inspect "$IMAGE_REF" | node scripts/security/run-security-gate.mjs image-identity "$OUTPUT_DIRECTORY/$DOCKER_INSPECT_AFTER_SCAN_FILE" "${{ inputs.expected-platform || steps.security-policy.outputs.image_platform }}"
+        node -e 'const fs=require("node:fs"); const a=JSON.parse(fs.readFileSync(process.env.OUTPUT_DIRECTORY + "/" + process.env.DOCKER_INSPECT_FILE, "utf8"))[0]; const b=JSON.parse(fs.readFileSync(process.env.OUTPUT_DIRECTORY + "/" + process.env.DOCKER_INSPECT_AFTER_SCAN_FILE, "utf8"))[0]; if (!a || !b || a.Id !== b.Id || a.Os !== b.Os || a.Architecture !== b.Architecture || JSON.stringify(a.Descriptor ?? null) !== JSON.stringify(b.Descriptor ?? null) || JSON.stringify(a.RepoTags ?? []) !== JSON.stringify(b.RepoTags ?? []) || JSON.stringify(a.RepoDigests ?? []) !== JSON.stringify(b.RepoDigests ?? [])) process.exit(1);'
+
+    - name: Record image scan and SBOM execution outcomes
+      if: always() && steps.image-evidence.outcome == 'success'
+      shell: bash
+      env:
+        OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        EVIDENCE_OUTCOME: ${{ steps.image-evidence.outcome }}
+        TRIVY_OUTCOME: ${{ steps.trivy-scan.outcome }}
+        SBOM_OUTCOME: ${{ steps.image-sbom.outcome }}
+        SBOM_BINDING_OUTCOME: ${{ steps.image-sbom-binding.outcome }}
+      run: |
+        node scripts/security/run-security-gate.mjs image-scan-result
+
+    - name: Upload image security evidence
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.artifact-name }}-${{ github.sha }}
+        path: ${{ inputs.output-directory }}
+        if-no-files-found: error
+        retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

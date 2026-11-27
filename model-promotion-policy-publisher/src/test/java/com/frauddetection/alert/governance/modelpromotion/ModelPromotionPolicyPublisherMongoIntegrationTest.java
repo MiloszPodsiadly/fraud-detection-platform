@@ -37,7 +37,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MongoDBContainer;
-import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
@@ -72,7 +71,7 @@ import static org.mockito.Mockito.when;
 
 class ModelPromotionPolicyPublisherMongoIntegrationTest {
 
-    private static final MongoDBContainer MONGO = new MongoDBContainer(DockerImageName.parse("mongo:7.0"));
+    private static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
     private static final String ISSUER = "institutional-policy-issuer";
     private static final String KEY_ID = "policy-key-1";

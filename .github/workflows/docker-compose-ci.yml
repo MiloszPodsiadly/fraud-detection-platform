@@ -1,18 +1,10 @@
 name: Docker Compose CI
 
 on:
-  pull_request:
-  push:
-    branches:
-      - master
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: docker-compose-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   compose-config:
@@ -48,7 +40,10 @@ jobs:
             files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml -f deployment/docker-compose.model-promotion-policy-trust.yml -f deployment/docker-compose.shadow-performance-generated.yml -f deployment/docker-compose.model-shadow-performance-generated.yml
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify all base and runtime image references are pinned and scanned
+        run: node scripts/security/run-security-gate.mjs image-inventory
 
       - name: Generate local identity fixtures for Compose overlays
         run: |
@@ -64,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Generate local runtime fixture from example
         run: |
@@ -123,7 +118,7 @@ jobs:
         run: node --test scripts/model-promotion-trust-admin.test.mjs
 
       - name: Verify artifact preflight and Docker read-only behavior
-        run: bash scripts/ci/check-compose-bind-mount-security.sh
+        run: node scripts/security/run-security-gate.mjs compose-bind-mount-check
 
   exact-model-runtime-boundary:
     name: Exact Model / non-root artifact reader
@@ -131,10 +126,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify publisher, reader ACL, and HTTP boundary
-        run: bash scripts/ci/check-exact-model-runtime-boundary.sh
+        run: node scripts/security/run-security-gate.mjs exact-model-runtime-boundary
 
   runtime-smoke:
     name: Runtime Smoke / default dev without AI
@@ -142,7 +137,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load the shared Kafka image before Compose runtime smoke
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Generate local runtime fixture from example
         run: |
@@ -168,7 +166,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load the shared Kafka image before Compose runtime smoke
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Generate local runtime fixture from example
         run: |
@@ -185,7 +186,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load the shared Kafka image before Compose runtime smoke
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Generate local runtime fixture from example
         run: |
@@ -207,17 +211,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
 
       - name: Generate local identity fixtures for fixture guard tests
         run: bash scripts/bootstrap-local-fixtures.sh
 
-      - name: Set up Java
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
 
       - name: Test alert-service fixture guards
         run: mvn -B -pl alert-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=InternalServiceClientProdGuardTest,AuditTrustAuthorityClientConfigurationTest test
@@ -229,15 +233,17 @@ jobs:
         run: mvn -B -pl audit-trust-authority -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=TrustAuthorityServiceTest test
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: ${{ steps.security-policy.outputs.python_version }}
+          pip-version: ${{ steps.security-policy.outputs.pip_version }}
           cache: pip
           cache-dependency-path: ml-inference-service/requirements.txt
 
       - name: Install ML test dependencies
         working-directory: ml-inference-service
-        run: python -m pip install -r requirements.txt
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
 
       - name: Test ML fixture guard
         working-directory: ml-inference-service
@@ -248,159 +254,376 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
 
       - name: Reject committed private key material
-        run: bash scripts/ci/assert-no-committed-private-keys.sh
+        run: node scripts/security/run-security-gate.mjs committed-private-key-check
       - name: Block repository secrets
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_PARALLEL: '1'
+          TRIVY_OFFLINE_SCAN: 'true'
         with:
           scan-type: fs
           scan-ref: .
-          version: v0.71.0
+          version: ${{ steps.security-policy.outputs.trivy_version }}
           cache: false
-          vuln-type: os
           scanners: secret
           format: table
-          timeout: 10m
+          timeout: ${{ steps.security-policy.outputs.secret_scan_timeout }}
           exit-code: '1'
+
+      - name: Prove secret-only scan works while Maven resolution is unavailable
+        env:
+          SECRET_PROOF_EVIDENCE_PATH: target/security/secret-proof-summary.json
+        run: node scripts/security/run-security-gate.mjs secret-proof
+
+      - name: Upload safe secret proof summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: repository-secret-proof-${{ github.sha }}
+          path: target/security/secret-proof-summary.json
+          if-no-files-found: ignore
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}
+
+  repository-configuration-gate:
+    name: Docker and Compose Misconfiguration Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
+
+      - name: Block high or critical Docker and Compose misconfigurations
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PARALLEL: '1'
+        with:
+          scan-type: config
+          scan-ref: .
+          version: ${{ steps.security-policy.outputs.trivy_version }}
+          cache: false
+          scanners: misconfig
+          format: json
+          output: trivy-config.json
+          severity: ${{ steps.security-policy.outputs.blocking_vulnerability_severities }}
+          timeout: ${{ steps.security-policy.outputs.repository_scan_timeout }}
+          exit-code: '1'
+
+      - name: Upload Docker and Compose misconfiguration report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: repository-config-scan-${{ github.sha }}
+          path: trivy-config.json
+          if-no-files-found: error
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}
 
   repository-vulnerability-gate:
     name: Repository High/Critical Vulnerability Gate
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Java for Trivy Maven analysis
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-
-      - name: Prime Maven cache for Trivy
-        run: mvn -B -DskipTests dependency:go-offline
-
-      - name: Block high or critical repository vulnerabilities
-        uses: aquasecurity/trivy-action@v0.36.0
-        env:
-          TRIVY_PARALLEL: '1'
-        with:
-          scan-type: fs
-          scan-ref: .
-          version: v0.71.0
-          cache: false
-          scanners: vuln
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          timeout: 10m
-          exit-code: '1'
-
-  repository-vulnerability-sarif:
-    name: Repository Vulnerability SARIF Upload
-    runs-on: ubuntu-latest
-    needs: repository-vulnerability-gate
-    if: always()
+    timeout-minutes: 45
     permissions:
       contents: read
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Java for Trivy Maven analysis
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
+      - name: Load central security policy
+        id: security-policy
+        run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
 
-      - name: Prime Maven cache for Trivy
-        run: mvn -B -DskipTests dependency:go-offline
+      - name: Set up patched Java
+        uses: ./.github/actions/setup-patched-java
 
-      - name: Scan repository filesystem for vulnerability visibility
-        uses: aquasecurity/trivy-action@v0.36.0
+      - name: Resolve Maven dependencies and build plugins for Trivy
+        run: node scripts/security/run-security-gate.mjs maven-prefetch
+
+      - name: Prepare vulnerability evidence directory
+        run: mkdir -p target/security/trivy
+
+      - name: Scan repository dependencies once
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_PARALLEL: '1'
+          TRIVY_OFFLINE_SCAN: 'true'
+          HOME: ${{ github.workspace }}/target/security/home
         with:
           scan-type: fs
           scan-ref: .
-          version: v0.71.0
+          version: ${{ steps.security-policy.outputs.trivy_version }}
           cache: false
+          vuln-type: os,library
           scanners: vuln
-          format: sarif
-          output: trivy-fs.sarif
-          severity: LOW,MEDIUM,HIGH,CRITICAL
-          ignore-unfixed: true
-          timeout: 10m
+          skip-dirs: target/security/home/.m2/repository
+          skip-files: '**/pom.xml,**/*.pom'
+          format: json
+          output: target/security/trivy/repository.json
+          severity: ${{ steps.security-policy.outputs.all_vulnerability_severities }}
+          list-all-pkgs: 'true'
+          timeout: ${{ steps.security-policy.outputs.repository_scan_timeout }}
           exit-code: '0'
 
-      - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4
+      - name: Scan the isolated Maven repository as a root filesystem
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PARALLEL: '1'
+          TRIVY_OFFLINE_SCAN: 'true'
+          HOME: ${{ github.workspace }}/target/security/home
         with:
-          sarif_file: trivy-fs.sarif
+          scan-type: rootfs
+          scan-ref: target/security/home/.m2/repository
+          version: ${{ steps.security-policy.outputs.trivy_version }}
+          cache: false
+          vuln-type: library
+          scanners: vuln
+          list-all-pkgs: 'true'
+          format: json
+          output: target/security/trivy/resolved-maven.json
+          severity: ${{ steps.security-policy.outputs.all_vulnerability_severities }}
+          list-all-pkgs: 'true'
+          timeout: ${{ steps.security-policy.outputs.repository_scan_timeout }}
+          exit-code: '0'
 
-  backend-images:
-    name: Backend image / ${{ matrix.module }}
+      - name: Evaluate one complete vulnerability report and blocking policy
+        if: always()
+        run: >-
+          node scripts/security/run-security-gate.mjs vulnerability-evidence
+          --repository target/security/trivy/repository.json
+          --maven target/security/trivy/resolved-maven.json
+          --output target/security/trivy/combined.json
+          --summary target/security/trivy/summary.json
+
+      - name: Derive SARIF from the combined Trivy JSON report
+        if: always() && hashFiles('target/security/trivy/combined.json') != ''
+        run: trivy convert --format sarif --severity "${{ steps.security-policy.outputs.all_vulnerability_severities }}" --output target/security/trivy/vulnerability.sarif target/security/trivy/combined.json
+
+      - name: Upload Trivy SARIF to code scanning
+        if: always() && hashFiles('target/security/trivy/vulnerability.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: target/security/trivy/vulnerability.sarif
+
+      - name: Upload combined vulnerability evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: repository-vulnerability-evidence-${{ github.sha }}
+          path: |
+            target/security/trivy/combined.json
+            target/security/trivy/summary.json
+            target/security/trivy/repository.json
+            target/security/trivy/resolved-maven.json
+            target/security/trivy/vulnerability.sarif
+          if-no-files-found: error
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}
+
+  image-inventory:
+    name: Validate image inventory
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        module:
-          - transaction-ingest-service
-          - transaction-simulator-service
-          - feature-enricher-service
-          - fraud-scoring-service
-          - alert-service
-          - audit-trust-authority
+    outputs:
+      backend: ${{ steps.inventory.outputs.backend }}
+      services: ${{ steps.inventory.outputs.services }}
+      infrastructure: ${{ steps.inventory.outputs.infrastructure }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate image coverage and publish matrix inputs
+        id: inventory
+        run: node scripts/security/run-security-gate.mjs image-inventory --write-inventory target/image-security/expected-inventory.json --write-github-matrices
 
+  maven-backend-dependency-cache:
+    name: Resolve and cache backend Maven dependencies once
+    needs: image-inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build backend module image
-        uses: docker/build-push-action@v7
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+      - name: Resolve the reactor once and export its verified Maven layer
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: deployment/Dockerfile.backend
+          target: maven-dependencies
           push: false
-          tags: fdp-local/${{ matrix.module }}:${{ github.sha }}
-          build-args: |
-            MODULE_NAME=${{ matrix.module }}
-          cache-from: type=gha,scope=fdp-backend-${{ matrix.module }}
-          cache-to: type=gha,mode=max,scope=fdp-backend-${{ matrix.module }}
+          pull: true
+          cache-from: type=gha,scope=maven-backend-dependencies
+          cache-to: type=gha,scope=maven-backend-dependencies,mode=max
 
-  service-images:
-    name: Service image / ${{ matrix.name }}
+  backend-images:
+    name: Backend image / ${{ matrix.image.logicalName }}
+    needs: [image-inventory, maven-backend-dependency-cache]
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
-        include:
-          - name: ml-inference-service
-            dockerfile: deployment/Dockerfile.ml-inference
-          - name: analyst-console-ui
-            dockerfile: deployment/Dockerfile.frontend
+        image: ${{ fromJSON(needs.image-inventory.outputs.backend) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
-
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build service image
-        uses: docker/build-push-action@v7
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: false
-          tags: fdp-local/${{ matrix.name }}:${{ github.sha }}
-          cache-from: type=gha,scope=fdp-${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=fdp-${{ matrix.name }}
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+      - name: Build and scan backend image
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: ${{ matrix.image.source }}
+          image-ref: ${{ matrix.image.imageRef || format('{0}:{1}', matrix.image.repository, github.sha) }}
+          dockerfile: ${{ matrix.image.dockerfile }}
+          build-args: ${{ matrix.image.buildArgs }}
+          target: ${{ matrix.image.target }}
+          cache-scope: ${{ matrix.image.artifactName }}
+          cache-from-scopes: |
+            type=gha,scope=maven-backend-dependencies
+            type=gha,scope=${{ matrix.image.artifactName }}
+          artifact-name: ${{ matrix.image.artifactName }}
+
+  service-images:
+    name: Service image / ${{ matrix.image.logicalName }}
+    needs: image-inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        image: ${{ fromJSON(needs.image-inventory.outputs.services) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+      - name: Build and scan service image
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: ${{ matrix.image.source }}
+          image-ref: ${{ matrix.image.imageRef || format('{0}:{1}', matrix.image.repository, github.sha) }}
+          dockerfile: ${{ matrix.image.dockerfile }}
+          build-args: ${{ matrix.image.buildArgs }}
+          target: ${{ matrix.image.target }}
+          cache-scope: ${{ matrix.image.artifactName }}
+          artifact-name: ${{ matrix.image.artifactName }}
+
+  infrastructure-images:
+    name: Infrastructure image / ${{ matrix.image.logicalName }}
+    needs: image-inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        image: ${{ fromJSON(needs.image-inventory.outputs.infrastructure) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Buildx
+        if: matrix.image.logicalName != 'apache-kafka-runtime'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+      - name: Build and scan infrastructure image
+        if: matrix.image.logicalName != 'apache-kafka-runtime'
+        uses: ./.github/actions/build-and-scan-image
+        with:
+          source: ${{ matrix.image.source }}
+          image-ref: ${{ matrix.image.imageRef || format('{0}:{1}', matrix.image.repository, github.sha) }}
+          dockerfile: ${{ matrix.image.dockerfile }}
+          build-args: ${{ matrix.image.buildArgs }}
+          target: ${{ matrix.image.target }}
+          cache-scope: ${{ matrix.image.artifactName }}
+          artifact-name: ${{ matrix.image.artifactName }}
+
+      - name: Load the shared Kafka OCI artifact
+        if: matrix.image.logicalName == 'apache-kafka-runtime'
+        uses: ./.github/actions/load-kafka-test-image
+
+      - name: Scan the shared Kafka OCI artifact
+        if: matrix.image.logicalName == 'apache-kafka-runtime'
+        uses: ./.github/actions/scan-built-image
+        with:
+          image-ref: ${{ matrix.image.imageRef }}
+          build-metadata-path: target/kafka-shared-image/buildx-metadata.json
+          build-digest-path: target/kafka-shared-image/buildx-digest.txt
+          oci-archive-path: target/kafka-shared-image/image.oci.tar
+          artifact-name: ${{ matrix.image.artifactName }}
+          output-directory: target/image-security/downloads/${{ matrix.image.artifactName }}-${{ github.sha }}
+
+  image-scan-evidence:
+    name: Aggregate image scan and SBOM evidence
+    if: ${{ always() }}
+    needs: [image-inventory, backend-images, service-images, infrastructure-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TESTED_GIT_SHA: ${{ github.sha }}
+      IMAGE_SCAN_JOB_RESULTS: '{"backend-images":"${{ needs.backend-images.result }}","service-images":"${{ needs.service-images.result }}","infrastructure-images":"${{ needs.infrastructure-images.result }}"}'
+    steps:
+      - name: Checkout
+        if: ${{ always() }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Recreate expected image inventory
+        if: ${{ always() }}
+        run: node scripts/security/run-security-gate.mjs image-inventory --write-inventory target/image-security/expected-inventory.json
+      - name: Download backend image evidence
+        if: ${{ always() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: 'backend-image-*-security-${{ github.sha }}'
+          path: target/image-security/downloads
+          merge-multiple: false
+      - name: Download service image evidence
+        if: ${{ always() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: 'service-image-*-security-${{ github.sha }}'
+          path: target/image-security/downloads
+          merge-multiple: false
+      - name: Download infrastructure image evidence
+        if: ${{ always() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: 'external-image-*-security-${{ github.sha }}'
+          path: target/image-security/downloads
+          merge-multiple: false
+      - name: Exercise image inventory and evidence rejection cases
+        if: ${{ always() }}
+        run: node --test scripts/security/evidence/check-image-scan-coverage.test.mjs scripts/security/evidence/validate-image-scan-evidence.test.mjs scripts/security/evidence/verify-buildx-image-metadata.test.mjs
+      - name: Validate complete image scans and SBOMs
+        if: ${{ always() }}
+        run: node scripts/security/run-security-gate.mjs image-evidence target/image-security/expected-inventory.json target/image-security/downloads
+      - name: Upload image scan evidence validation summary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-scan-validation-${{ github.sha }}
+          path: target/image-security/validated-image-scan-summary.json
+          if-no-files-found: ignore
+          retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

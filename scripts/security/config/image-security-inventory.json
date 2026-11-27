@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "requiredScanJobs": [
+    "backend-images",
+    "service-images",
+    "infrastructure-images"
+  ],
+  "groups": {
+    "backend": [
+      { "logicalName": "transaction-ingest-service", "source": "buildx", "repository": "fdp-local/transaction-ingest-service", "dockerfile": "deployment/Dockerfile.backend", "buildArgs": "MODULE_NAME=transaction-ingest-service", "artifactName": "backend-image-transaction-ingest-service-security" },
+      { "logicalName": "transaction-simulator-service", "source": "buildx", "repository": "fdp-local/transaction-simulator-service", "dockerfile": "deployment/Dockerfile.backend", "buildArgs": "MODULE_NAME=transaction-simulator-service", "artifactName": "backend-image-transaction-simulator-service-security" },
+      { "logicalName": "feature-enricher-service", "source": "buildx", "repository": "fdp-local/feature-enricher-service", "dockerfile": "deployment/Dockerfile.backend", "buildArgs": "MODULE_NAME=feature-enricher-service", "artifactName": "backend-image-feature-enricher-service-security" },
+      { "logicalName": "fraud-scoring-service", "source": "buildx", "repository": "fdp-local/fraud-scoring-service", "dockerfile": "deployment/Dockerfile.backend", "buildArgs": "MODULE_NAME=fraud-scoring-service", "artifactName": "backend-image-fraud-scoring-service-security" },
+      { "logicalName": "alert-service", "source": "buildx", "repository": "fdp-local/alert-service", "dockerfile": "deployment/Dockerfile.backend", "buildArgs": "MODULE_NAME=alert-service", "artifactName": "backend-image-alert-service-security" },
+      { "logicalName": "audit-trust-authority", "source": "buildx", "repository": "fdp-local/audit-trust-authority", "dockerfile": "deployment/Dockerfile.backend", "buildArgs": "MODULE_NAME=audit-trust-authority", "artifactName": "backend-image-audit-trust-authority-security" },
+      { "logicalName": "model-promotion-policy-publisher", "source": "buildx", "repository": "fdp-local/model-promotion-policy-publisher", "dockerfile": "deployment/Dockerfile.backend", "buildArgs": "MODULE_NAME=model-promotion-policy-publisher", "artifactName": "backend-image-model-promotion-policy-publisher-security" }
+    ],
+    "services": [
+      { "logicalName": "ml-inference-service", "source": "buildx", "repository": "fdp-local/ml-inference-service", "dockerfile": "deployment/Dockerfile.ml-inference", "artifactName": "service-image-ml-inference-service-security" },
+      { "logicalName": "analyst-console-ui", "source": "buildx", "repository": "fdp-local/analyst-console-ui", "dockerfile": "deployment/Dockerfile.frontend", "artifactName": "service-image-analyst-console-ui-security" },
+      { "logicalName": "node-builder", "source": "buildx", "imageRef": "fdp-local/node-builder:26.13.1-npm12.2.3", "dockerfile": "deployment/Dockerfile.frontend", "target": "node-builder", "artifactName": "external-image-node-builder-security" }
+    ],
+    "infrastructure": [
+      { "logicalName": "dockerfile-syntax", "source": "registry", "imageRef": "docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183", "artifactName": "external-image-dockerfile-syntax-security" },
+      { "logicalName": "buildkit-builder", "source": "registry", "imageRef": "moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c", "artifactName": "external-image-buildkit-builder-security" },
+      { "logicalName": "maven-builder", "source": "registry", "imageRef": "maven:3.10.2-eclipse-temurin-21-noble@sha256:c8d5fcc6bbda32e415cd6a2f4d091c52f768e12594cfdb396dd2712c4b609369", "artifactName": "external-image-maven-builder-security" },
+      { "logicalName": "temurin-runtime", "source": "registry", "imageRef": "eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5", "artifactName": "external-image-temurin-runtime-security" },
+      { "logicalName": "python-runtime", "source": "registry", "imageRef": "python:3.12.16-slim-trixie@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b", "artifactName": "external-image-python-runtime-security" },
+      { "logicalName": "nginx-runtime", "source": "registry", "imageRef": "nginx:1.30.8-alpine3.24@sha256:6437a63b5c529f0e06162b3f593c0154cff6fa2ea0f94fd7c27928cb399e022d", "artifactName": "external-image-nginx-runtime-security" },
+      { "logicalName": "apache-kafka-runtime", "source": "buildx", "imageRef": "fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3", "dockerfile": "deployment/Dockerfile.kafka", "artifactName": "external-image-apache-kafka-runtime-security" },
+      { "logicalName": "temurin-kafka-runtime", "source": "registry", "imageRef": "eclipse-temurin:25.0.5.1_2-jre-alpine-3.24@sha256:69c2a26e9894016e274c880fa542956d005b3755f84db765145185e87405bd89", "artifactName": "external-image-temurin-kafka-runtime-security" },
+      { "logicalName": "mongodb", "source": "registry", "imageRef": "mongo:7.0.48@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1", "artifactName": "external-image-mongodb-security" },
+      { "logicalName": "redis-runtime", "source": "registry", "imageRef": "redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289", "artifactName": "external-image-redis-runtime-security" },
+      { "logicalName": "prometheus", "source": "registry", "imageRef": "prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06", "artifactName": "external-image-prometheus-security" },
+      { "logicalName": "grafana", "source": "registry", "imageRef": "grafana/grafana:13.3.2@sha256:81556409ba48b2b922e0adb69a2511337d8ba7578f11962eefa6149a2d815101", "artifactName": "external-image-grafana-security" },
+      { "logicalName": "ollama-opt-in", "source": "registry", "imageRef": "ollama/ollama:0.40.18@sha256:1cabd20e1762a7a8444bf4a7110b346d923cd77ab6c97c984434140638c913ec", "artifactName": "external-image-ollama-opt-in-security" },
+      { "logicalName": "keycloak", "source": "registry", "imageRef": "quay.io/keycloak/keycloak:26.8.2-3@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3", "artifactName": "external-image-keycloak-security" },
+      { "logicalName": "testcontainers-alpine", "source": "registry", "imageRef": "alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf", "artifactName": "external-image-testcontainers-alpine-security" },
+      { "logicalName": "testcontainers-ryuk", "source": "registry", "imageRef": "testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0", "artifactName": "external-image-testcontainers-ryuk-security" }
+    ]
+  },
+  "recipes": {
+    "buildkitBuilderImage": "moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c",
+    "kafka": {
+      "version": "4.4.0",
+      "javaVersion": "25.0.5.1+2",
+      "distributionUrl": "https://downloads.apache.org/kafka/4.4.0/kafka_2.13-4.4.0.tgz",
+      "distributionSha512": "f5ceba8a265ab6bb2d68362b1f6859a95e15d60ef92ba83b43fdf065b557dc18e98d6383c15b9977320e25b3a2c8b6f11decb17b0fa6c0f163423793a0eb95cb",
+      "dockerAssetsImage": "apache/kafka:4.4.0@sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f",
+      "compressionJars": [
+        { "name": "lz4-java", "version": "1.14.1", "url": "https://repo.maven.apache.org/maven2/at/yawk/lz4/lz4-java/1.14.1/lz4-java-1.14.1.jar", "sha256": "02d1ceb848d510fce228f66febee3254978df7d70d53da472a98eb3b5cf9caaf", "replaced": "lz4-java-1.11.2.jar" },
+        { "name": "snappy-java", "version": "1.1.10.12", "url": "https://repo.maven.apache.org/maven2/org/xerial/snappy/snappy-java/1.1.10.12/snappy-java-1.1.10.12.jar", "sha256": "1c03ce77b3f2e926c25a952612e372404d80bc88c6c8052bede964804fabd732", "replaced": "snappy-java-1.1.10.7.jar" }
+      ]
+    },
+    "nodeBuilder": {
+      "baseImage": "node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5",
+      "npmVersion": "12.2.3",
+      "npmTarballSha256": "fa0711dd513fa1386bbad3962a292cb813461cb57dedf07d6eb7efe76dffe897",
+      "fixedPackages": { "brace-expansion": "5.0.12", "undici": "6.29.1" }
+    }
+  }
+}

@@ -4,7 +4,7 @@ set -euo pipefail
 docker version --format 'Docker Engine: {{.Server.Version}}'
 docker compose version
 
-repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 workspace="$(mktemp -d)"
 project="exact-model-bind-$RANDOM-$$"
 compose_file="$workspace/compose.yml"
@@ -15,7 +15,7 @@ preflight_artifact_root="$workspace/preflight-artifacts"
 malformed_sentinel_root="$workspace/malformed-sentinel-artifacts"
 resolved_config="$workspace/resolved.json"
 key_loader_probe_file="$workspace/key-loader-missing-source-probes.yml"
-probe_image="alpine:3.21"
+probe_image="alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf"
 
 main_compose() {
   ARTIFACT_ROOT="$artifact_root" docker compose --project-name "$project" -f "$compose_file" "$@"
@@ -61,7 +61,7 @@ docker image inspect "$probe_image" >/dev/null
 cat >"$compose_file" <<'YAML'
 services:
   reader:
-    image: alpine:3.21
+    image: alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
     command:
       - /bin/sh
       - -ec
@@ -83,7 +83,7 @@ YAML
 cat >"$create_path_compose_file" <<'YAML'
 services:
   reader:
-    image: alpine:3.21
+    image: alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
     command: ["/bin/sh", "-ec", "test -d /run/model-shadow-performance"]
     volumes:
       - type: bind

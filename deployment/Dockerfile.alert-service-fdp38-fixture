@@ -1,5 +1,9 @@
+# syntax=docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
 # Dockerfile.alert-service-fdp38-fixture builds the FDP-38 test-fixture image.
-FROM maven:3.9.9-eclipse-temurin-21 AS build
+FROM maven:3.10.2-eclipse-temurin-21-noble@sha256:c8d5fcc6bbda32e415cd6a2f4d091c52f768e12594cfdb396dd2712c4b609369 AS build
+COPY scripts/security/toolchain/verify-temurin-java-runtime.sh /usr/local/bin/verify-temurin-java-runtime
+COPY scripts/security/toolchain/java-runtime-policy.properties /usr/local/share/fdp/java-runtime-policy.properties
+RUN chmod 0555 /usr/local/bin/verify-temurin-java-runtime && /usr/local/bin/verify-temurin-java-runtime
 
 WORKDIR /workspace
 
@@ -28,7 +32,13 @@ COPY audit-trust-authority/src audit-trust-authority/src
 RUN mvn -q -pl alert-service -am -DskipTests install
 RUN mvn -q -pl alert-service -DskipTests dependency:copy-dependencies -DincludeScope=test -DoutputDirectory=/workspace/alert-service/target/dependency
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21.0.13.1_2-jre-noble@sha256:897ec01ae1350622de0d5393a48a4ffffee8fe1609f248f4389578b919eaf9f5
+COPY scripts/security/toolchain/verify-temurin-java-runtime.sh /usr/local/bin/verify-temurin-java-runtime
+COPY scripts/security/toolchain/java-runtime-policy.properties /usr/local/share/fdp/java-runtime-policy.properties
+RUN chmod 0555 /usr/local/bin/verify-temurin-java-runtime && /usr/local/bin/verify-temurin-java-runtime
+
+COPY scripts/security/toolchain/exec-with-verified-temurin-java.sh /usr/local/bin/exec-with-verified-temurin-java
+RUN chmod 0555 /usr/local/bin/exec-with-verified-temurin-java
 
 WORKDIR /app
 
@@ -42,4 +52,4 @@ USER 10001:10001
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-cp", "/app/classes:/app/test-classes:/app/common-events-classes:/app/common-test-support-classes:/app/dependency/*", "com.frauddetection.alert.AlertServiceApplication"]
+CMD ["/usr/local/bin/exec-with-verified-temurin-java", "-cp", "/app/classes:/app/test-classes:/app/common-events-classes:/app/common-test-support-classes:/app/dependency/*", "com.frauddetection.alert.AlertServiceApplication"]

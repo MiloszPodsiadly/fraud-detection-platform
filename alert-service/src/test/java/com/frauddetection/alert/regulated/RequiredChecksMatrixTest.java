@@ -14,17 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class RequiredChecksMatrixTest {
 
-    private static final Set<String> REQUIRED = Set.of(
-            "backend",
-            "docker",
-            "regulated-mutation-regression",
-            "fdp35-production-readiness",
-            "fdp36-real-chaos",
-            "fdp37-production-image-chaos",
-            "fdp38-live-runtime-checkpoint-chaos",
-            "fdp39-release-governance",
-            "fdp40-release-controls"
-    );
+    private static final Set<String> REQUIRED = Set.of("platform-security-gate");
 
     @Test
     void requiredChecksMatrixListsAllBlockingReleaseGates() throws Exception {

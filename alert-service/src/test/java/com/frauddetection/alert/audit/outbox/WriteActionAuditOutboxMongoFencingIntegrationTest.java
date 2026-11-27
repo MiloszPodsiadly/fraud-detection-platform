@@ -38,7 +38,7 @@ class WriteActionAuditOutboxMongoFencingIntegrationTest {
     private static final Duration LEASE = Duration.ofMinutes(5);
 
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
+    static final MongoDBContainer MONGO = com.frauddetection.common.testsupport.container.MongoTestSupport.newMongoDBContainer();
 
     private MongoClient client;
     private SimpleMongoClientDatabaseFactory factory;

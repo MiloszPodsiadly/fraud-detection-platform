@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 
 const project = process.argv[2];
 if (!project || process.argv.length !== 3) {
-  console.error("Usage: node scripts/ci/verify-audit-trust-runtime.mjs <compose-project>");
+  console.error("Usage: node scripts/security/run-security-gate.mjs audit-trust-runtime <compose-project>");
   process.exit(2);
 }
 
