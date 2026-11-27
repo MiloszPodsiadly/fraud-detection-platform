@@ -37,7 +37,38 @@
   },
   "platformGate": {
     "artifactName": "platform-security-evidence",
+    "kafkaImageConsumers": [
+      "backend",
+      "graph-signed-e2e",
+      "institutional-reliability",
+      "fdp28-proof",
+      "fdp35-production-readiness",
+      "fdp36-real-chaos",
+      "fdp37-production-image-chaos",
+      "regulated-mutation-regression",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "infrastructure-images",
+      "runtime-smoke",
+      "app-hardening-runtime-smoke",
+      "full-security-runtime-smoke"
+    ],
+    "kafkaImageConsumerArtifactPrefix": "kafka-test-image-consumer",
+    "kafkaImageRequiredStatusJobs": [
+      "kafka-test-image",
+      "backend",
+      "graph-signed-e2e",
+      "institutional-reliability",
+      "fdp28-proof",
+      "fdp35-production-readiness",
+      "fdp36-real-chaos",
+      "fdp37-production-image-chaos",
+      "regulated-mutation-regression",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "compose-ci"
+    ],
     "requiredProducerJobs": [
+      "kafka-test-image",
+      "kafka-image-consumer-evidence",
       "backend",
       "graph-signed-e2e",
       "institutional-reliability",
@@ -65,6 +96,42 @@
       "compose-ci",
       "resolved-sbom"
     ],
+    "securityEvidenceJobs": [
+      "kafka-test-image",
+      "kafka-image-consumer-evidence",
+      "frontend-dependency-audit",
+      "python-dependency-audit",
+      "fdp-image-scan-evidence",
+      "compose-ci",
+      "resolved-sbom",
+      "fdp37-production-image-chaos",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "fdp39-release-governance"
+    ],
+    "functionalProofJobs": [
+      "backend",
+      "graph-signed-e2e",
+      "institutional-reliability",
+      "fdp42-fraud-case-management",
+      "fdp45-fraud-case-work-queue-read-model",
+      "ml",
+      "frontend",
+      "fdp28-proof",
+      "fdp35-production-readiness",
+      "fdp47-analyst-console-ux-and-summary",
+      "fdp48-bff-session-request-lifecycle",
+      "security-route-boundary",
+      "fdp54-ci-docs-governance",
+      "analyst-console-frontend-architecture-gate",
+      "regulated-mutation-regression",
+      "fdp36-real-chaos",
+      "fdp37-production-image-chaos",
+      "fdp38-live-runtime-checkpoint-chaos",
+      "fdp39-release-governance",
+      "fdp40-release-controls",
+      "docker",
+      "compose-ci"
+    ],
     "requiredArtifactBases": [
       "npm-audit",
       "pip-audit",
@@ -73,7 +140,8 @@
       "repository-secret-proof",
       "resolved-cyclonedx-sbom",
       "image-scan-validation",
-      "fdp-image-scan-validation"
+      "fdp-image-scan-validation",
+      "kafka-image-consumers"
     ],
     "historicalImageArtifacts": [
       "fdp37-alert-service-image-security",
@@ -95,8 +163,10 @@
       "vulnerabilityRepositoryReport": "repository.json",
       "vulnerabilityMavenReport": "resolved-maven.json",
       "imageValidationSummary": "validated-image-scan-summary.json",
+      "kafkaImageConsumers": "kafka-image-consumers.json",
       "sbomDocuments": [
         "maven-resolved.cdx.json",
+      "sbom-manifest.json",
         "npm-analyst-console-ui.cdx.json",
         "python-ml-inference-service.cdx.json",
         "npm-sbom-toolchain-audit.json"
@@ -126,7 +196,8 @@
   "secretProof": {
     "expectedRuleId": "aws-access-key-id",
     "expectedSeverity": "CRITICAL",
-    "expectedFindingCount": 1
+    "expectedFindingCount": 1,
+    "expectedTarget": "SyntheticCredentialFixture.java"
   },
   "artifacts": {
     "retentionDays": 30,

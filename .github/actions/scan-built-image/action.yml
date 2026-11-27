@@ -16,6 +16,18 @@ inputs:
     description: Metadata JSON reported by docker/build-push-action.
     required: false
     default: ''
+  oci-archive-path:
+    description: OCI archive used to derive and verify Buildx manifest and config digests.
+    required: false
+    default: ''
+  build-metadata-path:
+    description: File containing the preserved Buildx metadata JSON.
+    required: false
+    default: ''
+  build-digest-path:
+    description: File containing the preserved Buildx action digest.
+    required: false
+    default: ''
   expected-platform:
     description: Required platform of the image loaded for scanning.
     required: false
@@ -42,6 +54,9 @@ runs:
         IMAGE_REF: ${{ inputs.image-ref }}
         BUILD_DIGEST: ${{ inputs.build-digest }}
         BUILD_METADATA_JSON: ${{ inputs.build-metadata }}
+        BUILD_METADATA_PATH: ${{ inputs.build-metadata-path }}
+        BUILD_DIGEST_PATH: ${{ inputs.build-digest-path }}
+        OCI_ARCHIVE_PATH: ${{ inputs.oci-archive-path }}
         EXPECTED_PLATFORM: ${{ inputs.expected-platform || steps.security-policy.outputs.image_platform }}
         OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
         EXPECTED_GIT_SHA: ${{ github.sha }}
@@ -51,8 +66,14 @@ runs:
         test "$actual_git_sha" = "$EXPECTED_GIT_SHA"
         mkdir -p "$OUTPUT_DIRECTORY"
         docker image inspect "$IMAGE_REF" | node scripts/security/run-security-gate.mjs image-identity "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}" "$EXPECTED_PLATFORM"
+        if [[ -n "$BUILD_METADATA_PATH" ]]; then
+          BUILD_METADATA_JSON="$(cat "$BUILD_METADATA_PATH")"
+        fi
+        if [[ -n "$BUILD_DIGEST_PATH" ]]; then
+          BUILD_DIGEST="$(cat "$BUILD_DIGEST_PATH")"
+        fi
         if [[ -n "$BUILD_METADATA_JSON" ]]; then
-          image_identity_json="$(BUILD_METADATA_JSON="$BUILD_METADATA_JSON" BUILD_DIGEST="$BUILD_DIGEST" IMAGE_INSPECT_PATH="$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}" EXPECTED_PLATFORM="$EXPECTED_PLATFORM" IMAGE_REF="$IMAGE_REF" node scripts/security/run-security-gate.mjs image-build-metadata)"
+          image_identity_json="$(BUILD_METADATA_JSON="$BUILD_METADATA_JSON" BUILD_DIGEST="$BUILD_DIGEST" IMAGE_INSPECT_PATH="$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.docker_image_inspect_file }}" EXPECTED_PLATFORM="$EXPECTED_PLATFORM" IMAGE_REF="$IMAGE_REF" OCI_ARCHIVE_PATH="$OCI_ARCHIVE_PATH" node scripts/security/run-security-gate.mjs image-build-metadata)"
           identity_source="buildx-loaded-image"
           printf '%s\n' "$BUILD_METADATA_JSON" > "$OUTPUT_DIRECTORY/${{ steps.security-policy.outputs.buildx_metadata_file }}"
         elif [[ "$IMAGE_REF" == *@sha256:* ]]; then
@@ -65,6 +86,13 @@ runs:
         fi
         image_id_digest="$(TESTED_GIT_SHA="$actual_git_sha" IMAGE_REF="$IMAGE_REF" EXPECTED_PLATFORM="$EXPECTED_PLATFORM" IDENTITY_SOURCE="$identity_source" IMAGE_IDENTITY_JSON="$image_identity_json" BUILD_DIGEST="$BUILD_DIGEST" node scripts/security/run-security-gate.mjs image-security-evidence "$OUTPUT_DIRECTORY")"
         printf 'image-id-digest=%s\n' "$image_id_digest" >> "$GITHUB_OUTPUT"
+
+    - name: Remove the temporary OCI archive after identity verification
+      if: inputs.oci-archive-path != '' && steps.image-evidence.outcome == 'success'
+      shell: bash
+      env:
+        OCI_ARCHIVE_PATH: ${{ inputs.oci-archive-path }}
+      run: rm -f -- "$OCI_ARCHIVE_PATH"
 
     - name: Scan image for high and critical vulnerabilities
       id: trivy-scan

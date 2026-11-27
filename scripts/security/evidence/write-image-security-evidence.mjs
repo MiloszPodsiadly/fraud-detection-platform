@@ -30,6 +30,11 @@ if (process.env.IDENTITY_SOURCE === 'buildx-loaded-image') {
     || identity.dockerEngineDescriptorDigest !== null && identity.dockerEngineDescriptorDigest !== identity.manifestDigest) {
     throw new Error('Verified Buildx identity has inconsistent manifest, config, or Engine descriptor fields.');
   }
+  if (!/^[a-f0-9]{64}$/.test(identity.archiveSha256 ?? '')
+    || identity.manifestContentDigest !== identity.manifestDigest
+    || identity.configContentDigest !== identity.configDigest) {
+    throw new Error('Verified Buildx identity is missing content-addressed OCI archive, manifest, or config evidence.');
+  }
 } else if (process.env.IDENTITY_SOURCE === 'registry-pinned') {
   const platformDescriptorMismatch = identity.dockerEngineIdKind === 'manifest-descriptor'
     && identity.platformManifestDigest !== identity.dockerEngineDescriptorDigest;
@@ -71,6 +76,7 @@ const evidence = {
   buildxActionDigest: process.env.IDENTITY_SOURCE === 'buildx-loaded-image' ? process.env.BUILD_DIGEST : null,
   buildxDigest: process.env.IDENTITY_SOURCE === 'buildx-loaded-image' ? identity.manifestDigest : null,
   buildxConfigDigest: process.env.IDENTITY_SOURCE === 'buildx-loaded-image' ? identity.configDigest : null,
+  buildxOciArchiveSha256: process.env.IDENTITY_SOURCE === 'buildx-loaded-image' ? identity.archiveSha256 : null,
 };
 if (evidence.dockerEngineConfigDigest !== evidence.platformConfigDigest
   || evidence.scannedImageDigest !== evidence.dockerEngineId) {

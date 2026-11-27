@@ -6,14 +6,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SECURITY_POLICY } from '../config/policy.mjs';
 import { IMAGE_SECURITY_INVENTORY, imageEntry } from '../config/image-inventory.mjs';
+import { verifyBuildxImageMetadata } from './verify-buildx-image-metadata.mjs';
 
 const KAFKA_RECIPE = IMAGE_SECURITY_INVENTORY.recipes.kafka;
 const KAFKA_JAVA_IMAGE = imageEntry('infrastructure', 'temurin-kafka-runtime')?.imageRef;
 const KAFKA_JAVA_VERSION = KAFKA_RECIPE.javaVersion;
 export const KAFKA_TEST_IMAGE = imageEntry('infrastructure', 'apache-kafka-runtime')?.imageRef;
 const IMAGE_PLATFORM = SECURITY_POLICY.platforms.image;
-const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
-const MANIFEST_MEDIA_TYPES = new Set(SECURITY_POLICY.imageIdentity.manifestMediaTypes);
 const KAFKA_ARCHIVE_SHA512 = KAFKA_RECIPE.distributionSha512;
 const EXPECTED_RECIPE_INPUTS = [
   `FROM ${KAFKA_RECIPE.dockerAssetsImage} AS kafka-docker-assets`,
@@ -27,6 +26,7 @@ export function validateKafkaTestImageEvidence({
   imageRef,
   buildDigest,
   buildMetadataJson,
+  ociArchivePath,
   image,
   javaVersionOutput,
   kafkaVersionOutput,
@@ -36,8 +36,7 @@ export function validateKafkaTestImageEvidence({
   if (imageRef !== KAFKA_TEST_IMAGE) {
     throw new Error(`Unexpected Kafka test image reference: ${imageRef || '<missing>'}`);
   }
-  const buildMetadata = parseBuildxMetadata(buildMetadataJson);
-  const buildIdentity = verifyLoadedImageIdentity(buildMetadata, buildDigest, image);
+  const buildIdentity = verifyLoadedImageIdentity(buildMetadataJson, buildDigest, image, ociArchivePath, imageRef);
   if (!Array.isArray(image?.RepoTags) || !image.RepoTags.includes(KAFKA_TEST_IMAGE)) {
     throw new Error('The expected Kafka image tag does not resolve to the inspected Docker image.');
   }
@@ -90,6 +89,7 @@ export function validateKafkaTestImageEvidence({
     buildxManifestDigest: buildIdentity.manifestDigest,
     buildxConfigDigest: buildIdentity.configDigest,
     buildxMediaType: buildIdentity.mediaType,
+    buildxOciArchiveSha256: buildIdentity.archiveSha256,
     buildxMetadataSha256: createHash('sha256').update(buildMetadataJson).digest('hex'),
     dockerfileSha256: createHash('sha256').update(dockerfileText).digest('hex'),
     kafkaVersion: KAFKA_RECIPE.version,
@@ -107,80 +107,30 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function parseBuildxMetadata(metadataJson) {
-  let metadata;
-  try {
-    metadata = JSON.parse(metadataJson);
-  } catch {
-    throw new Error('Buildx metadata is not valid JSON.');
-  }
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-    throw new Error('Buildx metadata must be an object.');
-  }
-  const manifestDigest = metadata['containerimage.digest'];
-  const configDigest = metadata['containerimage.config.digest'];
-  const descriptor = metadata['containerimage.descriptor'];
-  if (!DIGEST_PATTERN.test(manifestDigest ?? '') || !DIGEST_PATTERN.test(configDigest ?? '')) {
-    throw new Error('Buildx metadata must identify one platform manifest and its image config.');
-  }
-  if (!descriptor || descriptor.digest !== manifestDigest || !MANIFEST_MEDIA_TYPES.has(descriptor.mediaType)) {
-    throw new Error('Buildx descriptor does not identify the image manifest.');
-  }
-  const descriptorConfigDigest = descriptor.annotations?.['config.digest'];
-  if (descriptorConfigDigest && descriptorConfigDigest !== configDigest) {
-    throw new Error('Buildx descriptor config digest disagrees with its image config metadata.');
-  }
-  if (descriptor.platform
-    && `${descriptor.platform.os}/${descriptor.platform.architecture}` !== IMAGE_PLATFORM) {
-    throw new Error(`Buildx metadata does not describe the required ${IMAGE_PLATFORM} platform.`);
-  }
-  return metadata;
-}
-
-function verifyLoadedImageIdentity(metadata, actionDigest, image) {
-  const manifestDigest = metadata['containerimage.digest'];
-  const configDigest = metadata['containerimage.config.digest'];
-  const buildDescriptor = metadata['containerimage.descriptor'];
-  if (!DIGEST_PATTERN.test(actionDigest ?? '') || actionDigest !== manifestDigest) {
-    throw new Error('Buildx action digest output disagrees with its manifest metadata.');
-  }
-  if (!DIGEST_PATTERN.test(image?.Id ?? '')) {
-    throw new Error('Docker Engine did not report a content-addressed Kafka image ID.');
-  }
-
-  const engineDescriptor = image.Descriptor;
-  if (engineDescriptor) {
-    if (engineDescriptor.digest !== manifestDigest
-      || engineDescriptor.mediaType !== buildDescriptor.mediaType) {
-      throw new Error('Docker Engine descriptor does not match the Buildx image manifest.');
-    }
-    const engineConfigDigest = engineDescriptor.annotations?.['config.digest'];
-    if (engineConfigDigest && engineConfigDigest !== configDigest) {
-      throw new Error('Docker Engine descriptor does not bind the Buildx image config digest.');
-    }
-  }
-
-  let dockerImageIdKind;
-  if (image.Id === configDigest) {
-    dockerImageIdKind = 'config-digest';
-  } else if (image.Id === manifestDigest
-    && engineDescriptor?.digest === manifestDigest
-    && engineDescriptor.annotations?.['config.digest'] === configDigest) {
-    dockerImageIdKind = 'manifest-descriptor';
-  } else {
-    throw new Error('Loaded Docker image ID is not bound to the Buildx manifest and config metadata.');
-  }
-
-  const repoDigests = image.RepoDigests ?? [];
-  if (repoDigests.length > 0 && !repoDigests.includes(`fdp-local/kafka@${manifestDigest}`)
-    && !repoDigests.includes(`docker.io/fdp-local/kafka@${manifestDigest}`)) {
-    throw new Error('Docker Engine repository digest does not match the Buildx output manifest.');
-  }
+function verifyLoadedImageIdentity(metadataJson, actionDigest, image, ociArchivePath, expectedRef) {
+  if (!ociArchivePath) throw new Error('Kafka image verification requires the preserved OCI archive.');
+  const identityInspect = {
+    Id: image?.Id,
+    Os: image?.Os,
+    Architecture: image?.Architecture,
+    RepoTags: image?.RepoTags,
+    RepoDigests: image?.RepoDigests,
+    ...(image?.Descriptor ? { Descriptor: image.Descriptor } : {}),
+  };
+  const identity = verifyBuildxImageMetadata({
+    metadataJson,
+    actionDigest,
+    imageInspectJson: JSON.stringify([identityInspect]),
+    expectedPlatform: IMAGE_PLATFORM,
+    expectedRef,
+    ociArchivePath,
+  });
   return {
-    manifestDigest,
-    configDigest,
-    mediaType: buildDescriptor.mediaType,
-    dockerImageIdKind,
+    manifestDigest: identity.manifestDigest,
+    configDigest: identity.configDigest,
+    mediaType: identity.mediaType,
+    dockerImageIdKind: identity.dockerEngineIdKind,
+    archiveSha256: identity.archiveSha256,
   };
 }
 
@@ -197,6 +147,7 @@ function main() {
   const imageRef = process.env.KAFKA_IMAGE_REF ?? '';
   const buildDigest = process.env.KAFKA_BUILD_DIGEST ?? '';
   const buildMetadataJson = process.env.KAFKA_BUILD_METADATA_JSON ?? '';
+  const ociArchivePath = process.env.KAFKA_OCI_ARCHIVE_PATH ?? '';
   const dockerfilePath = path.resolve('deployment/Dockerfile.kafka');
   const dockerfileText = readFileSync(dockerfilePath, 'utf8');
   const imageInspectJson = capture('docker', ['image', 'inspect', imageRef]);
@@ -221,6 +172,7 @@ function main() {
     imageRef,
     buildDigest,
     buildMetadataJson,
+    ociArchivePath,
     image: inspected[0],
     javaVersionOutput,
     kafkaVersionOutput,
@@ -239,19 +191,35 @@ function main() {
     workflow: process.env.GITHUB_WORKFLOW ?? null,
     job: process.env.GITHUB_JOB ?? null,
     runId: process.env.GITHUB_RUN_ID ?? null,
+    runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
     buildxActionDigest: buildDigest,
     ...verified,
   };
+  const producerEvidencePath = process.env.KAFKA_PRODUCER_EVIDENCE_PATH;
+  if (producerEvidencePath) {
+    const producerEvidence = JSON.parse(readFileSync(producerEvidencePath, 'utf8'));
+    const preservedFields = [
+      'testedGitSha', 'runId', 'runAttempt', 'imageRef', 'imagePlatform', 'imageIdDigest',
+      'dockerImageIdKind', 'buildxActionDigest', 'buildxManifestDigest', 'buildxConfigDigest',
+      'buildxOciArchiveSha256', 'dockerfileSha256', 'kafkaVersion', 'javaVersion',
+      'kafkaArchiveSha512', 'compressionJars', 'dockerUser',
+    ];
+    for (const field of preservedFields) {
+      if (JSON.stringify(producerEvidence[field]) !== JSON.stringify(evidence[field])) {
+        throw new Error(`Downloaded Kafka image producer evidence does not match the loaded artifact field ${field}.`);
+      }
+    }
+  }
   const outputPath = path.resolve('target/kafka-test-image-evidence.json');
   mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`);
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(process.env.GITHUB_OUTPUT,
-      `image-id-digest=${verified.imageIdDigest}\nbuildx-manifest-digest=${verified.buildxManifestDigest}\nrecipe-sha256=${verified.dockerfileSha256}\n`);
+      `image-id-digest=${verified.imageIdDigest}\nbuildx-manifest-digest=${verified.buildxManifestDigest}\nbuildx-config-digest=${verified.buildxConfigDigest}\noci-archive-sha256=${verified.buildxOciArchiveSha256}\nrecipe-sha256=${verified.dockerfileSha256}\n`);
   }
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-      `## Patched Kafka Test Image\n\n- tested SHA: \`${testedSha}\`\n- image: \`${verified.imageRef}\`\n- Buildx manifest digest: \`${verified.buildxManifestDigest}\`\n- loaded Docker image ID: \`${verified.imageIdDigest}\`\n- platform: \`${verified.imagePlatform}\`\n- Dockerfile SHA-256: \`${verified.dockerfileSha256}\`\n- Kafka: ${verified.kafkaVersion}\n- Temurin: ${verified.javaVersion}\n- compression jar SHA-256: lz4 \`${LZ4_SHA256}\`, snappy \`${SNAPPY_SHA256}\`\n- runtime user: \`${verified.dockerUser}\`\n`);
+      `## Patched Kafka Test Image\n\n- tested SHA: \`${testedSha}\`\n- image: \`${verified.imageRef}\`\n- Buildx manifest digest: \`${verified.buildxManifestDigest}\`\n- loaded Docker image ID: \`${verified.imageIdDigest}\`\n- platform: \`${verified.imagePlatform}\`\n- OCI archive SHA-256: \`${verified.buildxOciArchiveSha256}\`\n- Dockerfile SHA-256: \`${verified.dockerfileSha256}\`\n- Kafka: ${verified.kafkaVersion}\n- Temurin: ${verified.javaVersion}\n- compression jar SHA-256: lz4 \`${verified.compressionJars['lz4-java'].sha256}\`, snappy \`${verified.compressionJars['snappy-java'].sha256}\`\n- runtime user: \`${verified.dockerUser}\`\n`);
   }
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
 }

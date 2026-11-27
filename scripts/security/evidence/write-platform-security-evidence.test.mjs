@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { SECURITY_POLICY } from '../config/policy.mjs';
 import { IMAGE_SECURITY_INVENTORY } from '../config/image-inventory.mjs';
+import { mavenCoordinateKey } from '../sbom/maven-sbom-inventory.mjs';
 import { buildPlatformSecurityEvidence } from './write-platform-security-evidence.mjs';
 
 const sha = 'a'.repeat(40);
@@ -14,10 +15,18 @@ test('writes a pass decision only with every required producer and same-run evid
   const fixture = createEvidenceFixture();
   try {
     const evidence = buildPlatformSecurityEvidence({ ...fixture.input, testedGitSha: sha });
-    assert.equal(evidence.finalDecision, 'PASS');
+    assert.equal(evidence.finalDecision, 'PASS', evidence.failures.join('\n'));
+    assert.equal(evidence.securityEvidenceStatus, 'PASS');
+    assert.equal(evidence.functionalProofStatus, 'PASS');
+    assert.equal(evidence.combinedReadiness, 'PASS');
     assert.deepEqual(evidence.failures, []);
     assert.equal(evidence.producerOutcomes['compose-ci'], 'success');
     assert.equal(evidence.imageEvidence.reduce((total, summary) => total + summary.artifactCount, 0), 30);
+    assert.deepEqual(evidence.resolvedMavenPackageCoverage, {
+      resolvedJarPackageCount: 2,
+      scannedJarPackageCount: 2,
+      coveredJarPackageCount: 2,
+    });
     assert.ok(evidence.artifactReferences.every((artifact) => artifact.files.every((file) => /^[a-f0-9]{64}$/.test(file.sha256))));
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -31,11 +40,16 @@ test('rejects missing, failed, skipped, and cancelled producer outcomes', () => 
       const needs = { ...fixture.input.needs, backend: { result } };
       const evidence = buildPlatformSecurityEvidence({ ...fixture.input, needs, testedGitSha: sha });
       assert.equal(evidence.finalDecision, 'FAIL');
+      assert.equal(evidence.securityEvidenceStatus, 'PASS');
+      assert.equal(evidence.functionalProofStatus, 'FAIL');
+      assert.equal(evidence.combinedReadiness, 'FAIL');
       assert.ok(evidence.failures.some((failure) => failure.includes(`backend completed with ${result}`)));
     }
     const needs = { ...fixture.input.needs };
     delete needs['resolved-sbom'];
     const missing = buildPlatformSecurityEvidence({ ...fixture.input, needs, testedGitSha: sha });
+    assert.equal(missing.securityEvidenceStatus, 'FAIL');
+    assert.equal(missing.functionalProofStatus, 'PASS');
     assert.ok(missing.failures.some((failure) => failure.includes('Required producer result is missing: resolved-sbom')));
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -141,9 +155,35 @@ function createEvidenceFixture() {
     offlineSecretOnlyScan: 'success',
     expectedRuleId: SECURITY_POLICY.secretProof.expectedRuleId,
     expectedSeverity: SECURITY_POLICY.secretProof.expectedSeverity,
+    findingTarget: SECURITY_POLICY.secretProof.expectedTarget,
     findingCount: SECURITY_POLICY.secretProof.expectedFindingCount,
     cleanControl: 'passed',
     independentOfflineMavenFailure: 'passed',
+  });
+  const kafkaImageIdDigest = `sha256:${'1'.repeat(64)}`;
+  const kafkaManifestDigest = `sha256:${'2'.repeat(64)}`;
+  const kafkaConfigDigest = `sha256:${'3'.repeat(64)}`;
+  const kafkaArchiveSha256 = '4'.repeat(64);
+  const kafkaConsumers = SECURITY_POLICY.platformGate.kafkaImageConsumers.map((job) => ({
+    job,
+    imageIdDigest: kafkaImageIdDigest,
+    manifestDigest: kafkaManifestDigest,
+    configDigest: kafkaConfigDigest,
+    ociArchiveSha256: kafkaArchiveSha256,
+  }));
+  writeArtifactJson(root, `kafka-image-consumers-${sha}`, 'kafka-image-consumers.json', {
+    schemaVersion: 1,
+    outcome: 'success',
+    testedGitSha: sha,
+    runId: '12345',
+    runAttempt: '2',
+    imagePlatform: SECURITY_POLICY.platforms.image,
+    imageIdDigest: kafkaImageIdDigest,
+    buildxManifestDigest: kafkaManifestDigest,
+    buildxConfigDigest: kafkaConfigDigest,
+    ociArchiveSha256: kafkaArchiveSha256,
+    consumerCount: kafkaConsumers.length,
+    consumers: kafkaConsumers,
   });
   const repositoryReport = trivyReport('repository source');
   const mavenReport = trivyReport('resolved Maven source');
@@ -178,6 +218,41 @@ function createEvidenceFixture() {
   for (const file of SECURITY_POLICY.platformGate.requiredFiles.sbomDocuments) {
     writeArtifactJson(root, `resolved-cyclonedx-sbom-${sha}`, file, { bomFormat: 'CycloneDX' });
   }
+  const mavenPurl = 'pkg:maven/example/locked-package@1.0.0';
+  const pluginPurl = 'pkg:maven/example/build-plugin@2.0.0';
+  const mavenSbom = {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.6',
+    version: 1,
+    metadata: { component: { name: 'resolved-maven-fixture', type: 'application' } },
+    components: [{
+      name: 'locked-package', type: 'library', version: '1.0.0', purl: mavenPurl, 'bom-ref': mavenPurl,
+    }],
+  };
+  const mavenSbomContents = `${JSON.stringify(mavenSbom)}\n`;
+  writeArtifactText(root, `resolved-cyclonedx-sbom-${sha}`, 'maven-resolved.cdx.json', mavenSbomContents);
+  writeArtifactJson(root, `resolved-cyclonedx-sbom-${sha}`, 'sbom-manifest.json', {
+    testedGitSha: sha,
+    files: [{
+      path: 'target/sbom/maven-resolved.cdx.json',
+      ecosystem: 'maven',
+      sha256: createHash('sha256').update(mavenSbomContents).digest('hex'),
+      componentCount: 1,
+      componentPackageUrls: [mavenPurl],
+    }],
+    mavenSbomComponentCoordinates: [mavenCoordinateKey({
+      groupId: 'example', artifactId: 'locked-package', version: '1.0.0', type: 'jar', classifier: '',
+    })],
+    mavenModulePoms: [{ path: 'alert-service/pom.xml', artifactId: 'alert-service' }],
+    mavenDependencyTrees: [{ path: 'alert-service/target/maven-dependency-tree.json' }],
+    mavenDependencyOccurrences: [{ groupId: 'example', artifactId: 'locked-package', version: '1.0.0' }],
+    mavenBuildPluginResolutions: [{
+      path: 'alert-service/target/maven-plugin-dependencies.txt',
+      plugins: [{ dependencies: [{
+        groupId: 'example', artifactId: 'build-plugin', version: '2.0.0', type: 'jar', classifier: '',
+      }] }],
+    }],
+  });
   const inventoryCount = Object.values(IMAGE_SECURITY_INVENTORY.groups).flat().length;
   writeImageSummary(root, `image-scan-validation-${sha}`, inventoryCount, {
     'backend-images': 'success', 'service-images': 'success', 'infrastructure-images': 'success',
@@ -241,15 +316,26 @@ function writeArtifactText(root, artifactName, fileName, contents) {
   fs.writeFileSync(path.join(directory, fileName), contents);
 }
 
-function trivyReport(artifactName) {
+function trivyReport(source) {
+  const isRepository = source === 'repository source';
+  const artifactType = isRepository ? 'repository' : 'filesystem';
+  const artifactName = isRepository ? '.' : 'target/security/home/.m2/repository';
   return {
     SchemaVersion: 2,
     Trivy: { Version: SECURITY_POLICY.tools.trivy },
     ArtifactName: artifactName,
-    ArtifactType: 'filesystem',
+    ArtifactType: artifactType,
     Results: [{
-      Target: artifactName,
-      Packages: [{ Name: 'locked-package', Version: '1.0.0' }],
+      Target: isRepository ? 'analyst-console-ui/package-lock.json' : 'target/security/home/.m2/repository/example/locked-package/1.0/locked-package-1.0.jar',
+      Packages: [{
+        Name: 'locked-package',
+        Version: '1.0.0',
+        Identifier: { PURL: 'pkg:maven/example/locked-package@1.0.0' },
+      }, ...(!isRepository ? [{
+        Name: 'build-plugin',
+        Version: '2.0.0',
+        Identifier: { PURL: 'pkg:maven/example/build-plugin@2.0.0' },
+      }] : [])],
       Vulnerabilities: [],
     }],
   };
@@ -259,6 +345,7 @@ function sourceSummary(name, report) {
   return {
     name,
     artifactName: report.ArtifactName,
+    artifactType: report.ArtifactType,
     targetCount: report.Results.length,
     packageCount: report.Results.reduce((count, result) => count + result.Packages.length, 0),
     vulnerabilityCount: report.Results.reduce((count, result) => count + (result.Vulnerabilities?.length ?? 0), 0),

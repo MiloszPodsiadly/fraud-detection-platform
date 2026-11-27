@@ -5,6 +5,7 @@ import {
   parseMavenDependencyTree,
   parseMavenPluginResolutionReport,
   verifyMavenSbomCoverage,
+  verifyMavenTrivyPackageCoverage,
 } from './maven-sbom-inventory.mjs';
 
 const reactorCoordinate = {
@@ -83,4 +84,26 @@ test('Maven SBOM must cover all resolved coordinates and contain no unexpected o
   ], resolved, reactor), /1 unaccounted components/);
   assert.throws(() => verifyMavenSbomCoverage([purl, purl], [dependencyKey], reactor), /duplicate Maven component/);
   assert.throws(() => verifyMavenSbomCoverage(['pkg:maven/%ZZ/library@1'], [], reactor), /malformed encoded/);
+});
+
+test('Trivy Maven scan must cover resolved SBOM and build-plugin JAR coordinates', () => {
+  const plugin = {
+    groupId: 'org.example', artifactId: 'build-plugin', type: 'jar', version: '3.1.0', classifier: '',
+  };
+  const report = verifyMavenTrivyPackageCoverage([
+    'pkg:maven/org.example/library@2.4.1',
+    'pkg:maven/org.example/build-plugin@3.1.0',
+  ], ['pkg:maven/org.example/library@2.4.1'], [
+    { plugins: [{ dependencies: [plugin] }] },
+  ]);
+  assert.deepEqual(report, {
+    resolvedJarPackageCount: 2,
+    scannedJarPackageCount: 2,
+    coveredJarPackageCount: 2,
+  });
+  assert.throws(() => verifyMavenTrivyPackageCoverage(
+    ['pkg:maven/org.example/library@2.4.1'],
+    ['pkg:maven/org.example/library@2.4.1'],
+    [{ plugins: [{ dependencies: [plugin] }] }],
+  ), /missing 1 independently resolved Maven JAR package/);
 });

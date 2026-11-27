@@ -11,9 +11,11 @@ test("exposes known bounded phases for independent CI producers", () => {
   assert.ok(securityGatePhases().includes("sbom-validation"));
   assert.ok(securityGatePhases().includes("pip-audit-install"));
   assert.ok(securityGatePhases().includes("pip-dependency-audit"));
+  assert.ok(securityGatePhases().includes("npm-sbom-audit"));
   assert.ok(securityGatePhases().includes("platform-security-evidence"));
   assert.equal(securityGatePhase("not-a-phase"), null);
   assert.match(securityGatePhase("secret-proof").file, /scripts[\\/]security[\\/]scanners[\\/]verify-trivy-secret-only\.mjs$/);
+  assert.match(securityGatePhase("npm-sbom-audit").file, /scripts[\\/]security[\\/]sbom[\\/]run-npm-sbom-toolchain-audit\.mjs$/);
 });
 
 test("central policy provides the pinned versions, severity policy, platforms, and artifact retention", () => {

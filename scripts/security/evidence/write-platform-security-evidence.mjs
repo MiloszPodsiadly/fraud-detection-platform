@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { SECURITY_POLICY } from '../config/policy.mjs';
 import { IMAGE_SECURITY_INVENTORY } from '../config/image-inventory.mjs';
 import { validateTrivyVulnerabilityReport } from '../scanners/trivy-vulnerability-report.mjs';
+import { mavenCoordinateFromPurl, verifyMavenTrivyPackageCoverage } from '../sbom/maven-sbom-inventory.mjs';
 
 const POLICY_PATH = fileURLToPath(new URL('../config/security-policy.json', import.meta.url));
 const INVENTORY_PATH = fileURLToPath(new URL('../config/image-security-inventory.json', import.meta.url));
@@ -28,15 +29,29 @@ export function buildPlatformSecurityEvidence({
 }) {
   const failures = [];
   const requiredJobs = SECURITY_POLICY.platformGate.requiredProducerJobs;
+  const securityJobs = new Set(SECURITY_POLICY.platformGate.securityEvidenceJobs ?? []);
+  const functionalJobs = new Set(SECURITY_POLICY.platformGate.functionalProofJobs ?? []);
+  const functionalProducerFailures = [];
+  const functionalOnlyProducerFailures = new Set();
+  for (const job of [...securityJobs, ...functionalJobs]) {
+    if (!requiredJobs.includes(job)) failures.push(`Platform gate domain references a non-required producer: ${job}.`);
+  }
   if (!needs || typeof needs !== 'object' || Array.isArray(needs)) {
     failures.push('Producer outcomes are missing or malformed.');
+    functionalProducerFailures.push('Producer outcomes are missing or malformed.');
     needs = {};
   }
   const actualJobs = Object.keys(needs);
   for (const job of requiredJobs) {
-    if (!Object.hasOwn(needs, job)) failures.push(`Required producer result is missing: ${job}.`);
-    else if (needs[job]?.result !== 'success') {
-      failures.push(`Required producer ${job} completed with ${String(needs[job]?.result ?? 'malformed result')}.`);
+    const message = !Object.hasOwn(needs, job)
+      ? `Required producer result is missing: ${job}.`
+      : needs[job]?.result !== 'success'
+        ? `Required producer ${job} completed with ${String(needs[job]?.result ?? 'malformed result')}.`
+        : null;
+    if (message) {
+      failures.push(message);
+      if (functionalJobs.has(job)) functionalProducerFailures.push(message);
+      if (functionalJobs.has(job) && !securityJobs.has(job)) functionalOnlyProducerFailures.add(message);
     }
   }
   for (const job of actualJobs) {
@@ -135,6 +150,7 @@ export function buildPlatformSecurityEvidence({
     || secretProof.offlineSecretOnlyScan !== 'success'
     || secretProof.expectedRuleId !== SECURITY_POLICY.secretProof.expectedRuleId
     || secretProof.expectedSeverity !== SECURITY_POLICY.secretProof.expectedSeverity
+    || secretProof.findingTarget !== SECURITY_POLICY.secretProof.expectedTarget
     || secretProof.findingCount !== SECURITY_POLICY.secretProof.expectedFindingCount
     || secretProof.cleanControl !== 'passed'
     || secretProof.independentOfflineMavenFailure !== 'passed')) {
@@ -146,6 +162,8 @@ export function buildPlatformSecurityEvidence({
   const vulnerabilitySummary = readArtifactJson(vulnerabilityArtifact, contractFiles.vulnerabilitySummary, 'Trivy vulnerability decision summary');
   const repositoryReport = readArtifactJson(vulnerabilityArtifact, contractFiles.vulnerabilityRepositoryReport, 'repository Trivy source report');
   const mavenReport = readArtifactJson(vulnerabilityArtifact, contractFiles.vulnerabilityMavenReport, 'resolved Maven Trivy source report');
+  const sbomArtifact = `resolved-cyclonedx-sbom-${testedGitSha}`;
+  let mavenPackageCoverage = null;
   let trivySourcesValid = false;
   if (repositoryReport && mavenReport && vulnerabilityCombined) {
     try {
@@ -212,7 +230,90 @@ export function buildPlatformSecurityEvidence({
     }
   }
 
-  const sbomArtifact = `resolved-cyclonedx-sbom-${testedGitSha}`;
+  if (trivySourcesValid) {
+    const mavenSbom = readArtifactJson(sbomArtifact, 'maven-resolved.cdx.json', 'resolved Maven CycloneDX SBOM');
+    const sbomManifest = readArtifactJson(sbomArtifact, 'sbom-manifest.json', 'resolved SBOM inventory manifest');
+    if (mavenSbom && sbomManifest) {
+      try {
+        const sbomPath = findFile(sbomArtifact, 'maven-resolved.cdx.json');
+        const manifestMavenEntry = Array.isArray(sbomManifest.files)
+          ? sbomManifest.files.find((entry) => entry?.ecosystem === 'maven')
+          : null;
+        const sbomPurls = flattenComponentPurls(mavenSbom.components);
+        const sortedSbomPurls = [...sbomPurls].sort();
+        if (mavenSbom.bomFormat !== 'CycloneDX' || mavenSbom.specVersion !== '1.6'
+          || !Array.isArray(mavenSbom.components) || sbomPurls.length === 0
+          || sbomManifest.testedGitSha !== testedGitSha
+          || !manifestMavenEntry || manifestMavenEntry.path !== 'target/sbom/maven-resolved.cdx.json'
+          || manifestMavenEntry.sha256 !== hashFile(sbomPath)
+          || manifestMavenEntry.componentCount !== sbomPurls.length
+          || JSON.stringify(manifestMavenEntry.componentPackageUrls) !== JSON.stringify(sortedSbomPurls)) {
+          throw new Error('Maven SBOM content does not match its same-run resolved inventory manifest.');
+        }
+        const sbomCoordinates = [...new Set(sbomPurls.map((purl) => mavenCoordinateFromPurl(purl, 'Resolved Maven SBOM')))].sort();
+        if (!Array.isArray(sbomManifest.mavenSbomComponentCoordinates)
+          || JSON.stringify(sbomManifest.mavenSbomComponentCoordinates) !== JSON.stringify(sbomCoordinates)) {
+          throw new Error('Maven SBOM coordinates do not match the resolved dependency inventory.');
+        }
+        const moduleCount = Array.isArray(sbomManifest.mavenModulePoms) ? sbomManifest.mavenModulePoms.length : 0;
+        const pluginResolutions = sbomManifest.mavenBuildPluginResolutions;
+        if (moduleCount === 0 || !Array.isArray(sbomManifest.mavenDependencyTrees)
+          || sbomManifest.mavenDependencyTrees.length !== moduleCount
+          || !Array.isArray(pluginResolutions) || pluginResolutions.length !== moduleCount
+          || !Array.isArray(sbomManifest.mavenDependencyOccurrences)
+          || sbomManifest.mavenDependencyOccurrences.length === 0) {
+          throw new Error('Resolved Maven dependency or plugin inventory is incomplete.');
+        }
+        for (const resolution of pluginResolutions) {
+          if (!Array.isArray(resolution?.plugins) || resolution.plugins.length === 0
+            || resolution.plugins.some((plugin) => !Array.isArray(plugin.dependencies) || plugin.dependencies.length === 0)) {
+            throw new Error('Resolved Maven build-plugin inventory is incomplete.');
+          }
+        }
+        const scannedMavenPurls = mavenReport.Results.flatMap((result) => result.Packages)
+          .map((pkg) => pkg.Identifier?.PURL)
+          .filter((purl) => typeof purl === 'string' && purl.startsWith('pkg:maven/'));
+        mavenPackageCoverage = verifyMavenTrivyPackageCoverage(
+          scannedMavenPurls,
+          manifestMavenEntry.componentPackageUrls,
+          pluginResolutions,
+        );
+      } catch (error) {
+        failures.push(`Resolved Maven Trivy coverage verification failed: ${error.message}.`);
+      }
+    }
+  }
+
+  const kafkaConsumersArtifact = `kafka-image-consumers-${testedGitSha}`;
+  const kafkaConsumersSummary = readArtifactJson(
+    kafkaConsumersArtifact, contractFiles.kafkaImageConsumers, 'shared Kafka image consumer summary',
+  );
+  if (kafkaConsumersSummary) {
+    const expectedConsumers = SECURITY_POLICY.platformGate.kafkaImageConsumers;
+    const actualConsumers = Array.isArray(kafkaConsumersSummary.consumers)
+      ? kafkaConsumersSummary.consumers.map((consumer) => consumer?.job)
+      : [];
+    if (kafkaConsumersSummary.schemaVersion !== 1 || kafkaConsumersSummary.outcome !== 'success'
+      || kafkaConsumersSummary.testedGitSha !== testedGitSha
+      || kafkaConsumersSummary.runId !== String(runId)
+      || String(kafkaConsumersSummary.runAttempt) !== String(runAttempt)
+      || kafkaConsumersSummary.imagePlatform !== SECURITY_POLICY.platforms.image
+      || !/^sha256:[a-f0-9]{64}$/.test(kafkaConsumersSummary.imageIdDigest ?? '')
+      || !/^sha256:[a-f0-9]{64}$/.test(kafkaConsumersSummary.buildxManifestDigest ?? '')
+      || !/^sha256:[a-f0-9]{64}$/.test(kafkaConsumersSummary.buildxConfigDigest ?? '')
+      || !/^[a-f0-9]{64}$/.test(kafkaConsumersSummary.ociArchiveSha256 ?? '')
+      || kafkaConsumersSummary.consumerCount !== expectedConsumers.length
+      || JSON.stringify(actualConsumers) !== JSON.stringify(expectedConsumers)) {
+      failures.push('Shared Kafka consumer summary is incomplete or belongs to another image, revision, or run attempt.');
+    } else if (kafkaConsumersSummary.consumers.some((consumer) =>
+      consumer.imageIdDigest !== kafkaConsumersSummary.imageIdDigest
+      || consumer.manifestDigest !== kafkaConsumersSummary.buildxManifestDigest
+      || consumer.configDigest !== kafkaConsumersSummary.buildxConfigDigest
+      || consumer.ociArchiveSha256 !== kafkaConsumersSummary.ociArchiveSha256)) {
+      failures.push('A Kafka consumer does not match the aggregated producer image identity.');
+    }
+  }
+
   for (const fileName of contractFiles.sbomDocuments) {
     if (!findFile(sbomArtifact, fileName)) failures.push(`Required resolved SBOM evidence is missing: ${fileName}.`);
   }
@@ -274,6 +375,9 @@ export function buildPlatformSecurityEvidence({
   const evidence = {
     schemaVersion: 1,
     finalDecision: failures.length === 0 ? 'PASS' : 'FAIL',
+    securityEvidenceStatus: failures.every((failure) => functionalOnlyProducerFailures.has(failure)) ? 'PASS' : 'FAIL',
+    functionalProofStatus: functionalProducerFailures.length === 0 ? 'PASS' : 'FAIL',
+    combinedReadiness: failures.length === 0 ? 'PASS' : 'FAIL',
     createdAt,
     repository,
     workflow,
@@ -293,6 +397,7 @@ export function buildPlatformSecurityEvidence({
     },
     producerOutcomes: Object.fromEntries(requiredJobs.map((job) => [job, needs[job]?.result ?? 'missing'])),
     imageEvidence: imageSummaries,
+    resolvedMavenPackageCoverage: mavenPackageCoverage,
     artifactReferences,
     failures,
   };
@@ -321,6 +426,27 @@ function findNamedFile(directory, fileName, failures) {
     return null;
   }
   return matches[0] ?? null;
+}
+
+function flattenComponentPurls(components) {
+  if (!Array.isArray(components)) return [];
+  const purls = [];
+  const pending = [...components];
+  while (pending.length > 0) {
+    const component = pending.pop();
+    if (!component || typeof component !== 'object' || Array.isArray(component)) {
+      throw new Error('Maven SBOM contains a malformed component entry.');
+    }
+    if (typeof component.purl !== 'string' || !component.purl.startsWith('pkg:maven/')) {
+      throw new Error('Maven SBOM contains a component without a Maven package URL.');
+    }
+    purls.push(component.purl);
+    if (component.components !== undefined) {
+      if (!Array.isArray(component.components)) throw new Error('Maven SBOM component nesting is malformed.');
+      pending.push(...component.components);
+    }
+  }
+  return purls;
 }
 
 function walkEvidenceFiles(directory, root, output, failures) {
@@ -360,7 +486,9 @@ function renderSummary(evidence) {
   const lines = [
     '# Platform Security Gate',
     '',
-    `**Decision: ${evidence.finalDecision}**`,
+    `**Combined readiness: ${evidence.combinedReadiness}**`,
+    `- Security evidence: ${evidence.securityEvidenceStatus}`,
+    `- Functional proofs: ${evidence.functionalProofStatus}`,
     '',
     `- Tested SHA: \`${evidence.testedGitSha}\``,
     `- Pull request head SHA: \`${evidence.pullRequest.headSha}\``,

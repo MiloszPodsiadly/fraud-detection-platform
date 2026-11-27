@@ -121,7 +121,27 @@ fi
 # Keep runtime smoke deterministic by default while allowing an explicit faster local override.
 compose_parallel_limit="${COMPOSE_PARALLEL_LIMIT:-1}"
 echo "Using Docker Compose parallel limit for runtime smoke: $compose_parallel_limit"
-"${compose[@]}" --parallel "$compose_parallel_limit" up --build -d "${services[@]}"
+if [[ "${KAFKA_PRELOADED_IMAGE:-false}" == "true" ]]; then
+  kafka_image="fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3"
+  expected_kafka_id="$(node -e 'const fs=require("node:fs");process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).imageIdDigest)' target/kafka-test-image-evidence.json)"
+  actual_kafka_id="$(docker image inspect "$kafka_image" --format '{{.Id}}')"
+  if [[ -z "$expected_kafka_id" || "$actual_kafka_id" != "$expected_kafka_id" ]]; then
+    echo "Compose Kafka image differs from the verified same-run shared artifact." >&2
+    exit 1
+  fi
+  export KAFKA_PULL_POLICY=never
+  buildable_services_text="$("${compose[@]}" config --format json | node -e 'const fs=require("node:fs");const services=JSON.parse(fs.readFileSync(0,"utf8")).services??{};const wanted=new Set(process.argv.slice(1));for(const [name,service] of Object.entries(services)){if(wanted.has(name)&&service.build)process.stdout.write(`${name}\n`)}' "${services[@]}")"
+  buildable_services=()
+  if [[ -n "$buildable_services_text" ]]; then
+    mapfile -t buildable_services <<< "$buildable_services_text"
+  fi
+  if [[ ${#buildable_services[@]} -gt 0 ]]; then
+    "${compose[@]}" --parallel "$compose_parallel_limit" build "${buildable_services[@]}"
+  fi
+  "${compose[@]}" --parallel "$compose_parallel_limit" up --no-build -d "${services[@]}"
+else
+  "${compose[@]}" --parallel "$compose_parallel_limit" up --build -d "${services[@]}"
+fi
 
 for service in "${health_services[@]}"; do
   healthy=false

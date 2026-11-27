@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { expectedScanCategories } from './image-scan-contract.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const validator = resolve(scriptDirectory, 'validate-image-scan-evidence.mjs');
@@ -65,6 +66,8 @@ function derivedIdentityProperties(evidence) {
     ['fraud-detection-platform:platform-manifest-digest', evidence.platformManifestDigest],
     ['fraud-detection-platform:platform-manifest-content-digest', evidence.platformManifestContentDigest],
     ['fraud-detection-platform:platform-config-digest', evidence.platformConfigDigest],
+    ...(evidence.buildxOciArchiveSha256
+      ? [['fraud-detection-platform:buildx-oci-archive-sha256', evidence.buildxOciArchiveSha256]] : []),
   ].map(([name, value]) => ({ name, value }));
 }
 
@@ -104,6 +107,7 @@ function baselineFixture() {
     buildxActionDigest: buildxManifestDigest,
     buildxDigest: buildxManifestDigest,
     buildxConfigDigest: imageIdDigest,
+    buildxOciArchiveSha256: 'd'.repeat(64),
   };
   const raw = rawSbom();
   const bound = structuredClone(raw);
@@ -198,6 +202,7 @@ function useRegistryImage(fixture, sourceIsIndex = true) {
     buildxActionDigest: null,
     buildxDigest: null,
     buildxConfigDigest: null,
+    buildxOciArchiveSha256: null,
   });
   fixture.dockerImageInspect = {
     Id: imageIdDigest,
@@ -337,7 +342,7 @@ function runValidator(mutate = () => {}) {
       writeFileSync(join(artifactDirectory, 'image-scan-result.json'), `${JSON.stringify(fixture.result)}\n`);
     }
 
-    return spawnSync(process.execPath, [validator, inventoryPath, join(root, 'downloads')], {
+    const result = spawnSync(process.execPath, [validator, inventoryPath, join(root, 'downloads')], {
       encoding: 'utf8',
       env: {
         ...process.env,
@@ -345,10 +350,22 @@ function runValidator(mutate = () => {}) {
         IMAGE_SCAN_JOB_RESULTS: JSON.stringify(fixture.jobResults ?? { backend: 'success' }),
       },
     });
+    result.summary = readFileSync(join(root, 'validated-image-scan-summary.json'), 'utf8');
+    return result;
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+test('writes a failure summary when the expected inventory is not an object', () => {
+  const result = runValidator((fixture) => { fixture.inventory = null; });
+  assert.notEqual(result.status, 0);
+  const summary = JSON.parse(result.summary);
+  assert.equal(summary.outcome, 'failure');
+  assert.equal(summary.scanStatus, 'failure');
+  assert.equal(summary.expectedArtifactCount, null);
+  assert.match(summary.failures.join('\n'), /Expected image inventory must be a JSON object/i);
+});
 
 function digestFile(file) {
   return createHash('sha256').update(requireFile(file)).digest('hex');
@@ -361,6 +378,25 @@ function requireFile(file) {
 test('accepts complete Buildx metadata, immutable scanner input, and raw/bound SBOM evidence', () => {
   const result = runValidator();
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test('accepts an omitted optional Buildx config digest only when independently derived image evidence remains present', () => {
+  const result = runValidator((fixture) => {
+    delete fixture.buildxMetadata['containerimage.config.digest'];
+    delete fixture.buildxMetadata['containerimage.descriptor'].annotations['config.digest'];
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test('rejects Buildx evidence that omits the hash of the OCI archive used for independent config derivation', () => {
+  const result = runValidator((fixture) => {
+    fixture.evidence.buildxOciArchiveSha256 = null;
+    fixture.result.buildxOciArchiveSha256 = null;
+    fixture.boundSbom = structuredClone(fixture.rawSbom);
+    fixture.boundSbom.metadata.properties.push(...derivedIdentityProperties(fixture.evidence));
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /hashed OCI export does not bind/i);
 });
 
 test('accepts a pinned OCI index with a hashed platform manifest and matching config', () => {
@@ -471,6 +507,36 @@ test('rejects empty Trivy results when OS and application package categories are
   assert.match(result.stderr, /missing expected os-pkgs|missing expected lang-pkgs|Results is empty/i);
 });
 
+test('rejects absent, null, and wrong-type Trivy results without aborting aggregation', () => {
+  for (const mutate of [
+    (fixture) => { delete fixture.trivy.Results; },
+    (fixture) => { fixture.trivy.Results = null; },
+    (fixture) => { fixture.trivy.Results = {}; },
+  ]) {
+    const result = runValidator(mutate);
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stderr, /uncaught exception|UnhandledPromiseRejection/i);
+    assert.match(result.stderr, /expected report structure|missing expected os-pkgs|missing expected lang-pkgs/i);
+  }
+});
+
+test('requires OS and language package categories for all historical alert-service images', () => {
+  for (const logicalName of [
+    'fdp37-alert-service-image-security',
+    'fdp38-alert-service-fixture-image-security',
+    'fdp39-release-image-security',
+    'fdp39-fixture-image-security',
+  ]) {
+    assert.deepEqual(expectedScanCategories({ logicalName, source: 'buildx-loaded-image' }), ['os-pkgs', 'lang-pkgs']);
+    const result = runValidator((fixture) => {
+      fixture.inventory.expectedArtifacts[0].logicalName = logicalName;
+      fixture.inventory.expectedArtifacts[0].expectedScanCategories = ['os-pkgs'];
+    });
+    assert.notEqual(result.status, 0, `${logicalName} must reject an omitted language package category`);
+    assert.match(result.stderr, /expected scan categories do not match its image type/i);
+  }
+});
+
 test('rejects an image SBOM with incomplete package identity', () => {
   const result = runValidator((fixture) => {
     delete fixture.rawSbom.components[0].purl;
@@ -479,6 +545,17 @@ test('rejects an image SBOM with incomplete package identity', () => {
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /incomplete package component identity/i);
+});
+
+test('records malformed CycloneDX structure as an artifact failure instead of crashing', () => {
+  const result = runValidator((fixture) => { fixture.boundSbom = {}; });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /validation stopped safely after malformed artifact structure/i);
+  const summary = JSON.parse(result.summary);
+  assert.equal(summary.outcome, 'failure');
+  assert.equal(summary.scanStatus, 'failure');
+  assert.equal(summary.artifactDiagnostics[0].status, 'failure');
+  assert.match(summary.artifactDiagnostics[0].failures.join('\n'), /malformed artifact structure/i);
 });
 
 test('rejects a failed scanner outcome', () => {

@@ -37,6 +37,8 @@ if (evidence.schemaVersion !== SECURITY_POLICY.imageIdentity.evidenceSchemaVersi
     && !/^sha256:[a-f0-9]{64}$/.test(evidence.sourceManifestContentDigest ?? ''))
   || (evidence.platformManifestContentDigest !== null
     && !/^sha256:[a-f0-9]{64}$/.test(evidence.platformManifestContentDigest ?? ''))
+  || (evidence.buildxOciArchiveSha256 !== null
+    && !/^[a-f0-9]{64}$/.test(evidence.buildxOciArchiveSha256 ?? ''))
   || (evidence.sourceManifestMediaType !== null && typeof evidence.sourceManifestMediaType !== 'string')
   || (evidence.platformManifestMediaType !== null && typeof evidence.platformManifestMediaType !== 'string')) {
   throw new Error('Image evidence is missing a valid immutable image ID, reference, or platform.');
@@ -50,7 +52,8 @@ if (evidence.dockerImageIdKind === 'config-digest') {
   if (evidence.imageIdDigest !== evidence.platformManifestDigest
     || evidence.dockerEngineDescriptorDigest !== evidence.platformManifestDigest
     || evidence.dockerEngineDescriptorMediaType !== evidence.platformManifestMediaType
-    || evidence.dockerEngineDescriptorConfigDigest !== evidence.platformConfigDigest) {
+    || (evidence.dockerEngineDescriptorConfigDigest !== null
+      && evidence.dockerEngineDescriptorConfigDigest !== evidence.platformConfigDigest)) {
     throw new Error('Containerd Docker Engine manifest ID is not bound to the verified platform config descriptor.');
   }
 } else if (evidence.dockerImageIdKind === 'source-index-descriptor') {
@@ -69,6 +72,7 @@ if (evidence.buildxDigest !== null) {
     || evidence.buildxDigest !== evidence.platformManifestDigest
     || evidence.platformManifestContentDigest !== evidence.platformManifestDigest
     || evidence.buildxConfigDigest !== evidence.platformConfigDigest
+    || !/^[a-f0-9]{64}$/.test(evidence.buildxOciArchiveSha256 ?? '')
     || evidence.sourceManifestMediaType !== evidence.platformManifestMediaType
     || !IMAGE_MANIFEST_MEDIA_TYPES.has(evidence.sourceManifestMediaType)) {
     throw new Error('Loaded Docker image ID is not bound to its Buildx output manifest and config metadata.');
@@ -79,6 +83,7 @@ if (evidence.buildxDigest !== null) {
     || evidence.buildxDigest !== null
     || evidence.buildxActionDigest !== null
     || evidence.buildxConfigDigest !== null
+    || evidence.buildxOciArchiveSha256 !== null
     || evidence.sourceImageDigest !== pinnedDigest
     || evidence.sourceManifestContentDigest !== pinnedDigest
     || evidence.platformManifestContentDigest !== evidence.platformManifestDigest

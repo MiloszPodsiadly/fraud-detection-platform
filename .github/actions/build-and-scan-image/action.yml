@@ -26,6 +26,10 @@ inputs:
     description: Unique GitHub Actions BuildKit cache scope for this image.
     required: false
     default: image-build
+  cache-from-scopes:
+    description: Optional newline-separated BuildKit cache sources; defaults to this image's cache scope.
+    required: false
+    default: ''
   expected-platform:
     description: Required platform of the image.
     required: false
@@ -38,7 +42,14 @@ runs:
       shell: bash
       run: node scripts/security/run-security-gate.mjs policy --github-output "$GITHUB_OUTPUT"
 
-    - name: Build image with Buildx
+    - name: Prepare image evidence directory
+      if: inputs.source == 'buildx'
+      shell: bash
+      env:
+        OUTPUT_DIRECTORY: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}
+      run: mkdir -p "$OUTPUT_DIRECTORY"
+
+    - name: Build image with Buildx and export its OCI content
       if: inputs.source == 'buildx'
       id: build-image
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -47,13 +58,20 @@ runs:
         file: ${{ inputs.dockerfile }}
         target: ${{ inputs.target }}
         push: false
-        load: true
+        outputs: type=oci,dest=target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}/image.oci.tar
         provenance: false
         pull: true
-        cache-from: type=gha,scope=${{ inputs.cache-scope }}
+        cache-from: ${{ inputs.cache-from-scopes || format('type=gha,scope={0}', inputs.cache-scope) }}
         cache-to: type=gha,scope=${{ inputs.cache-scope }},mode=max,ignore-error=true
         tags: ${{ inputs.image-ref }}
         build-args: ${{ inputs.build-args }}
+
+    - name: Load the exact OCI image into Docker Engine
+      if: inputs.source == 'buildx'
+      shell: bash
+      env:
+        OCI_ARCHIVE_PATH: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}/image.oci.tar
+      run: docker load --input "$OCI_ARCHIVE_PATH"
 
     - name: Pull digest-pinned registry image
       if: inputs.source == 'registry'
@@ -69,6 +87,7 @@ runs:
         image-ref: ${{ inputs.image-ref }}
         build-digest: ${{ steps.build-image.outputs.digest }}
         build-metadata: ${{ steps.build-image.outputs.metadata }}
+        oci-archive-path: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}/image.oci.tar
         expected-platform: ${{ inputs.expected-platform || steps.security-policy.outputs.image_platform }}
         artifact-name: ${{ inputs.artifact-name }}
         output-directory: target/image-security/downloads/${{ inputs.artifact-name }}-${{ github.sha }}

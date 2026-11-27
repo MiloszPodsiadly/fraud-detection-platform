@@ -135,6 +135,43 @@ export function verifyMavenSbomCoverage(componentPurls, dependencyCoordinates, r
   return { componentCoordinates: [...actual].sort(), dependencyCoordinates: [...expected].sort() };
 }
 
+export function verifyMavenTrivyPackageCoverage(scannedPurls, resolvedSbomPurls, pluginResolutions, source = 'Trivy Maven scan') {
+  const scannedJarCoordinates = new Set();
+  for (const purl of scannedPurls) {
+    const key = mavenCoordinateFromPurl(purl, source);
+    if (JSON.parse(key)[3] === 'jar') scannedJarCoordinates.add(key);
+  }
+
+  const expectedJarCoordinates = new Set();
+  for (const purl of resolvedSbomPurls) {
+    const key = mavenCoordinateFromPurl(purl, 'Resolved Maven SBOM');
+    if (JSON.parse(key)[3] === 'jar') expectedJarCoordinates.add(key);
+  }
+  for (const resolution of pluginResolutions) {
+    if (!Array.isArray(resolution?.plugins)) throw new Error('Resolved Maven plugin inventory is malformed.');
+    for (const plugin of resolution.plugins) {
+      if (!Array.isArray(plugin?.dependencies)) throw new Error('Resolved Maven plugin dependencies are malformed.');
+      for (const dependency of plugin.dependencies) {
+        const key = mavenCoordinateKey(dependency);
+        if (dependency.type === 'jar') expectedJarCoordinates.add(key);
+      }
+    }
+  }
+
+  if (expectedJarCoordinates.size === 0) {
+    throw new Error('Resolved Maven dependency and plugin inventories contain no JAR coordinates.');
+  }
+  const missing = [...expectedJarCoordinates].filter((coordinate) => !scannedJarCoordinates.has(coordinate));
+  if (missing.length > 0) {
+    throw new Error(`${source} is missing ${missing.length} independently resolved Maven JAR package(s).`);
+  }
+  return {
+    resolvedJarPackageCount: expectedJarCoordinates.size,
+    scannedJarPackageCount: scannedJarCoordinates.size,
+    coveredJarPackageCount: expectedJarCoordinates.size,
+  };
+}
+
 function normalizeCoordinate(value, source) {
   const type = value.type;
   const classifier = value.classifier ?? '';

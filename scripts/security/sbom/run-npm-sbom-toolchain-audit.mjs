@@ -1,19 +1,43 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { SECURITY_POLICY } from '../config/policy.mjs';
+import { NPM_SBOM_TOOLCHAIN_PACKAGE_NAME, resolveNpmSbomAuditPaths } from './npm-sbom-audit-paths.mjs';
+import { verifyNpmSbomToolchainEvidence } from './verify-npm-sbom-toolchain.mjs';
 
-const [outputPathArgument, npmCliPathArgument] = process.argv.slice(2);
-if (!outputPathArgument || process.argv.length > 4) {
-  throw new Error('Usage: node run-npm-sbom-toolchain-audit.mjs <output-json-path> [npm-cli-path]');
+const [outputPathArgument, packageDirectoryArgument, npmCliPathArgument] = process.argv.slice(2);
+if (!outputPathArgument || !packageDirectoryArgument || process.argv.length > 5) {
+  throw new Error('Usage: node run-npm-sbom-toolchain-audit.mjs <output-json-path> <verified-package-dir> [npm-cli-path]');
 }
 
-const outputPath = resolve(outputPathArgument);
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const paths = resolveNpmSbomAuditPaths({
+  repositoryRoot,
+  outputPath: outputPathArgument,
+  packageDirectory: packageDirectoryArgument,
+});
+const packageJson = JSON.parse(readFileSync(paths.packageJsonPath, 'utf8'));
+const lockfile = JSON.parse(readFileSync(paths.lockfilePath, 'utf8'));
+if (packageJson.name !== NPM_SBOM_TOOLCHAIN_PACKAGE_NAME
+  || lockfile.name !== NPM_SBOM_TOOLCHAIN_PACKAGE_NAME
+  || lockfile.packages?.['']?.name !== NPM_SBOM_TOOLCHAIN_PACKAGE_NAME) {
+  throw new Error('npm audit package identity does not match the locked SBOM toolchain.');
+}
+const outputPath = paths.outputPath;
 const args = ['audit', '--json', '--audit-level=low'];
 const npmCliPath = npmCliPathArgument ?? process.env.NPM_CLI_PATH;
+const npmVersion = npmCliPath
+  ? spawnSync(process.execPath, [resolve(npmCliPath), '--version'], { cwd: paths.packageDirectory })
+  : spawnSync('npm', ['--version'], { cwd: paths.packageDirectory, shell: process.platform === 'win32' });
+if (npmVersion.error || npmVersion.status !== 0
+  || npmVersion.stdout?.toString('utf8').trim() !== SECURITY_POLICY.tools.npm) {
+  throw new Error(`npm SBOM toolchain audit requires pinned npm ${SECURITY_POLICY.tools.npm}.`);
+}
 const result = npmCliPath
-  ? spawnSync(process.execPath, [resolve(npmCliPath), ...args], { cwd: process.cwd() })
-  : spawnSync('npm', args, { cwd: process.cwd(), shell: process.platform === 'win32' });
+  ? spawnSync(process.execPath, [resolve(npmCliPath), ...args], { cwd: paths.packageDirectory })
+  : spawnSync('npm', args, { cwd: paths.packageDirectory, shell: process.platform === 'win32' });
 
 if (result.stdout?.length) {
   mkdirSync(dirname(outputPath), { recursive: true });
@@ -29,10 +53,5 @@ try {
 } catch {
   throw new Error('npm audit returned malformed JSON evidence.');
 }
-if (!Number.isInteger(report.metadata?.vulnerabilities?.total)) {
-  throw new Error('npm audit report is missing its complete vulnerability summary.');
-}
-if (report.metadata.vulnerabilities.total !== 0) {
-  throw new Error(`npm audit found ${report.metadata.vulnerabilities.total} vulnerabilities in the SBOM toolchain.`);
-}
-process.stdout.write(`Audited ${report.metadata.dependencies?.total ?? 'unknown'} locked npm SBOM toolchain dependencies.\n`);
+const summary = verifyNpmSbomToolchainEvidence(packageJson, lockfile, report);
+process.stdout.write(`Audited ${summary.lockedPackageCount} locked npm SBOM toolchain dependencies with AJV ${summary.directAjvVersion}.\n`);

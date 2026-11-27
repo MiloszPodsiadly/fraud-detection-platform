@@ -27,6 +27,9 @@ export function imageSbomIdentityBindings(evidence) {
   if (evidence.platformConfigDigest) {
     bindings.set(`${PROPERTY_PREFIX}platform-config-digest`, evidence.platformConfigDigest);
   }
+  if (evidence.buildxOciArchiveSha256) {
+    bindings.set(`${PROPERTY_PREFIX}buildx-oci-archive-sha256`, evidence.buildxOciArchiveSha256);
+  }
   return bindings;
 }
 

@@ -1,24 +1,17 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { after, test } from 'node:test';
 import { verifyBuildxImageMetadata } from './verify-buildx-image-metadata.mjs';
+import { createOciImageArchive } from './oci-image-archive.test-support.mjs';
 
-const manifestDigest = `sha256:${'a'.repeat(64)}`;
-const configDigest = `sha256:${'b'.repeat(64)}`;
-const wrongDigest = `sha256:${'c'.repeat(64)}`;
 const imageRef = 'fdp-local/test:revision';
-const mediaType = 'application/vnd.oci.image.manifest.v1+json';
+const fixture = createOciImageArchive({ imageRef });
+after(() => fixture.cleanup());
+
+const { manifestDigest, configDigest, mediaType } = fixture;
+const wrongDigest = `sha256:${'c'.repeat(64)}`;
 
 function metadata() {
-  return {
-    'containerimage.digest': manifestDigest,
-    'containerimage.config.digest': configDigest,
-    'containerimage.descriptor': {
-      digest: manifestDigest,
-      mediaType,
-      size: 506,
-      annotations: { 'config.digest': configDigest },
-    },
-  };
+  return structuredClone(fixture.metadata);
 }
 
 function engineImage({ id = configDigest, descriptor = null, tags = [imageRef], platform = 'linux/amd64' } = {}) {
@@ -40,6 +33,7 @@ function verify({ metadataValue = metadata(), digest = manifestDigest, image = e
     imageInspectJson: JSON.stringify([image]),
     expectedPlatform: 'linux/amd64',
     expectedRef: ref,
+    ociArchivePath: fixture.archivePath,
   });
 }
 
@@ -48,6 +42,9 @@ test('verifies Buildx metadata against a classic Engine config ID and exact loca
     manifestDigest,
     configDigest,
     mediaType,
+    archiveSha256: fixture.archiveSha256,
+    manifestContentDigest: manifestDigest,
+    configContentDigest: configDigest,
     dockerEngineId: configDigest,
     dockerEngineIdKind: 'config-digest',
     dockerEngineConfigDigest: configDigest,
@@ -77,7 +74,8 @@ test('verifies a containerd Engine manifest ID only through its matching descrip
 
 test('rejects malformed Buildx metadata JSON', () => {
   assert.throws(() => verifyBuildxImageMetadata({
-    metadataJson: '{', actionDigest: manifestDigest, imageInspectJson: '[]', expectedPlatform: 'linux/amd64', expectedRef: imageRef,
+    metadataJson: '{', actionDigest: manifestDigest, imageInspectJson: '[]', expectedPlatform: 'linux/amd64',
+    expectedRef: imageRef, ociArchivePath: fixture.archivePath,
   }), /not valid JSON/);
 });
 
@@ -88,7 +86,11 @@ test('rejects Buildx descriptor mismatch and missing digests', () => {
   assert.throws(() => verify({ metadataValue: value }), /does not match its manifest/);
   const missing = metadata();
   delete missing['containerimage.config.digest'];
-  assert.throws(() => verify({ metadataValue: missing }), /missing or malformed/);
+  assert.equal(verify({ metadataValue: missing }).configDigest, configDigest);
+  assert.throws(() => verifyBuildxImageMetadata({
+    metadataJson: JSON.stringify(metadata()), actionDigest: manifestDigest,
+    imageInspectJson: JSON.stringify([engineImage()]), expectedPlatform: 'linux/amd64', expectedRef: imageRef,
+  }), /preserved OCI image archive/);
 });
 
 test('rejects disagreement between Buildx metadata and its action digest output', () => {
@@ -121,7 +123,8 @@ test('rejects a Docker image inspect result with the wrong platform or multiple 
   assert.throws(() => verify({ image: engineImage({ platform: 'linux/arm64' }) }), /does not match linux\/amd64/);
   assert.throws(() => verifyBuildxImageMetadata({
     metadataJson: JSON.stringify(metadata()), actionDigest: manifestDigest,
-    imageInspectJson: JSON.stringify([engineImage(), engineImage()]), expectedPlatform: 'linux/amd64', expectedRef: imageRef,
+    imageInspectJson: JSON.stringify([engineImage(), engineImage()]), expectedPlatform: 'linux/amd64',
+    expectedRef: imageRef, ociArchivePath: fixture.archivePath,
   }), /exactly one inspected image/);
 });
 

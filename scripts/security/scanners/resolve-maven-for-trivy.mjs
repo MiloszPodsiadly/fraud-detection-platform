@@ -117,7 +117,7 @@ export async function runMavenResolution({
 function executeMaven({ timeoutMs, signal }) {
   const mavenRepository = path.join(REPOSITORY_ROOT, "target", "security", "home", ".m2", "repository");
   const executable = process.env.MAVEN_BIN ?? (process.platform === "win32" ? "mvn.cmd" : "mvn");
-  return runBoundedProcess(executable, ["-B", "-ntp", `-Dmaven.repo.local=${mavenRepository}`, MAVEN_GOAL], {
+  return runBoundedProcess(executable, ["-B", "-C", "-ntp", `-Dmaven.repo.local=${mavenRepository}`, MAVEN_GOAL], {
     cwd: REPOSITORY_ROOT,
     shell: process.platform === "win32",
     timeoutMs,

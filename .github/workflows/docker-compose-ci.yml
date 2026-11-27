@@ -139,6 +139,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load the shared Kafka image before Compose runtime smoke
+        uses: ./.github/actions/load-kafka-test-image
+
       - name: Generate local runtime fixture from example
         run: |
           test -f deployment/.env.example
@@ -165,6 +168,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Load the shared Kafka image before Compose runtime smoke
+        uses: ./.github/actions/load-kafka-test-image
+
       - name: Generate local runtime fixture from example
         run: |
           test -f deployment/.env.example
@@ -181,6 +187,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load the shared Kafka image before Compose runtime smoke
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Generate local runtime fixture from example
         run: |
@@ -364,19 +373,20 @@ jobs:
           timeout: ${{ steps.security-policy.outputs.repository_scan_timeout }}
           exit-code: '0'
 
-      - name: Scan isolated resolved Maven artifacts once
+      - name: Scan the isolated Maven repository as a root filesystem
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_PARALLEL: '1'
           TRIVY_OFFLINE_SCAN: 'true'
           HOME: ${{ github.workspace }}/target/security/home
         with:
-          scan-type: fs
+          scan-type: rootfs
           scan-ref: target/security/home/.m2/repository
           version: ${{ steps.security-policy.outputs.trivy_version }}
           cache: false
-          vuln-type: os,library
+          vuln-type: library
           scanners: vuln
+          list-all-pkgs: 'true'
           format: json
           output: target/security/trivy/resolved-maven.json
           severity: ${{ steps.security-policy.outputs.all_vulnerability_severities }}
@@ -431,9 +441,34 @@ jobs:
         id: inventory
         run: node scripts/security/run-security-gate.mjs image-inventory --write-inventory target/image-security/expected-inventory.json --write-github-matrices
 
+  maven-backend-dependency-cache:
+    name: Resolve and cache backend Maven dependencies once
+    needs: image-inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: |
+            image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+      - name: Resolve the reactor once and export its verified Maven layer
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deployment/Dockerfile.backend
+          target: maven-dependencies
+          push: false
+          pull: true
+          cache-from: type=gha,scope=maven-backend-dependencies
+          cache-to: type=gha,scope=maven-backend-dependencies,mode=max
+
   backend-images:
     name: Backend image / ${{ matrix.image.logicalName }}
-    needs: image-inventory
+    needs: [image-inventory, maven-backend-dependency-cache]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -459,6 +494,9 @@ jobs:
           build-args: ${{ matrix.image.buildArgs }}
           target: ${{ matrix.image.target }}
           cache-scope: ${{ matrix.image.artifactName }}
+          cache-from-scopes: |
+            type=gha,scope=maven-backend-dependencies
+            type=gha,scope=${{ matrix.image.artifactName }}
           artifact-name: ${{ matrix.image.artifactName }}
 
   service-images:
@@ -505,12 +543,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
+        if: matrix.image.logicalName != 'apache-kafka-runtime'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.39.0
           driver-opts: |
             image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
       - name: Build and scan infrastructure image
+        if: matrix.image.logicalName != 'apache-kafka-runtime'
         uses: ./.github/actions/build-and-scan-image
         with:
           source: ${{ matrix.image.source }}
@@ -520,6 +560,21 @@ jobs:
           target: ${{ matrix.image.target }}
           cache-scope: ${{ matrix.image.artifactName }}
           artifact-name: ${{ matrix.image.artifactName }}
+
+      - name: Load the shared Kafka OCI artifact
+        if: matrix.image.logicalName == 'apache-kafka-runtime'
+        uses: ./.github/actions/load-kafka-test-image
+
+      - name: Scan the shared Kafka OCI artifact
+        if: matrix.image.logicalName == 'apache-kafka-runtime'
+        uses: ./.github/actions/scan-built-image
+        with:
+          image-ref: ${{ matrix.image.imageRef }}
+          build-metadata-path: target/kafka-shared-image/buildx-metadata.json
+          build-digest-path: target/kafka-shared-image/buildx-digest.txt
+          oci-archive-path: target/kafka-shared-image/image.oci.tar
+          artifact-name: ${{ matrix.image.artifactName }}
+          output-directory: target/image-security/downloads/${{ matrix.image.artifactName }}-${{ github.sha }}
 
   image-scan-evidence:
     name: Aggregate image scan and SBOM evidence

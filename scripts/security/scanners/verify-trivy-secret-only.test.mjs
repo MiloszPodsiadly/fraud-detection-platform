@@ -28,6 +28,7 @@ test("accepts exactly one critical AWS key finding in the fixture and no clean-c
     findingCount: SECURITY_POLICY.secretProof.expectedFindingCount,
     ruleId: SECURITY_POLICY.secretProof.expectedRuleId,
     severity: SECURITY_POLICY.secretProof.expectedSeverity,
+    target: SECURITY_POLICY.secretProof.expectedTarget,
   });
 });
 

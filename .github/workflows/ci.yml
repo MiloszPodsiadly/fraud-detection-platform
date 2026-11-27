@@ -15,10 +15,23 @@ permissions:
   contents: read
 
 jobs:
+  kafka-test-image:
+    name: Build shared patched Kafka test image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build and preserve the verified Kafka OCI artifact
+        id: kafka-image
+        uses: ./.github/actions/build-kafka-test-image
+
   backend:
     name: Backend Maven Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: kafka-test-image
 
     steps:
       - name: Checkout
@@ -44,7 +57,7 @@ jobs:
         run: docker version
 
       - name: Build patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Use canonical ready shadow model artifact for backend tests
         run: cp ml-inference-service/app/model_artifact.json /tmp/model_artifact.json
@@ -59,6 +72,7 @@ jobs:
     name: Signed Graph to scorer E2E
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: kafka-test-image
 
     steps:
       - name: Checkout
@@ -80,7 +94,7 @@ jobs:
         run: docker version
 
       - name: Build and verify patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Run the live signed Graph-to-scorer proof
         run: mvn -B -Pgraph-signed-e2e -pl fraud-scoring-service -am -Dtest=GraphRiskSignalEngineSignedMongoE2ETest,GraphRiskSignalEngineSignedDenseMongoE2ETest -Dsurefire.failIfNoSpecifiedTests=false verify
@@ -127,6 +141,7 @@ jobs:
     name: Institutional Reliability Proof
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    needs: kafka-test-image
 
     steps:
       - name: Checkout
@@ -153,7 +168,7 @@ jobs:
         run: docker version
 
       - name: Build patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Run institutional reliability suite
         env:
@@ -415,6 +430,7 @@ jobs:
     name: FDP-28 Docker Integration Proof
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: kafka-test-image
 
     steps:
       - name: Checkout
@@ -429,7 +445,7 @@ jobs:
         run: docker version
 
       - name: Build patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Run FDP-28 proof suite with Testcontainers
         run: mvn -B -pl alert-service -am -Dgroups=failure-injection,invariant-proof,integration test
@@ -438,6 +454,7 @@ jobs:
     name: FDP-35 Production Readiness Proof
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    needs: kafka-test-image
 
     steps:
       - name: Checkout
@@ -452,7 +469,7 @@ jobs:
         run: docker version
 
       - name: Build patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Run FDP-35 proof suite
         run: mvn -B -pl alert-service -am -Dgroups=production-readiness,e2e,recovery-proof,integration test
@@ -806,6 +823,7 @@ jobs:
     name: FDP-36 Real Alert-Service Kill Proof
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: kafka-test-image
 
     steps:
       - name: Checkout
@@ -825,7 +843,7 @@ jobs:
         run: docker version
 
       - name: Build patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Run FDP-36 real alert-service kill suite
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dgroups=real-chaos,docker-chaos,service-chaos,integration" "-Dtest=RegulatedMutationRealAlertServiceChaosIT,RegulatedMutationRealAlertServiceEvidenceIntegrityIT,RegulatedMutationLiveInFlightKillIT" test
@@ -852,6 +870,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs:
+      - kafka-test-image
       - fdp36-real-chaos
       - regulated-mutation-regression
       - fdp35-production-readiness
@@ -887,7 +906,7 @@ jobs:
           context: .
           file: deployment/Dockerfile.backend
           push: false
-          load: true
+          outputs: type=oci,dest=fdp37-image.oci.tar
           provenance: false
           pull: true
           no-cache: true
@@ -895,12 +914,16 @@ jobs:
           build-args: |
             MODULE_NAME=alert-service
 
+      - name: Load the exported FDP-37 OCI image
+        run: docker load --input fdp37-image.oci.tar
+
       - name: Scan FDP-37 production-like image and save SBOM evidence
         uses: ./.github/actions/scan-built-image
         with:
           image-ref: fdp37-alert-service:${{ github.sha }}
           build-digest: ${{ steps.build-fdp37-image.outputs.digest }}
           build-metadata: ${{ steps.build-fdp37-image.outputs.metadata }}
+          oci-archive-path: fdp37-image.oci.tar
           artifact-name: fdp37-alert-service-image-security
           output-directory: alert-service/target/fdp37-image-security
 
@@ -914,7 +937,7 @@ jobs:
           echo "Built FDP-37 image fdp37-alert-service:${GITHUB_SHA} with image id ${IMAGE_ID} and digest/id ${IMAGE_DIGEST_OR_ID}"
 
       - name: Build patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Run FDP-37 production image chaos suite
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp37.alert-service.image=${FDP37_ALERT_SERVICE_IMAGE}" "-Dfdp37.alert-service.image-id=${FDP37_ALERT_SERVICE_IMAGE_ID}" "-Dfdp37.alert-service.image-digest=${FDP37_ALERT_SERVICE_IMAGE_DIGEST}" "-Dgroups=fdp37,production-image-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationProductionImageChaosIT,RegulatedMutationProductionImageEvidenceIntegrityIT,RegulatedMutationProductionImageConfigParityIT,RegulatedMutationProductionImageRollbackIT,RegulatedMutationProductionImageRequiredTransactionChaosIT" test
@@ -961,6 +984,7 @@ jobs:
     name: Regulated Mutation Regression Gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: kafka-test-image
 
     steps:
       - name: Checkout
@@ -975,7 +999,7 @@ jobs:
         run: docker version
 
       - name: Build patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Run regulated mutation regression suite
         env:
@@ -997,6 +1021,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs:
+      - kafka-test-image
       - fdp37-production-image-chaos
       - regulated-mutation-regression
 
@@ -1031,11 +1056,14 @@ jobs:
           context: .
           file: deployment/Dockerfile.alert-service-fdp38-fixture
           push: false
-          load: true
+          outputs: type=oci,dest=fdp38-fixture-image.oci.tar
           provenance: false
           pull: true
           no-cache: true
           tags: fdp38-alert-service-test-fixture:${{ github.sha }}
+
+      - name: Load the exported FDP-38 fixture OCI image
+        run: docker load --input fdp38-fixture-image.oci.tar
 
       - name: Scan FDP-38 fixture image and save SBOM evidence
         uses: ./.github/actions/scan-built-image
@@ -1043,6 +1071,7 @@ jobs:
           image-ref: fdp38-alert-service-test-fixture:${{ github.sha }}
           build-digest: ${{ steps.build-fdp38-fixture.outputs.digest }}
           build-metadata: ${{ steps.build-fdp38-fixture.outputs.metadata }}
+          oci-archive-path: fdp38-fixture-image.oci.tar
           artifact-name: fdp38-alert-service-fixture-image-security
           output-directory: alert-service/target/fdp38-image-security
 
@@ -1061,7 +1090,7 @@ jobs:
           esac
 
       - name: Build patched Kafka image for Testcontainers
-        uses: ./.github/actions/build-kafka-test-image
+        uses: ./.github/actions/load-kafka-test-image
 
       - name: Run FDP-38 live runtime checkpoint suite
         run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp38.live-runtime-checkpoint.enabled=true" "-Dfdp38.alert-service.fixture-image=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE}" "-Dfdp38.alert-service.fixture-image-id=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_ID}" "-Dfdp38.alert-service.fixture-image-digest=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_DIGEST}" "-Dgroups=fdp38,live-runtime-checkpoint-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationLiveCheckpointBeforeEvidencePreparationIT,RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT,RegulatedMutationLiveCheckpointBeforeEvidenceGatedFinalizeIT" test
@@ -1130,7 +1159,7 @@ jobs:
           context: .
           file: deployment/Dockerfile.backend
           push: false
-          load: true
+          outputs: type=oci,dest=fdp39-release-image.oci.tar
           provenance: false
           pull: true
           no-cache: true
@@ -1138,12 +1167,16 @@ jobs:
           build-args: |
             MODULE_NAME=alert-service
 
+      - name: Load the exported FDP-39 release OCI image
+        run: docker load --input fdp39-release-image.oci.tar
+
       - name: Scan FDP-39 release image and save SBOM evidence
         uses: ./.github/actions/scan-built-image
         with:
           image-ref: fdp39-alert-service:${{ github.sha }}
           build-digest: ${{ steps.build-fdp39-release-image.outputs.digest }}
           build-metadata: ${{ steps.build-fdp39-release-image.outputs.metadata }}
+          oci-archive-path: fdp39-release-image.oci.tar
           artifact-name: fdp39-release-image-security
           output-directory: alert-service/target/fdp39-governance/image-security/release
 
@@ -1178,11 +1211,14 @@ jobs:
           context: .
           file: deployment/Dockerfile.alert-service-fdp38-fixture
           push: false
-          load: true
+          outputs: type=oci,dest=fdp39-fixture-image.oci.tar
           provenance: false
           pull: true
           no-cache: true
           tags: fdp38-alert-service-test-fixture:${{ github.sha }}
+
+      - name: Load the exported FDP-39 fixture OCI image
+        run: docker load --input fdp39-fixture-image.oci.tar
 
       - name: Scan FDP-39 fixture image and save SBOM evidence
         uses: ./.github/actions/scan-built-image
@@ -1190,6 +1226,7 @@ jobs:
           image-ref: fdp38-alert-service-test-fixture:${{ github.sha }}
           build-digest: ${{ steps.build-fdp39-fixture-image.outputs.digest }}
           build-metadata: ${{ steps.build-fdp39-fixture-image.outputs.metadata }}
+          oci-archive-path: fdp39-fixture-image.oci.tar
           artifact-name: fdp39-fixture-image-security
           output-directory: alert-service/target/fdp39-governance/image-security/fixture
 
@@ -1297,6 +1334,64 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  kafka-image-consumer-evidence:
+    name: Aggregate shared Kafka artifact consumers
+    if: always()
+    needs:
+      - kafka-test-image
+      - backend
+      - graph-signed-e2e
+      - institutional-reliability
+      - fdp28-proof
+      - fdp35-production-readiness
+      - fdp36-real-chaos
+      - fdp37-production-image-chaos
+      - regulated-mutation-regression
+      - fdp38-live-runtime-checkpoint-chaos
+      - compose-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TESTED_GIT_SHA: ${{ github.sha }}
+      KAFKA_CONSUMER_JOB_RESULTS: >-
+        {"kafka-test-image":"${{ needs.kafka-test-image.result }}","backend":"${{ needs.backend.result }}","graph-signed-e2e":"${{ needs.graph-signed-e2e.result }}","institutional-reliability":"${{ needs.institutional-reliability.result }}","fdp28-proof":"${{ needs.fdp28-proof.result }}","fdp35-production-readiness":"${{ needs.fdp35-production-readiness.result }}","fdp36-real-chaos":"${{ needs.fdp36-real-chaos.result }}","fdp37-production-image-chaos":"${{ needs.fdp37-production-image-chaos.result }}","regulated-mutation-regression":"${{ needs.regulated-mutation-regression.result }}","fdp38-live-runtime-checkpoint-chaos":"${{ needs.fdp38-live-runtime-checkpoint-chaos.result }}","compose-ci":"${{ needs.compose-ci.result }}"}
+    steps:
+      - name: Checkout
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the producer OCI archive and proof
+        if: always()
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kafka-test-image-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/kafka-image-consumers/producer
+
+      - name: Download every same-run Kafka consumer proof
+        if: always()
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: kafka-test-image-consumer-*-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: target/kafka-image-consumers/consumers
+          merge-multiple: false
+
+      - name: Validate the OCI bytes and every consumer identity
+        if: always()
+        run: >-
+          node scripts/security/evidence/validate-kafka-image-consumers.mjs
+          target/kafka-image-consumers/producer
+          target/kafka-image-consumers/consumers
+          target/kafka-image-consumers/kafka-image-consumers.json
+
+      - name: Upload shared Kafka consumer validation summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kafka-image-consumers-${{ github.sha }}
+          path: target/kafka-image-consumers/kafka-image-consumers.json
+          if-no-files-found: error
+          retention-days: 30
+
   fdp40-release-controls:
     name: FDP-40 Release Controls
     runs-on: ubuntu-latest
@@ -1369,6 +1464,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs:
+      - kafka-test-image
       - backend
       - ml
       - frontend
@@ -1412,18 +1508,28 @@ jobs:
 
       - name: Build compose images
         run: |
-          docker compose --env-file deployment/.env.example \
+          compose=(docker compose --env-file deployment/.env.example \
             -f deployment/docker-compose.yml \
             -f deployment/docker-compose.dev.yml \
             -f deployment/docker-compose.oidc.yml \
             -f deployment/docker-compose.service-identity-mtls.yml \
             -f deployment/docker-compose.trust-authority-jwt.yml \
-            -f deployment/docker-compose.hardened.yml \
-            build
+            -f deployment/docker-compose.hardened.yml)
+          buildable_services_text="$("${compose[@]}" config --format json | node -e 'const fs=require("node:fs");const services=JSON.parse(fs.readFileSync(0,"utf8")).services??{};for(const [name,service] of Object.entries(services)){if(name!=="kafka"&&service.build)process.stdout.write(`${name}\n`)}')"
+          buildable_services=()
+          if [[ -n "$buildable_services_text" ]]; then
+            mapfile -t buildable_services <<< "$buildable_services_text"
+          fi
+          if [[ ${#buildable_services[@]} -eq 0 ]]; then
+            echo "Compose has no buildable services after excluding the shared Kafka image." >&2
+            exit 1
+          fi
+          "${compose[@]}" build "${buildable_services[@]}"
 
   compose-ci:
     name: Docker Compose CI
     uses: ./.github/workflows/docker-compose-ci.yml
+    needs: kafka-test-image
     permissions:
       contents: read
       security-events: write
@@ -1438,6 +1544,8 @@ jobs:
     name: Platform Security Gate
     if: ${{ always() }}
     needs:
+      - kafka-test-image
+      - kafka-image-consumer-evidence
       - backend
       - graph-signed-e2e
       - institutional-reliability

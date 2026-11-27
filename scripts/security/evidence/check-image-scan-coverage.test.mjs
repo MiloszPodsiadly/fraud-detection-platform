@@ -119,7 +119,7 @@ test('rejects local image scanning when the composite build enables provenance i
     return () => writeFileSync(actionPath, action, 'utf8');
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /without publishing or attaching an OCI provenance index/i);
+  assert.match(result.stderr, /without publishing or attaching a provenance index/i);
 });
 
 test('rejects a floating image reference introduced in a Docker build stage', () => {

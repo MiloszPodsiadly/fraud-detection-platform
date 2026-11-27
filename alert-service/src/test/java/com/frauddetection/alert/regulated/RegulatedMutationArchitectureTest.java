@@ -2089,16 +2089,18 @@ class RegulatedMutationArchitectureTest {
         Map<String, Object> ci = CiBuildxWorkflowPolicy.parse(
                 Files.readString(Path.of("../.github/workflows/ci.yml")));
         assertThat(CiBuildxWorkflowPolicy.jobsUsingAction(ci, "./.github/actions/build-kafka-test-image"))
+                .containsExactly("kafka-test-image");
+        assertThat(CiBuildxWorkflowPolicy.jobsUsingAction(ci, "./.github/actions/load-kafka-test-image"))
                 .containsExactly(
                         "backend",
+                        "graph-signed-e2e",
+                        "institutional-reliability",
                         "fdp28-proof",
                         "fdp35-production-readiness",
                         "fdp36-real-chaos",
                         "fdp37-production-image-chaos",
-                        "fdp38-live-runtime-checkpoint-chaos",
-                        "graph-signed-e2e",
-                        "institutional-reliability",
-                        "regulated-mutation-regression"
+                        "regulated-mutation-regression",
+                        "fdp38-live-runtime-checkpoint-chaos"
                 );
 
         Map<String, Object> action = CiBuildxWorkflowPolicy.parse(
@@ -2117,7 +2119,7 @@ class RegulatedMutationArchitectureTest {
                 .containsEntry("file", "deployment/Dockerfile.kafka")
                 .containsEntry("platforms", "${{ steps.security-policy.outputs.image_platform }}")
                 .containsEntry("push", false)
-                .containsEntry("load", true)
+                .containsEntry("outputs", "type=oci,dest=target/kafka-test-image/image.oci.tar")
                 .containsEntry("pull", true)
                 .containsEntry("no-cache", true)
                 .containsEntry("provenance", false)
@@ -2135,14 +2137,33 @@ class RegulatedMutationArchitectureTest {
             assertThat(step.get("run")).isEqualTo("node scripts/security/run-security-gate.mjs kafka-image-proof");
         });
         assertThat(actionSteps).anySatisfy(step -> {
-            assertThat(step.get("name")).isEqualTo("Upload Kafka image build identity");
+            assertThat(step.get("name")).isEqualTo("Upload the shared Kafka image artifact once per workflow run");
             assertThat(step.get("uses")).isEqualTo(
                     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9");
+            assertThat(CiBuildxWorkflowPolicy.nestedMap(step, "with").get("name").toString())
+                    .contains("${{ github.run_id }}")
+                    .contains("${{ github.run_attempt }}");
+        });
+
+        Map<String, Object> consumerAction = CiBuildxWorkflowPolicy.parse(
+                Files.readString(Path.of("../.github/actions/load-kafka-test-image/action.yml")));
+        List<Map<String, Object>> consumerSteps = CiBuildxWorkflowPolicy.steps(
+                CiBuildxWorkflowPolicy.nestedMap(consumerAction, "runs"));
+        assertThat(consumerSteps).anySatisfy(step -> {
+            assertThat(step.get("uses")).isEqualTo(
+                    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333");
+            assertThat(CiBuildxWorkflowPolicy.nestedMap(step, "with").get("name").toString())
+                    .contains("${{ github.run_id }}")
+                    .contains("${{ github.run_attempt }}");
+        });
+        assertThat(consumerSteps).anySatisfy(step -> {
+            assertThat(step.get("name")).isEqualTo("Validate and load the preserved OCI image without registry fallback");
+            assertThat(step.get("run").toString()).contains("docker load --input");
         });
 
         List<Map<String, Object>> graphSteps = CiBuildxWorkflowPolicy.steps(
                 CiBuildxWorkflowPolicy.job(ci, "graph-signed-e2e"));
-        int provisioningIndex = indexOfStep(graphSteps, "./.github/actions/build-kafka-test-image");
+        int provisioningIndex = indexOfStep(graphSteps, "./.github/actions/load-kafka-test-image");
         int proofIndex = indexOfStepByName(graphSteps, "Run the live signed Graph-to-scorer proof");
         assertThat(provisioningIndex).isGreaterThanOrEqualTo(0);
         assertThat(proofIndex).isGreaterThan(provisioningIndex);

@@ -47,6 +47,7 @@ function main() {
     buildxActionDigest: evidence.buildxActionDigest,
     buildxDigest: evidence.buildxDigest,
     buildxConfigDigest: evidence.buildxConfigDigest,
+    buildxOciArchiveSha256: evidence.buildxOciArchiveSha256,
     scannerInputImageId: evidence.imageIdDigest,
     artifactSha256: {
       evidence: sha256(files.evidence),

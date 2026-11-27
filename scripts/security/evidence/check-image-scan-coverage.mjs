@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { SECURITY_POLICY } from "../config/policy.mjs";
+import { expectedScanCategories } from "./image-scan-contract.mjs";
 import { discoverImageSourceReferences } from "./discover-image-source-references.mjs";
 import {
   IMAGE_SECURITY_INVENTORY,
@@ -134,11 +135,12 @@ if (buildxSetupCount === 0 || buildkitReferences.length !== buildxSetupCount
 }
 addReference(workflowPath, buildkitBuilderImage);
 function jobSection(source, jobName) {
+  const normalizedSource = source.replace(/\r\n/g, "\n");
   const header = "\n  " + jobName + ":\n";
-  const start = source.indexOf(header);
+  const start = normalizedSource.indexOf(header);
   if (start < 0) throw new Error("Required workflow job is missing: " + jobName);
   const bodyStart = start + header.length;
-  const remainder = source.slice(bodyStart);
+  const remainder = normalizedSource.slice(bodyStart);
   const nextJob = remainder.search(/\n  [a-z0-9_-]+:\n/);
   return remainder.slice(0, nextJob < 0 ? undefined : nextJob);
 }
@@ -242,9 +244,20 @@ const buildAndScanAction = fs.readFileSync(buildAndScanActionPath, 'utf8');
 const localBuildStep = buildAndScanAction.match(/\bid: build-image\b[\s\S]*?(?=\n    - name:)/)?.[0] ?? '';
 if (!localBuildStep.includes('uses: docker/build-push-action@')
   || !/^\s+provenance:\s+false\s*$/m.test(localBuildStep)
-  || !/^\s+load:\s+true\s*$/m.test(localBuildStep)
+  || !/^\s+outputs:\s+type=oci,dest=/m.test(localBuildStep)
   || !/^\s+push:\s+false\s*$/m.test(localBuildStep)) {
-  failures.push(`${buildAndScanActionPath}: local scan builds must load without publishing or attaching an OCI provenance index`);
+  failures.push(`${buildAndScanActionPath}: local scan builds must export a content-addressed OCI artifact without publishing or attaching a provenance index`);
+}
+if (!buildAndScanAction.includes('docker load --input "$OCI_ARCHIVE_PATH"')) {
+  failures.push(`${buildAndScanActionPath}: the exact exported OCI artifact must be loaded before image scanning`);
+}
+const kafkaScanJob = jobSection(workflow, 'infrastructure-images');
+if (!kafkaScanJob.includes("if: matrix.image.logicalName == 'apache-kafka-runtime'")
+  || !kafkaScanJob.includes('uses: ./.github/actions/load-kafka-test-image')
+  || !kafkaScanJob.includes('uses: ./.github/actions/scan-built-image')
+  || !kafkaScanJob.includes('build-metadata-path: target/kafka-shared-image/buildx-metadata.json')
+  || !kafkaScanJob.includes('oci-archive-path: target/kafka-shared-image/image.oci.tar')) {
+  failures.push('infrastructure-images must scan the exact shared Kafka artifact with its producer metadata and OCI archive');
 }
 const inventoryJob = jobSection(workflow, "image-inventory");
 if (!inventoryJob.includes("--write-github-matrices") || !inventoryJob.includes("--write-inventory")) {
@@ -364,10 +377,7 @@ for (const entry of imageEntries) {
     imageRef,
     expectedPlatform: SECURITY_POLICY.platforms.image,
     source: expectedSource,
-    expectedScanCategories: [
-      ...(logicalName === "dockerfile-syntax" ? [] : ["os-pkgs"]),
-      ...(group === "backend" || logicalName === "ml-inference-service" ? ["lang-pkgs"] : []),
-    ],
+    expectedScanCategories: expectedScanCategories({ logicalName, source: expectedSource }),
   });
 }
 for (const moduleName of requiredBackendModules) {
@@ -585,6 +595,10 @@ for (const invocation of ciImageScanInvocations) {
     expectedPlatform: SECURITY_POLICY.platforms.image,
     source: 'buildx-loaded-image',
     jobName: invocation.jobName,
+    expectedScanCategories: expectedScanCategories({
+      logicalName: artifactName,
+      source: 'buildx-loaded-image',
+    }),
   });
 }
 for (const requiredName of requiredCiImageScans.keys()) {

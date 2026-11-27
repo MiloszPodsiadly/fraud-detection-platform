@@ -5,6 +5,7 @@ import { SECURITY_POLICY } from '../config/policy.mjs';
 import { decodeHashedManifest, sha256File, verifyCycloneDxDocument } from './image-evidence-integrity.mjs';
 import { imageSbomIdentityBindings, isImageSbomIdentityProperty } from './image-sbom-identity.mjs';
 import { parseDockerImageInspect, verifyImageEngineBinding } from './image-identity.mjs';
+import { expectedScanCategories } from './image-scan-contract.mjs';
 
 const [inventoryPathArgument, artifactsPathArgument] = process.argv.slice(2);
 if (!inventoryPathArgument || !artifactsPathArgument || process.argv.length !== 4) {
@@ -38,8 +39,45 @@ function isDigest(value) {
   return typeof value === 'string' && digestPattern.test(value);
 }
 
+function writeDiagnosticSummary({ testedGitSha, requiredScanJobs, expectedArtifactCount, summaries }) {
+  const summaryPath = join(dirname(inventoryPath), 'validated-image-scan-summary.json');
+  mkdirSync(dirname(inventoryPath), { recursive: true });
+  const artifactDiagnostics = (Array.isArray(inventory?.expectedArtifacts) ? inventory.expectedArtifacts : [])
+    .filter((expected) => typeof expected?.artifactName === 'string')
+    .map((expected) => {
+      const artifactFailures = failures.filter((failure) => failure.includes(expected.artifactName));
+      const validated = summaries.some((summary) => summary.artifactName === expected.artifactName);
+      return {
+        artifactName: expected.artifactName,
+        status: validated && artifactFailures.length === 0 ? 'success' : 'failure',
+        missingEvidence: artifactFailures.filter((failure) => /missing|unavailable|invalid JSON/i.test(failure)),
+        failures: artifactFailures,
+      };
+    });
+  const missingEvidence = failures.filter((failure) => /missing|unavailable|invalid JSON/i.test(failure));
+  writeFileSync(summaryPath, `${JSON.stringify({
+    schemaVersion: 2,
+    outcome: failures.length === 0 ? 'success' : 'failure',
+    scanStatus: failures.length === 0 ? 'success' : 'failure',
+    errorCategory: failures.length === 0 ? null
+      : missingEvidence.length > 0 ? 'missing-or-invalid-evidence' : 'evidence-validation-failure',
+    testedGitSha,
+    requiredScanJobs,
+    expectedArtifactCount,
+    artifactCount: summaries.length,
+    artifacts: summaries,
+    artifactDiagnostics,
+    missingEvidence,
+    failures,
+  }, null, 2)}\n`);
+}
+
 const inventory = readJson(inventoryPath, 'Expected image inventory');
-if (!inventory) process.exit(1);
+if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)) {
+  if (failures.length === 0) failures.push('Expected image inventory must be a JSON object.');
+  writeDiagnosticSummary({ testedGitSha: null, requiredScanJobs: null, expectedArtifactCount: null, summaries: [] });
+  process.exit(1);
+}
 const expectedSha = inventory.testedGitSha;
 failUnless(inventory.schemaVersion === 1, 'Expected image inventory has an unsupported schemaVersion.');
 failUnless(shaPattern.test(expectedSha ?? ''), 'Expected image inventory does not contain a 40-character tested Git SHA.');
@@ -73,7 +111,15 @@ if (!jobResults || typeof jobResults !== 'object' || Array.isArray(jobResults) |
   }
 }
 
-if (!Array.isArray(inventory.expectedArtifacts)) process.exit(1);
+if (!Array.isArray(inventory.expectedArtifacts)) {
+  writeDiagnosticSummary({
+    testedGitSha: expectedSha,
+    requiredScanJobs: jobResults ?? null,
+    expectedArtifactCount: null,
+    summaries: [],
+  });
+  process.exit(1);
+}
 const expectedNames = new Set();
 for (const expected of inventory.expectedArtifacts) {
   if (!expected || typeof expected !== 'object') {
@@ -93,13 +139,7 @@ for (const expected of inventory.expectedArtifacts) {
   if (expected.expectedPlatform !== SECURITY_POLICY.platforms.image) {
     failures.push(`${expected.artifactName}: unsupported expected platform ${String(expected.expectedPlatform)}.`);
   }
-  const requiredCategories = expected.logicalName === 'dockerfile-syntax'
-    ? []
-    : ['os-pkgs', ...(expected.source === 'buildx-loaded-image'
-      && (expected.logicalName === 'ml-inference-service'
-        || ['transaction-ingest-service', 'transaction-simulator-service', 'feature-enricher-service',
-          'fraud-scoring-service', 'alert-service', 'audit-trust-authority', 'model-promotion-policy-publisher'].includes(expected.logicalName))
-      ? ['lang-pkgs'] : [])];
+  const requiredCategories = expectedScanCategories(expected);
   if (!Array.isArray(expected.expectedScanCategories)
     || JSON.stringify(expected.expectedScanCategories) !== JSON.stringify(requiredCategories)) {
     failures.push(`${expected.artifactName}: expected scan categories do not match its image type.`);
@@ -126,6 +166,7 @@ for (const name of actualDirectories) {
 const summaries = [];
 for (const expected of inventory.expectedArtifacts) {
   if (!expected || typeof expected.artifactName !== 'string') continue;
+  try {
   const artifactDirectory = join(artifactsPath, expected.artifactName);
   if (!actualDirectories.includes(expected.artifactName) || !statSync(artifactDirectory).isDirectory()) continue;
   const evidencePath = join(artifactDirectory, evidenceFiles.evidence);
@@ -184,17 +225,22 @@ for (const expected of inventory.expectedArtifacts) {
     const buildxConfigDigest = buildxMetadata['containerimage.config.digest'];
     const descriptorMediaType = descriptor?.mediaType;
     const descriptorConfig = descriptor?.annotations?.['config.digest'];
-    failUnless(isDigest(buildxManifestDigest) && isDigest(buildxConfigDigest),
-      `${expected.artifactName}: Buildx output metadata is missing a valid manifest or config digest.`);
+    failUnless(isDigest(buildxManifestDigest)
+      && (buildxConfigDigest === undefined || isDigest(buildxConfigDigest)),
+    `${expected.artifactName}: Buildx output metadata has a malformed manifest or reported config digest.`);
     failUnless(descriptor && descriptor.digest === buildxManifestDigest
-      && descriptorConfig === buildxConfigDigest && manifestMediaTypes.has(descriptorMediaType),
-    `${expected.artifactName}: Buildx descriptor does not bind its output manifest and config.`);
+      && manifestMediaTypes.has(descriptorMediaType)
+      && (descriptorConfig === undefined || buildxConfigDigest === undefined || descriptorConfig === buildxConfigDigest),
+    `${expected.artifactName}: Buildx descriptor does not bind its output manifest.`);
     failUnless(evidence.buildxActionDigest === buildxManifestDigest
       && evidence.buildxDigest === buildxManifestDigest
-      && evidence.buildxConfigDigest === buildxConfigDigest,
-    `${expected.artifactName}: Buildx action output differs from the preserved exporter metadata.`);
-    failUnless(buildxConfigDigest === evidence.dockerEngineConfigDigest,
-      `${expected.artifactName}: Docker Engine config digest does not match Buildx's config digest.`);
+      && isDigest(evidence.buildxConfigDigest)
+      && (buildxConfigDigest === undefined || evidence.buildxConfigDigest === buildxConfigDigest)
+      && (descriptorConfig === undefined || evidence.buildxConfigDigest === descriptorConfig),
+    `${expected.artifactName}: Buildx action output differs from the preserved exporter metadata or hashed OCI config.`);
+    failUnless(evidence.buildxConfigDigest === evidence.dockerEngineConfigDigest
+      && /^[a-f0-9]{64}$/.test(evidence.buildxOciArchiveSha256 ?? ''),
+    `${expected.artifactName}: hashed OCI export does not bind the Docker Engine config identity.`);
     failUnless(['config-digest', 'manifest-descriptor'].includes(evidence.dockerImageIdKind)
       && evidence.sourceImageDigest === buildxManifestDigest
       && evidence.sourceManifestMediaType === descriptorMediaType
@@ -213,7 +259,7 @@ for (const expected of inventory.expectedArtifacts) {
         expectedRef,
         manifestDigest: buildxManifestDigest,
         manifestMediaType: descriptorMediaType,
-        configDigest: buildxConfigDigest,
+        configDigest: evidence.buildxConfigDigest,
         acceptedRepoDigests: [buildxManifestDigest],
       });
       failUnless(binding.dockerEngineId === imageId
@@ -320,7 +366,7 @@ for (const expected of inventory.expectedArtifacts) {
     'scannedImageDigest', 'scannedImageIdentitySource', 'repoDigests', 'sourceImageDigest',
     'sourceManifestMediaType', 'sourceManifestContentDigest', 'platformManifestDigest',
     'platformManifestMediaType', 'platformManifestContentDigest', 'platformConfigDigest',
-    'buildxDigest', 'buildxActionDigest', 'buildxConfigDigest',
+    'buildxDigest', 'buildxActionDigest', 'buildxConfigDigest', 'buildxOciArchiveSha256',
   ];
   for (const field of identityFields) {
     failUnless(JSON.stringify(result[field]) === JSON.stringify(evidence[field]),
@@ -363,30 +409,32 @@ for (const expected of inventory.expectedArtifacts) {
   failUnless(trivy.SchemaVersion === SECURITY_POLICY.formats.trivyImageSchemaVersion && typeof trivy.ArtifactName === 'string'
     && Array.isArray(trivy.Results),
   `${expected.artifactName}: Trivy JSON does not have the expected report structure.`);
+  const trivyResults = Array.isArray(trivy.Results) ? trivy.Results : null;
   failUnless(trivy.ArtifactName === imageId,
     `${expected.artifactName}: Trivy report target does not match its immutable scanner input.`);
   failUnless(trivy.Metadata && typeof trivy.Metadata === 'object'
     && trivy.Metadata.ImageID === evidence.dockerEngineConfigDigest,
   `${expected.artifactName}: Trivy report does not identify the Docker Engine image config digest.`);
   const expectedCategories = Array.isArray(expected.expectedScanCategories) ? expected.expectedScanCategories : [];
-  const observedCategories = new Set((Array.isArray(trivy.Results) ? trivy.Results : [])
+  const observedCategories = new Set((trivyResults ?? [])
     .filter((entry) => entry && typeof entry === 'object' && typeof entry.Class === 'string')
     .map((entry) => entry.Class));
   for (const category of expectedCategories) {
     failUnless(observedCategories.has(category),
       `${expected.artifactName}: Trivy report is missing expected ${category} package scan results.`);
-    failUnless((trivy.Results ?? []).some((entry) => entry?.Class === category
+    failUnless((trivyResults ?? []).some((entry) => entry?.Class === category
       && typeof entry.Target === 'string' && entry.Target.length > 0),
     `${expected.artifactName}: expected ${category} scan result has no target.`);
   }
   if (expectedCategories.length > 0) {
-    failUnless(trivy.Results.length > 0, `${expected.artifactName}: Trivy Results is empty for an image with expected packages.`);
+    failUnless(trivyResults !== null && trivyResults.length > 0,
+      `${expected.artifactName}: Trivy Results is missing, invalid, or empty for an image with expected packages.`);
   }
   if (expectedCategories.includes('os-pkgs')) {
     failUnless(typeof trivy.Metadata.OS?.Family === 'string' && trivy.Metadata.OS.Family.length > 0,
       `${expected.artifactName}: Trivy OS package scan has no detected OS identity.`);
   }
-  for (const scanResult of Array.isArray(trivy.Results) ? trivy.Results : []) {
+  for (const scanResult of trivyResults ?? []) {
     if (!scanResult || typeof scanResult !== 'object'
       || (scanResult.Vulnerabilities !== undefined && !Array.isArray(scanResult.Vulnerabilities))) {
       failures.push(`${expected.artifactName}: Trivy JSON contains an invalid scan result entry.`);
@@ -437,23 +485,21 @@ for (const expected of inventory.expectedArtifacts) {
     sbomOutcome: result.sbom?.outcome ?? null,
     sbomComponentCount: Array.isArray(boundSbom.components) ? boundSbom.components.length : 0,
   });
+  } catch (error) {
+    const errorCategory = error instanceof TypeError ? 'malformed artifact structure' : 'artifact validation exception';
+    failures.push(`${expected.artifactName}: validation stopped safely after ${errorCategory}.`);
+  }
 }
 
 failUnless(summaries.length === inventory.expectedArtifacts.length,
   'Not every expected image artifact produced a complete evidence summary.');
 
-const summaryPath = join(dirname(inventoryPath), 'validated-image-scan-summary.json');
-mkdirSync(dirname(inventoryPath), { recursive: true });
-writeFileSync(summaryPath, `${JSON.stringify({
-  schemaVersion: 2,
-  outcome: failures.length === 0 ? 'success' : 'failure',
+writeDiagnosticSummary({
   testedGitSha: expectedSha,
   requiredScanJobs: jobResults,
   expectedArtifactCount: inventory.expectedArtifacts.length,
-  artifactCount: summaries.length,
-  artifacts: summaries,
-  failures,
-}, null, 2)}\n`);
+  summaries,
+});
 
 if (failures.length > 0) {
   console.error('Image scan evidence validation failed:');

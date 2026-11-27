@@ -1,12 +1,18 @@
 name: Build and verify patched Kafka test image
-description: Provision the reviewed Kafka image locally, verify its immutable Buildx identity and runtime, then preserve evidence.
+description: Build one reviewed Kafka OCI artifact, verify its immutable identity and runtime, and preserve it for same-run consumers.
 outputs:
   image-id-digest:
     description: Docker Engine image config digest loaded for Testcontainers.
     value: ${{ steps.verify.outputs.image-id-digest }}
   buildx-manifest-digest:
-    description: Buildx manifest digest for this independent image build.
+    description: Buildx manifest digest for the shared Kafka image artifact.
     value: ${{ steps.verify.outputs.buildx-manifest-digest }}
+  buildx-config-digest:
+    description: Config digest derived from actual OCI config bytes.
+    value: ${{ steps.verify.outputs.buildx-config-digest }}
+  oci-archive-sha256:
+    description: SHA-256 of the shared Kafka OCI image archive.
+    value: ${{ steps.verify.outputs.oci-archive-sha256 }}
   recipe-sha256:
     description: SHA-256 of the reviewed Kafka Dockerfile used for this build.
     value: ${{ steps.verify.outputs.recipe-sha256 }}
@@ -25,7 +31,11 @@ runs:
         driver-opts: |
           image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
 
-    - name: Build the local Kafka image with Buildx
+    - name: Prepare the shared Kafka image artifact directory
+      shell: bash
+      run: mkdir -p target/kafka-test-image
+
+    - name: Build Kafka once and export its OCI image
       id: build-kafka
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
@@ -33,11 +43,22 @@ runs:
         file: deployment/Dockerfile.kafka
         platforms: ${{ steps.security-policy.outputs.image_platform }}
         push: false
-        load: true
+        outputs: type=oci,dest=target/kafka-test-image/image.oci.tar
         pull: true
         no-cache: true
         provenance: false
         tags: fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3
+
+    - name: Preserve Buildx metadata and load the exported artifact
+      shell: bash
+      env:
+        KAFKA_BUILD_DIGEST: ${{ steps.build-kafka.outputs.digest }}
+        KAFKA_BUILD_METADATA_JSON: ${{ steps.build-kafka.outputs.metadata }}
+      run: |
+        set -euo pipefail
+        printf '%s\n' "$KAFKA_BUILD_DIGEST" > target/kafka-test-image/buildx-digest.txt
+        printf '%s\n' "$KAFKA_BUILD_METADATA_JSON" > target/kafka-test-image/buildx-metadata.json
+        docker load --input target/kafka-test-image/image.oci.tar
 
     - name: Verify loaded Kafka identity and runtime
       id: verify
@@ -45,13 +66,19 @@ runs:
       env:
         KAFKA_BUILD_DIGEST: ${{ steps.build-kafka.outputs.digest }}
         KAFKA_BUILD_METADATA_JSON: ${{ steps.build-kafka.outputs.metadata }}
+        KAFKA_OCI_ARCHIVE_PATH: target/kafka-test-image/image.oci.tar
         KAFKA_IMAGE_REF: fdp-local/kafka:4.4.0-temurin-25.0.5.1_2-r3
       run: node scripts/security/run-security-gate.mjs kafka-image-proof
 
-    - name: Upload Kafka image build identity
+    - name: Preserve producer identity alongside the immutable OCI artifact
+      shell: bash
+      run: cp target/kafka-test-image-evidence.json target/kafka-test-image/producer-evidence.json
+
+    - name: Upload the shared Kafka image artifact once per workflow run
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: kafka-test-image-${{ github.job }}-${{ github.sha }}
-        path: target/kafka-test-image-evidence.json
+        name: kafka-test-image-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: target/kafka-test-image
+        compression-level: 0
         if-no-files-found: error
         retention-days: ${{ steps.security-policy.outputs.artifact_retention_days }}

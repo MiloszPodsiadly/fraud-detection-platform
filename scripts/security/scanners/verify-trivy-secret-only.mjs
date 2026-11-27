@@ -36,7 +36,7 @@ export function validateSecretProbeReport(report) {
     target: basename(entry.Target ?? ""),
     finding,
   })));
-  const expected = findings.filter(({ target, finding }) => target === "SyntheticCredentialFixture.java"
+  const expected = findings.filter(({ target, finding }) => target === EXPECTED_SECRET.expectedTarget
     && finding?.RuleID === EXPECTED_SECRET.expectedRuleId
     && finding?.Severity === EXPECTED_SECRET.expectedSeverity);
   if (expected.length !== EXPECTED_SECRET.expectedFindingCount || findings.length !== EXPECTED_SECRET.expectedFindingCount) {
@@ -45,7 +45,12 @@ export function validateSecretProbeReport(report) {
   if (findings.some(({ target }) => target === "CleanControl.java")) {
     throw new Error("Trivy secret-only probe reported a secret in its clean control.");
   }
-  return { findingCount: findings.length, ruleId: EXPECTED_SECRET.expectedRuleId, severity: EXPECTED_SECRET.expectedSeverity };
+  return {
+    findingCount: findings.length,
+    ruleId: EXPECTED_SECRET.expectedRuleId,
+    severity: EXPECTED_SECRET.expectedSeverity,
+    target: EXPECTED_SECRET.expectedTarget,
+  };
 }
 
 function basename(value) {
@@ -190,12 +195,13 @@ async function runProof() {
         offlineSecretOnlyScan: "success",
         expectedRuleId: result.ruleId,
         expectedSeverity: result.severity,
+        findingTarget: result.target,
         findingCount: result.findingCount,
         cleanControl: "passed",
         independentOfflineMavenFailure: "passed",
       }, null, 2)}\n`);
     }
-    console.log(`Trivy ${TRIVY_VERSION} secret-only offline proof passed: ${result.findingCount} expected ${result.severity} ${result.ruleId} finding; clean control passed and offline Maven failed on its synthetic BOM.`);
+    console.log(`Trivy ${TRIVY_VERSION} secret-only offline proof passed: ${result.findingCount} expected ${result.severity} ${result.ruleId} finding in ${result.target}; clean control passed and offline Maven failed on its synthetic BOM.`);
   } finally {
     process.removeListener("SIGINT", abort);
     process.removeListener("SIGTERM", abort);

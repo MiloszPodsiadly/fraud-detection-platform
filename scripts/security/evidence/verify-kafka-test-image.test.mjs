@@ -1,19 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import test from 'node:test';
+import { after, test } from 'node:test';
 import { KAFKA_TEST_IMAGE, validateKafkaTestImageEvidence } from './verify-kafka-test-image.mjs';
+import { createOciImageArchive } from './oci-image-archive.test-support.mjs';
 
-const manifestDigest = `sha256:${'a'.repeat(64)}`;
-const configDigest = `sha256:${'b'.repeat(64)}`;
-const metadata = JSON.stringify({
-  'containerimage.digest': manifestDigest,
-  'containerimage.config.digest': configDigest,
-  'containerimage.descriptor': {
-    digest: manifestDigest,
-    mediaType: 'application/vnd.oci.image.manifest.v1+json',
-    annotations: { 'config.digest': configDigest },
-  },
-});
+const fixture = createOciImageArchive({ imageRef: KAFKA_TEST_IMAGE });
+after(() => fixture.cleanup());
+const { manifestDigest, configDigest } = fixture;
+const metadata = JSON.stringify(fixture.metadata);
 const dockerfileText = readFileSync(new URL('../../../deployment/Dockerfile.kafka', import.meta.url), 'utf8');
 
 function validEvidence(overrides = {}) {
@@ -21,6 +15,7 @@ function validEvidence(overrides = {}) {
     imageRef: KAFKA_TEST_IMAGE,
     buildDigest: manifestDigest,
     buildMetadataJson: metadata,
+    ociArchivePath: fixture.archivePath,
     image: {
       Id: configDigest,
       RepoTags: [KAFKA_TEST_IMAGE],
@@ -67,7 +62,7 @@ test('accepts the loaded pinned Kafka image only when Buildx binds its manifest 
 test('rejects a Kafka image built for a different platform', () => {
   assert.throws(() => validateKafkaTestImageEvidence(validEvidence({
     image: { ...validEvidence().image, Architecture: 'arm64' },
-  })), /platform must be linux\/amd64/);
+  })), /platform .* does not match linux\/amd64/);
 });
 
 test('rejects a tag that no longer resolves to the inspected Kafka image', () => {
@@ -79,7 +74,7 @@ test('rejects a tag that no longer resolves to the inspected Kafka image', () =>
 test('rejects a loaded Engine image whose config is not the Buildx output config', () => {
   assert.throws(() => validateKafkaTestImageEvidence(validEvidence({
     image: { ...validEvidence().image, Id: `sha256:${'c'.repeat(64)}` },
-  })), /not bound to the Buildx manifest and config metadata/);
+  })), /not cryptographically bound to the verified source index or platform manifest and config/);
 });
 
 test('accepts a containerd Engine manifest ID when its descriptor binds the Buildx config', () => {
@@ -113,7 +108,7 @@ test('rejects a containerd manifest ID when its descriptor does not bind the Bui
         annotations: { 'config.digest': `sha256:${'c'.repeat(64)}` },
       },
     },
-  })), /does not bind the Buildx image config/);
+  })), /descriptor config digest does not match the platform manifest config/);
 });
 
 test('rejects an incorrect Kafka runtime or replaced compression jar', () => {
